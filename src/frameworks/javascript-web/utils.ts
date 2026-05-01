@@ -1,13 +1,15 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { z } from 'zod';
-import { detectAllPackageManagers } from '../../utils/package-manager';
+import { detectNodePackageManagersLight } from '../../lib/package-manager-detection-light';
 import type { WizardOptions } from '../../utils/types';
 
 export type JavaScriptContext = {
   packageManagerName?: string;
   hasTypeScript?: boolean;
   hasBundler?: string;
+  /** VitePress, VuePress, Slidev, etc. — Vue is present for tooling, not a product SPA */
+  vuePoweredDocsSite?: boolean;
 };
 
 const INDEX_HTML_MAX_DEPTH = 6;
@@ -65,16 +67,16 @@ export const FRAMEWORK_PACKAGES = [
 
 /**
  * Detect the JS package manager for the project by checking lockfiles.
- * Reuses the existing package manager detection infrastructure.
+ *
+ * Uses the lightweight detector to keep this file out of the cold-start
+ * import graph for `setup-utils` / analytics — the framework `detect()`
+ * path imports this module transitively.
  */
-export function detectJsPackageManager(
+export async function detectJsPackageManager(
   options: Pick<WizardOptions, 'installDir'>,
-): string {
-  const detected = detectAllPackageManagers(options);
-  if (detected.length > 0) {
-    return detected[0].label;
-  }
-  return 'unknown';
+): Promise<string> {
+  const result = await detectNodePackageManagersLight(options.installDir);
+  return result.primary?.label ?? 'unknown';
 }
 
 /**
@@ -92,12 +94,14 @@ export function detectBundler(
       .object({
         dependencies: z.record(z.string(), z.string()).optional(),
         devDependencies: z.record(z.string(), z.string()).optional(),
+        optionalDependencies: z.record(z.string(), z.string()).optional(),
       })
       .passthrough()
       .parse(JSON.parse(content));
     const allDeps: Record<string, string> = {
-      ...pkg.dependencies,
+      ...pkg.optionalDependencies,
       ...pkg.devDependencies,
+      ...pkg.dependencies,
     };
 
     if (allDeps['vite']) return 'vite';

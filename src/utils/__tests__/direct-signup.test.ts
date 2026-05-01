@@ -44,6 +44,69 @@ describe('performDirectSignup', () => {
       expect(result.tokens.refreshToken).toBe('r');
       expect(result.tokens.zone).toBe('us');
       expect(result.tokens.expiresAt).toBeTruthy();
+      expect(result.dashboardUrl).toBeNull();
+    }
+  });
+
+  it('returns dashboardUrl when provisioning includes dashboard_url', async () => {
+    const magic =
+      'https://app.amplitude.com/login/magic?next=%2Fanalytics%2Fd%2Fx';
+    server.use(
+      http.post(PROVISIONING_URL, () =>
+        HttpResponse.json({
+          type: 'oauth',
+          oauth: { code: 'auth-code-xyz' },
+          dashboard_url: magic,
+        }),
+      ),
+      http.post(TOKEN_URL, () => HttpResponse.json(VALID_TOKEN_RESPONSE)),
+    );
+
+    const result = await performDirectSignup(INPUT);
+
+    expect(result.kind).toBe('success');
+    if (result.kind === 'success') {
+      expect(result.dashboardUrl).toBe(magic);
+    }
+  });
+
+  it('accepts null dashboard_url from provisioning', async () => {
+    server.use(
+      http.post(PROVISIONING_URL, () =>
+        HttpResponse.json({
+          type: 'oauth',
+          oauth: { code: 'auth-code-xyz' },
+          dashboard_url: null,
+        }),
+      ),
+      http.post(TOKEN_URL, () => HttpResponse.json(VALID_TOKEN_RESPONSE)),
+    );
+
+    const result = await performDirectSignup(INPUT);
+
+    expect(result.kind).toBe('success');
+    if (result.kind === 'success') {
+      expect(result.dashboardUrl).toBeNull();
+    }
+  });
+
+  it('accepts empty-string dashboard_url and surfaces it as null', async () => {
+    server.use(
+      http.post(PROVISIONING_URL, () =>
+        HttpResponse.json({
+          type: 'oauth',
+          oauth: { code: 'auth-code-xyz' },
+          dashboard_url: '',
+        }),
+      ),
+      http.post(TOKEN_URL, () => HttpResponse.json(VALID_TOKEN_RESPONSE)),
+    );
+
+    const result = await performDirectSignup(INPUT);
+
+    expect(result.kind).toBe('success');
+    if (result.kind === 'success') {
+      expect(result.dashboardUrl).toBeNull();
     }
   });
 

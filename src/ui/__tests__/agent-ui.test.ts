@@ -101,6 +101,70 @@ describe('AgentUI.emitAuthRequired', () => {
       expect(event.data?.reason).toBe(reasons[i]);
     });
   });
+
+  it('emits previousAttempt + choices on env_selection_failed for structured retries', () => {
+    // Regression: when the orchestrator passed a bad scope flag
+    // (e.g. `--app-id 99999` when no env has that id), the
+    // `auth_required` envelope must echo BOTH the bad value and the
+    // candidate list so the orchestrator can re-prompt without doing
+    // a fresh discovery cycle. Without this, orchestrators saw a
+    // generic "could not resolve" error and had to re-invoke the
+    // wizard once just to learn the valid set.
+    const ui = new AgentUI();
+    ui.emitAuthRequired({
+      reason: 'env_selection_failed',
+      instruction:
+        'No Amplitude environment with app-id=99999. Re-run with --app-id from data.choices[].',
+      loginCommand: ['amplitude-wizard', 'login'],
+      previousAttempt: {
+        flag: '--app-id',
+        value: '99999',
+        reason: 'No Amplitude environment with app-id=99999.',
+      },
+      choices: [
+        {
+          orgId: 'org-1',
+          orgName: 'DevX',
+          projectId: 'proj-a',
+          projectName: 'Sandbox',
+          appId: '187520',
+          envName: 'Production',
+          label: 'DevX / Sandbox / Production',
+        },
+      ],
+    });
+
+    const event = JSON.parse(writes[0].trim()) as NDJSONEvent;
+    const data = event.data as {
+      reason: string;
+      previousAttempt?: { flag: string; value: string; reason: string };
+      choices?: Array<{ appId: string | null; label: string }>;
+    };
+    expect(data.reason).toBe('env_selection_failed');
+    expect(data.previousAttempt).toEqual({
+      flag: '--app-id',
+      value: '99999',
+      reason: 'No Amplitude environment with app-id=99999.',
+    });
+    expect(data.choices).toHaveLength(1);
+    expect(data.choices?.[0]).toMatchObject({
+      appId: '187520',
+      label: 'DevX / Sandbox / Production',
+    });
+  });
+
+  it('omits previousAttempt + choices when not provided (no schema bloat for non-selection failures)', () => {
+    const ui = new AgentUI();
+    ui.emitAuthRequired({
+      reason: 'no_stored_credentials',
+      instruction: 'Run wizard login.',
+      loginCommand: ['amplitude-wizard', 'login'],
+    });
+
+    const event = JSON.parse(writes[0].trim()) as NDJSONEvent;
+    expect(event.data).not.toHaveProperty('previousAttempt');
+    expect(event.data).not.toHaveProperty('choices');
+  });
 });
 
 describe('AgentUI.emitNestedAgent', () => {
@@ -212,9 +276,9 @@ describe('AgentUI.promptEnvironmentSelection — prompt event shape', () => {
       {
         id: 'org-1',
         name: 'DevX',
-        workspaces: [
+        projects: [
           {
-            id: 'ws-a',
+            id: 'proj-a',
             name: 'Sandbox',
             environments: [
               {
@@ -240,21 +304,21 @@ describe('AgentUI.promptEnvironmentSelection — prompt event shape', () => {
       choices: Array<{
         orgId: string;
         orgName: string;
-        workspaceId: string;
-        workspaceName: string;
+        projectId: string;
+        projectName: string;
         appId: string | null;
         envName: string;
         label: string;
       }>;
     };
     expect(data.promptType).toBe('environment_selection');
-    expect(data.hierarchy).toEqual(['org', 'workspace', 'app', 'environment']);
+    expect(data.hierarchy).toEqual(['org', 'project', 'app', 'environment']);
     expect(data.choices).toHaveLength(2);
     expect(data.choices[0]).toMatchObject({
       orgId: 'org-1',
       orgName: 'DevX',
-      workspaceId: 'ws-a',
-      workspaceName: 'Sandbox',
+      projectId: 'proj-a',
+      projectName: 'Sandbox',
       appId: '100001',
       envName: 'Production',
       label: 'DevX / Sandbox / Production',
@@ -267,9 +331,9 @@ describe('AgentUI.promptEnvironmentSelection — prompt event shape', () => {
       {
         id: 'org-1',
         name: 'DevX',
-        workspaces: [
+        projects: [
           {
-            id: 'ws-a',
+            id: 'proj-a',
             name: 'Sandbox',
             environments: [
               {
@@ -286,15 +350,47 @@ describe('AgentUI.promptEnvironmentSelection — prompt event shape', () => {
     expect(writes[0]).not.toContain('super-secret-key');
   });
 
+  it('omits the redundant `orgs` tree from the legacy prompt event (avoids ~50% NDJSON bloat on portfolios with hundreds of envs)', async () => {
+    // Regression: the same (org, project, env) tuples appear once in
+    // `data.choices` (used by orchestrators) and previously a second time
+    // in `data.orgs` (a nested mirror). On a 322-environment portfolio
+    // the duplicate roughly halved the NDJSON envelope size for no
+    // benefit — orchestrators can rebuild the tree from `choices` if
+    // they need traversal. The companion `needs_input` event carries
+    // the structured data for newer integrations.
+    const ui = new AgentUI();
+    const event = await runPromptAndGetFirst(ui, [
+      {
+        id: 'org-1',
+        name: 'DevX',
+        projects: [
+          {
+            id: 'proj-a',
+            name: 'Sandbox',
+            environments: [
+              {
+                name: 'Production',
+                rank: 1,
+                app: { id: '100001', apiKey: 'k1' },
+              },
+            ],
+          },
+        ],
+      },
+    ]);
+
+    expect(event.data).not.toHaveProperty('orgs');
+  });
+
   it('surfaces resumeFlags with --app-id for unambiguous re-invocation', async () => {
     const ui = new AgentUI();
     const event = await runPromptAndGetFirst(ui, [
       {
         id: 'org-1',
         name: 'DevX',
-        workspaces: [
+        projects: [
           {
-            id: 'ws-a',
+            id: 'proj-a',
             name: 'Sandbox',
             environments: [
               {
@@ -312,8 +408,8 @@ describe('AgentUI.promptEnvironmentSelection — prompt event shape', () => {
       resumeFlags: Array<{ label: string; flags: string[] }>;
     };
     expect(data.resumeFlags).toHaveLength(1);
-    // --project-id alone is sufficient — it's globally unique and resolves
-    // to one (org, workspace, env) tuple server-side. No --env / --org noise.
+    // --app-id alone is sufficient — it's globally unique and resolves
+    // to one (org, project, env) tuple server-side. No --env / --org noise.
     expect(data.resumeFlags[0].flags).toEqual(['--app-id', '100002']);
   });
 });
@@ -337,14 +433,6 @@ describe('parseEnvSelectionStdinLine', () => {
     expect(parsed).toEqual({ appId: '100002' });
   });
 
-  it('parses legacy { projectId } shape via zod', () => {
-    const { parsed, rejectionMessage } = parseEnvSelectionStdinLine(
-      '{"projectId":"100001"}',
-    );
-    expect(rejectionMessage).toBeNull();
-    expect(parsed).toEqual({ projectId: '100001' });
-  });
-
   it('rejects non-string appId (wrong type) and returns a descriptive reason', () => {
     const { parsed, rejectionMessage } =
       parseEnvSelectionStdinLine('{"appId":12345}');
@@ -365,8 +453,8 @@ describe('resolveEnvSelectionFromStdin', () => {
     {
       orgId: 'org-1',
       orgName: 'DevX',
-      workspaceId: 'ws-a',
-      workspaceName: 'Sandbox',
+      projectId: 'proj-a',
+      projectName: 'Sandbox',
       appId: '100001',
       envName: 'Production',
       rank: 1,
@@ -375,8 +463,8 @@ describe('resolveEnvSelectionFromStdin', () => {
     {
       orgId: 'org-1',
       orgName: 'DevX',
-      workspaceId: 'ws-a',
-      workspaceName: 'Sandbox',
+      projectId: 'proj-a',
+      projectName: 'Sandbox',
       appId: '100002',
       envName: 'Development',
       rank: 2,
@@ -403,24 +491,11 @@ describe('resolveEnvSelectionFromStdin', () => {
       kind: 'selected',
       selection: {
         orgId: 'org-1',
-        workspaceId: 'ws-a',
+        projectId: 'proj-a',
         env: 'Development',
       },
       warnings: [],
     });
-  });
-
-  it('resolves legacy { projectId } alias AND surfaces a deprecation warning', () => {
-    const outcome = resolveEnvSelectionFromStdin(
-      { projectId: '100001' },
-      CHOICES,
-    );
-    expect(outcome.kind).toBe('selected');
-    if (outcome.kind === 'selected') {
-      expect(outcome.selection.env).toBe('Production');
-    }
-    expect(outcome.warnings.join('\n')).toMatch(/\{ projectId \}/);
-    expect(outcome.warnings.join('\n')).toMatch(/deprecated/);
   });
 
   it('returns kind=mismatch when a provided appId does not match any choice', () => {
@@ -430,28 +505,6 @@ describe('resolveEnvSelectionFromStdin', () => {
       expect(outcome.reason).toMatch(/999999/);
       expect(outcome.reason).toMatch(/did not match/);
     }
-  });
-
-  it('returns kind=mismatch when a legacy triple does not match any choice', () => {
-    const outcome = resolveEnvSelectionFromStdin(
-      { orgId: 'ghost', workspaceId: 'none', env: 'Staging' },
-      CHOICES,
-    );
-    expect(outcome.kind).toBe('mismatch');
-    if (outcome.kind === 'mismatch') {
-      expect(outcome.reason).toMatch(/ghost/);
-    }
-  });
-
-  it('accepts a matching legacy triple and emits the deprecation warning', () => {
-    const outcome = resolveEnvSelectionFromStdin(
-      { orgId: 'org-1', workspaceId: 'ws-a', env: 'Production' },
-      CHOICES,
-    );
-    expect(outcome.kind).toBe('selected');
-    expect(outcome.warnings.join('\n')).toMatch(
-      /\{ orgId, workspaceId, env \}/,
-    );
   });
 });
 
@@ -511,12 +564,17 @@ describe('AgentUI.emitNeedsInput', () => {
     ]);
   });
 
-  it('promptConfirm emits a needs_input event in addition to the legacy prompt event', () => {
+  it('promptConfirm emits prompt + needs_input + decision_auto, in that order', () => {
     const ui = new AgentUI();
     void ui.promptConfirm('Apply this plan?');
 
-    expect(writes.length).toBe(2);
-    const [legacy, modern] = writes.map(
+    // Order matters: legacy `prompt` first (back-compat), then the
+    // structured `needs_input`, then the `decision_auto` companion.
+    // Orchestrators that subscribe to needs_input MUST see
+    // decision_auto next on the same stream — that's the contract
+    // for distinguishing "awaiting input" from "auto-resolved".
+    expect(writes.length).toBe(3);
+    const [legacy, modern, decision] = writes.map(
       (l) => JSON.parse(l.trim()) as NDJSONEvent,
     );
     expect(legacy.type).toBe('prompt');
@@ -530,23 +588,1175 @@ describe('AgentUI.emitNeedsInput', () => {
       { value: 'yes', label: 'Yes' },
       { value: 'no', label: 'No' },
     ]);
+    expect(decision.type).toBe('lifecycle');
+    expect(decision.data).toMatchObject({
+      event: 'decision_auto',
+      code: 'confirm',
+      value: 'yes',
+      reason: 'auto_approve',
+    });
   });
 
-  it('promptChoice emits a needs_input event with one choice per option', () => {
+  it('promptChoice emits prompt + needs_input + decision_auto, in that order', () => {
     const ui = new AgentUI();
     void ui.promptChoice('Pick a framework', ['nextjs', 'vue', 'svelte']);
 
-    expect(writes.length).toBe(2);
-    const modern = JSON.parse(writes[1].trim()) as NDJSONEvent;
+    expect(writes.length).toBe(3);
+    const events = writes.map((l) => JSON.parse(l.trim()) as NDJSONEvent);
+    const modern = events[1];
+    const decision = events[2];
     expect(modern.type).toBe('needs_input');
     expect(modern.data).toMatchObject({
       code: 'choice',
       recommended: 'nextjs',
+    });
+    expect(decision.type).toBe('lifecycle');
+    expect(decision.data).toMatchObject({
+      event: 'decision_auto',
+      code: 'choice',
+      value: 'nextjs',
+      reason: 'auto_approve',
     });
     expect(modern.data?.choices).toEqual([
       { value: 'nextjs', label: 'nextjs' },
       { value: 'vue', label: 'vue' },
       { value: 'svelte', label: 'svelte' },
     ]);
+  });
+
+  it('promptChoice picks searchable_select widget for ≥10 options', () => {
+    const ui = new AgentUI();
+    const longList = Array.from({ length: 15 }, (_, i) => `option-${i}`);
+    void ui.promptChoice('Pick one of many', longList);
+
+    const modern = JSON.parse(writes[1].trim()) as NDJSONEvent;
+    expect(modern.data?.ui).toMatchObject({
+      component: 'searchable_select',
+      searchPlaceholder: 'Filter options…',
+    });
+  });
+
+  it('promptChoice picks plain select widget for <10 options', () => {
+    const ui = new AgentUI();
+    void ui.promptChoice('Pick one', ['a', 'b', 'c']);
+    const modern = JSON.parse(writes[1].trim()) as NDJSONEvent;
+    expect(modern.data?.ui).toMatchObject({ component: 'select' });
+  });
+
+  it('promptConfirm uses the confirmation widget', () => {
+    const ui = new AgentUI();
+    void ui.promptConfirm('Apply changes?');
+    const modern = JSON.parse(writes[1].trim()) as NDJSONEvent;
+    expect(modern.data?.ui).toMatchObject({
+      component: 'confirmation',
+      priority: 'required',
+      title: 'Apply changes?',
+    });
+  });
+
+  it('emitNeedsInput surfaces ui hints, recommendedReason, pagination, manualEntry', () => {
+    const ui = new AgentUI();
+    ui.emitNeedsInput({
+      code: 'project_selection',
+      message: 'Pick a project',
+      ui: {
+        component: 'searchable_select',
+        priority: 'required',
+        title: 'Select an Amplitude project',
+        description: 'Choose where events go.',
+        searchPlaceholder: 'Search…',
+        emptyState: 'No projects available.',
+      },
+      choices: [
+        {
+          value: '123',
+          label: 'Prod',
+          description: 'Org > WS > Prod',
+          metadata: { orgName: 'Org', envName: 'Prod' },
+          resumeFlags: ['--app-id', '123'],
+        },
+      ],
+      recommended: '123',
+      recommendedReason: 'Matches current ampli.json',
+      pagination: {
+        total: 100,
+        returned: 1,
+        nextCommand: ['npx', 'wizard', 'projects', 'list'],
+      },
+      allowManualEntry: true,
+      manualEntry: { flag: '--app-id', placeholder: 'Enter ID' },
+    });
+
+    const event = JSON.parse(writes[0].trim()) as NDJSONEvent;
+    expect(event.type).toBe('needs_input');
+    expect(event.data).toMatchObject({
+      code: 'project_selection',
+      ui: {
+        component: 'searchable_select',
+        priority: 'required',
+        title: 'Select an Amplitude project',
+      },
+      recommended: '123',
+      recommendedReason: 'Matches current ampli.json',
+      allowManualEntry: true,
+    });
+    const data = event.data as Record<string, unknown>;
+    expect(data.pagination).toMatchObject({ total: 100, returned: 1 });
+    expect(data.manualEntry).toMatchObject({ flag: '--app-id' });
+    expect((data.choices as Array<Record<string, unknown>>)[0]).toMatchObject({
+      value: '123',
+      description: 'Org > WS > Prod',
+      resumeFlags: ['--app-id', '123'],
+    });
+  });
+});
+
+// ── Per-event data_version stamping ─────────────────────────────────
+//
+// Orchestrators that pin to envelope `v: 1` aren't protected from
+// breaking changes inside `data` — adding/renaming a field on (say)
+// `event_plan_proposed` keeps envelope `v` stable but silently shifts
+// the contract. The fix: every event whose `data` shape is part of
+// the public API carries a `data_version` integer. Orchestrators
+// branch on `(type, data?.event, data_version)`.
+//
+// These tests pin the contract: the registered events emit a
+// `data_version` field, and unregistered free-form payloads (log,
+// status, generic progress) do NOT, so we don't ship noise.
+
+describe('AgentUI — per-event data_version', () => {
+  let writes: string[];
+  let spy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    writes = [];
+    spy = vi
+      .spyOn(process.stdout, 'write')
+      .mockImplementation((chunk: string | Uint8Array): boolean => {
+        writes.push(typeof chunk === 'string' ? chunk : chunk.toString());
+        return true;
+      });
+  });
+
+  afterEach(() => {
+    spy.mockRestore();
+  });
+
+  const eventsOfType = (type: string): NDJSONEvent[] =>
+    writes
+      .map((w) => JSON.parse(w.trim()) as NDJSONEvent)
+      .filter((e) => e.type === type);
+
+  it('stamps data_version=1 on auth_required (registered event)', () => {
+    const ui = new AgentUI();
+    ui.emitAuthRequired({
+      reason: 'no_stored_credentials',
+      instruction: 'Please log in.',
+      loginCommand: ['npx', '@amplitude/wizard', 'login'],
+    });
+    const event = eventsOfType('lifecycle').at(-1)!;
+    expect((event as unknown as { data_version: number }).data_version).toBe(1);
+  });
+
+  it('stamps data_version on dashboard_created (result event)', () => {
+    const ui = new AgentUI();
+    ui.setDashboardUrl('https://app.amplitude.com/dashboard/123');
+    const event = eventsOfType('result').at(-1)!;
+    expect((event as unknown as { data_version: number }).data_version).toBe(1);
+  });
+
+  it('stamps data_version on tool_call', () => {
+    const ui = new AgentUI();
+    // Bugbot regression: previous version of this test passed
+    // `toolName` (the wrong key) — vitest/esbuild skip type-checking
+    // at runtime, so the call ran with `data.tool === undefined` and
+    // produced a malformed event. The data_version assertion still
+    // passed (the discriminator is injected by the method, not the
+    // caller), which gave false confidence. Use the correct `tool`
+    // key here AND assert the wire shape includes it, so a future
+    // typo can't sneak through.
+    ui.emitToolCall({
+      tool: 'Edit',
+      summary: 'edit src/foo.ts',
+    });
+    const event = eventsOfType('progress').at(-1)!;
+    expect((event as unknown as { data_version: number }).data_version).toBe(1);
+    expect(event.data).toMatchObject({
+      event: 'tool_call',
+      tool: 'Edit',
+      summary: 'edit src/foo.ts',
+    });
+  });
+
+  it('does NOT stamp data_version on free-form log events', () => {
+    const ui = new AgentUI();
+    ui.log.info('a free-form log line');
+    const event = eventsOfType('log').at(-1)!;
+    // log.* is a debug stream, not a versioned API surface — events
+    // without an `event` discriminator stay un-versioned so we don't
+    // imply a contract we'd have to honor.
+    expect((event as unknown as { data_version?: number }).data_version).toBe(
+      undefined,
+    );
+  });
+
+  it('does NOT stamp data_version on session_state events (free-form payload)', () => {
+    const ui = new AgentUI();
+    ui.setRegion('us');
+    const event = eventsOfType('session_state').at(-1)!;
+    expect((event as unknown as { data_version?: number }).data_version).toBe(
+      undefined,
+    );
+  });
+
+  it('preserves the v=1 envelope version regardless of data_version', () => {
+    // Envelope `v` is the framing-layer version; data_version is the
+    // payload-shape version. Bumping one must not implicitly bump the
+    // other.
+    const ui = new AgentUI();
+    ui.setDashboardUrl('https://example.com');
+    const event = eventsOfType('result').at(-1)!;
+    expect(event.v).toBe(1);
+  });
+});
+
+// ── Terminal `run_completed` lifecycle event ─────────────────────────
+//
+// Orchestrators rely on `run_completed` to distinguish "wizard
+// finished cleanly" from "wizard crashed mid-stream and tore the pipe
+// down". Absence of this event before stream EOF means crash; presence
+// with `outcome: success` is the only signal of a clean run. These
+// tests pin that contract.
+
+describe('AgentUI.emitRunCompleted', () => {
+  let writes: string[];
+  let spy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    writes = [];
+    spy = vi
+      .spyOn(process.stdout, 'write')
+      .mockImplementation((chunk: string | Uint8Array): boolean => {
+        writes.push(typeof chunk === 'string' ? chunk : chunk.toString());
+        return true;
+      });
+  });
+
+  afterEach(() => {
+    spy.mockRestore();
+  });
+
+  const lastEvent = (): NDJSONEvent => {
+    const last = writes[writes.length - 1];
+    return JSON.parse(last.trim()) as NDJSONEvent;
+  };
+
+  it('emits a lifecycle event tagged event=run_completed', () => {
+    const ui = new AgentUI();
+    ui.emitRunCompleted({
+      outcome: 'success',
+      exitCode: 0,
+      durationMs: 1234,
+    });
+    const event = lastEvent();
+    expect(event.type).toBe('lifecycle');
+    expect(event.message).toBe('run_completed: success');
+    expect(event.data).toMatchObject({
+      event: 'run_completed',
+      outcome: 'success',
+      exitCode: 0,
+      durationMs: 1234,
+    });
+    expect((event as unknown as { data_version: number }).data_version).toBe(1);
+  });
+
+  it('maps outcome to level (success → success, error → error, cancelled → warn)', () => {
+    const ui = new AgentUI();
+
+    ui.emitRunCompleted({ outcome: 'success', exitCode: 0, durationMs: 0 });
+    expect(lastEvent().level).toBe('success');
+
+    ui.emitRunCompleted({ outcome: 'error', exitCode: 10, durationMs: 0 });
+    expect(lastEvent().level).toBe('error');
+
+    ui.emitRunCompleted({ outcome: 'cancelled', exitCode: 130, durationMs: 0 });
+    expect(lastEvent().level).toBe('warn');
+  });
+
+  it('omits reason key when not provided (vs writing reason: undefined)', () => {
+    const ui = new AgentUI();
+    ui.emitRunCompleted({ outcome: 'success', exitCode: 0, durationMs: 5 });
+    const data = lastEvent().data as Record<string, unknown>;
+    expect(data).not.toHaveProperty('reason');
+  });
+
+  it('includes reason when provided (e.g. wizardAbort with a message)', () => {
+    const ui = new AgentUI();
+    ui.emitRunCompleted({
+      outcome: 'error',
+      exitCode: 10,
+      durationMs: 5,
+      reason: 'Inner agent failed: model overloaded',
+    });
+    const data = lastEvent().data as Record<string, unknown>;
+    expect(data.reason).toBe('Inner agent failed: model overloaded');
+  });
+});
+
+describe('AgentUI.emitAgentMetrics', () => {
+  let writes: string[];
+  let spy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    writes = [];
+    spy = vi
+      .spyOn(process.stdout, 'write')
+      .mockImplementation((chunk: string | Uint8Array): boolean => {
+        writes.push(typeof chunk === 'string' ? chunk : chunk.toString());
+        return true;
+      });
+  });
+
+  afterEach(() => {
+    spy.mockRestore();
+  });
+
+  const lastEvent = (): NDJSONEvent => {
+    const last = writes[writes.length - 1];
+    return JSON.parse(last.trim()) as NDJSONEvent;
+  };
+
+  it('emits a progress event with event=agent_metrics', () => {
+    const ui = new AgentUI();
+    ui.emitAgentMetrics({
+      durationMs: 12345,
+      inputTokens: 1000,
+      outputTokens: 500,
+      cacheReadInputTokens: 800,
+      costUsd: 0.0123,
+      numTurns: 7,
+      totalToolCalls: 12,
+      totalMessages: 25,
+      isError: false,
+    });
+    const event = lastEvent();
+    expect(event.type).toBe('progress');
+    expect(event.message).toBe('agent_metrics: 12345ms');
+    expect(event.data).toMatchObject({
+      event: 'agent_metrics',
+      durationMs: 12345,
+      inputTokens: 1000,
+      outputTokens: 500,
+      cacheReadInputTokens: 800,
+      costUsd: 0.0123,
+      numTurns: 7,
+      totalToolCalls: 12,
+      totalMessages: 25,
+      isError: false,
+    });
+    expect((event as unknown as { data_version: number }).data_version).toBe(1);
+  });
+
+  it('omits undefined fields rather than shipping {"costUsd": undefined}', () => {
+    const ui = new AgentUI();
+    ui.emitAgentMetrics({
+      durationMs: 100,
+      // No usage, no cost — SDK didn't report them.
+    });
+    const data = lastEvent().data as Record<string, unknown>;
+    expect(data).not.toHaveProperty('inputTokens');
+    expect(data).not.toHaveProperty('costUsd');
+    expect(data).toMatchObject({
+      event: 'agent_metrics',
+      durationMs: 100,
+    });
+  });
+});
+
+// ── Bugbot regressions on the agent-mode reliability PR ─────────────
+//
+// Two issues bugbot caught during review of the run_completed +
+// data_version + decision_auto changes. These tests pin the contracts
+// the wizard now upholds.
+
+describe('AgentUI.emitProjectCreateSuccess — registry key match', () => {
+  let writes: string[];
+  let spy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    writes = [];
+    spy = vi
+      .spyOn(process.stdout, 'write')
+      .mockImplementation((chunk: string | Uint8Array): boolean => {
+        writes.push(typeof chunk === 'string' ? chunk : chunk.toString());
+        return true;
+      });
+  });
+
+  afterEach(() => {
+    spy.mockRestore();
+  });
+
+  // Bugbot Issue 1 (Medium): the registry entry was `project_created`
+  // but the actual emitted discriminator is `project_create_success`.
+  // Result: `lookupDataVersion` never matched and the data_version
+  // stamp was silently omitted from project-create-success events.
+  it('stamps data_version=1 on project_create_success (registry key matches discriminator)', () => {
+    const ui = new AgentUI();
+    ui.emitProjectCreateSuccess({
+      orgId: 'org-1',
+      appId: 100001,
+      name: 'My Project',
+      url: 'https://app.amplitude.com/...',
+    });
+    const event = JSON.parse(writes[writes.length - 1].trim()) as NDJSONEvent;
+    expect(event.type).toBe('result');
+    expect(event.data).toMatchObject({ event: 'project_create_success' });
+    // The whole point of the fix: data_version is now stamped.
+    expect((event as unknown as { data_version: number }).data_version).toBe(1);
+  });
+});
+
+describe('AgentUI.promptEventPlan — needs_input + result + decision_auto contract', () => {
+  let writes: string[];
+  let spy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    writes = [];
+    spy = vi
+      .spyOn(process.stdout, 'write')
+      .mockImplementation((chunk: string | Uint8Array): boolean => {
+        writes.push(typeof chunk === 'string' ? chunk : chunk.toString());
+        return true;
+      });
+  });
+
+  afterEach(() => {
+    spy.mockRestore();
+  });
+
+  // Bugbot Issue 2 (Low): decision_auto was firing without a
+  // preceding needs_input, contradicting the registry docstring that
+  // says "Fires AFTER the corresponding `needs_input`." Fix: emit a
+  // structured needs_input first so the contract holds.
+  it('emits needs_input → result → decision_auto in that order', async () => {
+    const ui = new AgentUI();
+    await ui.promptEventPlan([
+      { name: 'Sign Up', description: 'User completed signup' },
+      { name: 'Purchase', description: 'User completed checkout' },
+    ]);
+
+    const events = writes.map((l) => JSON.parse(l.trim()) as NDJSONEvent);
+    expect(events.length).toBe(3);
+
+    // 1) needs_input — orchestrators surfacing this to a human key
+    //    off `code: 'event_plan'` and the choices array.
+    expect(events[0].type).toBe('needs_input');
+    expect(events[0].data).toMatchObject({
+      code: 'event_plan',
+      recommended: 'approved',
+    });
+
+    // 2) result — back-compat: existing orchestrators that key off
+    //    `event: event_plan` see the full events array here.
+    expect(events[1].type).toBe('result');
+    expect(events[1].data).toMatchObject({ event: 'event_plan' });
+
+    // 3) decision_auto — the contract pin. This MUST follow a
+    //    needs_input for the same `code`. An orphaned decision_auto
+    //    would confuse orchestrators tracking pair state.
+    expect(events[2].type).toBe('lifecycle');
+    expect(events[2].data).toMatchObject({
+      event: 'decision_auto',
+      code: 'event_plan',
+      value: 'approved',
+      reason: 'auto_approve',
+    });
+  });
+});
+
+// ── EVENT_DATA_VERSIONS registry vs actual discriminators ───────────
+//
+// Catches future drift between the registry keys and the strings
+// AgentUI actually emits. If a new event lands in the wizard but
+// doesn't get a registry entry (or gets one under the wrong name),
+// the data_version stamp is silently dropped — the same bug bugbot
+// caught on `project_created` vs `project_create_success`.
+
+describe('EVENT_DATA_VERSIONS registry covers every emitted discriminator', () => {
+  let writes: string[];
+  let spy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    writes = [];
+    spy = vi
+      .spyOn(process.stdout, 'write')
+      .mockImplementation((chunk: string | Uint8Array): boolean => {
+        writes.push(typeof chunk === 'string' ? chunk : chunk.toString());
+        return true;
+      });
+  });
+
+  afterEach(() => {
+    spy.mockRestore();
+  });
+
+  // Each documented event-emitter method on AgentUI fires an event
+  // whose `data.event` discriminator must be in the registry. This
+  // test exercises the public methods that carry a discriminator and
+  // asserts every resulting event is stamped with `data_version`.
+  it('every documented emit method stamps data_version', () => {
+    const ui = new AgentUI();
+    ui.emitAuthRequired({
+      reason: 'no_stored_credentials',
+      instruction: 'login',
+      loginCommand: ['x'],
+    });
+    ui.emitProjectCreateStart({ orgId: 'o', name: 'n' });
+    ui.emitProjectCreateSuccess({
+      orgId: 'o',
+      appId: 1,
+      name: 'n',
+      url: 'u',
+    });
+    ui.emitProjectCreateError({
+      orgId: 'o',
+      name: 'n',
+      code: 'X',
+      message: 'm',
+    });
+    ui.emitNestedAgent({
+      signal: 'claude_code_cli',
+      envVar: 'CLAUDECODE',
+      instruction: 'i',
+      bypassEnv: 'X',
+    });
+    ui.emitInnerAgentStarted({ model: 'm', phase: 'wizard' });
+    ui.emitToolCall({ tool: 'Edit', summary: 'e' });
+    ui.emitFileChangePlanned({ operation: 'create', path: 'p' });
+    ui.emitFileChangeApplied({ operation: 'create', path: 'p' });
+    ui.emitVerificationStarted({ phase: 'sdk_init' });
+    ui.emitVerificationResult({
+      phase: 'sdk_init',
+      passed: true,
+      details: 'd',
+    });
+    ui.startRun();
+    ui.setEventIngestionDetected(['Sign Up']);
+    ui.setDashboardUrl('https://example.com');
+
+    const events = writes.map((l) => JSON.parse(l.trim()) as NDJSONEvent);
+    // Filter to events that carry a discriminator — others (free-form
+    // log/status) intentionally lack data_version.
+    const versioned = events.filter(
+      (e) =>
+        typeof e.data === 'object' &&
+        e.data !== null &&
+        typeof (e.data as { event?: unknown }).event === 'string',
+    );
+    expect(versioned.length).toBeGreaterThan(0);
+    for (const e of versioned) {
+      expect(
+        (e as unknown as { data_version?: number }).data_version,
+        `Event ${
+          (e.data as { event: string }).event
+        } should have data_version stamped — registry key may be missing or misnamed`,
+      ).toBe(1);
+    }
+  });
+});
+
+describe('AgentUI.promptEventPlan — pre-resolved decision short-circuits needs_input', () => {
+  // The wizard's `apply` command forwards the user's event-plan decision
+  // (--approve-events / --skip-events / --revise-events) to the spawned
+  // child as `AMPLITUDE_WIZARD_EVENT_PLAN_DECISION`. The child must NOT
+  // emit `needs_input` for that prompt — if it did, the outer skill
+  // (which STOPs on every needs_input by contract) would re-prompt the
+  // user for an answer they already gave, and the wizard would block
+  // forever on stdin. Locked in here so the launch-blocker regression
+  // can't come back.
+
+  let writes: string[];
+  let spy: ReturnType<typeof vi.spyOn>;
+  const originalDecisionEnv = process.env.AMPLITUDE_WIZARD_EVENT_PLAN_DECISION;
+  const originalFeedbackEnv = process.env.AMPLITUDE_WIZARD_EVENT_PLAN_FEEDBACK;
+
+  beforeEach(() => {
+    writes = [];
+    spy = vi
+      .spyOn(process.stdout, 'write')
+      .mockImplementation((chunk: string | Uint8Array): boolean => {
+        writes.push(typeof chunk === 'string' ? chunk : chunk.toString());
+        return true;
+      });
+  });
+
+  afterEach(() => {
+    spy.mockRestore();
+    if (originalDecisionEnv === undefined) {
+      delete process.env.AMPLITUDE_WIZARD_EVENT_PLAN_DECISION;
+    } else {
+      process.env.AMPLITUDE_WIZARD_EVENT_PLAN_DECISION = originalDecisionEnv;
+    }
+    if (originalFeedbackEnv === undefined) {
+      delete process.env.AMPLITUDE_WIZARD_EVENT_PLAN_FEEDBACK;
+    } else {
+      process.env.AMPLITUDE_WIZARD_EVENT_PLAN_FEEDBACK = originalFeedbackEnv;
+    }
+  });
+
+  const events = [{ name: 'Event A', description: 'fires' }];
+
+  const writtenEvents = (): NDJSONEvent[] =>
+    writes
+      .map((w) => w.trim())
+      .filter((w) => w.length > 0)
+      .map((w) => JSON.parse(w) as NDJSONEvent);
+
+  it('approved env var: emits result(via flag), no needs_input, no decision_auto', async () => {
+    process.env.AMPLITUDE_WIZARD_EVENT_PLAN_DECISION = 'approved';
+    const ui = new AgentUI();
+    const decision = await ui.promptEventPlan(events);
+    expect(decision).toEqual({ decision: 'approved' });
+    const wire = writtenEvents();
+    expect(wire.some((e) => e.type === 'needs_input')).toBe(false);
+    expect(
+      wire.some(
+        (e) =>
+          e.type === 'result' &&
+          (e.data as { event?: string } | undefined)?.event === 'event_plan' &&
+          (e.data as { decision?: string } | undefined)?.decision ===
+            'approved',
+      ),
+    ).toBe(true);
+    expect(
+      wire.some(
+        (e) =>
+          (e.data as { event?: string } | undefined)?.event === 'decision_auto',
+      ),
+    ).toBe(false);
+  });
+
+  it('skipped env var: returns skipped without emitting needs_input', async () => {
+    process.env.AMPLITUDE_WIZARD_EVENT_PLAN_DECISION = 'skipped';
+    const ui = new AgentUI();
+    const decision = await ui.promptEventPlan(events);
+    expect(decision).toEqual({ decision: 'skipped' });
+    expect(writtenEvents().some((e) => e.type === 'needs_input')).toBe(false);
+  });
+
+  it('revised env var: returns revised + feedback without emitting needs_input', async () => {
+    process.env.AMPLITUDE_WIZARD_EVENT_PLAN_DECISION = 'revised';
+    process.env.AMPLITUDE_WIZARD_EVENT_PLAN_FEEDBACK =
+      'add a Cart Cleared event';
+    const ui = new AgentUI();
+    const decision = await ui.promptEventPlan(events);
+    expect(decision).toEqual({
+      decision: 'revised',
+      feedback: 'add a Cart Cleared event',
+    });
+    expect(writtenEvents().some((e) => e.type === 'needs_input')).toBe(false);
+  });
+
+  it('no env var: emits needs_input + result + decision_auto (the auto-approve path)', async () => {
+    delete process.env.AMPLITUDE_WIZARD_EVENT_PLAN_DECISION;
+    delete process.env.AMPLITUDE_WIZARD_EVENT_PLAN_FEEDBACK;
+    const ui = new AgentUI();
+    const decision = await ui.promptEventPlan(events);
+    expect(decision).toEqual({ decision: 'approved' });
+    const wire = writtenEvents();
+    expect(
+      wire.some(
+        (e) =>
+          e.type === 'needs_input' &&
+          (e.data as { code?: string } | undefined)?.code === 'event_plan',
+      ),
+    ).toBe(true);
+    expect(
+      wire.some(
+        (e) =>
+          (e.data as { event?: string } | undefined)?.event === 'decision_auto',
+      ),
+    ).toBe(true);
+  });
+
+  it('invalid env var value: falls through to auto-approve path (defensive)', async () => {
+    process.env.AMPLITUDE_WIZARD_EVENT_PLAN_DECISION = 'bogus';
+    const ui = new AgentUI();
+    const decision = await ui.promptEventPlan(events);
+    expect(decision).toEqual({ decision: 'approved' });
+    expect(writtenEvents().some((e) => e.type === 'needs_input')).toBe(true);
+  });
+});
+
+describe('AgentUI.startRun + getRunStartedAtMs', () => {
+  it('captures start timestamp on startRun() so duration can be computed', () => {
+    const before = Date.now();
+    const ui = new AgentUI();
+    expect(ui.getRunStartedAtMs()).toBeNull();
+    ui.startRun();
+    const after = Date.now();
+    const ts = ui.getRunStartedAtMs();
+    expect(ts).not.toBeNull();
+    expect(ts!).toBeGreaterThanOrEqual(before);
+    expect(ts!).toBeLessThanOrEqual(after);
+  });
+
+  it('returns null before startRun() — early-exit paths report durationMs=0', () => {
+    // auth_required and INPUT_REQUIRED can fire before the inner
+    // agent run starts. wizard-abort's computeRunDurationMs reads
+    // null and reports 0 in that case.
+    const ui = new AgentUI();
+    expect(ui.getRunStartedAtMs()).toBeNull();
+  });
+});
+
+describe('AgentUI.emitSetupContext', () => {
+  let writes: string[];
+  let spy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    writes = [];
+    spy = vi
+      .spyOn(process.stdout, 'write')
+      .mockImplementation((chunk: string | Uint8Array): boolean => {
+        writes.push(typeof chunk === 'string' ? chunk : chunk.toString());
+        return true;
+      });
+  });
+
+  afterEach(() => {
+    spy.mockRestore();
+  });
+
+  const lastEvent = (): NDJSONEvent =>
+    JSON.parse(writes[writes.length - 1].trim()) as NDJSONEvent;
+
+  it('emits a lifecycle event with event: "setup_context" and the requested phase', () => {
+    const ui = new AgentUI();
+    ui.emitSetupContext({
+      phase: 'plan',
+      amplitude: { region: 'us', orgId: 'org-1', orgName: 'Acme' },
+      sources: { region: 'saved', orgId: 'saved' },
+      requiresConfirmation: true,
+    });
+    const ev = lastEvent();
+    expect(ev.type).toBe('lifecycle');
+    expect(ev.data).toMatchObject({
+      event: 'setup_context',
+      phase: 'plan',
+      amplitude: { region: 'us', orgId: 'org-1', orgName: 'Acme' },
+      sources: { region: 'saved', orgId: 'saved' },
+      requiresConfirmation: true,
+    });
+  });
+
+  it('drops undefined / null / empty-string scope fields from the wire payload', () => {
+    const ui = new AgentUI();
+    ui.emitSetupContext({
+      phase: 'apply_started',
+      amplitude: {
+        region: 'us',
+        orgId: 'org-1',
+        // Mix of empty / null / undefined that should be dropped:
+        orgName: '',
+        projectId: undefined,
+        appId: 'app-7',
+        envName: undefined,
+      },
+    });
+    const ev = lastEvent();
+    const amp = (ev.data as { amplitude: Record<string, unknown> }).amplitude;
+    expect(Object.keys(amp).sort()).toEqual(['appId', 'orgId', 'region']);
+  });
+
+  it('builds a human-readable summary in the message field when scope is rich', () => {
+    const ui = new AgentUI();
+    ui.emitSetupContext({
+      phase: 'apply_started',
+      amplitude: {
+        orgName: 'Acme',
+        projectName: 'Marketing',
+        appName: 'TodoMVC',
+        appId: 'app-7',
+        envName: 'Production',
+      },
+    });
+    const ev = lastEvent();
+    expect(ev.message).toContain('Acme / Marketing / TodoMVC / Production');
+  });
+
+  it('omits the summary when no scope fields are present', () => {
+    const ui = new AgentUI();
+    ui.emitSetupContext({ phase: 'whoami', amplitude: {} });
+    const ev = lastEvent();
+    expect(ev.message).toBe('setup_context (whoami)');
+  });
+});
+
+describe('AgentUI.emitSetupComplete', () => {
+  let writes: string[];
+  let spy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    writes = [];
+    spy = vi
+      .spyOn(process.stdout, 'write')
+      .mockImplementation((chunk: string | Uint8Array): boolean => {
+        writes.push(typeof chunk === 'string' ? chunk : chunk.toString());
+        return true;
+      });
+  });
+
+  afterEach(() => {
+    spy.mockRestore();
+  });
+
+  const lastEvent = (): NDJSONEvent =>
+    JSON.parse(writes[writes.length - 1].trim()) as NDJSONEvent;
+
+  it('emits a result event with event: "setup_complete" and level: "success"', () => {
+    const ui = new AgentUI();
+    ui.emitSetupComplete({
+      amplitude: {
+        appId: 'app-7',
+        appName: 'TodoMVC',
+        orgId: 'org-1',
+        envName: 'Production',
+        dashboardUrl: 'https://app.amplitude.com/analytics/acme/dashboard/abc',
+        dashboardId: 'abc',
+      },
+      files: { written: ['src/amplitude.js'], modified: ['src/index.js'] },
+      events: [{ name: 'Todo Created', description: 'User adds a todo.' }],
+      durationMs: 60_000,
+    });
+    const ev = lastEvent();
+    expect(ev.type).toBe('result');
+    expect(ev.level).toBe('success');
+    expect(ev.data).toMatchObject({
+      event: 'setup_complete',
+      amplitude: { appId: 'app-7', dashboardId: 'abc' },
+      files: { written: ['src/amplitude.js'], modified: ['src/index.js'] },
+      durationMs: 60_000,
+    });
+    expect(ev.message).toContain('app TodoMVC');
+  });
+
+  it('omits empty optional sub-objects from the wire payload', () => {
+    const ui = new AgentUI();
+    ui.emitSetupComplete({
+      amplitude: { appId: 'app-7' },
+    });
+    const ev = lastEvent();
+    expect(ev.data).not.toHaveProperty('files');
+    expect(ev.data).not.toHaveProperty('envVars');
+    expect(ev.data).not.toHaveProperty('events');
+    expect(ev.data).not.toHaveProperty('durationMs');
+  });
+});
+
+describe('truncateLogMessage (log-spillover guard)', () => {
+  it('passes short messages through unchanged', async () => {
+    const { truncateLogMessage, MAX_LOG_MESSAGE_LENGTH } = await import(
+      '../../lib/agent-events.js'
+    );
+    expect(truncateLogMessage('hello')).toBe('hello');
+    const exact = 'a'.repeat(MAX_LOG_MESSAGE_LENGTH);
+    expect(truncateLogMessage(exact)).toBe(exact);
+  });
+
+  it('truncates oversized messages and appends a [truncated …] suffix', async () => {
+    const { truncateLogMessage, MAX_LOG_MESSAGE_LENGTH } = await import(
+      '../../lib/agent-events.js'
+    );
+    const oversized = 'x'.repeat(MAX_LOG_MESSAGE_LENGTH + 5_000);
+    const out = truncateLogMessage(oversized);
+    expect(out.length).toBe(MAX_LOG_MESSAGE_LENGTH);
+    expect(out.endsWith('[truncated; see verbose log]')).toBe(true);
+  });
+});
+
+describe('AgentUI.promptEnvironmentSelection — pagination cap', () => {
+  let writes: string[];
+  let spy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    writes = [];
+    spy = vi
+      .spyOn(process.stdout, 'write')
+      .mockImplementation((chunk: string | Uint8Array): boolean => {
+        writes.push(typeof chunk === 'string' ? chunk : chunk.toString());
+        return true;
+      });
+  });
+
+  afterEach(() => {
+    spy.mockRestore();
+  });
+
+  // Build N environments across one org/project so the test is
+  // deterministic and we can verify the cap takes effect.
+  const buildOrgsWithEnvs = (count: number) => [
+    {
+      id: 'org-mega',
+      name: 'MegaCorp',
+      projects: [
+        {
+          id: 'proj-big',
+          name: 'Big',
+          environments: Array.from({ length: count }, (_, i) => ({
+            name: `Env${String(i).padStart(3, '0')}`,
+            // Spread ranks so the sort (rank → orgName → projectName → envName)
+            // is exercised. rank 1 first slot, rank 2 next 100, etc.
+            rank: i < 100 ? 1 : 2,
+            app: { id: `app-${i}`, apiKey: `k-${i}` },
+          })),
+        },
+      ],
+    },
+  ];
+
+  const runAndGetEvents = async (
+    ui: AgentUI,
+    orgs: Parameters<AgentUI['promptEnvironmentSelection']>[0],
+  ): Promise<NDJSONEvent[]> => {
+    const originalStdin = process.stdin;
+    Object.defineProperty(process, 'stdin', {
+      configurable: true,
+      value: { readable: false },
+    });
+    try {
+      await ui.promptEnvironmentSelection(orgs);
+    } finally {
+      Object.defineProperty(process, 'stdin', {
+        configurable: true,
+        value: originalStdin,
+      });
+    }
+    return writes.map((line) => JSON.parse(line.trim()) as NDJSONEvent);
+  };
+
+  it('does not truncate when choices fit under the cap', async () => {
+    const ui = new AgentUI();
+    const events = await runAndGetEvents(ui, buildOrgsWithEnvs(5));
+    const promptEvent = events.find((e) => e.type === 'prompt');
+    const needsInputEvent = events.find((e) => e.type === 'needs_input');
+    expect(promptEvent).toBeDefined();
+    expect(needsInputEvent).toBeDefined();
+    const data = needsInputEvent!.data as {
+      pagination: { total: number; returned: number };
+      choices: unknown[];
+    };
+    expect(data.pagination.total).toBe(5);
+    expect(data.pagination.returned).toBe(5);
+    expect(data.choices).toHaveLength(5);
+  });
+
+  it('caps the wire payload at MAX_ENV_SELECTION_CHOICES (50)', async () => {
+    const ui = new AgentUI();
+    // 200 envs total — well above the cap.
+    const events = await runAndGetEvents(ui, buildOrgsWithEnvs(200));
+    const needsInputEvent = events.find((e) => e.type === 'needs_input');
+    const data = needsInputEvent!.data as {
+      pagination: { total: number; returned: number };
+      choices: unknown[];
+    };
+    expect(data.pagination.total).toBe(200);
+    expect(data.pagination.returned).toBe(50);
+    expect(data.choices).toHaveLength(50);
+  });
+
+  it('signals truncation via pagination.total > pagination.returned', async () => {
+    const ui = new AgentUI();
+    const events = await runAndGetEvents(ui, buildOrgsWithEnvs(75));
+    const needsInputEvent = events.find((e) => e.type === 'needs_input');
+    const data = needsInputEvent!.data as {
+      pagination: { total: number; returned: number };
+    };
+    // total > returned is the canonical truncation signal.
+    expect(data.pagination.total).toBeGreaterThan(data.pagination.returned);
+  });
+
+  it('keeps higher-ranked envs (rank 1 = Production) in the truncated set', async () => {
+    const ui = new AgentUI();
+    // 200 envs: first 100 are rank 1, next 100 are rank 2. After
+    // sort+cap we should ONLY see rank-1 envs.
+    const events = await runAndGetEvents(ui, buildOrgsWithEnvs(200));
+    const needsInputEvent = events.find((e) => e.type === 'needs_input');
+    const data = needsInputEvent!.data as {
+      choices: Array<{ metadata: { rank: number } }>;
+    };
+    for (const c of data.choices) {
+      expect(c.metadata.rank).toBe(1);
+    }
+  });
+
+  it('still surfaces a recommended env when truncation is in effect', async () => {
+    const ui = new AgentUI();
+    const events = await runAndGetEvents(ui, buildOrgsWithEnvs(200));
+    const needsInputEvent = events.find((e) => e.type === 'needs_input');
+    const data = needsInputEvent!.data as {
+      recommended?: string;
+      choices: Array<{ value: string }>;
+    };
+    expect(data.recommended).toBeDefined();
+    // Recommended must point to a value that survived the cap.
+    expect(data.choices.some((c) => c.value === data.recommended)).toBe(true);
+  });
+
+  it('auto-select fallback picks the same env as recommended for multi-org accounts', async () => {
+    // Regression: the auto-select fallback used to iterate `orgs` in
+    // input-array order while `recommended` derived from the sorted
+    // choices list. For multi-org accounts where orgs weren't
+    // alphabetically ordered, they could diverge.
+    const orgs = [
+      {
+        id: 'org-zebra',
+        name: 'Zebra Corp',
+        projects: [
+          {
+            id: 'proj-z',
+            name: 'ZProject',
+            environments: [
+              {
+                name: 'Production',
+                rank: 1,
+                app: { id: 'app-z', apiKey: 'key-z' },
+              },
+            ],
+          },
+        ],
+      },
+      {
+        id: 'org-alpha',
+        name: 'Alpha Inc',
+        projects: [
+          {
+            id: 'proj-a',
+            name: 'AProject',
+            environments: [
+              {
+                name: 'Production',
+                rank: 1,
+                app: { id: 'app-a', apiKey: 'key-a' },
+              },
+            ],
+          },
+        ],
+      },
+    ];
+
+    const ui = new AgentUI();
+    const originalStdin = process.stdin;
+    Object.defineProperty(process, 'stdin', {
+      configurable: true,
+      value: { readable: false },
+    });
+    let autoSelected: { orgId: string; projectId: string; env: string };
+    try {
+      autoSelected = await ui.promptEnvironmentSelection(orgs);
+    } finally {
+      Object.defineProperty(process, 'stdin', {
+        configurable: true,
+        value: originalStdin,
+      });
+    }
+
+    const needsInputEvent = writes
+      .map((line) => JSON.parse(line.trim()) as NDJSONEvent)
+      .find((e) => e.type === 'needs_input');
+    const data = needsInputEvent!.data as {
+      recommended?: string;
+      choices: Array<{
+        value: string;
+        metadata: { orgId: string; envName: string };
+      }>;
+    };
+
+    const recommendedChoice = data.choices.find(
+      (c) => c.value === data.recommended,
+    );
+    expect(recommendedChoice).toBeDefined();
+    expect(autoSelected.orgId).toBe(recommendedChoice!.metadata.orgId);
+    expect(autoSelected.env).toBe(recommendedChoice!.metadata.envName);
+  });
+});
+
+describe('AgentUI.heartbeat', () => {
+  let writes: string[];
+  let spy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    writes = [];
+    spy = vi
+      .spyOn(process.stdout, 'write')
+      .mockImplementation((chunk: string | Uint8Array): boolean => {
+        writes.push(typeof chunk === 'string' ? chunk : chunk.toString());
+        return true;
+      });
+  });
+
+  afterEach(() => {
+    spy.mockRestore();
+  });
+
+  const lastEvent = (): NDJSONEvent => {
+    const last = writes[writes.length - 1];
+    return JSON.parse(last.trim()) as NDJSONEvent;
+  };
+
+  it('always emits — even when the status tail is empty', () => {
+    const ui = new AgentUI();
+    ui.heartbeat({ statuses: [], elapsedMs: 12_345 });
+    // Single line, regardless of empty statuses — orchestrators rely
+    // on the cadence to detect a stalled wizard.
+    expect(writes.length).toBe(1);
+    const event = lastEvent();
+    expect(event.type).toBe('progress');
+    expect(event.data).toMatchObject({
+      event: 'heartbeat',
+      statuses: [],
+      elapsedMs: 12_345,
+    });
+  });
+
+  it('emits the structured progress event with elapsedMs and statuses', () => {
+    const ui = new AgentUI();
+    ui.heartbeat({
+      statuses: ['Detecting framework', 'Installing SDK'],
+      elapsedMs: 27_500,
+    });
+    const event = lastEvent();
+    expect(event.type).toBe('progress');
+    expect(event.message).toMatch(/heartbeat \(28s, 2 recent\)/);
+    expect(event.data).toMatchObject({
+      event: 'heartbeat',
+      statuses: ['Detecting framework', 'Installing SDK'],
+      elapsedMs: 27_500,
+    });
+  });
+
+  it('includes attempt only when supplied (omitted on attempt 0 / undefined)', () => {
+    const ui = new AgentUI();
+    ui.heartbeat({ statuses: [], elapsedMs: 1_000 });
+    expect(lastEvent().data?.attempt).toBeUndefined();
+
+    ui.heartbeat({ statuses: [], elapsedMs: 1_000, attempt: 2 });
+    expect(lastEvent().data?.attempt).toBe(2);
+  });
+
+  it('uses a different summary string when the status tail is empty vs not', () => {
+    const ui = new AgentUI();
+    ui.heartbeat({ statuses: [], elapsedMs: 5_000 });
+    expect(lastEvent().message).toMatch(/heartbeat \(5s, idle\)/);
+    ui.heartbeat({ statuses: ['working'], elapsedMs: 5_000 });
+    expect(lastEvent().message).toMatch(/heartbeat \(5s, 1 recent\)/);
+  });
+
+  it('stamps data_version from the EVENT_DATA_VERSIONS registry', () => {
+    const ui = new AgentUI();
+    ui.heartbeat({ statuses: [], elapsedMs: 1_000 });
+    const last = JSON.parse(writes[writes.length - 1].trim());
+    expect(last.data_version).toBe(1);
   });
 });

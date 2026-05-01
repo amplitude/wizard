@@ -18,7 +18,10 @@
  */
 
 import React from 'react';
-import { describe, it, expect } from 'vitest';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { IntroScreen } from '../IntroScreen.js';
 import {
   makeStoreForSnapshot,
@@ -53,14 +56,21 @@ function fakeConfig(
 }
 
 describe('IntroScreen snapshots', () => {
-  it('renders the detecting state with spinner and "Detecting project framework" copy', () => {
+  it('renders the detecting state with target line + "Scanning …" spinner', () => {
     const store = makeStoreForSnapshot({
       detectionComplete: false,
       frameworkConfig: null,
+      // Pin a stable path so the snapshot doesn't include a per-run
+      // tmpdir like `/var/folders/.../wizard-snapshot-XXX`.
+      installDir: '/projects/my-app',
     });
     const { frame } = renderSnapshot(<IntroScreen store={store} />, store);
     expect(frame).toContain('Amplitude Wizard');
-    expect(frame).toContain('Detecting project framework');
+    // Target line is visible during detection — that's the whole point
+    // of moving it above the spinner. If a user pointed the wizard at
+    // the wrong directory, they need to spot it here.
+    expect(frame).toContain('Target');
+    expect(frame).toContain('Scanning');
     expect(frame).toMatchSnapshot();
   });
 
@@ -73,8 +83,9 @@ describe('IntroScreen snapshots', () => {
     });
     const { frame } = renderSnapshot(<IntroScreen store={store} />, store);
     expect(frame).toContain('Next.js (detected)');
-    // Continue / Change framework / Cancel actions
-    expect(frame).toContain('Continue');
+    // Continue (sign-in vs create) / Change framework / Cancel actions
+    expect(frame).toContain('Continue — sign in');
+    expect(frame).toContain('create');
     expect(frame).toContain('Change framework');
     expect(frame).toContain('Cancel');
   });
@@ -135,5 +146,175 @@ describe('IntroScreen snapshots', () => {
     expect(frame).toContain('Resume where you left off');
     expect(frame).toContain('Start fresh');
     expect(frame).toContain('Acme Corp');
+  });
+});
+
+// ── Welcome-back panel ──────────────────────────────────────────────────
+//
+// Returning users (signed in + ampli.json on disk) get a personalized
+// header instead of the marketing tagline. These tests exercise the
+// gating logic and the three-line content fallbacks.
+describe('IntroScreen — welcome-back panel', () => {
+  let installDir: string;
+
+  beforeEach(() => {
+    installDir = fs.mkdtempSync(path.join(os.tmpdir(), 'intro-welcome-'));
+  });
+
+  afterEach(() => {
+    try {
+      fs.rmSync(installDir, { recursive: true, force: true });
+    } catch {
+      // best-effort
+    }
+  });
+
+  /** Helper — minimal ampli.json signal that this is a known project. */
+  function writeAmpliConfig(): void {
+    fs.writeFileSync(
+      path.join(installDir, 'ampli.json'),
+      JSON.stringify({ OrgId: 'org-1', ProjectId: 'prj-1' }),
+    );
+  }
+
+  /** Helper — drop a canonical events.json with the given names + mtime. */
+  function writeEventsFile(names: string[], mtime?: Date): void {
+    fs.mkdirSync(path.join(installDir, '.amplitude'), { recursive: true });
+    const eventsPath = path.join(installDir, '.amplitude', 'events.json');
+    fs.writeFileSync(
+      eventsPath,
+      JSON.stringify(names.map((n) => ({ name: n, description: '' }))),
+    );
+    if (mtime) {
+      fs.utimesSync(eventsPath, mtime, mtime);
+    }
+  }
+
+  it('greets a returning user with project + region + events', () => {
+    writeAmpliConfig();
+    writeEventsFile(
+      ['signup_started', 'signup_completed', 'checkout_started'],
+      new Date(Date.now() - 2 * 60 * 60_000), // 2 hours ago
+    );
+
+    const store = makeStoreForSnapshot({
+      installDir,
+      userEmail: 'kelson@amplitude.com',
+      selectedProjectName: 'Acme Analytics',
+      region: 'us',
+      detectionComplete: true,
+      detectedFrameworkLabel: 'Next.js',
+      integration: Integration.nextjs,
+      frameworkConfig: fakeConfig(Integration.nextjs),
+    });
+    const { frame } = renderSnapshot(<IntroScreen store={store} />, store);
+    expect(frame).toContain('Welcome back, kelson@amplitude.com');
+    expect(frame).toContain('Acme Analytics · US');
+    expect(frame).toContain('3 events instrumented');
+    expect(frame).toContain('hours ago');
+    // Marketing tagline must NOT appear for returning users — that's
+    // the whole point of this branch.
+    expect(frame).not.toContain('AI-powered analytics setup in minutes');
+  });
+
+  it('hides the events line when no events.json exists', () => {
+    writeAmpliConfig();
+
+    const store = makeStoreForSnapshot({
+      installDir,
+      userEmail: 'kelson@amplitude.com',
+      selectedProjectName: 'Acme Analytics',
+      region: 'us',
+      detectionComplete: true,
+      detectedFrameworkLabel: 'Next.js',
+      integration: Integration.nextjs,
+      frameworkConfig: fakeConfig(Integration.nextjs),
+    });
+    const { frame } = renderSnapshot(<IntroScreen store={store} />, store);
+    expect(frame).toContain('Welcome back, kelson@amplitude.com');
+    expect(frame).toContain('Acme Analytics');
+    expect(frame).not.toContain('events instrumented');
+  });
+
+  it('falls back to email-only line when project name is not yet known', () => {
+    writeAmpliConfig();
+
+    const store = makeStoreForSnapshot({
+      installDir,
+      userEmail: 'kelson@amplitude.com',
+      selectedProjectName: null,
+      region: null,
+      detectionComplete: true,
+      detectedFrameworkLabel: 'Next.js',
+      integration: Integration.nextjs,
+      frameworkConfig: fakeConfig(Integration.nextjs),
+    });
+    const { frame } = renderSnapshot(<IntroScreen store={store} />, store);
+    expect(frame).toContain('Welcome back, kelson@amplitude.com');
+    // Must NOT crash or render a stray separator when project + region
+    // are both null.
+    expect(frame).not.toContain(' · undefined');
+  });
+
+  it('silently skips events line when events.json is malformed', () => {
+    writeAmpliConfig();
+    fs.mkdirSync(path.join(installDir, '.amplitude'), { recursive: true });
+    fs.writeFileSync(
+      path.join(installDir, '.amplitude', 'events.json'),
+      '{ this is not valid json',
+    );
+
+    const store = makeStoreForSnapshot({
+      installDir,
+      userEmail: 'kelson@amplitude.com',
+      selectedProjectName: 'Acme Analytics',
+      region: 'us',
+      detectionComplete: true,
+      detectedFrameworkLabel: 'Next.js',
+      integration: Integration.nextjs,
+      frameworkConfig: fakeConfig(Integration.nextjs),
+    });
+    // The whole render must not throw — the helper swallows the parse
+    // error and returns 0 events.
+    expect(() =>
+      renderSnapshot(<IntroScreen store={store} />, store),
+    ).not.toThrow();
+    const { frame } = renderSnapshot(<IntroScreen store={store} />, store);
+    expect(frame).toContain('Welcome back, kelson@amplitude.com');
+    expect(frame).not.toContain('events instrumented');
+  });
+
+  it('keeps the marketing tagline for first-time users (no userEmail)', () => {
+    writeAmpliConfig();
+
+    const store = makeStoreForSnapshot({
+      installDir,
+      userEmail: null,
+      detectionComplete: true,
+      detectedFrameworkLabel: 'Next.js',
+      integration: Integration.nextjs,
+      frameworkConfig: fakeConfig(Integration.nextjs),
+    });
+    const { frame } = renderSnapshot(<IntroScreen store={store} />, store);
+    expect(frame).toContain('AI-powered analytics setup in minutes');
+    expect(frame).not.toContain('Welcome back');
+  });
+
+  it('keeps the marketing tagline when ampli.json is absent', () => {
+    // userEmail set but no ampli.json — this is the "signed in but new
+    // project" case. Hold off the welcome-back personalization until we
+    // have at least one disk signal that the user has run the wizard
+    // here before.
+    const store = makeStoreForSnapshot({
+      installDir,
+      userEmail: 'kelson@amplitude.com',
+      detectionComplete: true,
+      detectedFrameworkLabel: 'Next.js',
+      integration: Integration.nextjs,
+      frameworkConfig: fakeConfig(Integration.nextjs),
+    });
+    const { frame } = renderSnapshot(<IntroScreen store={store} />, store);
+    expect(frame).toContain('AI-powered analytics setup in minutes');
+    expect(frame).not.toContain('Welcome back');
   });
 });

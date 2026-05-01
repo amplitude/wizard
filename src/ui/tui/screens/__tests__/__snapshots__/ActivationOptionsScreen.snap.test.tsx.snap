@@ -8,7 +8,7 @@ What would you like to do?
 
 
 ▸ [1] Help me test locally (run the setup agent)
-  [2] I'm blocked (get help)
+  [2] I'm blocked — write a support report (open log + save shareable report)
   [3] Take me to the docs (https://amplitude.com/docs/sdks)
   [4] I'm done for now (exit and resume later)"
 `;
@@ -21,7 +21,7 @@ What would you like to do?
 
 
 ▸ [1] Help me test locally (run the setup agent)
-  [2] I'm blocked (get help)
+  [2] I'm blocked — write a support report (open log + save shareable report)
   [3] Take me to the docs (https://amplitude.com/docs/sdks)
   [4] I'm done for now (exit and resume later)"
 `;

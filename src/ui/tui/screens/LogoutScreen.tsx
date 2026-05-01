@@ -10,9 +10,8 @@ import { useState, useEffect, useRef } from 'react';
 import { ConfirmationInput } from '../primitives/index.js';
 import { Colors } from '../styles.js';
 import { clearStoredCredentials } from '../../../utils/ampli-settings.js';
-import { clearApiKey } from '../../../utils/api-key-store.js';
-import { clearCheckpoint } from '../../../lib/session-checkpoint.js';
-import { clearAuthFieldsInAmpliConfig } from '../../../lib/ampli-config.js';
+import { clearStaleProjectState } from '../../../utils/clear-stale-project-state.js';
+import { wizardSuccessExit } from '../../../utils/wizard-abort.js';
 
 interface LogoutScreenProps {
   onComplete: () => void;
@@ -33,25 +32,46 @@ export const LogoutScreen = ({
 }: LogoutScreenProps) => {
   const [phase, setPhase] = useState<Phase>(Phase.Confirm);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Hard mount-guard for the `process.exit(0)` schedule. Without this,
+  // any path that unmounts the LogoutScreen between confirm-click and
+  // the 1.5s timer firing (overlay swap, ScreenErrorBoundary retry,
+  // back-nav before timer drains) would still kill the whole CLI.
+  // Process termination must NEVER outlive its owning screen.
+  const mountedRef = useRef(true);
 
-  // Clear any pending timer on unmount
+  // Clear any pending timer on unmount + flip the mount flag so the
+  // exit callback short-circuits if it's already in the macrotask queue.
   useEffect(() => {
     return () => {
-      if (timerRef.current !== null) clearTimeout(timerRef.current);
+      mountedRef.current = false;
+      if (timerRef.current !== null) {
+        clearTimeout(timerRef.current);
+        timerRef.current = null;
+      }
     };
   }, []);
 
   const handleConfirm = () => {
     clearStoredCredentials();
-    clearApiKey(installDir);
-    clearCheckpoint(installDir);
-    // Strip OrgId/WorkspaceId/Zone from ampli.json so the next login shows
-    // the org + workspace pickers instead of silently reusing stale IDs.
-    clearAuthFieldsInAmpliConfig(installDir);
+    // Wipe install-dir-keyed surfaces (keychain, .env.local, bindings,
+    // checkpoint). Same helper as successful direct signup — symmetric UX.
+    clearStaleProjectState(installDir, 'logout');
     onLoggedOut?.();
     setPhase(Phase.Done);
-    // Exit after a short delay so the user sees the confirmation
-    timerRef.current = setTimeout(() => process.exit(0), 1500);
+    // Exit after a short delay so the user sees the confirmation.
+    // Routes through wizardSuccessExit so any pending analytics events
+    // (logout-confirmed, session metrics) flush before the process
+    // tears down.
+    //
+    // The mount-guard on the inner callback is belt-and-braces with
+    // the unmount cleanup above (PR 338) — even if a queued macrotask
+    // sneaks past clearTimeout (e.g. unmount races the timer drain on
+    // an overloaded event loop), `mountedRef.current` will be false
+    // and we'll skip the exit.
+    timerRef.current = setTimeout(() => {
+      timerRef.current = null;
+      if (mountedRef.current) void wizardSuccessExit(0);
+    }, 1500);
   };
 
   return (
@@ -63,7 +83,7 @@ export const LogoutScreen = ({
       <Box marginTop={1} flexDirection="column">
         {phase === Phase.Confirm && (
           <ConfirmationInput
-            message="Clear stored Amplitude credentials from ~/.ampli.json?"
+            message="Clear stored Amplitude credentials (wizard session + project binding)?"
             confirmLabel="Log out"
             cancelLabel="Cancel"
             onConfirm={handleConfirm}

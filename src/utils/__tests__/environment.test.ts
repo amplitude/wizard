@@ -2,6 +2,13 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 
 vi.mock('../../lib/constants', () => ({
   IS_DEV: false,
+  // Must be present (not just defaulted to undefined): commandments.ts
+  // reads `DEMO_MODE` at module load via a real ESM import, and Vitest's
+  // strict mocker throws "No DEMO_MODE export is defined on the mock" if
+  // the key is missing entirely. Belt-and-braces: nothing in this file's
+  // current import graph loads commandments, but a partial mock of
+  // ../../lib/constants is a pit-trap for future imports.
+  DEMO_MODE: false,
 }));
 
 vi.mock('../setup-utils', () => ({

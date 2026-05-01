@@ -16,6 +16,7 @@ import { Box, Text } from 'ink';
 import { useState, useEffect, useRef, type ReactNode } from 'react';
 import { useWizardStore } from '../hooks/useWizardStore.js';
 import { useScreenHints } from '../hooks/useScreenHints.js';
+import { useTimedCoaching } from '../hooks/useTimedCoaching.js';
 import type { KeyHint } from '../components/KeyHintBar.js';
 import type { WizardStore } from '../store.js';
 import {
@@ -31,6 +32,9 @@ import { Colors, Icons, SPINNER_FRAMES, SPINNER_INTERVAL } from '../styles.js';
 import { BrailleSpinner } from '../components/BrailleSpinner.js';
 import { AnimatedAmplitudeLogo } from '../components/AmplitudeLogo.js';
 import { RetryStatusChip } from '../components/RetryBanner.js';
+import { FileWritesPanel } from '../components/FileWritesPanel.js';
+import { FinalizingPanel } from '../components/FinalizingPanel.js';
+import { PostAgentStepStatus } from '../session-constants.js';
 import { useStdoutDimensions } from '../hooks/useStdoutDimensions.js';
 import { DiscoveredFeature } from '../../../lib/wizard-session.js';
 import {
@@ -38,17 +42,14 @@ import {
   TRAILING_FEATURES,
 } from '../session-constants.js';
 import { OUTBOUND_URLS } from '../../../lib/constants.js';
+import path from 'node:path';
+import { getLogFile } from '../../../utils/storage-paths.js';
+import { getSessionStartMs } from '../../../lib/observability/index.js';
 
 const RUN_HINTS: readonly KeyHint[] = Object.freeze([
   { key: '←→', label: 'Tabs' },
   { key: 'Ctrl+C', label: 'Cancel' },
 ]);
-
-const LOG_FILE = '/tmp/amplitude-wizard.log';
-
-/** File extensions used to detect "currently editing" from status messages. */
-const FILE_EXT_PATTERN =
-  /\S+\.(?:tsx?|jsx?|py|swift|kt|java|go|dart|cs|cpp|vue|svelte|rb)\b/;
 
 /** Format elapsed seconds as "Xm Ys". */
 function formatElapsed(seconds: number): string {
@@ -58,13 +59,58 @@ function formatElapsed(seconds: number): string {
   return `${m}m ${s}s`;
 }
 
-/** Extract a file path from the most recent status message, if any. */
-function extractCurrentFile(messages: string[]): string | null {
-  for (let i = messages.length - 1; i >= 0; i--) {
-    const match = messages[i].match(FILE_EXT_PATTERN);
-    if (match) return match[0];
+/**
+ * Cap a status string for inline display. Belt-and-braces against unbounded
+ * streamed content (e.g. raw stream-event JSON forwarded by runAgentLocally
+ * before its filter stripped them). Yoga's `truncate-end` is the primary
+ * defense once the row is flex-shrinkable, but a JS cap keeps the header
+ * sane regardless of layout context.
+ */
+const STATUS_MAX_LEN = 80;
+function truncateStatus(s: string): string {
+  if (s.length <= STATUS_MAX_LEN) return s;
+  return s.slice(0, STATUS_MAX_LEN - 1) + '…';
+}
+
+/**
+ * Resolve the path of the file the inner agent is currently working on.
+ *
+ * Source of truth: PreToolUse/PostToolUse hooks populate `store.fileWrites`
+ * with structured rows (planned → applied/failed). The most recent row is
+ * the file the agent has its hands on right now.
+ *
+ * The previous implementation regex'd `store.statusMessages` for tokens
+ * matching `\S+\.(tsx?|jsx?|py|...)`. That worked when status strings were
+ * structured `[STATUS]` markers, but `pushStatus` now also receives raw
+ * model text deltas and SDK stream-event protocol fragments — both of
+ * which can contain `.js`, `.ts`, etc. Production users were seeing
+ * markdown code refs (`` `src/index.js` ``, leading backtick included)
+ * and partial JSON like `{"type":"content_block_delta","index":0,...}`
+ * surface in the "currently editing" slot. The header lied.
+ *
+ * Reading from `fileWrites` is the structural fix: PreToolUse only fires
+ * for actual Edit/Write/MultiEdit invocations, so prose and protocol
+ * frames can't contaminate the value. Returns the relative path when an
+ * `installDir` is provided (so wide paths don't blow out the header
+ * slot).
+ */
+function extractCurrentFile(
+  fileWrites: readonly { path: string }[],
+  installDir?: string,
+): string | null {
+  if (fileWrites.length === 0) return null;
+  const filePath = fileWrites[fileWrites.length - 1].path;
+  if (
+    installDir &&
+    filePath.startsWith(installDir) &&
+    (filePath.length === installDir.length ||
+      filePath[installDir.length] === '/' ||
+      filePath[installDir.length] === '\\')
+  ) {
+    const rel = path.relative(installDir, filePath);
+    return rel === '' ? filePath : rel;
   }
-  return null;
+  return filePath;
 }
 
 interface RunScreenProps {
@@ -186,7 +232,34 @@ const ProgressTab = ({ store }: { store: WizardStore }) => {
     });
   }
 
-  const rawFile = extractCurrentFile(store.statusMessages);
+  // Synthetic 6th task for the post-agent dashboard fallback. The agent's
+  // 5-task TodoWrite list is locked at five and "Build your starter dashboard"
+  // covers the agent-side dashboard work. When the agent didn't actually
+  // create the dashboard (skill drift, retry exhaustion, abort), the
+  // post-agent `createDashboardStep` runs as a slow fallback and sets
+  // `dashboardFallbackPhase` to `in_progress`. Without this row the user
+  // sees a "5 / 5 tasks complete" header for the duration of the spinner —
+  // the bug we fixed in PR #479.
+  //
+  // Guard: only render this synthetic task when postAgentSteps has NOT
+  // been seeded. Once the FinalizingPanel is active it owns the
+  // "Create your starter dashboard" row — showing both is a confusing
+  // duplicate.
+  if (
+    store.session.dashboardFallbackPhase === 'in_progress' &&
+    store.session.postAgentSteps.length === 0
+  ) {
+    progressItems.push({
+      label: 'Create your starter dashboard',
+      activeForm: 'Creating your starter dashboard...',
+      status: 'in_progress',
+    });
+  }
+
+  const rawFile = extractCurrentFile(
+    store.fileWrites,
+    store.session.installDir,
+  );
   const lastFileRef = useRef<string | null>(null);
   if (rawFile) lastFileRef.current = rawFile;
   const currentFile = lastFileRef.current;
@@ -194,7 +267,72 @@ const ProgressTab = ({ store }: { store: WizardStore }) => {
   const completed = progressItems.filter(
     (t) => t.status === 'completed',
   ).length;
+  const inProgress = progressItems.filter(
+    (t) => t.status === 'in_progress',
+  ).length;
+  const pending = progressItems.filter((t) => t.status === 'pending').length;
   const total = progressItems.length;
+
+  // High-water mark for the "done" counter. The agent can grow its
+  // TodoWrite list mid-run, which means the count we display would
+  // otherwise visibly regress: 5/5 done → 5/8 done as soon as 3 new
+  // tasks land. Pinning the displayed "done" count to its maximum
+  // observed value keeps the user-perceived progress monotonically
+  // forward; the "to go" side is always the live pending+inProgress
+  // count, so new tasks still surface clearly without rewriting the
+  // history of work the user already saw finish.
+  const completedHighRef = useRef(0);
+  if (completed > completedHighRef.current)
+    completedHighRef.current = completed;
+  const completedDisplay = completedHighRef.current;
+
+  // Coaching tiers for "spinner spins forever". The progress signal must
+  // change every time the agent does ANYTHING the user can see — finishing
+  // a task, emitting a new status line, or writing a file. Using just the
+  // task count was a bug: post-#347 the TodoWrite list is locked at exactly
+  // 5 todos, so `total` never changes after the first frame, and the tier-1
+  // line ("Still working — switch to Logs") plus the tier-2 line ("This is
+  // unusually slow") fired on every run at 90s/5min regardless of activity.
+  // Calling a 5-minute wizard run "unusually slow" while the agent is
+  // actively shipping status updates undermines trust — the wizard
+  // shouldn't lie to the user about what it's doing.
+  //
+  // The new signal concatenates three monotonically-increasing counters:
+  //   - `completedDisplay` — high-water-marked completed task count
+  //   - `store.statusMessages.length` — every [STATUS] line from the agent
+  //   - `store.fileWritesTotal` — every file write the agent initiates (monotonic;
+  //     unlike `fileWrites.length`, it keeps climbing past the FIFO cap)
+  // Any one of them ticking forward resets the coaching timer. True silence
+  // (no status, no file write, no completion) for 90s now means the agent
+  // really is on a long thought, and the coaching copy is honest.
+  // Tiers fire at 90s (calm reassurance) and 5min (escalated suggestion).
+  // RUN_COACHING_TIER_T1_S=90, RUN_COACHING_TIER_T2_S=300.
+  // Include `dashboardFallbackPhase` so the coaching timer resets when the
+  // post-agent fallback starts running. Otherwise the agent silence right
+  // before the fallback could trip the 90s "unusually slow" tier just as
+  // we're entering a known-slow path.
+  const progressSignal = `${completedDisplay}|${store.statusMessages.length}|${
+    store.fileWritesTotal
+  }|${store.session.dashboardFallbackPhase ?? ''}`;
+  const { tier: coachingTier } = useTimedCoaching({
+    thresholds: [90, 300],
+    progressSignal,
+  });
+
+  // Cold-start UX: until the agent finishes its first task the counter sits
+  // at "0 done · N to go" with the timer climbing — every screenshot the
+  // wizard's collected of users Ctrl+C-ing during Setup has been in this
+  // exact gap. The agent IS working (its [STATUS] shows up at the bottom),
+  // but the user's eye lands on the spinner header and the header looks
+  // dead. Surface the latest status next to the counter, and after 30s of
+  // zero completed tasks add an explanatory hint so a slow first response
+  // doesn't read as a hung wizard.
+  const lastStatus =
+    store.statusMessages.length > 0
+      ? store.statusMessages[store.statusMessages.length - 1]
+      : undefined;
+  const showColdStartHint =
+    completedDisplay === 0 && total > 0 && elapsed >= 30;
 
   return (
     <Box flexDirection="row" flexGrow={1}>
@@ -203,31 +341,99 @@ const ProgressTab = ({ store }: { store: WizardStore }) => {
         {/* Header bar: progress count + elapsed + (transient retry hint) +
             currently editing. Retry status renders inline as a muted chip
             after a 3s grace period — see RetryStatusChip. */}
-        <Box marginBottom={1} justifyContent="space-between">
-          <Box gap={1}>
-            <BrailleSpinner color={Colors.active} frame={spinnerFrame} />
-            <Text color={Colors.body} bold>
-              {total > 0
-                ? `${completed}/${total} tasks complete`
-                : 'Agent running'}
-            </Text>
-            <Text color={Colors.muted}>
-              {Icons.dot} {formatElapsed(elapsed)}
-            </Text>
-            <RetryStatusChip
-              retryState={store.session.retryState}
-              now={Date.now()}
-            />
+        <Box marginBottom={1} flexDirection="column">
+          <Box justifyContent="space-between">
+            <Box gap={1}>
+              <BrailleSpinner color={Colors.active} frame={spinnerFrame} />
+              <Text color={Colors.body} bold>
+                {total > 0
+                  ? // Avoid "X / Y" — Y can grow as the agent adds new tasks
+                    // mid-run, which makes the progress bar look like it's
+                    // going backwards (6 tasks → 9 tasks). Show absolute
+                    // counts instead so the user sees forward motion.
+                    // `completedDisplay` is a high-water mark, so the "done"
+                    // count never regresses if new tasks appear after the
+                    // user already saw earlier ones finish.
+                    pending + inProgress > 0
+                    ? `${completedDisplay} done · ${inProgress + pending} to go`
+                    : `${completedDisplay} tasks complete`
+                  : 'Agent running'}
+              </Text>
+              <Text color={Colors.muted}>
+                {Icons.dot} {formatElapsed(elapsed)}
+              </Text>
+              <RetryStatusChip
+                retryState={store.session.retryState}
+                now={Date.now()}
+              />
+            </Box>
+            {currentFile && (
+              <Text color={Colors.muted} wrap="truncate-end">
+                {currentFile}
+              </Text>
+            )}
           </Box>
-          {currentFile && (
+          {/* Show the latest agent status on its own row while nothing is
+              finished yet. Stays below the counter (not inline) — long
+              status strings used to push the counter siblings to wrap onto
+              the next line. Truncated in JS as a belt-and-braces guard
+              against unbounded streamed content (e.g. raw stream-event
+              JSON from `runAgentLocally`). Once the first task lands, the
+              regular status pill below the tabs takes over and we don't
+              need to duplicate it in the header. */}
+          {completedDisplay === 0 && lastStatus && (
             <Text color={Colors.muted} wrap="truncate-end">
-              {currentFile}
+              {Icons.dot} {truncateStatus(lastStatus)}
+            </Text>
+          )}
+          {showColdStartHint && (
+            <Text color={Colors.muted}>
+              {Icons.dot} Still on the agent's first response — cold start can
+              take 30–60s while it loads skills and reads your project. The
+              status above shows it's working, not stuck.
             </Text>
           )}
         </Box>
 
         {/* Tasks — the hero */}
         <ProgressList items={progressItems} title="Tasks" />
+
+        {/* Live per-file activity from the inner agent's write hooks.
+            Hidden until the first PreToolUse fires so it doesn't reserve
+            blank space during planning. The panel shares the spinner
+            frame so its in-progress rows tick in lockstep with the
+            header braille spinner. */}
+        <FileWritesPanel
+          entries={store.fileWrites}
+          installDir={store.session.installDir}
+          spinnerFrame={spinnerFrame}
+        />
+
+        {/* Coaching: surfaces calmly after 90s of no task-count progress.
+            The spinner stays — this is a *secondary* line that gives the
+            user something to do (open Logs, cancel) instead of staring
+            at a frozen indicator. Resets when a new task appears.
+
+            NB: tabs switch with ← / → (or number keys); the Tab key is
+            wired to opening the slash-command input in ConsoleView. The
+            old copy said "(Tab)" and led users to the wrong key. */}
+        {coachingTier >= 1 && (
+          <Box marginTop={1}>
+            <Text color={Colors.muted}>
+              {coachingTier >= 2
+                ? "This is unusually slow. Press ← / → to switch to the Logs tab and see what's stuck — or Ctrl+C to cancel."
+                : "Still working — press ← / → to switch to the Logs tab and see what's happening, or Ctrl+C to cancel."}
+            </Text>
+          </Box>
+        )}
+
+        {/* Post-agent steps (commit events, create dashboard, …).
+            Rendered as its own panel below the agent task list — keeps
+            the "main agent work done" milestone intact while still
+            surfacing the work happening between agent completion and
+            the MCP/Verify screens. Empty until agent-runner seeds the
+            queue, so it's a no-op during the agent run itself. */}
+        <FinalizingPanel steps={store.session.postAgentSteps} />
 
         {/* Inline event plan */}
         <InlineEventPlan store={store} />
@@ -250,10 +456,22 @@ export const RunScreen = ({ store }: RunScreenProps) => {
   useWizardStore(store);
   useScreenHints(RUN_HINTS);
 
+  // Footer status: when a post-agent step is in_progress, drive the
+  // footer line from the step's `activeForm` so the visible task and
+  // the spinner footer always agree (single source of truth). Without
+  // this, the agent's last pushStatus("Creating charts and dashboard…")
+  // sits frozen beneath the FinalizingPanel and the message can lag
+  // the actual step state. Falls back to the agent's last status when
+  // no post-agent step is active (during the run, before seeding, or
+  // after all steps finish).
+  const activePostAgentStep = store.session.postAgentSteps.find(
+    (s) => s.status === PostAgentStepStatus.InProgress,
+  );
   const lastStatus =
-    store.statusMessages.length > 0
+    activePostAgentStep?.activeForm ??
+    (store.statusMessages.length > 0
       ? store.statusMessages[store.statusMessages.length - 1]
-      : undefined;
+      : undefined);
 
   const hasEvents = store.eventPlan.length > 0;
 
@@ -275,7 +493,22 @@ export const RunScreen = ({ store }: RunScreenProps) => {
     {
       id: 'logs',
       label: 'Logs',
-      component: <LogViewer filePath={LOG_FILE} />,
+      // Per-project log file under ~/.amplitude/wizard/runs/<hash>/log.txt.
+      // Resolving from session.installDir keeps two parallel runs in
+      // separate logs (vs. the previous global /tmp/amplitude-wizard.log).
+      // PR 322 added getLogFilePath() with a runtime AMPLITUDE_WIZARD_LOG
+      // override; per-project pathing supersedes it. If a future PR wants
+      // both, getLogFile() can grow an env-override branch.
+      // Scope the live tail to the current wizard session by default. The
+      // per-project log file is append-only across runs (5 MB rotation),
+      // so without this scope users see yesterday's runs above today's
+      // startup banner. `a` toggles to show the full historical log.
+      component: (
+        <LogViewer
+          filePath={getLogFile(store.session.installDir)}
+          sessionStartMs={getSessionStartMs()}
+        />
+      ),
     },
     {
       id: 'snake',

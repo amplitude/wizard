@@ -7,16 +7,36 @@ import {
   RunPhase,
   McpOutcome,
 } from '../store.js';
-import { vi, describe, it, expect, type Mock, beforeEach } from 'vitest';
-import { OutroKind, AdditionalFeature } from '../../../lib/wizard-session.js';
+import {
+  vi,
+  describe,
+  it,
+  expect,
+  type Mock,
+  beforeEach,
+  afterAll,
+} from 'vitest';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
+import {
+  OutroKind,
+  AdditionalFeature,
+  SlackOutcome,
+} from '../../../lib/wizard-session.js';
 import { buildSession } from '../../../lib/wizard-session.js';
 import { Integration } from '../../../lib/constants.js';
 import { analytics } from '../../../utils/analytics.js';
+import {
+  readAmpliConfig,
+  writeAmpliConfig,
+} from '../../../lib/ampli-config.js';
 import type { SignupSuccessResult } from '../../../utils/signup-or-auth.js';
 
 vi.mock('../../../utils/analytics.js', () => ({
   analytics: {
     capture: vi.fn(),
+    captureException: vi.fn(),
     wizardCapture: vi.fn(),
     setTag: vi.fn(),
     setSessionProperty: vi.fn(),
@@ -29,8 +49,36 @@ vi.mock('../../../utils/analytics.js', () => ({
   sessionPropertiesCompact: vi.fn(() => ({})),
 }));
 
+vi.mock('../../../utils/api-key-store.js', () => ({
+  clearApiKey: vi.fn(),
+  persistApiKey: vi.fn(),
+  readApiKeyWithSource: vi.fn(),
+}));
+// Stub `getStoredUser` so the Wizard flow's RegionSelect gate (which calls
+// `tryResolveZone`) doesn't pick up the developer's real ~/.ampli.json.
+// `readAmpliConfig` is left un-mocked because store.test.ts already
+// exercises real reads/writes against per-test tmpdirs.
+vi.mock('../../../utils/ampli-settings.js', async (importOriginal) => {
+  const actual = await importOriginal<
+    typeof import('../../../utils/ampli-settings.js')
+  >();
+  return {
+    ...actual,
+    getStoredUser: vi.fn(() => undefined),
+  };
+});
+
+// Redirect fs-touching setters (setRegion, setOrgAndWorkspace) away from
+// the repo root so tests don't pollute the wizard's own ampli.json. Every
+// store gets a fresh isolated tmpdir; individual tests can override by
+// reassigning store.session.installDir.
+const createdDirs: string[] = [];
 function createStore(flow?: Flow): WizardStore {
-  return new WizardStore(flow);
+  const store = new WizardStore(flow);
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wizard-store-test-'));
+  createdDirs.push(dir);
+  store.session.installDir = dir;
+  return store;
 }
 
 const wizardCaptureMock = analytics.wizardCapture as Mock;
@@ -38,6 +86,14 @@ const wizardCaptureMock = analytics.wizardCapture as Mock;
 describe('WizardStore', () => {
   beforeEach(() => {
     vi.clearAllMocks();
+  });
+  afterAll(() => {
+    // Clean up the per-store tmpdirs accumulated by createStore() so the
+    // suite doesn't leak directories into $TMPDIR across runs.
+    for (const dir of createdDirs) {
+      fs.rmSync(dir, { recursive: true, force: true });
+    }
+    createdDirs.length = 0;
   });
   // ── Construction ─────────────────────────────────────────────────
 
@@ -47,7 +103,26 @@ describe('WizardStore', () => {
       expect(store.version).toBe('');
       expect(store.statusMessages).toEqual([]);
       expect(store.tasks).toEqual([]);
-      expect(store.session).toEqual(buildSession({}));
+      // installDir is overridden by the test helper, and agentSessionId is a
+      // freshly-generated UUID per call to buildSession — compare the rest.
+      const {
+        installDir: storeInstallDir,
+        agentSessionId: storeAgentSessionId,
+        ...rest
+      } = store.session;
+      const {
+        installDir: defaultInstallDir,
+        agentSessionId: defaultAgentSessionId,
+        ...defaults
+      } = buildSession({});
+      expect(rest).toEqual(defaults);
+      expect(storeInstallDir).toMatch(/wizard-store-test-/);
+      expect(defaultInstallDir).toBeDefined();
+      // Both should be valid UUIDs but won't match (generated independently).
+      const UUID_RE =
+        /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+      expect(storeAgentSessionId).toMatch(UUID_RE);
+      expect(defaultAgentSessionId).toMatch(UUID_RE);
     });
 
     it('defaults to Wizard flow', () => {
@@ -184,6 +259,36 @@ describe('WizardStore', () => {
       expect(store.session.runStartedAt).toBe(stamped);
     });
 
+    it('setRunPhase(Running) pre-populates the canonical 5 tasks', () => {
+      // Empty list while the agent cold-starts is a known abandonment
+      // moment. Pre-populate at the Running transition so the user sees
+      // "0 done · 5 to go" from frame 1.
+      const store = createStore();
+      expect(store.tasks).toHaveLength(0);
+      store.setRunPhase(RunPhase.Running);
+      expect(store.tasks).toHaveLength(5);
+      expect(store.tasks.map((t) => t.label)).toEqual([
+        'Detect your project setup',
+        'Install Amplitude',
+        'Plan and approve events to track',
+        'Wire up event tracking',
+        'Build your starter dashboard',
+      ]);
+      expect(store.tasks.every((t) => t.status === TaskStatus.Pending)).toBe(
+        true,
+      );
+    });
+
+    it('setRunPhase(Running) does not clobber existing task progress on re-entry', () => {
+      const store = createStore();
+      store.setRunPhase(RunPhase.Running);
+      store.applyJourneyTransition('install', 'completed');
+      expect(store.tasks[1].status).toBe(TaskStatus.Completed);
+      store.setRunPhase(RunPhase.Idle);
+      store.setRunPhase(RunPhase.Running);
+      expect(store.tasks[1].status).toBe(TaskStatus.Completed);
+    });
+
     it('setCredentials updates session.credentials', () => {
       const store = createStore();
       const creds = {
@@ -194,6 +299,25 @@ describe('WizardStore', () => {
       };
       store.setCredentials(creds);
       expect(store.session.credentials).toEqual(creds);
+    });
+
+    it('setOAuthComplete clears any cached project API key for the install dir', async () => {
+      const { clearApiKey } = await import('../../../utils/api-key-store.js');
+      const store = createStore();
+      (clearApiKey as Mock).mockClear();
+
+      store.setOAuthComplete({
+        accessToken: 'access',
+        idToken: 'id',
+        cloudRegion: 'us',
+        orgs: [],
+      });
+
+      // Stale keychain entries from prior runs in different orgs must be
+      // wiped so AuthScreen step 1 misses and the freshly-fetched env key
+      // wins. See src/ui/tui/screens/AuthScreen.tsx step 1.
+      expect(clearApiKey).toHaveBeenCalledTimes(1);
+      expect(clearApiKey).toHaveBeenCalledWith(store.session.installDir);
     });
 
     it('setFrameworkConfig updates integration and frameworkConfig', () => {
@@ -279,6 +403,23 @@ describe('WizardStore', () => {
       expect(store.session.outroData).toEqual(data);
     });
 
+    it('setOutroData notifies subscribers even when data shape is unchanged', () => {
+      // Regression: the agent-runner AUTH_ERROR path used to direct-mutate
+      // `session.outroData`, then call `cancel()` which skipped its own
+      // setOutroData branch when outroData was already truthy. The
+      // OutroScreen never received a re-emit and the user could miss the
+      // auth-failure confirmation before being routed back to login.
+      // ink-ui's cancel() now re-calls setOutroData; this guards the
+      // contract that calling setOutroData fires a change notification.
+      const store = createStore();
+      const listener = vi.fn();
+      const data = { kind: OutroKind.Error, message: 'Authentication failed' };
+      store.setOutroData(data);
+      store.subscribe(listener);
+      store.setOutroData(data);
+      expect(listener).toHaveBeenCalled();
+    });
+
     it('setFrameworkContext sets key-value pairs', () => {
       const store = createStore();
       store.setFrameworkContext('packageManager', 'pnpm');
@@ -286,6 +427,117 @@ describe('WizardStore', () => {
 
       store.setFrameworkContext('srcDir', 'src');
       expect(store.session.frameworkContext['srcDir']).toBe('src');
+    });
+
+    it('setOrgAndProject clears org/project IDs when called with empty inputs', () => {
+      // Regression: AuthScreen "Start Over", stale-org clear, and the
+      // create-project fallback all pass `{ id: '', name: '' }` to reset
+      // session state. Both fields must collapse to null so an empty string
+      // `selectedOrgId` doesn't still satisfy `isAuthenticated`, leaving the
+      // session in a meaningless state.
+      const store = createStore();
+      expect(() =>
+        store.setOrgAndProject(
+          { id: '', name: '' },
+          { id: '', name: '' },
+          '/tmp/no-such-dir',
+          { persist: false },
+        ),
+      ).not.toThrow();
+      expect(store.session.selectedOrgId).toBeNull();
+      expect(store.session.selectedProjectId).toBeNull();
+      expect(store.session.selectedProjectName).toBe('');
+    });
+
+    it('restoreSessionIds clears selectedOrgId/ProjectId when called with empty inputs', () => {
+      // Defense-in-depth: keep restoreSessionIds consistent with
+      // setOrgAndProject so neither write path throws on empty input
+      // and neither leaves isAuthenticated reporting a meaningless empty id.
+      const store = createStore();
+      expect(() =>
+        store.restoreSessionIds({
+          orgId: '',
+          orgName: '',
+          projectId: '',
+          projectName: '',
+        }),
+      ).not.toThrow();
+      expect(store.session.selectedOrgId).toBeNull();
+      expect(store.session.selectedProjectId).toBeNull();
+    });
+
+    it('restoreSessionIds stores non-empty project ids', () => {
+      const store = createStore();
+      store.restoreSessionIds({ projectId: 'ws-77', projectName: 'Prod' });
+      expect(store.session.selectedProjectId).toBe('ws-77');
+      expect(store.session.selectedProjectName).toBe('Prod');
+    });
+
+    it('setOrgAndProject stores non-empty ids', () => {
+      const store = createStore();
+      store.setOrgAndProject(
+        { id: 'org-1', name: 'Acme' },
+        { id: 'ws-42', name: 'Amplitude' },
+        '/tmp/no-such-dir',
+        { persist: false },
+      );
+      expect(store.session.selectedOrgId).toBe('org-1');
+      expect(store.session.selectedProjectId).toBe('ws-42');
+    });
+
+    it('setOrgAndProject syncs credentials.appId and projectApiKey to the new project', () => {
+      // Regression: switching project mid-session left credentials.appId
+      // pointing at the originally-OAuth'd project, so /whoami and any
+      // reader of credentials.* showed the stale id.
+      const store = createStore();
+      store.setCredentials({
+        accessToken: 'tok',
+        projectApiKey: 'old-key',
+        host: 'https://api2.amplitude.com',
+        appId: 187520,
+      });
+      store.setOrgAndProject(
+        { id: 'org-2', name: 'EU Org' },
+        {
+          id: 'ws-99',
+          name: 'EU Project',
+          environments: [
+            {
+              rank: 0,
+              app: { id: '900001', apiKey: 'new-key' },
+            },
+          ],
+        },
+        '/tmp/no-such-dir',
+        { persist: false },
+      );
+      expect(store.session.selectedAppId).toBe('900001');
+      expect(store.session.credentials?.appId).toBe(900001);
+      expect(store.session.credentials?.projectApiKey).toBe('new-key');
+    });
+
+    it('setOrgAndProject preserves projectApiKey when env payload omits it', () => {
+      // Some picker payloads only carry app.id (no apiKey). Don't blank
+      // out the active key in that case — keep what we already had.
+      const store = createStore();
+      store.setCredentials({
+        accessToken: 'tok',
+        projectApiKey: 'keep-me',
+        host: 'https://api2.amplitude.com',
+        appId: 187520,
+      });
+      store.setOrgAndProject(
+        { id: 'org-2', name: 'Acme' },
+        {
+          id: 'ws-99',
+          name: 'Other',
+          environments: [{ rank: 0, app: { id: '900001' } }],
+        },
+        '/tmp/no-such-dir',
+        { persist: false },
+      );
+      expect(store.session.credentials?.appId).toBe(900001);
+      expect(store.session.credentials?.projectApiKey).toBe('keep-me');
     });
 
     it('every setter emits exactly one change event', () => {
@@ -306,6 +558,362 @@ describe('WizardStore', () => {
       store.setFrameworkConfig(null, null);
 
       expect(cb).toHaveBeenCalledTimes(11);
+    });
+
+    it('setRegionForced clears all region-tied state so Auth re-runs', () => {
+      const store = createStore();
+      // Simulate an authenticated user mid-session in US.
+      store.session.region = 'us';
+      store.setCredentials({
+        accessToken: 'tok',
+        projectApiKey: 'pk',
+        host: 'https://api2.amplitude.com',
+        appId: 42,
+      });
+      store.session.userEmail = 'user@example.com';
+      store.session.selectedOrgId = 'org-1';
+      store.session.selectedOrgName = 'Acme';
+      store.session.selectedProjectId = 'ws-1';
+      store.session.selectedProjectName = 'Amplitude';
+      store.session.selectedAppId = '769610';
+      store.session.selectedEnvName = 'Production';
+      store.session.projectHasData = true;
+      store.session.activationLevel = 'full';
+      store.session.activationOptionsComplete = true;
+      store.session.dataIngestionConfirmed = true;
+      store.session.mcpComplete = true;
+      store.session.mcpOutcome = McpOutcome.Installed;
+      store.session.pendingOrgs = [];
+      store.session.pendingAuthIdToken = 'idt';
+      store.session.pendingAuthAccessToken = 'at';
+      store.session.apiKeyNotice = 'stale';
+
+      store.setRegionForced();
+
+      expect(store.session.regionForced).toBe(true);
+      expect(store.session.credentials).toBeNull();
+      expect(store.session.userEmail).toBeNull();
+      expect(store.session.selectedOrgId).toBeNull();
+      expect(store.session.selectedOrgName).toBeNull();
+      expect(store.session.selectedProjectId).toBeNull();
+      expect(store.session.selectedProjectName).toBeNull();
+      expect(store.session.selectedAppId).toBeNull();
+      expect(store.session.selectedEnvName).toBeNull();
+      expect(store.session.projectHasData).toBeNull();
+      expect(store.session.activationLevel).toBeNull();
+      expect(store.session.activationOptionsComplete).toBe(false);
+      expect(store.session.dataIngestionConfirmed).toBe(false);
+      expect(store.session.mcpComplete).toBe(false);
+      expect(store.session.mcpOutcome).toBeNull();
+      expect(store.session.pendingOrgs).toBeNull();
+      expect(store.session.pendingAuthIdToken).toBeNull();
+      expect(store.session.pendingAuthAccessToken).toBeNull();
+      expect(store.session.apiKeyNotice).toBeNull();
+    });
+
+    it('setRegionForced clears framework + feature state so a new-zone run starts clean', () => {
+      const store = createStore();
+      store.session.region = 'us';
+      store.setCredentials({
+        accessToken: 'tok',
+        projectApiKey: 'pk',
+        host: 'https://api2.amplitude.com',
+        appId: 42,
+      });
+      // Simulate a run that progressed past framework detection and feature opt-in.
+      store.session.integration = Integration.NextJs;
+      store.session.frameworkConfig = {} as never;
+      store.session.frameworkContext = { router: 'app' };
+      store.session.discoveredFeatures = ['llm', 'session_replay'] as never;
+      store.session.additionalFeatureQueue = ['llm'] as never;
+      store.session.additionalFeatureCurrent = 'llm' as never;
+      store.session.additionalFeatureCompleted = ['session_replay'] as never;
+      store.session.optInFeaturesComplete = true;
+      store.session.mcpInstalledClients = ['cursor', 'claude'];
+      store.session.slackComplete = true;
+      store.session.slackOutcome = SlackOutcome.Joined;
+
+      store.setRegionForced();
+
+      expect(store.session.integration).toBeNull();
+      expect(store.session.frameworkConfig).toBeNull();
+      expect(store.session.frameworkContext).toEqual({});
+      expect(store.session.discoveredFeatures).toEqual([]);
+      expect(store.session.additionalFeatureQueue).toEqual([]);
+      expect(store.session.additionalFeatureCurrent).toBeNull();
+      expect(store.session.additionalFeatureCompleted).toEqual([]);
+      expect(store.session.optInFeaturesComplete).toBe(false);
+      expect(store.session.mcpInstalledClients).toEqual([]);
+      expect(store.session.slackComplete).toBe(false);
+      expect(store.session.slackOutcome).toBeNull();
+      // Lifecycle reset still happens.
+      expect(store.session.runPhase).toBe(RunPhase.Idle);
+      expect(store.session.outroData).toBeNull();
+    });
+
+    it('showLogoutOverlay sets loggingOut synchronously before pushing the overlay', () => {
+      const store = createStore();
+      expect(store.session.loggingOut).toBe(false);
+      store.showLogoutOverlay();
+      // The synchronous flag-set must happen before the overlay is pushed,
+      // so the bin.ts re-auth watcher can rely on it the moment /logout
+      // dispatches.
+      expect(store.session.loggingOut).toBe(true);
+      expect(store.currentScreen).toBe(Overlay.Logout);
+    });
+
+    it('hideLogoutOverlay clears loggingOut so a cancelled /logout does not block re-auth', () => {
+      const store = createStore();
+      store.showLogoutOverlay();
+      expect(store.session.loggingOut).toBe(true);
+      store.hideLogoutOverlay();
+      expect(store.session.loggingOut).toBe(false);
+    });
+
+    it('setRegionForced clears outroData and runPhase so /region works after setup completes', () => {
+      const store = createStore();
+      store.session.region = 'us';
+      store.setCredentials({
+        accessToken: 'tok',
+        projectApiKey: 'pk',
+        host: 'https://api2.amplitude.com',
+        appId: 42,
+      });
+      store.session.outroData = { kind: OutroKind.Success, message: 'Done' };
+      store.setRunPhase(RunPhase.Completed);
+
+      store.setRegionForced();
+
+      expect(store.session.outroData).toBeNull();
+      expect(store.session.runPhase).toBe(RunPhase.Idle);
+    });
+
+    it('setRegion persists new zone to existing ampli.json even when org/workspace are cleared', async () => {
+      const store = createStore();
+      // Seed ampli.json in the store's tmpdir as if from a prior SUSI
+      writeAmpliConfig(store.session.installDir, {
+        OrgId: 'org-old',
+        WorkspaceId: 'ws-old',
+        Zone: 'us',
+        SourceId: 'src-1',
+      });
+
+      store.setRegionForced();
+      expect(store.session.selectedOrgId).toBeNull();
+
+      store.setRegion('eu');
+      await new Promise((r) => setTimeout(r, 50));
+
+      const result = readAmpliConfig(store.session.installDir);
+      expect(result.ok).toBe(true);
+      if (!result.ok) return;
+      expect(result.config.Zone).toBe('eu');
+      expect(result.config.OrgId).toBeUndefined();
+      expect(result.config.WorkspaceId).toBeUndefined();
+      expect(result.config.SourceId).toBe('src-1'); // unrelated fields preserved
+    });
+
+    it('setRegion surfaces a feedback notice when project binding writes fail', async () => {
+      const store = createStore();
+      writeAmpliConfig(store.session.installDir, {
+        OrgId: 'org-1',
+        WorkspaceId: 'ws-1',
+        Zone: 'us',
+      });
+
+      const ampliConfig = await import('../../../lib/ampli-config.js');
+      const spy = vi
+        .spyOn(ampliConfig, 'writeAmpliConfig')
+        .mockReturnValue(false);
+
+      try {
+        store.setRegion('eu');
+        await new Promise((r) => setTimeout(r, 50));
+        expect(spy).toHaveBeenCalled();
+        expect(store.commandFeedback ?? '').toMatch(/binding files/i);
+      } finally {
+        spy.mockRestore();
+      }
+    });
+
+    it('setRegion does not create ampli.json when none exists', async () => {
+      const store = createStore();
+      store.setRegion('us');
+      await new Promise((r) => setTimeout(r, 50));
+      expect(
+        fs.existsSync(path.join(store.session.installDir, 'ampli.json')),
+      ).toBe(false);
+    });
+
+    it('/region mid-session routes back through RegionSelect then Auth', () => {
+      const store = createStore();
+      // Walk into a post-auth state.
+      store.concludeIntro();
+      store.setRegion('us');
+      store.setCredentials({
+        accessToken: 'tok',
+        projectApiKey: 'pk',
+        host: 'https://api2.amplitude.com',
+        appId: 1,
+      });
+      store.session.selectedOrgName = 'Acme';
+      store.session.selectedOrgId = 'org-1';
+      store.session.selectedProjectName = 'Amplitude';
+      store.session.selectedProjectId = 'ws-1';
+      store.session.selectedAppId = 'app-1';
+      store.setProjectHasData(false);
+      expect(store.currentScreen).toBe(Screen.Run);
+
+      store.setRegionForced();
+      expect(store.currentScreen).toBe(Screen.RegionSelect);
+
+      store.setRegion('eu');
+      expect(store.currentScreen).toBe(Screen.Auth);
+    });
+  });
+
+  // ── postAgentSteps (FinalizingPanel state) ────────────────────────
+
+  describe('post-agent step queue', () => {
+    it('seedPostAgentSteps replaces the queue and emits change', () => {
+      const store = createStore();
+      const cb = vi.fn();
+      store.subscribe(cb);
+      cb.mockClear();
+      store.seedPostAgentSteps([
+        {
+          id: 'commit-events',
+          label: 'Save events',
+          activeForm: 'Saving events',
+          status: 'pending',
+        },
+      ]);
+      expect(store.session.postAgentSteps).toHaveLength(1);
+      expect(store.session.postAgentSteps[0].id).toBe('commit-events');
+      expect(cb).toHaveBeenCalled();
+    });
+
+    it('setPostAgentStep stamps startedAt on in_progress transition', () => {
+      const store = createStore();
+      store.seedPostAgentSteps([
+        {
+          id: 'create-dashboard',
+          label: 'Create dashboard',
+          activeForm: 'Creating dashboard',
+          status: 'pending',
+        },
+      ]);
+      const before = Date.now();
+      store.setPostAgentStep('create-dashboard', { status: 'in_progress' });
+      const step = store.session.postAgentSteps[0];
+      expect(step.status).toBe('in_progress');
+      expect(step.startedAt).toBeGreaterThanOrEqual(before);
+      expect(step.startedAt).toBeLessThanOrEqual(Date.now());
+    });
+
+    it('setPostAgentStep preserves startedAt across status transitions', () => {
+      const store = createStore();
+      store.seedPostAgentSteps([
+        {
+          id: 'commit-events',
+          label: 'Save events',
+          activeForm: 'Saving events',
+          status: 'pending',
+        },
+      ]);
+      store.setPostAgentStep('commit-events', { status: 'in_progress' });
+      const startedAt = store.session.postAgentSteps[0].startedAt;
+      // A subsequent transition shouldn't reset the timer.
+      store.setPostAgentStep('commit-events', { status: 'completed' });
+      expect(store.session.postAgentSteps[0].startedAt).toBe(startedAt);
+    });
+
+    it('setPostAgentStep records skip reason', () => {
+      const store = createStore();
+      store.seedPostAgentSteps([
+        {
+          id: 'commit-events',
+          label: 'Save events',
+          activeForm: 'Saving events',
+          status: 'pending',
+        },
+      ]);
+      store.setPostAgentStep('commit-events', {
+        status: 'skipped',
+        reason: "couldn't resolve project",
+      });
+      expect(store.session.postAgentSteps[0].status).toBe('skipped');
+      expect(store.session.postAgentSteps[0].reason).toBe(
+        "couldn't resolve project",
+      );
+    });
+
+    it('setPostAgentStep is a no-op for unknown ids', () => {
+      const store = createStore();
+      store.seedPostAgentSteps([
+        {
+          id: 'commit-events',
+          label: 'Save events',
+          activeForm: 'Saving events',
+          status: 'pending',
+        },
+      ]);
+      const cb = vi.fn();
+      store.subscribe(cb);
+      cb.mockClear();
+      store.setPostAgentStep('does-not-exist', { status: 'completed' });
+      expect(cb).not.toHaveBeenCalled();
+      expect(store.session.postAgentSteps[0].status).toBe('pending');
+    });
+  });
+
+  // ── resetForFreshStart (IntroScreen "Start fresh" branch) ───────
+
+  describe('resetForFreshStart', () => {
+    it('clears every field IntroScreen used to wipe via direct assignment', () => {
+      const store = createStore();
+      // Walk into a checkpoint-restored state with everything populated.
+      store.session._restoredFromCheckpoint = true;
+      store.session.introConcluded = true;
+      store.session.detectionComplete = true;
+      store.session.detectedFrameworkLabel = 'Next.js';
+      store.session.integration = Integration.nextjs;
+      store.session.frameworkConfig = { metadata: { name: 'Next.js' } } as any;
+      store.session.frameworkContext = { foo: 'bar' } as any;
+      store.session.region = 'us';
+      store.session.selectedOrgId = 'org-1';
+      store.session.selectedOrgName = 'Acme';
+      store.session.selectedProjectId = 'ws-1';
+      store.session.selectedProjectName = 'Amplitude';
+      store.session.selectedEnvName = 'production';
+
+      store.resetForFreshStart();
+
+      expect(store.session._restoredFromCheckpoint).toBe(false);
+      expect(store.session.introConcluded).toBe(false);
+      expect(store.session.detectionComplete).toBe(false);
+      expect(store.session.detectedFrameworkLabel).toBeNull();
+      expect(store.session.integration).toBeNull();
+      expect(store.session.frameworkConfig).toBeNull();
+      expect(store.session.frameworkContext).toEqual({});
+      expect(store.session.region).toBeNull();
+      expect(store.session.selectedOrgId).toBeNull();
+      expect(store.session.selectedOrgName).toBeNull();
+      expect(store.session.selectedProjectId).toBeNull();
+      expect(store.session.selectedProjectName).toBeNull();
+      expect(store.session.selectedEnvName).toBeNull();
+    });
+
+    it('notifies subscribers (emits change)', () => {
+      const store = createStore();
+      const listener = vi.fn();
+      store.subscribe(listener);
+      const before = store.getVersion();
+
+      store.resetForFreshStart();
+
+      expect(listener).toHaveBeenCalled();
+      expect(store.getVersion()).toBeGreaterThan(before);
     });
   });
 
@@ -412,7 +1020,7 @@ describe('WizardStore', () => {
     store.concludeIntro();
     // RegionSelect: set region (skips it)
     store.setRegion('us');
-    // Auth: set credentials + org/workspace/env (Auth screen isComplete
+    // Auth: set credentials + org/project/env (Auth screen isComplete
     // requires all four: credentials and all three names)
     store.setCredentials({
       accessToken: 'tok',
@@ -420,11 +1028,11 @@ describe('WizardStore', () => {
       host: 'h',
       appId: 1,
     });
-    // Set org/workspace/env names directly to satisfy Auth.isComplete
+    // Set org/project/env names directly to satisfy Auth.isComplete
     // (it only checks names, not IDs — so we don't have to set IDs and
-    // trigger setOrgAndWorkspace's ampli.json write).
+    // trigger setOrgAndProject's ampli.json write).
     store.session.selectedOrgName = 'Acme';
-    store.session.selectedWorkspaceName = 'Amplitude';
+    store.session.selectedProjectName = 'Amplitude';
     store.setSelectedEnvName('Production');
     // DataSetup: set projectHasData (DataSetup screen isComplete)
     store.setProjectHasData(false);
@@ -624,76 +1232,167 @@ describe('WizardStore', () => {
     });
   });
 
-  describe('syncTodos', () => {
-    it('maps incoming todos to TaskItems', () => {
+  describe('applyJourneyTransition', () => {
+    // The 5-step user-visible journey is driven by deterministic tool-call
+    // signals classified in `src/lib/journey-state.ts`. These tests pin
+    // the store-side semantics: a transition updates the named step's
+    // status, applies a monotonic guard (completed steps cannot regress),
+    // and the renderer cascades earlier steps to completed when a later
+    // step advances (sequential ordering invariant).
+
+    it('renders exactly the five canonical steps from frame 1', () => {
+      const store = createStore();
+      store.applyJourneyTransition('install', 'in_progress');
+
+      expect(store.tasks).toHaveLength(5);
+      expect(store.tasks.map((t) => t.label)).toEqual([
+        'Detect your project setup',
+        'Install Amplitude',
+        'Plan and approve events to track',
+        'Wire up event tracking',
+        'Build your starter dashboard',
+      ]);
+    });
+
+    it('marks the named step in_progress and earlier steps completed', () => {
+      const store = createStore();
+      store.applyJourneyTransition('install', 'in_progress');
+
+      expect(store.tasks[0].status).toBe(TaskStatus.Completed); // detect
+      expect(store.tasks[1].status).toBe(TaskStatus.InProgress); // install
+      expect(store.tasks[2].status).toBe(TaskStatus.Pending); // plan
+    });
+
+    it('cascades earlier steps to completed when a later step advances', () => {
+      // Same invariant as PR-A's "skips ahead" case, now derived from
+      // a deterministic tool call rather than a TodoWrite string.
+      const store = createStore();
+      store.applyJourneyTransition('wire', 'in_progress');
+
+      expect(store.tasks[0].status).toBe(TaskStatus.Completed);
+      expect(store.tasks[1].status).toBe(TaskStatus.Completed);
+      expect(store.tasks[2].status).toBe(TaskStatus.Completed);
+      expect(store.tasks[3].status).toBe(TaskStatus.InProgress);
+      expect(store.tasks[4].status).toBe(TaskStatus.Pending);
+    });
+
+    it('promotes a stale in_progress step to completed when a later step is also in_progress', () => {
+      // The classifier emits per-tool-call transitions; nothing
+      // prevents `install: in_progress` from sitting in derived state
+      // when `wire: in_progress` later fires (no explicit "install
+      // completed" tool call ever lands — install completion is
+      // implicit via the sequential cascade).
+      //
+      // The user-visible list MUST stay single-in_progress: the older
+      // in_progress is stale and must render as Completed, even though
+      // it's still in the derived map as `in_progress`.
+      const store = createStore();
+      store.applyJourneyTransition('install', 'in_progress');
+      store.applyJourneyTransition('wire', 'in_progress');
+
+      expect(store.tasks[0].status).toBe(TaskStatus.Completed); // detect (cascade)
+      expect(store.tasks[1].status).toBe(TaskStatus.Completed); // install (was in_progress, cascaded)
+      expect(store.tasks[2].status).toBe(TaskStatus.Completed); // plan (cascade)
+      expect(store.tasks[3].status).toBe(TaskStatus.InProgress); // wire (frontier)
+      expect(store.tasks[4].status).toBe(TaskStatus.Pending); // dashboard
+    });
+
+    it('forces monotonic progress — completed steps cannot regress', () => {
+      // Retry scenario: a stale tool call replays after a step has been
+      // verified completed. The store ignores the demotion.
+      const store = createStore();
+      store.applyJourneyTransition('install', 'completed');
+      store.applyJourneyTransition('install', 'in_progress');
+
+      expect(store.tasks[1].status).toBe(TaskStatus.Completed);
+    });
+
+    it('is idempotent — re-applying the same transition is a no-op', () => {
+      const store = createStore();
+      const cb = vi.fn();
+      store.applyJourneyTransition('install', 'in_progress');
+      store.subscribe(cb);
+      store.applyJourneyTransition('install', 'in_progress');
+      expect(cb).not.toHaveBeenCalled();
+    });
+
+    it('emits change for every effective transition', () => {
+      const store = createStore();
+      const cb = vi.fn();
+      store.subscribe(cb);
+      store.applyJourneyTransition('install', 'in_progress');
+      store.applyJourneyTransition('install', 'completed');
+      expect(cb).toHaveBeenCalledTimes(2);
+    });
+  });
+
+  describe('syncTodos (activeForm only)', () => {
+    // syncTodos no longer drives status — it only refreshes the
+    // `activeForm` flavor text shown beside each canonical step. Status
+    // is owned by `applyJourneyTransition`. The list is always rendered
+    // as the canonical 5 rows, regardless of TodoWrite content.
+
+    it('renders exactly the five canonical steps even with no derived status', () => {
       const store = createStore();
       store.syncTodos([
-        { content: 'Install SDK', status: 'pending' },
-        { content: 'Configure', status: 'completed' },
+        { content: 'Install Amplitude', status: 'in_progress' },
       ]);
 
-      expect(store.tasks).toHaveLength(2);
-      expect(store.tasks[0]).toEqual({
-        label: 'Install SDK',
-        activeForm: undefined,
-        status: TaskStatus.Pending,
-        done: false,
-      });
-      expect(store.tasks[1]).toEqual({
-        label: 'Configure',
-        activeForm: undefined,
-        status: TaskStatus.Completed,
-        done: true,
-      });
-    });
-
-    it('retains completed tasks not in the incoming list', () => {
-      const store = createStore();
-      store.setTasks([
-        { label: 'Old done task', status: TaskStatus.Completed, done: true },
-        { label: 'Old pending task', status: TaskStatus.Pending, done: false },
+      expect(store.tasks).toHaveLength(5);
+      expect(store.tasks.map((t) => t.label)).toEqual([
+        'Detect your project setup',
+        'Install Amplitude',
+        'Plan and approve events to track',
+        'Wire up event tracking',
+        'Build your starter dashboard',
       ]);
-
-      store.syncTodos([{ content: 'New task', status: 'pending' }]);
-
-      // Old done task is retained, old pending task is dropped
-      expect(store.tasks).toHaveLength(2);
-      expect(store.tasks[0].label).toBe('Old done task');
-      expect(store.tasks[1].label).toBe('New task');
     });
 
-    it('does not duplicate completed tasks that appear in both', () => {
+    it('does not change step status — that is owned by applyJourneyTransition', () => {
       const store = createStore();
-      store.setTasks([
-        { label: 'Shared task', status: TaskStatus.Completed, done: true },
-      ]);
+      store.syncTodos([{ content: 'Install Amplitude', status: 'completed' }]);
 
-      store.syncTodos([{ content: 'Shared task', status: 'completed' }]);
-
-      // Should not have duplicates — incomingLabels includes "Shared task",
-      // so the retained filter excludes it
-      expect(store.tasks).toHaveLength(1);
-      expect(store.tasks[0].label).toBe('Shared task');
+      // Even with status='completed' in the TodoWrite, the step stays
+      // pending until a deterministic tool-call signal flips it.
+      expect(store.tasks.every((t) => t.status === TaskStatus.Pending)).toBe(
+        true,
+      );
     });
 
-    it('preserves activeForm from incoming todos', () => {
+    it('updates the matched step activeForm so the user sees current narration', () => {
       const store = createStore();
+      store.applyJourneyTransition('install', 'in_progress');
       store.syncTodos([
         {
-          content: 'Installing',
+          content: 'Install Amplitude',
           status: 'in_progress',
-          activeForm: 'Installing SDK...',
+          activeForm: 'Installing project dependencies',
         },
       ]);
 
-      expect(store.tasks[0].activeForm).toBe('Installing SDK...');
+      expect(store.tasks[1].activeForm).toBe('Installing project dependencies');
+    });
+
+    it('drops todos that do not exactly match a canonical label', () => {
+      const store = createStore();
+      store.applyJourneyTransition('install', 'in_progress');
+      store.syncTodos([
+        {
+          content: 'Install Amplitude SDK',
+          status: 'in_progress',
+          activeForm: 'Installing extra thing',
+        },
+      ]);
+
+      // Drift label dropped; activeForm falls back to the canonical default.
+      expect(store.tasks[1].activeForm).toBe('Installing Amplitude');
     });
 
     it('emits change', () => {
       const store = createStore();
       const cb = vi.fn();
       store.subscribe(cb);
-      store.syncTodos([{ content: 'task', status: 'pending' }]);
+      store.syncTodos([{ content: 'Install Amplitude', status: 'pending' }]);
       expect(cb).toHaveBeenCalled();
     });
   });
@@ -795,13 +1494,13 @@ describe('WizardStore', () => {
       });
 
       store.pushOverlay(Overlay.Outage); // -> outage
-      // Org/workspace/env names are required for Auth.isComplete. Assign
+      // Org/project/env names are required for Auth.isComplete. Assign
       // directly so subscribers only fire for the three explicit mutations
       // this test is exercising (setCredentials, setRegion, popOverlay).
       // Only names — IDs intentionally omitted to avoid setRegion below
       // triggering an ampli.json write.
       store.session.selectedOrgName = 'Acme';
-      store.session.selectedWorkspaceName = 'Amplitude';
+      store.session.selectedProjectName = 'Amplitude';
       store.session.selectedEnvName = 'Production';
       store.setCredentials({
         // -> outage (overlay still on top)
@@ -904,25 +1603,27 @@ describe('WizardStore', () => {
       expect(store.statusMessages).toEqual(['']);
     });
 
-    it('syncTodos with empty array clears non-completed tasks', () => {
+    it('syncTodos with empty array seeds the canonical 5 as pending', () => {
+      // The user-visible list is locked to the canonical 5. With no
+      // derived journey state and an empty TodoWrite, all 5 rows still
+      // render so the user sees the journey ahead.
       const store = createStore();
-      store.setTasks([
-        { label: 'Pending', status: TaskStatus.Pending, done: false },
-        { label: 'Done', status: TaskStatus.Completed, done: true },
-      ]);
-
       store.syncTodos([]);
 
-      // Only the completed task is retained
-      expect(store.tasks).toEqual([
-        { label: 'Done', status: TaskStatus.Completed, done: true },
-      ]);
+      expect(store.tasks).toHaveLength(5);
+      expect(store.tasks.every((t) => t.status === TaskStatus.Pending)).toBe(
+        true,
+      );
     });
 
-    it('syncTodos with unknown status defaults to Pending', () => {
+    it('syncTodos with no derived journey state leaves every step pending', () => {
       const store = createStore();
-      store.syncTodos([{ content: 'Task', status: '' }]);
-      expect(store.tasks[0].status).toBe(TaskStatus.Pending);
+      store.syncTodos([{ content: 'Install Amplitude', status: '' }]);
+      // syncTodos cannot set status on its own — without a journey
+      // transition every step stays pending.
+      expect(store.tasks.every((t) => t.status === TaskStatus.Pending)).toBe(
+        true,
+      );
     });
 
     it('updateTask with negative index is a no-op', () => {
@@ -992,12 +1693,12 @@ describe('WizardStore', () => {
       expect(store.currentScreen).toBe(Screen.Auth);
 
       // Step 3: Authenticate (credentials set by AuthScreen SUSI flow).
-      // Org/workspace/env are resolved as part of the SUSI flow too; set them
+      // Org/project/env are resolved as part of the SUSI flow too; set them
       // directly (no setter) so Auth.isComplete passes without bumping the
       // version counter this test asserts on. Only names — Auth.isComplete
       // checks names, not IDs, and omitting IDs avoids side effects.
       store.session.selectedOrgName = 'Acme';
-      store.session.selectedWorkspaceName = 'Amplitude';
+      store.session.selectedProjectName = 'Amplitude';
       store.session.selectedEnvName = 'Production';
       store.setCredentials({
         accessToken: 'tok',
@@ -1063,6 +1764,504 @@ describe('WizardStore', () => {
     });
   });
 
+  // ── outroDismissed promise (graceful error outro) ────────────────
+
+  describe('outroDismissed / signalOutroDismissed', () => {
+    it('resolves when signalOutroDismissed is called', async () => {
+      const store = createStore();
+
+      let resolved = false;
+      void store.outroDismissed().then(() => {
+        resolved = true;
+      });
+
+      // Not yet resolved
+      await Promise.resolve();
+      expect(resolved).toBe(false);
+
+      store.signalOutroDismissed();
+      await store.outroDismissed();
+      expect(resolved).toBe(true);
+    });
+
+    it('returns the same promise for multiple awaiters before dismissal', () => {
+      const store = createStore();
+
+      const p1 = store.outroDismissed();
+      const p2 = store.outroDismissed();
+      expect(p1).toBe(p2);
+
+      store.signalOutroDismissed();
+      // Both awaiters resolve via the shared promise; nothing else to assert.
+    });
+
+    it('handles dismissal arriving before any awaiter (pre-resolved)', async () => {
+      const store = createStore();
+
+      // Dismissal fires first
+      store.signalOutroDismissed();
+
+      // Then someone awaits — should resolve immediately
+      let resolved = false;
+      await store.outroDismissed().then(() => {
+        resolved = true;
+      });
+      expect(resolved).toBe(true);
+    });
+
+    it('is idempotent — extra signalOutroDismissed calls are no-ops', () => {
+      const store = createStore();
+
+      // Multiple calls should not throw or break the promise mechanism
+      expect(() => {
+        store.signalOutroDismissed();
+        store.signalOutroDismissed();
+        store.signalOutroDismissed();
+      }).not.toThrow();
+    });
+  });
+
+  // ── Back-navigation reset helpers ────────────────────────────────
+  // Each pre-Run reset helper must clear post-Run state so the router
+  // doesn't short-circuit past the agent run / outro after a back-nav.
+  describe('back-navigation reset helpers', () => {
+    /** Seed a store as if the user had completed a full run. */
+    function seedPostRunState(store: WizardStore): void {
+      store.setRunPhase(RunPhase.Completed);
+      store.setMcpComplete(McpOutcome.Installed, ['Cursor']);
+      store.setOutroData({ kind: OutroKind.Success, message: 'Done' });
+      // Direct field writes via internal store for fields without setters
+      // to mirror end-of-run state shape.
+      const internal = store as unknown as {
+        $session: {
+          setKey: (k: string, v: unknown) => void;
+        };
+      };
+      internal.$session.setKey('slackComplete', true);
+      internal.$session.setKey('dataIngestionConfirmed', true);
+      internal.$session.setKey('optInFeaturesComplete', true);
+      internal.$session.setKey('additionalFeatureQueue', [
+        AdditionalFeature.SessionReplay,
+      ]);
+      internal.$session.setKey('additionalFeatureCompleted', [
+        AdditionalFeature.SessionReplay,
+      ]);
+    }
+
+    /** Assert post-run state has been wiped back to defaults. */
+    function expectPostRunCleared(store: WizardStore): void {
+      expect(store.session.runPhase).toBe(RunPhase.Idle);
+      expect(store.session.runStartedAt).toBeNull();
+      expect(store.session.outroData).toBeNull();
+      expect(store.session.mcpComplete).toBe(false);
+      expect(store.session.mcpOutcome).toBeNull();
+      expect(store.session.mcpInstalledClients).toEqual([]);
+      expect(store.session.slackComplete).toBe(false);
+      expect(store.session.slackOutcome).toBeNull();
+      expect(store.session.dataIngestionConfirmed).toBe(false);
+      expect(store.session.optInFeaturesComplete).toBe(false);
+      expect(store.session.additionalFeatureQueue).toEqual([]);
+      expect(store.session.additionalFeatureCurrent).toBeNull();
+      expect(store.session.additionalFeatureCompleted).toEqual([]);
+    }
+
+    it('resetAuthForRegionChange clears post-run state', () => {
+      const store = createStore();
+      seedPostRunState(store);
+      store.resetAuthForRegionChange();
+      expectPostRunCleared(store);
+      // Plus its own primary effects.
+      expect(store.session.region).toBeNull();
+      expect(store.session.regionForced).toBe(true);
+      expect(store.session.credentials).toBeNull();
+      expect(store.session.pendingOrgs).toBeNull();
+      expect(store.session.selectedOrgId).toBeNull();
+    });
+
+    it('clearOrgAndProjectSelection clears post-run state', () => {
+      const store = createStore();
+      seedPostRunState(store);
+      store.clearOrgAndProjectSelection();
+      expectPostRunCleared(store);
+      expect(store.session.selectedOrgId).toBeNull();
+      expect(store.session.selectedProjectId).toBeNull();
+    });
+
+    it('resetActivationCheck clears post-run state', () => {
+      const store = createStore();
+      seedPostRunState(store);
+      store.resetActivationCheck();
+      expectPostRunCleared(store);
+      expect(store.session.projectHasData).toBeNull();
+      expect(store.session.activationLevel).toBe('none');
+      expect(store.session.activationOptionsComplete).toBe(false);
+    });
+
+    it('resetActivationOptions clears post-run state', () => {
+      const store = createStore();
+      seedPostRunState(store);
+      store.resetActivationOptions();
+      expectPostRunCleared(store);
+      expect(store.session.activationOptionsComplete).toBe(false);
+    });
+
+    it('resetFeatureOptIn clears post-run state', () => {
+      const store = createStore();
+      seedPostRunState(store);
+      store.resetFeatureOptIn();
+      expectPostRunCleared(store);
+    });
+
+    it('popLastFrameworkContextAnswer clears post-run state', () => {
+      const store = createStore();
+      store.setFrameworkContext('foo', 'bar');
+      seedPostRunState(store);
+      const popped = store.popLastFrameworkContextAnswer();
+      expect(popped).toBe(true);
+      expectPostRunCleared(store);
+      // The popped answer is gone.
+      expect(store.session.frameworkContext['foo']).toBeUndefined();
+    });
+
+    it('popLastFrameworkContextAnswer returns false (no-op) when nothing to pop', () => {
+      const store = createStore();
+      const popped = store.popLastFrameworkContextAnswer();
+      expect(popped).toBe(false);
+    });
+  });
+
+  // ── Inline directory change ──────────────────────────────────────
+  //
+  // The IntroScreen "Change directory" flow runs through
+  // `store.changeInstallDir` + `store.setFrameworkRedetector`. These
+  // tests pin the store-side contract: state reset is correct, the
+  // re-detector is invoked, and a new call cancels the previous one.
+  describe('changeInstallDir', () => {
+    function seedDetectionState(store: WizardStore): void {
+      // Mimic the post-detection state the IntroScreen would observe
+      // before the user opted to change directories.
+      store.setFrameworkConfig(Integration.nextjs, {
+        metadata: {
+          integration: Integration.nextjs,
+          name: 'Next.js',
+        },
+      } as unknown as Parameters<typeof store.setFrameworkConfig>[1]);
+      store.setDetectedFramework('Next.js');
+      store.setFrameworkContext('appRouter', true);
+      store.setDetectionComplete();
+    }
+
+    it('resets detection state and updates installDir', () => {
+      const store = createStore();
+      seedDetectionState(store);
+      expect(store.session.detectionComplete).toBe(true);
+      expect(store.session.integration).toBe(Integration.nextjs);
+
+      store.changeInstallDir('/tmp/another-project');
+
+      expect(store.session.installDir).toBe('/tmp/another-project');
+      expect(store.session.integration).toBeNull();
+      expect(store.session.frameworkConfig).toBeNull();
+      expect(store.session.detectedFrameworkLabel).toBeNull();
+      expect(store.session.detectionComplete).toBe(false);
+      expect(store.session.frameworkContext).toEqual({});
+      expect(store.session.detectionResults).toEqual([]);
+      expect(store.session.discoveredFeatures).toEqual([]);
+    });
+
+    it('clears the checkpoint-restore flag — directory change invalidates resume', () => {
+      const store = createStore();
+      // Mimic a user who opted to "Resume where you left off" but then
+      // realized the wizard was pointed at the wrong tree.
+      store.session = { ...store.session, _restoredFromCheckpoint: true };
+
+      store.changeInstallDir('/tmp/different-tree');
+
+      expect(store.session._restoredFromCheckpoint).toBe(false);
+    });
+
+    it('invokes the registered redetector with the new directory', () => {
+      const store = createStore();
+      const redetect = vi.fn().mockResolvedValue(undefined);
+      store.setFrameworkRedetector(redetect);
+
+      store.changeInstallDir('/tmp/new-target');
+
+      expect(redetect).toHaveBeenCalledTimes(1);
+      const [path, signal] = redetect.mock.calls[0];
+      expect(path).toBe('/tmp/new-target');
+      expect(signal).toBeInstanceOf(AbortSignal);
+      expect(signal.aborted).toBe(false);
+    });
+
+    it('aborts the previous detection when a second change fires', () => {
+      const store = createStore();
+      const redetect = vi.fn().mockResolvedValue(undefined);
+      store.setFrameworkRedetector(redetect);
+
+      store.changeInstallDir('/tmp/first');
+      const firstSignal = redetect.mock.calls[0][1] as AbortSignal;
+      expect(firstSignal.aborted).toBe(false);
+
+      store.changeInstallDir('/tmp/second');
+      // The first run's signal is now aborted — its detection should
+      // bail out rather than stomp on state for the new directory.
+      expect(firstSignal.aborted).toBe(true);
+
+      const secondSignal = redetect.mock.calls[1][1] as AbortSignal;
+      expect(secondSignal.aborted).toBe(false);
+    });
+
+    it('is a no-op for the redetector when none is registered', () => {
+      const store = createStore();
+      // No setFrameworkRedetector call — simulates classic-mode or test
+      // entry points where bin.ts hasn't wired up the helper.
+      expect(() => store.changeInstallDir('/tmp/foo')).not.toThrow();
+      expect(store.session.installDir).toBe('/tmp/foo');
+      expect(store.session.detectionComplete).toBe(false);
+    });
+
+    it('tolerates redetector rejections (errors are non-fatal)', async () => {
+      const store = createStore();
+      const failing = vi.fn().mockRejectedValue(new Error('boom'));
+      store.setFrameworkRedetector(failing);
+
+      // Should not throw synchronously.
+      expect(() => store.changeInstallDir('/tmp/will-fail')).not.toThrow();
+      // Give the rejected promise a tick to settle without bubbling.
+      await new Promise((r) => setImmediate(r));
+      expect(failing).toHaveBeenCalledTimes(1);
+    });
+
+    // Regression: bugbot Issue #2.
+    //
+    // Before this fix, only the IntroScreen-driven re-detection calls
+    // registered an AbortController as the active detection. The
+    // INITIAL detection from bin.ts had no controller registered, so a
+    // `changeInstallDir` fired before the first scan completed would
+    // skip the abort path entirely. The original detection's
+    // `setDetectionComplete` could then fire AFTER the reset, briefly
+    // flashing stale framework results from the old tree.
+    it('aborts a controller registered via registerActiveDetection', () => {
+      const store = createStore();
+      const initialController = new AbortController();
+      store.registerActiveDetection(initialController);
+
+      expect(initialController.signal.aborted).toBe(false);
+      store.changeInstallDir('/tmp/swap-during-initial-scan');
+      expect(initialController.signal.aborted).toBe(true);
+    });
+
+    // Regression: bugbot Issue #4.
+    //
+    // `discoveredFeatures` reset alone wasn't enough — the opt-in
+    // flags derived from those features (llmOptIn, sessionReplayOptIn,
+    // engagementOptIn) and the `additionalFeatureQueue` /
+    // `optInFeaturesComplete` markers also need to clear. Otherwise a
+    // user who points the wizard at a Python AI repo (LLM analytics
+    // discovered, llmOptIn=true, additionalFeatureQueue=[LLM]) and
+    // then changes directory to a vanilla Next.js app would have the
+    // agent set up LLM analytics in a project that has no LLM SDK.
+    it('resets every opt-in flag derived from the old discovery, not just the list', () => {
+      const store = createStore();
+      // Mimic post-discovery state for the OLD project.
+      store.session = {
+        ...store.session,
+        llmOptIn: true,
+        sessionReplayOptIn: true,
+        engagementOptIn: true,
+        optInFeaturesComplete: true,
+        additionalFeatureQueue: [
+          AdditionalFeature.LLM,
+          AdditionalFeature.SessionReplay,
+        ],
+      };
+
+      store.changeInstallDir('/tmp/clean-tree');
+
+      expect(store.session.llmOptIn).toBe(false);
+      expect(store.session.sessionReplayOptIn).toBe(false);
+      expect(store.session.engagementOptIn).toBe(false);
+      expect(store.session.optInFeaturesComplete).toBe(false);
+      expect(store.session.additionalFeatureQueue).toEqual([]);
+      expect(store.session.discoveredFeatures).toEqual([]);
+    });
+
+    // Regression: bugbot Issue #8.
+    //
+    // `frameworkContext` was reset to `{}` but
+    // `frameworkContextAnswerOrder` (the per-key answer log used by
+    // back-navigation) wasn't. After a directory change, stale keys
+    // stayed in the answer-order array. `popLastFrameworkContextAnswer`
+    // would then "successfully" pop a key that no longer existed in
+    // `frameworkContext`, creating phantom back-nav steps that did
+    // nothing visible.
+    it('resets frameworkContextAnswerOrder so back-nav has nothing stale to pop', () => {
+      const store = createStore();
+      store.setFrameworkContext('appRouter', true);
+      store.setFrameworkContext('typescript', true);
+      expect(store.session.frameworkContextAnswerOrder.length).toBeGreaterThan(
+        0,
+      );
+
+      store.changeInstallDir('/tmp/new-tree');
+
+      expect(store.session.frameworkContext).toEqual({});
+      expect(store.session.frameworkContextAnswerOrder).toEqual([]);
+      // popLastFrameworkContextAnswer now correctly reports "nothing
+      // to pop" — no phantom back-nav steps.
+      expect(store.popLastFrameworkContextAnswer()).toBe(false);
+    });
+
+    it('emits a telemetry event with whether a redetector was registered', () => {
+      const store = createStore();
+      const wizardCapture = analytics.wizardCapture as Mock;
+      wizardCapture.mockClear();
+
+      store.changeInstallDir('/tmp/no-redetector');
+      const noRedetectorCall = wizardCapture.mock.calls.find(
+        (call) => call[0] === 'install dir changed',
+      );
+      expect(noRedetectorCall?.[1]['has redetector']).toBe(false);
+
+      store.setFrameworkRedetector(vi.fn().mockResolvedValue(undefined));
+      store.changeInstallDir('/tmp/with-redetector');
+      const withRedetectorCall = wizardCapture.mock.calls
+        .filter((call) => call[0] === 'install dir changed')
+        .pop();
+      expect(withRedetectorCall?.[1]['has redetector']).toBe(true);
+    });
+  });
+
+  describe('recordFileChangePlanned / recordFileChangeApplied', () => {
+    it('appends a planned row, then flips it to applied with bytes + duration', () => {
+      const store = createStore();
+      expect(store.fileWrites).toEqual([]);
+
+      store.recordFileChangePlanned({
+        path: '/proj/src/amplitude.ts',
+        operation: 'create',
+      });
+      expect(store.fileWrites).toHaveLength(1);
+      expect(store.fileWrites[0]).toMatchObject({
+        path: '/proj/src/amplitude.ts',
+        operation: 'create',
+        status: 'planned',
+      });
+      expect(store.fileWrites[0].startedAt).toBeGreaterThan(0);
+      expect(store.fileWrites[0].completedAt).toBeUndefined();
+
+      store.recordFileChangeApplied({
+        path: '/proj/src/amplitude.ts',
+        operation: 'create',
+        bytes: 512,
+      });
+      expect(store.fileWrites).toHaveLength(1);
+      expect(store.fileWrites[0]).toMatchObject({
+        path: '/proj/src/amplitude.ts',
+        operation: 'create',
+        status: 'applied',
+        bytes: 512,
+      });
+      expect(store.fileWrites[0].completedAt).toBeGreaterThanOrEqual(
+        store.fileWrites[0].startedAt,
+      );
+    });
+
+    it('synthesizes an applied entry when no matching planned event arrived', () => {
+      // Edit / MultiEdit hooks can technically fire PostToolUse without a
+      // matching PreToolUse if the SDK reorders or drops a hook (rare but
+      // observed). Surface the write rather than silently dropping it.
+      const store = createStore();
+      store.recordFileChangeApplied({
+        path: '/proj/src/orphan.ts',
+        operation: 'modify',
+      });
+      expect(store.fileWrites).toHaveLength(1);
+      expect(store.fileWrites[0]).toMatchObject({
+        path: '/proj/src/orphan.ts',
+        operation: 'modify',
+        status: 'applied',
+      });
+    });
+
+    it('collapses a back-to-back duplicate planned event for the same path', () => {
+      // Defensive: PreToolUse can fire twice for the same path during a
+      // retry loop. The user should see one in-progress row, not two.
+      const store = createStore();
+      store.recordFileChangePlanned({
+        path: '/proj/src/dup.ts',
+        operation: 'modify',
+      });
+      store.recordFileChangePlanned({
+        path: '/proj/src/dup.ts',
+        operation: 'modify',
+      });
+      expect(store.fileWrites).toHaveLength(1);
+    });
+
+    it('caps the list at MAX_FILE_WRITES with FIFO eviction', () => {
+      // A long-running run that touches hundreds of files (skill installs,
+      // lint fix-ups) shouldn't blow up the TUI. Oldest rows fall off.
+      const store = createStore();
+      for (let i = 0; i < WizardStore.MAX_FILE_WRITES + 5; i++) {
+        store.recordFileChangePlanned({
+          path: `/proj/file-${i}.ts`,
+          operation: 'create',
+        });
+      }
+      expect(store.fileWrites).toHaveLength(WizardStore.MAX_FILE_WRITES);
+      // First five rows should have been evicted.
+      expect(store.fileWrites[0].path).toBe('/proj/file-5.ts');
+    });
+
+    it('keeps fileWritesTotal climbing past MAX_FILE_WRITES', () => {
+      // The coaching signal in RunScreen keys off `fileWritesTotal`, not
+      // `fileWrites.length`. After the FIFO cap kicks in, the array length
+      // plateaus at 50 — but the agent might still be hammering away at
+      // file writes with no [STATUS] messages. The monotonic counter is
+      // what keeps the coaching timer from prematurely firing tier-1.
+      const store = createStore();
+      const N = WizardStore.MAX_FILE_WRITES + 7;
+      for (let i = 0; i < N; i++) {
+        store.recordFileChangePlanned({
+          path: `/proj/file-${i}.ts`,
+          operation: 'create',
+        });
+      }
+      expect(store.fileWrites).toHaveLength(WizardStore.MAX_FILE_WRITES);
+      expect(store.fileWritesTotal).toBe(N);
+    });
+
+    it('matches the most recent planned row when the same file is rewritten', () => {
+      // Common during multi-pass refactors. Apply the second planned row,
+      // not the first — otherwise the duration on the second row would
+      // count from the first plan, not the second.
+      const store = createStore();
+      store.recordFileChangePlanned({
+        path: '/proj/twice.ts',
+        operation: 'modify',
+      });
+      store.recordFileChangeApplied({
+        path: '/proj/twice.ts',
+        operation: 'modify',
+      });
+      store.recordFileChangePlanned({
+        path: '/proj/twice.ts',
+        operation: 'modify',
+      });
+      // At this point row 0 is applied, row 1 is planned.
+      expect(store.fileWrites[0].status).toBe('applied');
+      expect(store.fileWrites[1].status).toBe('planned');
+      store.recordFileChangeApplied({
+        path: '/proj/twice.ts',
+        operation: 'modify',
+      });
+      expect(store.fileWrites[0].status).toBe('applied');
+      expect(store.fileWrites[1].status).toBe('applied');
+    });
+  });
+
   // ── Signup setters ───────────────────────────────────────────────
 
   describe('signup setters', () => {
@@ -1087,6 +2286,7 @@ describe('WizardStore', () => {
         refreshToken: 'ref',
         zone: 'us',
         userInfo: null,
+        dashboardUrl: null,
       };
       store.setSignupAuth(result);
       expect(store.session.signupAuth).toEqual(result);

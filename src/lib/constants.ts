@@ -4,7 +4,11 @@
 
 // Kept in sync by release-please (x-release-please-version marker).
 // The prebuild script (sync-version.mjs) acts as a safety net.
-const VERSION = '1.7.0'; // x-release-please-version
+const VERSION = '1.14.0'; // x-release-please-version
+
+/** Public alias for the wizard version. Same value as the internal `VERSION`
+ * but exported for consumers (e.g. the bug-report module). */
+export const WIZARD_VERSION = VERSION;
 
 // ── Integration / CLI ───────────────────────────────────────────────
 
@@ -66,12 +70,22 @@ export const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 // ── URLs ─────────────────────────────────────────────────────────────
 
-export const DEFAULT_URL = IS_DEV
-  ? 'http://localhost:8010'
-  : 'https://amplitude.com';
-export const DEFAULT_HOST_URL = IS_DEV
-  ? 'http://localhost:8010'
-  : 'https://api2.amplitude.com';
+export const DEFAULT_URL = 'https://amplitude.com';
+export const TERMS_OF_SERVICE_URL = 'https://amplitude.com/terms';
+export const PRIVACY_POLICY_URL = 'https://amplitude.com/privacy';
+/**
+ * Default Amplitude data ingestion host used when region resolution isn't
+ * available (e.g. CI mode without OAuth, --api-key path). Always points at
+ * a real prod ingestion endpoint so dev contributors don't leak
+ * `localhost:8010` into a user's `.env.local` or setup report. Override
+ * via `AMPLITUDE_WIZARD_INGESTION_HOST` for local proxying — empty or
+ * whitespace-only values are ignored to keep us in lockstep with
+ * `getHostFromRegion()`.
+ */
+const ingestionHostOverride =
+  process.env.AMPLITUDE_WIZARD_INGESTION_HOST?.trim();
+export const DEFAULT_HOST_URL =
+  ingestionHostOverride || 'https://api2.amplitude.com';
 
 // ── Analytics (internal) ──────────────────────────────────────────────
 

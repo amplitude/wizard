@@ -15,9 +15,14 @@ const REQUEST_TIMEOUT_MS = 10_000;
 const MAX_EXPIRES_IN_SECONDS = 86_400 * 365;
 
 // Discriminated union response schemas from the provisioning endpoint.
-const OAuthCodeSchema = z.object({
+// `dashboard_url` — optional magic-link URL (amplitude/javascript PR #108967).
+const OAuthProvisioningSchema = z.object({
   type: z.literal('oauth'),
   oauth: z.object({ code: z.string().min(1) }),
+  // `.nullish()` (no `min(1)`): a metadata field with strict validation
+  // would fail-closed the entire signup whenever the API returns an empty
+  // string or null. Treat empty as null at the read site.
+  dashboard_url: z.string().nullish(),
 });
 
 const RedirectSchema = z.object({
@@ -93,10 +98,12 @@ export type DirectSignupResult =
         expiresAt: string;
         zone: AmplitudeZone;
       };
+      /** From `dashboard_url`; may contain secrets — never log or NDJSON. */
+      dashboardUrl: string | null;
     }
   | { kind: 'requires_redirect' }
   | { kind: 'needs_information'; requiredFields: string[] }
-  | { kind: 'error'; message: string };
+  | { kind: 'error'; message: string; code?: string };
 
 /**
  * Attempts to create an Amplitude account and obtain tokens directly via the
@@ -154,10 +161,14 @@ export async function performDirectSignup(
 
   const parsedError = ErrorSchema.safeParse(response.data);
   if (parsedError.success) {
-    return { kind: 'error', message: parsedError.data.error.message };
+    return {
+      kind: 'error',
+      message: parsedError.data.error.message,
+      code: parsedError.data.error.code,
+    };
   }
 
-  const parsedCode = OAuthCodeSchema.safeParse(response.data);
+  const parsedCode = OAuthProvisioningSchema.safeParse(response.data);
   if (!parsedCode.success) {
     if (response.status === 429) {
       log.warn('[direct-signup] provisioning rate limited');
@@ -248,8 +259,16 @@ export async function performDirectSignup(
     };
   }
 
+  // Source `expiresAt` from id_token's exp claim (id_token TTL is the
+  // binding constraint for API calls). Falls back to `expires_in` and
+  // then to a 1-hour default if either is unusable. See
+  // `src/utils/jwt-exp.ts` for rationale.
+  const { resolveStoredExpiryMs } = await import('./jwt-exp.js');
   const expiresAt = new Date(
-    Date.now() + parsedTokens.data.expires_in * 1000,
+    resolveStoredExpiryMs({
+      idToken: parsedTokens.data.id_token,
+      expiresInSeconds: parsedTokens.data.expires_in,
+    }),
   ).toISOString();
   return {
     kind: 'success',
@@ -260,5 +279,9 @@ export async function performDirectSignup(
       expiresAt,
       zone: input.zone,
     },
+    // Coerce empty-string to null so downstream code (which displays the
+    // URL or short-circuits on missing) doesn't have to handle "" as a
+    // distinct third case.
+    dashboardUrl: parsedCode.data.dashboard_url || null,
   };
 }

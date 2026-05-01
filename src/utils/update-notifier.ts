@@ -15,12 +15,12 @@
  */
 
 import { promises as fs } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { dirname } from 'node:path';
 import semver from 'semver';
+import { atomicWriteJSON } from './atomic-write.js';
+import { ensureDir, getUpdateCheckFile } from './storage-paths.js';
 
 const CHECK_INTERVAL_MS = 1000 * 60 * 60 * 24; // once per 24h
-const CACHE_FILENAME = 'amplitude-wizard-update-check.json';
 
 interface Cache {
   lastCheckedAt: number;
@@ -28,7 +28,7 @@ interface Cache {
 }
 
 function cachePath(): string {
-  return join(tmpdir(), CACHE_FILENAME);
+  return getUpdateCheckFile();
 }
 
 async function readCache(): Promise<Cache | null> {
@@ -48,9 +48,12 @@ async function readCache(): Promise<Cache | null> {
   return null;
 }
 
-async function writeCache(cache: Cache): Promise<void> {
+function writeCache(cache: Cache): void {
   try {
-    await fs.writeFile(cachePath(), JSON.stringify(cache), { mode: 0o600 });
+    // Ensure the cache root exists before writing — first run on a fresh
+    // machine has no `~/.amplitude/wizard/` yet.
+    ensureDir(dirname(cachePath()));
+    atomicWriteJSON(cachePath(), cache, 0o600);
   } catch {
     // silently ignore — best-effort
   }
@@ -140,7 +143,7 @@ export async function checkForUpdate(
     latest = cache.latestVersion;
   } else {
     latest = await fetchLatestVersion(pkgName, options.timeoutMs ?? 1500);
-    await writeCache({
+    writeCache({
       lastCheckedAt: now,
       latestVersion: latest ?? cache?.latestVersion ?? null,
     });

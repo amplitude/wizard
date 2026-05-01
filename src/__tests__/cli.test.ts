@@ -4,6 +4,13 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 
+// Skip the per-project storage bootstrap (migration shim + project log
+// file routing) for the entire suite. vitest module mocks don't always
+// intercept the dynamic-import chain bin.ts uses, and CLI tests aren't
+// exercising storage migration anyway — there's a dedicated test suite
+// for that. This must be set BEFORE bin.ts is imported.
+process.env.AMPLITUDE_WIZARD_SKIP_BOOTSTRAP = '1';
+
 // ── Hoisted mock state ─────────────────────────────────────────────────────────
 // vi.hoisted() ensures these are available inside vi.mock() factory functions.
 
@@ -27,8 +34,18 @@ const {
     setFrameworkConfig: vi.fn(),
     setDetectedFramework: vi.fn(),
     setDetectionComplete: vi.fn(),
+    setDetectionResults: vi.fn(),
     setFrameworkContext: vi.fn(),
     addDiscoveredFeature: vi.fn(),
+    autoEnableInlineAddons: vi.fn(),
+    // Wired up by bin.ts so the IntroScreen "Change directory" flow
+    // can re-invoke detection. The CLI tests don't drive that path,
+    // but the entry point still calls the setter.
+    setFrameworkRedetector: vi.fn(),
+    // bin.ts registers the initial detection's AbortController so a
+    // directory swap mid-scan can cancel it. The CLI tests don't
+    // exercise the cancel path, but bin.ts still calls this method.
+    registerActiveDetection: vi.fn(),
     onEnterScreen: vi.fn(),
     completeSetup: vi.fn(),
     setAmplitudePreDetected: vi.fn(),
@@ -36,6 +53,7 @@ const {
     resetForAgentAfterPreDetected: vi.fn(),
     setOutroData: vi.fn(),
     setRunPhase: vi.fn(),
+    setUserEmail: vi.fn(),
   };
   return {
     mockStore,
@@ -61,33 +79,69 @@ vi.mock('../run', () => ({
   detectAllFrameworks: mockDetectAllFrameworks,
 }));
 vi.mock('semver', () => ({ satisfies: () => true }));
+const mockStartTUI = vi.fn(
+  (
+    _version: string,
+    _flow?: unknown,
+    initialSession?: Record<string, unknown>,
+  ) => {
+    // Mirror real start-tui.ts: when an initialSession is provided, attach it
+    // to the store so screens see flag-driven values (e.g. installDir) on the
+    // first render instead of the default `buildSession({})` cwd fallback.
+    if (initialSession) {
+      mockStore.session = {
+        ...mockStore.session,
+        ...initialSession,
+      } as Record<string, unknown>;
+    }
+    return {
+      unmount: vi.fn(),
+      waitForSetup: vi.fn().mockResolvedValue(undefined),
+      store: mockStore,
+    };
+  },
+);
 vi.mock('../ui/tui/start-tui', () => ({
-  startTUI: () => ({
-    unmount: vi.fn(),
-    waitForSetup: vi.fn().mockResolvedValue(undefined),
-    store: mockStore,
-  }),
+  startTUI: mockStartTUI,
 }));
-vi.mock('../lib/wizard-session', () => ({
-  // Real buildSession includes region: null and credentials: null by default;
-  // mirror that so the auth-task checks behave correctly in tests.
-  buildSession: (args: Record<string, unknown>) => ({
-    region: null,
-    credentials: null,
-    frameworkContext: {},
-    apiKeyNotice: null,
-    signupAuth: null,
-    ...args,
-  }),
-  DiscoveredFeature: { Stripe: 'stripe', LLM: 'llm' },
-}));
+vi.mock('../lib/wizard-session', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../lib/wizard-session')>();
+  return {
+    ...actual,
+    // Real buildSession includes region: null and credentials: null by default;
+    // mirror that so the auth-task checks behave correctly in tests.
+    // Also mirrors the schema's `acceptTos → tosAccepted` translation so
+    // runDirectSignupIfRequested's missing-flags gate sees the right value.
+    buildSession: (args: Record<string, unknown>) => ({
+      region: null,
+      credentials: null,
+      frameworkContext: {},
+      frameworkContextAnswerOrder: [],
+      apiKeyNotice: null,
+      signupAuth: null,
+      ...args,
+      accountCreationFlow: Boolean(
+        args.accountCreationFlow ?? args.signup ?? false,
+      ),
+      tosAccepted: args.acceptTos === true ? true : null,
+    }),
+  };
+});
 vi.mock('../lib/registry', () => ({ FRAMEWORK_REGISTRY: {} }));
 vi.mock('../lib/constants', () => ({
   DETECTION_TIMEOUT_MS: 100,
   IS_DEV: true,
+  // Must be present (not just defaulted to undefined): commandments.ts
+  // reads `DEMO_MODE` at module load via a real ESM import, and Vitest's
+  // strict mocker throws "No DEMO_MODE export is defined on the mock" if
+  // the key is missing entirely. Loading agent-interface.ts (which
+  // transitively imports commandments) cascades that throw into
+  // unhandled-rejection territory and times out 4+ unrelated tests.
+  DEMO_MODE: false,
   DEFAULT_AMPLITUDE_ZONE: 'us',
   DEFAULT_HOST_URL: 'https://api.amplitude.com',
   EMAIL_REGEX: /^[^\s@]+@[^\s@]+\.[^\s@]+$/,
+  TERMS_OF_SERVICE_URL: 'https://amplitude.com/terms',
 }));
 vi.mock('../utils/oauth', () => ({
   performAmplitudeAuth: mockPerformAmplitudeAuth,
@@ -101,10 +155,22 @@ vi.mock('../utils/ampli-settings', () => ({
   getStoredToken: mockGetStoredToken,
   clearStoredCredentials: vi.fn(),
 }));
-vi.mock('../lib/ampli-config', () => ({
-  ampliConfigExists: mockAmpliConfigExists,
-  readAmpliConfig: vi.fn().mockReturnValue({ ok: false }),
-}));
+vi.mock('../lib/ampli-config', async () => {
+  // The reset and logout commands now call `clearAuthFieldsInAmpliConfig`
+  // to strip auth-scoped fields from `ampli.json` on sign-out / project
+  // reset. The reset test fixture writes a real `ampli.json` with
+  // `OrgId` + `SourceId` and asserts the auth field is gone afterward,
+  // so we can't fully mock this module — defer to the real
+  // implementation but keep the few helpers that earlier tests stub.
+  const actual = await vi.importActual<typeof import('../lib/ampli-config')>(
+    '../lib/ampli-config',
+  );
+  return {
+    ...actual,
+    ampliConfigExists: mockAmpliConfigExists,
+    readAmpliConfig: vi.fn().mockReturnValue({ ok: false }),
+  };
+});
 vi.mock('../utils/api-key-store', () => ({
   readApiKeyWithSource: vi.fn().mockReturnValue(null),
   persistApiKey: vi.fn().mockReturnValue('env'),
@@ -143,6 +209,8 @@ vi.mock('../utils/analytics', () => ({
     getAnonymousId: vi.fn().mockReturnValue('mock-anonymous-id'),
     shutdown: vi.fn().mockResolvedValue(undefined),
     isFeatureFlagEnabled: vi.fn().mockReturnValue(true),
+    initFlags: vi.fn().mockResolvedValue(undefined),
+    refreshFlags: vi.fn().mockResolvedValue(undefined),
   },
   sessionProperties: vi.fn(() => ({})),
   sessionPropertiesCompact: vi.fn(() => ({})),
@@ -177,8 +245,16 @@ async function runCLI(args: string[]) {
   await new Promise((resolve) => setImmediate(resolve));
 }
 
-/** Poll until fn() returns true or timeout elapses. */
-async function waitFor(fn: () => boolean, timeout = 2000): Promise<void> {
+/**
+ * Poll until fn() returns true or timeout elapses.
+ *
+ * The default ceiling has to be generous because each cli test rebuilds
+ * the bin.ts module graph from scratch. Under parallel test execution
+ * with a cold module cache, a 2 s default produced flaky failures on CI
+ * (and a fresh local checkout). 8 s absorbs cold-cache penalties without
+ * masking real hangs.
+ */
+async function waitFor(fn: () => boolean, timeout = 8000): Promise<void> {
   const deadline = Date.now() + timeout;
   while (!fn()) {
     if (Date.now() > deadline) throw new Error('waitFor timed out');
@@ -219,7 +295,13 @@ function simulateRegionSelect(region: 'us' | 'eu') {
 
 // ── CI mode validation ─────────────────────────────────────────────────────────
 
-describe('CI mode validation', () => {
+// Each test runs `bin.ts` end-to-end via dynamic import, which transitively
+// loads the TUI, framework registry, and observability stack. Under
+// parallel test execution with a cold module cache, the first cli test to
+// run can blow past the default 5s timeout. The 20s ceiling absorbs that
+// without penalizing the steady-state case (each test still completes in
+// under 1s).
+describe('CI mode validation', { timeout: 20_000 }, () => {
   const originalArgv = process.argv;
   const originalExit = process.exit;
 
@@ -283,6 +365,54 @@ describe('CI mode validation', () => {
       expect.any(Function),
       expect.any(Object),
     );
+  });
+
+  test('--install-dir is applied to the TUI store before render so the IntroScreen Target line reflects the flag (regression: pnpm try:prod --install-dir was silently ignored, leaving the wizard repo cwd in the header)', async () => {
+    defaultAuthMocks();
+    simulateRegionSelect('us');
+
+    await runCLI(['--install-dir', '/tmp/test-app']);
+    await waitFor(() => mockStartTUI.mock.calls.length > 0);
+
+    // startTUI must be invoked with the parsed --install-dir as the third
+    // arg (initialSession). Without this, the Ink TUI mounts with
+    // `buildSession({}).installDir = process.cwd()` and the user sees the
+    // wizard's own working directory in the Target line for the few seconds
+    // it takes OAuth credential resolution to complete.
+    const initialSession = mockStartTUI.mock.calls[0][2];
+    expect(initialSession).toBeDefined();
+    expect(initialSession?.installDir).toBe('/tmp/test-app');
+  });
+
+  // Internal `--mode` flag — see `docs/internal/agent-mode-flag.md`.
+  // We pin (a) the default and (b) that a non-default value threads
+  // through to the session, but deliberately do NOT enumerate the
+  // non-default tiers in test names or stderr-style messaging. The flag
+  // is hidden from `--help` and shouldn't be advertised in test output
+  // either.
+  test('--mode defaults to "standard" so existing users are unaffected', async () => {
+    defaultAuthMocks();
+    simulateRegionSelect('us');
+
+    await runCLI([]);
+    await waitFor(() => mockStartTUI.mock.calls.length > 0);
+
+    const initialSession = mockStartTUI.mock.calls[0][2];
+    expect(initialSession?.mode).toBe('standard');
+  });
+
+  test('--mode threads through to the initial session when set', async () => {
+    defaultAuthMocks();
+    simulateRegionSelect('us');
+
+    // Pick the cheapest non-default tier to exercise threading. We do
+    // NOT test the high-capability tier here — see the internal doc for
+    // why that path is left to manual verification.
+    await runCLI(['--mode', 'fast']);
+    await waitFor(() => mockStartTUI.mock.calls.length > 0);
+
+    const initialSession = mockStartTUI.mock.calls[0][2];
+    expect(initialSession?.mode).toBe('fast');
   });
 });
 
@@ -359,6 +489,146 @@ describe('TUI auth task: region determines OAuth zone', () => {
       expect.objectContaining({ zone: 'us' }),
     );
   });
+
+  test('does not start OAuth when intro concludes with regionForced=true (IntroScreen "Change region")', async () => {
+    // Regression: IntroScreen's "Change region" option fires
+    // setRegionForced() + concludeIntro() back-to-back. A returning user
+    // already has session.region populated, so the original wait condition
+    // (introConcluded && region !== null) was satisfied as soon as the
+    // intro concluded — even though regionForced=true means the user is
+    // about to pick a *new* region. The auth task would race ahead and
+    // open the browser at the OLD region's OAuth host. Adding the
+    // !regionForced guard keeps OAuth parked on RegionSelect until the
+    // user actually picks the new zone.
+    let storedCallback: (() => void) | null = null;
+    (mockStore.subscribe as any).mockImplementation((cb: () => void) => {
+      if (!storedCallback) storedCallback = cb;
+      return vi.fn();
+    });
+
+    const cliPromise = runCLI([]);
+
+    // Give authTask time to subscribe before the first state update.
+    await new Promise((r) => setTimeout(r, 50));
+    expect(mockPerformAmplitudeAuth).not.toHaveBeenCalled();
+
+    // Step 1: returning user lands on IntroScreen with region='us'
+    // already populated from disk. They pick "Change region", which
+    // fires setRegionForced (regionForced=true) + concludeIntro
+    // (introConcluded=true).
+    mockStore.session = {
+      ...mockStore.session,
+      region: 'us',
+      introConcluded: true,
+      regionForced: true,
+    };
+    (storedCallback as (() => void) | null)?.();
+
+    // OAuth must NOT start while regionForced=true — the user hasn't
+    // picked the new region yet.
+    await new Promise((r) => setTimeout(r, 50));
+    expect(mockPerformAmplitudeAuth).not.toHaveBeenCalled();
+
+    // Step 2: user picks 'eu' on RegionSelect. setRegion sets
+    // region='eu' and clears regionForced. Now OAuth should fire
+    // against the NEW region.
+    mockStore.session = {
+      ...mockStore.session,
+      region: 'eu',
+      regionForced: false,
+    };
+    (storedCallback as (() => void) | null)?.();
+
+    await cliPromise;
+    await waitFor(() => mockPerformAmplitudeAuth.mock.calls.length > 0);
+
+    expect(mockPerformAmplitudeAuth).toHaveBeenCalledWith(
+      expect.objectContaining({ zone: 'eu' }),
+    );
+    // And exactly once — the wait must not have fired prematurely
+    // against the old zone before the user finished picking.
+    expect(mockPerformAmplitudeAuth).toHaveBeenCalledTimes(1);
+  });
+
+  test(
+    'mid-session re-auth watcher fires OAuth on /region even when initial SUSI never completed',
+    { timeout: 20_000 },
+    async () => {
+      // Regression: the watcher's outer wait used to gate on
+      // `credentials !== null`, which never became true when /region was
+      // invoked DURING the AuthScreen SUSI step (initial OAuth completed,
+      // pendingOrgs set, but the user hadn't picked an org/project yet).
+      // setRegionForced cleared pendingOrgs and AuthScreen sat blank with
+      // no second performAmplitudeAuth call. Gating on the regionForced
+      // cycle (true → false) instead fires OAuth on every /region.
+      const subscribers: Array<() => void> = [];
+      (mockStore.subscribe as any).mockImplementation((cb: () => void) => {
+        subscribers.push(cb);
+        return vi.fn();
+      });
+      const fireAll = () => subscribers.slice().forEach((cb) => cb());
+
+      const cliPromise = runCLI([]);
+
+      // Step 1: drive the initial auth flow to completion. authTask waits
+      // on (introConcluded && region !== null && !regionForced); satisfy
+      // it so performAmplitudeAuth fires the first time, setOAuthComplete
+      // is called, and authTask resolves — which unblocks the watcher's
+      // `await authTask`. outroData and loggingOut must be set here (not
+      // before runCLI) because default.ts line 560 reassigns
+      // `tui.store.session = session` after startTUI, which would clobber
+      // any pre-populated keys.
+      await new Promise((r) => setTimeout(r, 20));
+      mockStore.session = {
+        ...mockStore.session,
+        region: 'us',
+        introConcluded: true,
+        regionForced: false,
+        outroData: null,
+        loggingOut: false,
+      };
+      fireAll();
+
+      await cliPromise;
+      await waitFor(() => mockStore.setOAuthComplete.mock.calls.length > 0);
+      expect(mockPerformAmplitudeAuth).toHaveBeenCalledTimes(1);
+      expect(mockPerformAmplitudeAuth).toHaveBeenLastCalledWith(
+        expect.objectContaining({ zone: 'us' }),
+      );
+
+      // Step 2: simulate /region invoked while still on AuthScreen SUSI —
+      // setRegionForced sets regionForced=true and clears credentials +
+      // pendingOrgs. Critically, credentials was never set in this
+      // scenario (SUSI never completed), so the OLD watcher gate
+      // (`credentials !== null`) would never have fired.
+      mockStore.session = {
+        ...mockStore.session,
+        regionForced: true,
+        credentials: null,
+      };
+      fireAll();
+
+      // Yield to the event loop so the watcher's first wait can resolve
+      // and its second wait can subscribe before we flip regionForced
+      // back off.
+      await new Promise((r) => setTimeout(r, 50));
+
+      // Step 3: user picks 'eu' on RegionSelect — setRegion clears
+      // regionForced and sets region='eu'. The watcher should now fire a
+      // second performAmplitudeAuth at the new zone.
+      mockStore.session = {
+        ...mockStore.session,
+        region: 'eu',
+        regionForced: false,
+      };
+      fireAll();
+
+      await waitFor(() => mockPerformAmplitudeAuth.mock.calls.length >= 2);
+      expect(mockPerformAmplitudeAuth).toHaveBeenLastCalledWith(
+        expect.objectContaining({ zone: 'eu' }),
+      );
+    },
+  );
 
   test('forceFresh is false when ampli.json exists (returning user)', async () => {
     mockAmpliConfigExists.mockReturnValue(true);
@@ -649,6 +919,131 @@ describe('logout command', () => {
       expect.stringContaining('No active session'),
     );
   });
+
+  // logout deliberately does NOT touch project-scoped artifacts —
+  // `wizard reset` is the gesture for that. This test guards the
+  // separation: a debug-time logout should NEVER nuke the user's
+  // setup report.
+  test('default logout preserves wizard artifacts', async () => {
+    const projectDir = fs.mkdtempSync(
+      path.join(os.tmpdir(), 'amp-wizard-keep-test-'),
+    );
+    fs.writeFileSync(path.join(projectDir, '.amplitude-events.json'), '[]');
+    fs.writeFileSync(path.join(projectDir, 'amplitude-setup-report.md'), 'r');
+    mockGetStoredUser.mockReturnValue({ email: 'jane@example.com' });
+
+    await runCLI(['logout', '--install-dir', projectDir]);
+    await waitFor(
+      () => (process.exit as unknown as Mock).mock.calls.length > 0,
+    );
+
+    expect(process.exit).toHaveBeenCalledWith(0);
+    expect(fs.existsSync(path.join(projectDir, '.amplitude-events.json'))).toBe(
+      true,
+    );
+    expect(
+      fs.existsSync(path.join(projectDir, 'amplitude-setup-report.md')),
+    ).toBe(true);
+
+    fs.rmSync(projectDir, { recursive: true, force: true });
+  });
+});
+
+// ── reset command ──────────────────────────────────────────────────────────────
+
+describe('reset command', () => {
+  const originalArgv = process.argv;
+  const originalExit = process.exit;
+  let consoleSpy: ReturnType<typeof vi.spyOn>;
+  let stdoutSpy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    consoleSpy = vi.spyOn(console, 'log').mockImplementation(() => undefined);
+    stdoutSpy = vi
+      .spyOn(process.stdout, 'write')
+      .mockImplementation(() => true);
+    process.exit = vi.fn() as unknown as typeof process.exit;
+  });
+
+  afterEach(() => {
+    process.argv = originalArgv;
+    process.exit = originalExit;
+    consoleSpy.mockRestore();
+    stdoutSpy.mockRestore();
+    vi.resetModules();
+  });
+
+  test('removes all wizard artifacts and emits a JSON result', async () => {
+    const projectDir = fs.mkdtempSync(
+      path.join(os.tmpdir(), 'amp-wizard-reset-test-'),
+    );
+    fs.mkdirSync(path.join(projectDir, '.amplitude'), { recursive: true });
+    fs.writeFileSync(path.join(projectDir, '.amplitude', 'events.json'), '[]');
+    fs.writeFileSync(path.join(projectDir, '.amplitude-events.json'), '[]');
+    fs.writeFileSync(path.join(projectDir, 'amplitude-setup-report.md'), 'r');
+    fs.writeFileSync(
+      path.join(projectDir, 'ampli.json'),
+      JSON.stringify({ OrgId: 'org-1', SourceId: 'keep' }),
+    );
+
+    await runCLI(['reset', '--install-dir', projectDir, '--json']);
+    await waitFor(
+      () => (process.exit as unknown as Mock).mock.calls.length > 0,
+    );
+
+    expect(process.exit).toHaveBeenCalledWith(0);
+    // All wizard-managed targets gone:
+    expect(fs.existsSync(path.join(projectDir, '.amplitude'))).toBe(false);
+    expect(fs.existsSync(path.join(projectDir, '.amplitude-events.json'))).toBe(
+      false,
+    );
+    expect(
+      fs.existsSync(path.join(projectDir, 'amplitude-setup-report.md')),
+    ).toBe(false);
+    // ampli.json: auth-scoped fields stripped, tracking-plan fields preserved.
+    const ampli = JSON.parse(
+      fs.readFileSync(path.join(projectDir, 'ampli.json'), 'utf-8'),
+    ) as Record<string, string>;
+    expect(ampli.OrgId).toBeUndefined();
+    expect(ampli.SourceId).toBe('keep');
+
+    // JSON result line emitted to stdout:
+    const resetEvent = stdoutSpy.mock.calls
+      .map((c) => String(c[0]))
+      .find((s) => s.includes('"event":"reset"'));
+    expect(resetEvent).toBeDefined();
+    if (resetEvent) {
+      const parsed = JSON.parse(resetEvent);
+      expect(parsed.data.removed.length).toBe(3);
+    }
+
+    fs.rmSync(projectDir, { recursive: true, force: true });
+  });
+
+  test('is a no-op (with friendly note) when there are no artifacts', async () => {
+    const projectDir = fs.mkdtempSync(
+      path.join(os.tmpdir(), 'amp-wizard-reset-empty-'),
+    );
+
+    await runCLI(['reset', '--install-dir', projectDir, '--json']);
+    await waitFor(
+      () => (process.exit as unknown as Mock).mock.calls.length > 0,
+    );
+
+    expect(process.exit).toHaveBeenCalledWith(0);
+    const resetEvent = stdoutSpy.mock.calls
+      .map((c) => String(c[0]))
+      .find((s) => s.includes('"event":"reset"'));
+    expect(resetEvent).toBeDefined();
+    if (resetEvent) {
+      const parsed = JSON.parse(resetEvent);
+      expect(parsed.data.removed.length).toBe(0);
+      expect(parsed.data.skipped.length).toBe(4);
+    }
+
+    fs.rmSync(projectDir, { recursive: true, force: true });
+  });
 });
 
 // ── whoami command ─────────────────────────────────────────────────────────────
@@ -679,7 +1074,11 @@ describe('whoami command', () => {
     vi.resetModules();
   });
 
-  test('shows user name and email when logged in', async () => {
+  // Pass `--human` so the test exercises the chalk-formatted UI output
+  // (`getUI().log.info` → console.log) instead of the agent-friendly
+  // JSON path that fires by default when stdout is non-TTY (e.g. inside
+  // vitest). The JSON shape is covered by the dedicated test below.
+  test('shows user name and email when logged in (--human)', async () => {
     mockGetStoredUser.mockReturnValue({
       id: 'user-1',
       firstName: 'Jane',
@@ -689,7 +1088,7 @@ describe('whoami command', () => {
     });
     mockGetStoredToken.mockReturnValue({ accessToken: 'token' });
 
-    await runCLI(['whoami']);
+    await runCLI(['whoami', '--human']);
     await waitFor(
       () => (process.exit as unknown as Mock).mock.calls.length > 0,
     );
@@ -700,11 +1099,11 @@ describe('whoami command', () => {
     expect(process.exit).toHaveBeenCalledWith(0);
   });
 
-  test('shows not-logged-in message when no token', async () => {
+  test('shows not-logged-in message when no token (--human)', async () => {
     mockGetStoredUser.mockReturnValue(null);
     mockGetStoredToken.mockReturnValue(null);
 
-    await runCLI(['whoami']);
+    await runCLI(['whoami', '--human']);
     await waitFor(
       () => (process.exit as unknown as Mock).mock.calls.length > 0,
     );
@@ -719,7 +1118,7 @@ describe('whoami command', () => {
     expect(process.exit).toHaveBeenCalledWith(0);
   });
 
-  test('prints zone for EU users', async () => {
+  test('prints zone for EU users (--human)', async () => {
     mockGetStoredUser.mockReturnValue({
       id: 'user-2',
       firstName: 'Jean',
@@ -729,13 +1128,85 @@ describe('whoami command', () => {
     });
     mockGetStoredToken.mockReturnValue({ accessToken: 'token' });
 
-    await runCLI(['whoami']);
+    await runCLI(['whoami', '--human']);
     await waitFor(
       () => (process.exit as unknown as Mock).mock.calls.length > 0,
     );
 
     const allOutput = consoleSpy.mock.calls.map((c) => c[0]).join('\n');
     expect(allOutput).toMatch(/eu/);
+  });
+
+  // Agent-mode contract: `whoami --json` emits a single NDJSON line on
+  // stdout carrying `{ event: 'whoami', loggedIn, email, region, ... }`.
+  // The skill reads this to render "you're logged in as X (Org Y)" in
+  // one line before any other action.
+  test('emits structured JSON when logged in', async () => {
+    mockGetStoredUser.mockReturnValue({
+      id: 'user-3',
+      firstName: 'Sam',
+      lastName: 'Cooper',
+      email: 'sam@example.com',
+      zone: 'us',
+    });
+    mockGetStoredToken.mockReturnValue({
+      accessToken: 'token',
+      expiresAt: '2099-01-01T00:00:00Z',
+    });
+
+    // JSON emission goes through process.stdout.write, not console.log,
+    // so spy on the underlying writer.
+    const stdoutSpy = vi
+      .spyOn(process.stdout, 'write')
+      .mockImplementation(() => true);
+
+    await runCLI(['whoami', '--json']);
+    await waitFor(
+      () => (process.exit as unknown as Mock).mock.calls.length > 0,
+    );
+
+    // Find the line that's our whoami payload (other modules may write
+    // unrelated lines during bin.ts startup; filter to ours).
+    const lines = stdoutSpy.mock.calls
+      .map((c) => String(c[0]))
+      .filter((s) => s.includes('"event":"whoami"'));
+    expect(lines.length).toBeGreaterThan(0);
+    const payload = JSON.parse(lines[0]);
+    expect(payload.type).toBe('result');
+    expect(payload.data.event).toBe('whoami');
+    expect(payload.data.loggedIn).toBe(true);
+    expect(payload.data.email).toBe('sam@example.com');
+    expect(payload.data.firstName).toBe('Sam');
+    expect(payload.data.lastName).toBe('Cooper');
+    expect(payload.data.region).toBe('us');
+    expect(payload.data.tokenExpiresAt).toBe('2099-01-01T00:00:00Z');
+
+    stdoutSpy.mockRestore();
+  });
+
+  test('emits structured JSON with loginCommand when logged out', async () => {
+    mockGetStoredUser.mockReturnValue(null);
+    mockGetStoredToken.mockReturnValue(null);
+
+    const stdoutSpy = vi
+      .spyOn(process.stdout, 'write')
+      .mockImplementation(() => true);
+
+    await runCLI(['whoami', '--json']);
+    await waitFor(
+      () => (process.exit as unknown as Mock).mock.calls.length > 0,
+    );
+
+    const lines = stdoutSpy.mock.calls
+      .map((c) => String(c[0]))
+      .filter((s) => s.includes('"event":"whoami"'));
+    expect(lines.length).toBeGreaterThan(0);
+    const payload = JSON.parse(lines[0]);
+    expect(payload.data.loggedIn).toBe(false);
+    expect(Array.isArray(payload.data.loginCommand)).toBe(true);
+    expect(payload.data.loginCommand).toContain('login');
+
+    stdoutSpy.mockRestore();
   });
 });
 
@@ -832,7 +1303,8 @@ describe('--email and --full-name flags', () => {
 
     try {
       await runCLI([
-        '--signup',
+        '--auth-onboarding',
+        'create-account',
         '--ci',
         '--email',
         'ada',
@@ -861,7 +1333,8 @@ describe('--email and --full-name flags', () => {
 
     try {
       await runCLI([
-        '--signup',
+        '--auth-onboarding',
+        'create-account',
         '--ci',
         '--email',
         'ada@example.com',
@@ -884,12 +1357,16 @@ describe('--email and --full-name flags', () => {
 
   test('accepts --email and --full-name on the default command', async () => {
     await runCLI([
-      '--signup',
+      '--auth-onboarding',
+      'create-account',
       '--ci',
       '--email',
       'ada@example.com',
       '--full-name',
       'Ada Lovelace',
+      '--accept-tos',
+      '--region',
+      'us',
       '--install-dir',
       '/tmp/test',
     ]);
@@ -903,6 +1380,7 @@ describe('--email and --full-name flags', () => {
       expect.objectContaining({
         signupEmail: 'ada@example.com',
         signupFullName: 'Ada Lovelace',
+        tosAccepted: true,
       }),
       expect.any(Function),
     );
@@ -915,18 +1393,17 @@ describe('--email and --full-name flags', () => {
     vi.mocked(performSignupOrAuth).mockRejectedValueOnce(new Error('boom'));
 
     await runCLI([
-      '--signup',
+      '--auth-onboarding',
+      'create-account',
       '--ci',
       '--email',
       'ada@example.com',
       '--full-name',
       'Ada Lovelace',
-      // `--region` is required in non-TUI modes now — without it,
-      // `tryResolveZone` returns null and `process.exit` fires before
-      // `performSignupOrAuth` is ever called. In test, `process.exit`
-      // is a no-op so the assertion would pass for the wrong reason
-      // (execution falling through with `zone: null`). Pass a real
-      // region so the production control flow is exercised.
+      '--accept-tos',
+      // `--region` is required in non-TUI modes — without it, the missing-flags
+      // gate in `runDirectSignupIfRequested` exits via INVALID_ARGS before
+      // `performSignupOrAuth` is ever called.
       '--region',
       'us',
       '--install-dir',
@@ -947,215 +1424,121 @@ describe('--email and --full-name flags', () => {
       }),
     );
   });
-});
 
-// ── Legacy / argument parsing (kept for regression coverage) ──────────────────
+  test('--ci create-account without --accept-tos exits INVALID_ARGS', async () => {
+    // `vi.clearAllMocks()` clears call data but not stored implementations,
+    // so prior login-suite tests' `mockReturnValue` calls leak. Reset here.
+    mockGetStoredUser.mockReturnValue(undefined);
+    // Direct override instead of vi.spyOn — vitest's stderr capture
+    // intercepts writes before the spy sees them.
+    const stderrCalls: string[] = [];
+    const origStderrWrite = process.stderr.write.bind(process.stderr);
+    process.stderr.write = ((chunk: unknown) => {
+      stderrCalls.push(String(chunk));
+      return true;
+    }) as typeof process.stderr.write;
 
-describe.skip('CLI argument parsing', () => {
-  const originalArgv = process.argv;
-
-  const originalExit = process.exit;
-  const originalEnv = { ...process.env };
-
-  beforeEach(() => {
-    vi.clearAllMocks();
-
-    // Reset environment
-    process.env = { ...originalEnv };
-    delete process.env.AMPLITUDE_WIZARD_DEFAULT;
-    delete process.env.AMPLITUDE_WIZARD_CI;
-    delete process.env.AMPLITUDE_WIZARD_API_KEY;
-    delete process.env.AMPLITUDE_WIZARD_INSTALL_DIR;
-
-    // Mock process.exit to prevent test runner from exiting
-    process.exit = vi.fn() as any;
-  });
-
-  afterEach(() => {
-    process.argv = originalArgv;
-    process.exit = originalExit;
-    process.env = originalEnv;
-    vi.resetModules();
-  });
-
-  /**
-   * Helper to run the CLI with given arguments
-   */
-  async function runCLI(args: string[]) {
-    process.argv = ['node', 'bin.ts', ...args];
-
-    vi.resetModules();
-    await import('../../bin.ts');
-
-    // Allow yargs to process
-    await new Promise((resolve) => setImmediate(resolve));
-  }
-
-  /**
-   * Helper to get the arguments passed to a mock function
-   */
-  function getLastCallArgs(mockFn: Mock) {
-    expect(mockFn).toHaveBeenCalled();
-    return mockFn.mock.calls[mockFn.mock.calls.length - 1][0];
-  }
-
-  describe('--default flag', () => {
-    test.skip('defaults to true when not specified', async () => {
-      await runCLI([]);
-
-      const args = getLastCallArgs(mockRunWizard);
-      expect(args.default).toBe(true);
-    });
-
-    test.skip('can be explicitly set to false with --no-default', async () => {
-      await runCLI(['--no-default']);
-
-      const args = getLastCallArgs(mockRunWizard);
-      expect(args.default).toBe(false);
-    });
-
-    test.skip('can be explicitly set to true', async () => {
-      await runCLI(['--default']);
-
-      const args = getLastCallArgs(mockRunWizard);
-      expect(args.default).toBe(true);
-    });
-  });
-
-  describe('environment variables', () => {
-    test.skip('respects AMPLITUDE_WIZARD_DEFAULT', async () => {
-      process.env.AMPLITUDE_WIZARD_DEFAULT = 'false';
-
-      await runCLI([]);
-
-      const args = getLastCallArgs(mockRunWizard);
-      expect(args.default).toBe(false);
-    });
-
-    test('CLI args override environment variables', async () => {
-      process.env.AMPLITUDE_WIZARD_DEFAULT = 'false';
-
-      await runCLI(['--default']);
-
-      const args = getLastCallArgs(mockRunWizard);
-      expect(args.default).toBe(true);
-    });
-  });
-
-  describe('backward compatibility', () => {
-    test('all existing flags continue to work', async () => {
+    try {
       await runCLI([
-        '--debug',
-        '--signup',
-        '--force-install',
-        '--install-dir',
-        '/custom/path',
-        '--integration',
-        'nextjs',
-      ]);
-
-      const args = getLastCallArgs(mockRunWizard);
-
-      // Existing flags
-      expect(args.debug).toBe(true);
-      expect(args.signup).toBe(true);
-      expect(args['force-install']).toBe(true);
-      expect(args['install-dir']).toBe('/custom/path');
-      expect(args.integration).toBe('nextjs');
-
-      // New defaults
-      expect(args.default).toBe(true);
-    });
-  });
-
-  // MCP commands now launch TUI — tested via integration tests
-
-  describe('--ci flag', () => {
-    test('defaults to false when not specified', async () => {
-      await runCLI([]);
-
-      const args = getLastCallArgs(mockRunWizard);
-      expect(args.ci).toBe(false);
-    });
-
-    test('can be set to true', async () => {
-      await runCLI([
+        '--auth-onboarding',
+        'create-account',
         '--ci',
-        '--api-key',
-        'phx_test',
+        '--email',
+        'ada@example.com',
+        '--full-name',
+        'Ada Lovelace',
+        '--region',
+        'us',
         '--install-dir',
         '/tmp/test',
       ]);
 
-      const args = getLastCallArgs(mockRunWizard);
-      expect(args.ci).toBe(true);
-    });
+      await waitFor(
+        () => (process.exit as unknown as Mock).mock.calls.length > 0,
+      );
+    } finally {
+      process.stderr.write = origStderrWrite;
+    }
 
-    test('invokes runWizard without --api-key when --ci and --install-dir are set', async () => {
-      await runCLI(['--ci', '--install-dir', '/tmp/test']);
-      await waitFor(() => mockRunWizard.mock.calls.length > 0);
+    // Exits with INVALID_ARGS (2) and prints a missing-flags error.
+    // (Don't assert mockRunWizard was not called — process.exit is a no-op
+    // in tests, so execution falls through to lazyRunWizard. In production
+    // the real exit prevents that.)
+    expect(process.exit).toHaveBeenCalledWith(2);
+    expect(stderrCalls.join('')).toMatch(/--accept-tos/);
+  });
 
-      expect(process.exit).not.toHaveBeenCalled();
-      expect(mockRunWizard).toHaveBeenCalled();
-    });
+  test('--agent create-account with no other flags emits signup_input_required and exits INPUT_REQUIRED', async () => {
+    // Reset stored-user implementation leaked from earlier login tests so
+    // tryResolveZone returns null (otherwise zone resolves from a prior
+    // test's `mockGetStoredUser.mockReturnValue({ zone: 'us', ... })` and
+    // --region wouldn't appear in the missing[] list).
+    mockGetStoredUser.mockReturnValue(undefined);
+    // Direct stdout override — AgentUI emits NDJSON via process.stdout.write
+    // which goes through `safePipeWrite` (a non-spy-friendly path).
+    const stdoutCalls: string[] = [];
+    const origStdoutWrite = process.stdout.write.bind(process.stdout);
+    process.stdout.write = ((chunk: unknown) => {
+      stdoutCalls.push(String(chunk));
+      return true;
+    }) as typeof process.stdout.write;
 
-    test('requires --install-dir when --ci is set', async () => {
-      await runCLI(['--ci', '--api-key', 'phx_test']);
-
-      expect(process.exit).toHaveBeenCalledWith(1);
-    });
-
-    test('passes --api-key to runWizard', async () => {
+    try {
       await runCLI([
-        '--ci',
-        '--api-key',
-        'phx_test_key',
+        '--auth-onboarding',
+        'create-account',
+        '--agent',
         '--install-dir',
         '/tmp/test',
       ]);
 
-      const args = getLastCallArgs(mockRunWizard);
-      expect(args.apiKey).toBe('phx_test_key');
-    });
-  });
+      await waitFor(
+        () => (process.exit as unknown as Mock).mock.calls.length > 0,
+      );
+    } finally {
+      process.stdout.write = origStdoutWrite;
+    }
 
-  describe('CI environment variables', () => {
-    test.skip('respects AMPLITUDE_WIZARD_CI', async () => {
-      process.env.AMPLITUDE_WIZARD_CI = 'true';
-      process.env.AMPLITUDE_WIZARD_API_KEY = 'phx_env_key';
-      process.env.AMPLITUDE_WIZARD_INSTALL_DIR = '/tmp/test';
+    // Exits with INPUT_REQUIRED (12).
+    expect(process.exit).toHaveBeenCalledWith(12);
 
-      await runCLI([]);
-
-      const args = getLastCallArgs(mockRunWizard);
-      expect(args.ci).toBe(true);
-    });
-
-    test.skip('respects AMPLITUDE_WIZARD_API_KEY', async () => {
-      process.env.AMPLITUDE_WIZARD_CI = 'true';
-      process.env.AMPLITUDE_WIZARD_API_KEY = 'phx_env_key';
-      process.env.AMPLITUDE_WIZARD_INSTALL_DIR = '/tmp/test';
-
-      await runCLI([]);
-
-      const args = getLastCallArgs(mockRunWizard);
-      expect(args.apiKey).toBe('phx_env_key');
-    });
-
-    test('CLI args override CI environment variables', async () => {
-      process.env.AMPLITUDE_WIZARD_CI = 'true';
-      process.env.AMPLITUDE_WIZARD_API_KEY = 'phx_env_key';
-      process.env.AMPLITUDE_WIZARD_INSTALL_DIR = '/tmp/test';
-
-      await runCLI([
-        '--api-key',
-        'phx_cli_key',
-        '--install-dir',
-        '/other/path',
-      ]);
-
-      const args = getLastCallArgs(mockRunWizard);
-      expect(args.apiKey).toBe('phx_cli_key');
-    });
+    // stdout received an NDJSON line with event: 'signup_input_required'
+    // listing all four missing flags.
+    const events = stdoutCalls
+      .join('')
+      .split('\n')
+      .filter((l) => l.trim().length > 0)
+      .map((l) => {
+        try {
+          return JSON.parse(l);
+        } catch {
+          return null;
+        }
+      })
+      .filter(
+        (e): e is { type: string; data?: { event?: string } } => e !== null,
+      );
+    const signupEvent = events.find(
+      (e) => e.data?.event === 'signup_input_required',
+    );
+    expect(signupEvent).toBeDefined();
+    const missingFlags = (
+      signupEvent?.data as { missing?: Array<{ flag: string }> } | undefined
+    )?.missing?.map((m) => m.flag);
+    expect(missingFlags).toEqual(
+      expect.arrayContaining([
+        '--region',
+        '--email',
+        '--full-name',
+        '--accept-tos',
+      ]),
+    );
   });
 });
+
+// NOTE: A 200-line `describe.skip('CLI argument parsing', ...)` block lived
+// here previously, marked "kept for regression coverage". Because the entire
+// suite was `.skip`-ed, it provided zero coverage — and several individual
+// tests were also `test.skip`-ed within it, indicating the whole thing had
+// rotted. Removed in the AI-compatibility cleanup; see git history if you
+// need to resurrect specific cases.

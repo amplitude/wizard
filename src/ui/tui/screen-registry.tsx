@@ -7,18 +7,18 @@ import type { WizardStore } from './store.js';
 import { Screen, Overlay, type ScreenName } from './router.js';
 
 import { OutageScreen } from './screens/OutageScreen.js';
-import { SettingsOverrideScreen } from './screens/SettingsOverrideScreen.js';
 import { IntroScreen } from './screens/IntroScreen.js';
 import { SetupScreen } from './screens/SetupScreen.js';
 import { AuthScreen } from './screens/AuthScreen.js';
 import { CreateProjectScreen } from './screens/CreateProjectScreen.js';
 import { RegionSelectScreen } from './screens/RegionSelectScreen.js';
+import { EmailCaptureScreen } from './screens/EmailCaptureScreen.js';
+import { ToSScreen } from './screens/ToSScreen.js';
 import { SignupEmailScreen } from './screens/SignupEmailScreen.js';
 import { SigningUpScreen } from './screens/SigningUpScreen.js';
 import { SignupFullNameScreen } from './screens/SignupFullNameScreen.js';
 import { DataSetupScreen } from './screens/DataSetupScreen.js';
 import { ActivationOptionsScreen } from './screens/ActivationOptionsScreen.js';
-import { FeatureOptInScreen } from './screens/FeatureOptInScreen.js';
 import { RunScreen } from './screens/RunScreen.js';
 import { McpScreen } from './screens/McpScreen.js';
 import { DataIngestionCheckScreen } from './screens/DataIngestionCheckScreen.js';
@@ -47,7 +47,6 @@ export function createScreens(
   return {
     // Overlays
     [Overlay.Outage]: <OutageScreen store={store} />,
-    [Overlay.SettingsOverride]: <SettingsOverrideScreen store={store} />,
     [Overlay.Snake]: (
       <SnakeGame onExit={() => store.hideSnakeOverlay()} music={false} />
     ),
@@ -65,16 +64,7 @@ export function createScreens(
       <LogoutScreen
         onComplete={() => store.hideLogoutOverlay()}
         installDir={store.session.installDir}
-        onLoggedOut={() => {
-          store.session.credentials = null;
-          store.session.userEmail = null;
-          store.session.selectedOrgId = null;
-          store.session.selectedOrgName = null;
-          store.session.selectedWorkspaceId = null;
-          store.session.selectedWorkspaceName = null;
-          store.session.selectedEnvName = null;
-          store.emitChange();
-        }}
+        onLoggedOut={() => store.clearAuthForLogout()}
       />
     ),
     [Overlay.Login]: (
@@ -87,12 +77,13 @@ export function createScreens(
     [Screen.Auth]: <AuthScreen store={store} />,
     [Screen.CreateProject]: <CreateProjectScreen store={store} />,
     [Screen.RegionSelect]: <RegionSelectScreen store={store} />,
+    [Screen.EmailCapture]: <EmailCaptureScreen store={store} />,
+    [Screen.ToS]: <ToSScreen store={store} />,
     [Screen.SignupEmail]: <SignupEmailScreen store={store} />,
     [Screen.SigningUp]: <SigningUpScreen store={store} />,
     [Screen.SignupFullName]: <SignupFullNameScreen store={store} />,
     [Screen.DataSetup]: <DataSetupScreen store={store} />,
     [Screen.ActivationOptions]: <ActivationOptionsScreen store={store} />,
-    [Screen.FeatureOptIn]: <FeatureOptInScreen store={store} />,
     [Screen.Options]: null,
     [Screen.Run]: <RunScreen store={store} />,
     [Screen.Mcp]: <McpScreen store={store} installer={services.mcpInstaller} />,

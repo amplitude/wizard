@@ -4,6 +4,7 @@ import { v4 as uuidv4 } from 'uuid';
 import { debug } from './debug';
 import { IS_DEV } from '../lib/constants';
 import { getSessionId, getRunId, setSentryUser } from '../lib/observability';
+import { getOrCreateInstallId } from './install-id';
 import {
   initFeatureFlags,
   refreshFlags,
@@ -93,7 +94,9 @@ export class Analytics {
 
   constructor() {
     this.sessionProperties = { $app_name: this.appName };
-    this.anonymousId = uuidv4();
+    // Persistent install ID stitches pre-auth runs across invocations;
+    // fall back to a per-process UUID if disk access fails.
+    this.anonymousId = getOrCreateInstallId() ?? uuidv4();
     this.distinctId = undefined;
     this.client = createInstance();
   }
@@ -106,6 +109,10 @@ export class Analytics {
   setDistinctId(distinctId: string) {
     this.distinctId = distinctId;
     setSentryUser(distinctId);
+    // Re-evaluate flags now that we know the user_id. Fire-and-forget —
+    // a no-op if the Experiment client hasn't been initialized yet, and
+    // flag-refresh failures are non-fatal.
+    void this.refreshFlags().catch(() => {});
   }
 
   /**
@@ -116,8 +123,8 @@ export class Analytics {
     email?: string;
     org_id?: string;
     org_name?: string;
-    workspace_id?: string;
-    workspace_name?: string;
+    project_id?: string;
+    project_name?: string;
     app_id?: string | number | null;
     env_name?: string | null;
     region?: string | null;
@@ -138,10 +145,10 @@ export class Analytics {
     }
     if (properties.org_id) identifyObj.set('org id', properties.org_id);
     if (properties.org_name) identifyObj.set('org name', properties.org_name);
-    if (properties.workspace_id)
-      identifyObj.set('workspace id', properties.workspace_id);
-    if (properties.workspace_name)
-      identifyObj.set('workspace name', properties.workspace_name);
+    if (properties.project_id)
+      identifyObj.set('project id', properties.project_id);
+    if (properties.project_name)
+      identifyObj.set('project name', properties.project_name);
     if (properties.app_id != null)
       identifyObj.set('app id', String(properties.app_id));
     if (properties.env_name) identifyObj.set('env name', properties.env_name);

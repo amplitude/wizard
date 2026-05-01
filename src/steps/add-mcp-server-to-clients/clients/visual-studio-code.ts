@@ -1,9 +1,9 @@
 import z from 'zod';
-import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { DefaultMCPClient, MCPServerConfig } from '../MCPClient';
 import { buildMCPUrl } from '../defaults';
+import type { CloudRegion } from '../../../utils/types';
 
 export const VisualStudioCodeMCPConfig = z
   .object({
@@ -36,27 +36,12 @@ export class VisualStudioCodeClient extends DefaultMCPClient {
     return 'servers';
   }
 
-  isClientSupported(): Promise<boolean> {
-    // VS Code creates Code/User/ on first launch — absence == not installed.
-    const homeDir = os.homedir();
-    if (process.platform === 'darwin') {
-      return Promise.resolve(
-        fs.existsSync(
-          path.join(homeDir, 'Library', 'Application Support', 'Code'),
-        ),
-      );
-    }
-    if (process.platform === 'win32') {
-      const appData = process.env.APPDATA;
-      if (!appData) return Promise.resolve(false);
-      return Promise.resolve(fs.existsSync(path.join(appData, 'Code')));
-    }
-    if (process.platform === 'linux') {
-      return Promise.resolve(
-        fs.existsSync(path.join(homeDir, '.config', 'Code')),
-      );
-    }
-    return Promise.resolve(false);
+  async isClientSupported(): Promise<boolean> {
+    return Promise.resolve(
+      process.platform === 'darwin' ||
+        process.platform === 'win32' ||
+        process.platform === 'linux',
+    );
   }
 
   async getConfigPath(): Promise<string> {
@@ -98,10 +83,11 @@ export class VisualStudioCodeClient extends DefaultMCPClient {
     type: 'sse' | 'streamable-http',
     selectedFeatures?: string[],
     local?: boolean,
+    zone: CloudRegion = 'us',
   ): MCPServerConfig {
     const config: MCPServerConfig = {
       type: 'http',
-      url: buildMCPUrl(type, selectedFeatures, local),
+      url: buildMCPUrl(type, selectedFeatures, local, zone),
     };
     if (apiKey) {
       config.headers = { Authorization: `Bearer ${apiKey}` };
@@ -113,12 +99,14 @@ export class VisualStudioCodeClient extends DefaultMCPClient {
     apiKey?: string,
     selectedFeatures?: string[],
     local?: boolean,
+    zone: CloudRegion = 'us',
   ): Promise<{ success: boolean }> {
     return this._addServerType(
       apiKey,
       'streamable-http',
       selectedFeatures,
       local,
+      zone,
     );
   }
 }

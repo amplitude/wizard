@@ -13,6 +13,7 @@
  */
 
 import type { WizardSession } from '../../lib/wizard-session.js';
+import type { WizardStore } from './store.js';
 import { OutroKind } from './session-constants.js';
 import { FLOWS, Screen, Flow, type FlowEntry } from './flows.js';
 
@@ -25,7 +26,6 @@ export type { FlowEntry };
 /** Screens that interrupt flows as overlays */
 export enum Overlay {
   Outage = 'outage',
-  SettingsOverride = 'settings-override',
   Snake = 'snake',
   Mcp = 'mcp-overlay',
   Slack = 'slack-overlay',
@@ -107,6 +107,74 @@ export class WizardRouter {
    */
   popOverlay(): void {
     this.overlays.pop();
+  }
+
+  /**
+   * Find the index of the entry that resolve() would currently land on.
+   * Returns flow.length when every entry is complete (i.e. on the trailing
+   * fallback screen).
+   */
+  private activeIndex(session: WizardSession): number {
+    for (let i = 0; i < this.flow.length; i++) {
+      const entry = this.flow[i];
+      if (entry.show && !entry.show(session)) continue;
+      if (entry.isComplete && entry.isComplete(session)) continue;
+      return i;
+    }
+    return this.flow.length;
+  }
+
+  /**
+   * Whether the user can go back from the current screen.
+   *
+   * Walks the flow backwards from the active entry through entries that
+   * the user has already completed (regardless of whether they're still
+   * "shown" — RegionSelect is a good example: once a region is picked,
+   * `show` returns false but the step still happened and is revertible).
+   *
+   * Returns true if it finds a previously-completed entry with a `revert`
+   * defined. Returns false the moment it hits a completed entry without a
+   * revert — those act as a wall (e.g. Run, which would be destructive
+   * to undo).
+   *
+   * Overlays disable back-nav so users dismiss the overlay first.
+   */
+  canGoBack(session: WizardSession): boolean {
+    if (this.overlays.length > 0) return false;
+    const activeIdx = this.activeIndex(session);
+    for (let i = activeIdx - 1; i >= 0; i--) {
+      const entry = this.flow[i];
+      // Walk through entries that have happened. An entry "happened" if
+      // its isComplete predicate is true; show=false alone doesn't disqualify
+      // (a step can be hidden because it already concluded).
+      if (!entry.isComplete || !entry.isComplete(session)) continue;
+      // Completed entry: either it can be reverted, or it's a wall.
+      return Boolean(entry.revert);
+    }
+    return false;
+  }
+
+  /**
+   * Step back one decision. Calls the most recent revertible entry's
+   * `revert` callback so the router naturally re-resolves to that screen
+   * on the next render. Returns true if a revert fired.
+   *
+   * Reverts that return `false` are treated as no-ops (nothing meaningful
+   * to undo at that step) and the walk continues further back.
+   */
+  goBack(session: WizardSession, store: WizardStore): boolean {
+    if (this.overlays.length > 0) return false;
+    const activeIdx = this.activeIndex(session);
+    for (let i = activeIdx - 1; i >= 0; i--) {
+      const entry = this.flow[i];
+      if (!entry.isComplete || !entry.isComplete(session)) continue;
+      if (!entry.revert) return false; // wall — no back past this entry
+      const reverted = entry.revert(store);
+      if (reverted === false) continue; // no-op revert, keep walking
+      this._lastDirection = 'pop';
+      return true;
+    }
+    return false;
   }
 
   /**

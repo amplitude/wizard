@@ -33,6 +33,25 @@ describe('defaults', () => {
       const url = buildMCPUrl('streamable-http', undefined, true);
       expect(url).toBe('http://localhost:8787/mcp');
     });
+
+    // Regression — every prior wizard release wrote the US MCP URL into
+    // EU users' editor configs. Once written, the URL persists past the
+    // wizard run, so getting this wrong stuck the user with a wrong-region
+    // MCP forever.
+    it('builds the EU MCP URL when zone is "eu"', () => {
+      expect(buildMCPUrl('streamable-http', undefined, false, 'eu')).toBe(
+        'https://mcp.eu.amplitude.com/mcp',
+      );
+      expect(buildMCPUrl('sse', undefined, false, 'eu')).toBe(
+        'https://mcp.eu.amplitude.com/sse',
+      );
+    });
+
+    it('still uses localhost for local mode regardless of zone', () => {
+      expect(buildMCPUrl('streamable-http', undefined, true, 'eu')).toBe(
+        'http://localhost:8787/mcp',
+      );
+    });
   });
 
   describe('getDefaultServerConfig', () => {

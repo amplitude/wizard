@@ -1,15 +1,17 @@
 /* Vue wizard for Amplitude */
 import fg from 'fast-glob';
 import type { FrameworkConfig } from '../../lib/framework-config';
-import { detectNodePackageManagers } from '../../lib/package-manager-detection';
+import { detectNodePackageManagersLight as detectNodePackageManagers } from '../../lib/package-manager-detection-light';
 import { Integration } from '../../lib/constants';
 import {
   getPackageVersion,
   hasPackageInstalled,
   type PackageDotJson,
 } from '../../utils/package-json';
-import { tryGetPackageJson } from '../../utils/setup-utils';
+import { tryGetPackageJson } from '../../utils/package-json-light';
 import { createVersionBucket } from '../../utils/semver';
+import { BROWSER_UNIFIED_SDK_PROMPT_LINE } from '../_shared/browser-sdk-prompt';
+import { isVuePoweredDocsSite } from '../_shared/vue-powered-docs-site';
 
 const FILE_SCAN_IGNORES = [
   '**/node_modules/**',
@@ -54,6 +56,7 @@ export const VUE_AGENT_CONFIG: FrameworkConfig<VueContext> = {
     targetsBrowser: true,
     docsUrl: 'https://amplitude.com/docs/sdks/analytics/browser/browser-sdk-2',
     beta: true,
+    getIntegrationSkillId: () => 'integration-vue-3',
   },
 
   detection: {
@@ -71,6 +74,8 @@ export const VUE_AGENT_CONFIG: FrameworkConfig<VueContext> = {
       if (packageJson) {
         // Nuxt projects have both 'vue' and 'nuxt' — don't claim them
         if (hasPackageInstalled('nuxt', packageJson)) return false;
+        // VitePress, VuePress, Slidev, etc. ship `vue` but are not product SPAs
+        if (isVuePoweredDocsSite(packageJson)) return false;
         return hasPackageInstalled('vue', packageJson);
       }
       // Fallback: sniff for .vue source files ONLY when package.json is
@@ -99,7 +104,8 @@ export const VUE_AGENT_CONFIG: FrameworkConfig<VueContext> = {
       const frameworkId = 'vue';
       return [
         `Framework docs ID: ${frameworkId} (use amplitude://docs/frameworks/${frameworkId} for documentation)`,
-        `Preferred Amplitude SDK: @amplitude/unified (prefer over @amplitude/analytics-browser for new browser integrations)`,
+        BROWSER_UNIFIED_SDK_PROMPT_LINE,
+        `Initialize from the project's main entry point (typically src/main.ts or src/main.js) before app.mount() so the SDK loads alongside your Vue root.`,
       ];
     },
   },

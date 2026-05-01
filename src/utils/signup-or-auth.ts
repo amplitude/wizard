@@ -1,6 +1,7 @@
 import type { AmplitudeAuthResult } from './oauth.js';
 import { performDirectSignup } from './direct-signup.js';
 import { replaceStoredUser, type StoredUser } from './ampli-settings.js';
+import { clearStaleProjectState } from './clear-stale-project-state.js';
 import { fetchAmplitudeUser, type AmplitudeUserInfo } from '../lib/api.js';
 import { createLogger } from '../lib/observability/logger.js';
 import type { AmplitudeZone } from '../lib/constants.js';
@@ -13,8 +14,8 @@ const PROVISIONING_RETRY_DELAYS_MS = [500, 1000, 2000];
 
 function hasEnvWithApiKey(userInfo: AmplitudeUserInfo): boolean {
   return userInfo.orgs.some((org) =>
-    org.workspaces.some((ws) =>
-      (ws.environments ?? []).some((e) => e.app?.apiKey),
+    org.projects.some((proj) =>
+      (proj.environments ?? []).some((e) => e.app?.apiKey),
     ),
   );
 }
@@ -124,6 +125,14 @@ export interface SignupOrAuthInput {
   email: string | null;
   fullName: string | null;
   zone: AmplitudeZone;
+  /**
+   * Project directory the wizard is running against. Used on successful
+   * signup to wipe pre-existing per-project state (keychain API key,
+   * .env.local, project ampli.json bindings, session checkpoint) so the
+   * new account doesn't inherit the prior account's data — see
+   * {@link clearStaleProjectState}.
+   */
+  installDir: string;
 }
 
 export interface SignupOrAuthOptions {
@@ -153,6 +162,11 @@ export interface SignupOrAuthOptions {
 export type PerformSignupOrAuthResult =
   | ({ kind: 'success' } & AmplitudeAuthResult & {
         userInfo: AmplitudeUserInfo | null;
+        /**
+         * Provisioning `dashboard_url` (browser magic link). May contain secrets —
+         * do not log or emit on NDJSON.
+         */
+        dashboardUrl: string | null;
       })
   | { kind: 'requires_redirect' }
   | { kind: 'needs_information'; requiredFields: string[] }
@@ -285,10 +299,26 @@ export async function performSignupOrAuth(
       zone: input.zone,
     };
   }
+  // Mark ToS as accepted for signup flow (the user went through the ToS
+  // screen or --signup was used, which implies acceptance)
+  const userWithTos: StoredUser = {
+    ...user,
+    tosAccepted: true,
+    tosAcceptedAt: new Date().toISOString(),
+  };
+
+  // Wipe pre-existing per-project state BEFORE persisting the new account.
+  // Mirrors `replaceStoredUser`'s wipe-then-write pattern across the
+  // install-dir-keyed surfaces (keychain, .env.local, project ampli.json,
+  // session checkpoint) that `replaceStoredUser` does not touch. Without
+  // this, downstream `getAPIKey` short-circuits on the prior account's
+  // cached key and silently routes the new account's events into the wrong
+  // tenancy. See MCP-196.
+  clearStaleProjectState(input.installDir);
   // Persist BEFORE telemetry: a disk/permission failure must propagate to
   // the outer catch so `wrapper_exception` is the sole event — emitting
   // success or user_fetch_failed first would double-count the attempt.
-  replaceStoredUser(user, tokens);
+  replaceStoredUser(userWithTos, tokens);
   if (fetchResult.ok) {
     trackSignupAttempt({
       status: 'success',
@@ -311,5 +341,6 @@ export async function performSignupOrAuth(
     refreshToken: tokens.refreshToken,
     zone: result.tokens.zone,
     userInfo,
+    dashboardUrl: result.dashboardUrl ?? null,
   };
 }

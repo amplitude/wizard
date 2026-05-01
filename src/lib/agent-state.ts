@@ -10,13 +10,14 @@
  * without a cyclic import through agent-interface.
  */
 
-import { writeFileSync, readFileSync, existsSync, unlinkSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { readFileSync, existsSync, unlinkSync } from 'node:fs';
+import { dirname } from 'node:path';
 
 import { z } from 'zod';
 import { getRunId } from './observability';
 import { logToFile } from '../utils/debug';
+import { atomicWriteJSON } from '../utils/atomic-write.js';
+import { ensureDir, getStateFile } from '../utils/storage-paths';
 
 const SerializedAgentStateSchema = z.object({
   schemaVersion: z.literal('amplitude-wizard-agent-state/1'),
@@ -42,6 +43,26 @@ export class AgentState {
   private lastStatus: { code: string; detail: string } | null = null;
   private compactionCount = 0;
   private attemptId: string | null = null;
+  /**
+   * Discovery facts captured from prior in-attempt tool calls so a retry
+   * doesn't redo the same exploration. Keyed by short stable names. Values
+   * are short human-readable summaries already trimmed for prompt context.
+   * Populated incrementally as tool results stream in (see
+   * `recordToolResultDiscovery` below); read on retry to build the
+   * `<retry-recovery>` hint prepended to the next attempt's user prompt.
+   *
+   * Bounded to a few entries — these are only the pre-discovery tools that
+   * dominate the cold-start tail (package-manager / env-key probes / which
+   * skill was loaded). Don't dump full Read/Glob outputs here; the hint
+   * is meant to skip a tool call, not replay an entire conversation.
+   */
+  private readonly discoveries = new Map<string, string>();
+  /**
+   * Tool calls observed in the current attempt — small bounded counter
+   * keyed by tool name. Used to surface "you already tried X N times" in
+   * the retry hint so the model doesn't loop on a tool that's failing.
+   */
+  private readonly toolUseCounts = new Map<string, number>();
 
   setAttemptId(attemptId: string): void {
     this.attemptId = attemptId;
@@ -59,6 +80,35 @@ export class AgentState {
     this.compactionCount += 1;
   }
 
+  recordToolUse(toolName: string): void {
+    if (!toolName) return;
+    this.toolUseCounts.set(
+      toolName,
+      (this.toolUseCounts.get(toolName) ?? 0) + 1,
+    );
+  }
+
+  /**
+   * Stash a one-line summary of a discovery-shaped tool result so the next
+   * attempt (after a transient retry) can skip the corresponding probe.
+   *
+   * Caller is responsible for trimming the summary — anything longer than
+   * ~200 chars gets dropped to keep the retry-hint block small. Empty /
+   * unknown summaries are a no-op (better to omit a fact than ship a
+   * misleading one to the next attempt).
+   */
+  recordDiscovery(key: string, summary: string): void {
+    if (!key) return;
+    const trimmed = summary?.trim();
+    if (!trimmed) return;
+    if (trimmed.length > 200) return;
+    this.discoveries.set(key, trimmed);
+  }
+
+  getDiscoveries(): ReadonlyMap<string, string> {
+    return this.discoveries;
+  }
+
   snapshot(): SerializedAgentState {
     return {
       schemaVersion: 'amplitude-wizard-agent-state/1',
@@ -71,13 +121,14 @@ export class AgentState {
     };
   }
 
-  /** Persist the current state to the tmpdir path for this attempt. */
+  /** Persist the current state to the cache-root path for this attempt. */
   persist(): string | null {
     const path = this.snapshotPath();
     try {
-      writeFileSync(path, JSON.stringify(this.snapshot(), null, 2), {
-        mode: 0o600,
-      });
+      // Make sure `<cacheRoot>/state/` exists; the cache root may not have
+      // been created yet on a cold run.
+      ensureDir(dirname(path));
+      atomicWriteJSON(path, this.snapshot(), 0o600);
       logToFile(`PreCompact: persisted agent state → ${path}`);
       return path;
     } catch (err) {
@@ -92,14 +143,97 @@ export class AgentState {
 
   snapshotPath(): string {
     const id = this.attemptId ?? 'unknown';
-    return join(tmpdir(), `amplitude-wizard-state-${id}.json`);
+    return getStateFile(id);
   }
 
   reset(): void {
-    this.modifiedFiles.clear();
-    this.lastStatus = null;
+    // `compactionCount` and `toolUseCounts` are per-attempt SDK
+    // conversation facts — a fresh attempt starts a fresh conversation
+    // so these reset.
     this.compactionCount = 0;
+    this.toolUseCounts.clear();
+    // NOTE: `modifiedFiles`, `lastStatus`, and `discoveries` are
+    // intentionally NOT cleared here. They describe **the run's effect
+    // on disk and the run's last reported user-visible state** — both
+    // survive a fresh SDK conversation and the next attempt needs them
+    // to avoid double-writing files the prior attempt already created
+    // and to know what the user last saw on the spinner. Use the
+    // dedicated `clear*` methods below for a hard reset (e.g. between
+    // unrelated wizard runs, in tests).
   }
+
+  clearModifiedFiles(): void {
+    this.modifiedFiles.clear();
+  }
+
+  clearLastStatus(): void {
+    this.lastStatus = null;
+  }
+
+  clearDiscoveries(): void {
+    this.discoveries.clear();
+  }
+}
+
+/**
+ * Render a compact retry-recovery note to prepend to the next attempt's
+ * user prompt. Mirrors `buildRecoveryNote` (post-compaction) but is keyed
+ * to wizard-level retries triggered by transient gateway errors. The
+ * agent restarts with a fresh conversation; without this hint, it
+ * redoes detect_package_manager / check_env_keys / Skill loads and
+ * — much worse — re-writes files the prior attempt already created
+ * (potentially with different content), since a fresh SDK conversation
+ * has no idea anything was written.
+ *
+ * Sections (each rendered only when it has content):
+ *   1. discoveries — facts probed by prior tool calls (skip the probes)
+ *   2. modifiedFiles — files already on disk (Read before re-writing)
+ *   3. lastStatus — the spinner message the user last saw
+ *
+ * Returns an empty string when none of the sections have content — the
+ * caller can unconditionally concatenate.
+ */
+export function buildRetryHint(state: AgentState): string {
+  const discoveries = state.getDiscoveries();
+  const snap = state.snapshot();
+  const hasDiscoveries = discoveries.size > 0;
+  const hasModifiedFiles = snap.modifiedFiles.length > 0;
+  const hasLastStatus = snap.lastStatus !== null;
+  if (!hasDiscoveries && !hasModifiedFiles && !hasLastStatus) return '';
+
+  const lines: string[] = [
+    '<retry-recovery>',
+    'A prior attempt was interrupted by a transient upstream error and the wizard is retrying. The facts below describe what the prior attempt already did — trust them. SKIP the corresponding tool calls and DO NOT overwrite files unless you Read them first and confirm the existing content is wrong.',
+    '',
+  ];
+
+  if (hasDiscoveries) {
+    lines.push('Discoveries already verified by prior-attempt tool calls:');
+    for (const [key, summary] of discoveries) {
+      lines.push(`- ${key}: ${summary}`);
+    }
+    lines.push('');
+  }
+
+  if (hasModifiedFiles) {
+    lines.push(
+      'Files already written by the prior attempt (still on disk; Read them before re-writing):',
+    );
+    for (const file of snap.modifiedFiles) {
+      lines.push(`- ${file}`);
+    }
+    lines.push('');
+  }
+
+  if (hasLastStatus && snap.lastStatus) {
+    lines.push(
+      `Last reported status before the interruption: [${snap.lastStatus.code}] ${snap.lastStatus.detail}`,
+      '',
+    );
+  }
+
+  lines.push('</retry-recovery>', '');
+  return lines.join('\n');
 }
 
 /**

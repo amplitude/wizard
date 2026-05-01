@@ -1,4 +1,9 @@
-import { execSync, spawn, spawnSync } from 'child_process';
+import { execSync } from 'child_process';
+// `vercel` ships as `vercel.cmd` when installed via npm on Windows. The
+// stock `child_process.spawn` does not consult PATHEXT, so we use the
+// cross-platform wrapper for the spawn paths. `execSync` already routes
+// through `cmd.exe` on Windows, which DOES consult PATHEXT, so it stays.
+import { spawn, spawnSync } from '../../../utils/cross-platform-spawn.js';
 import { EnvironmentProvider } from '../EnvironmentProvider';
 import * as fs from 'fs';
 import * as path from 'path';

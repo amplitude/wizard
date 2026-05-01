@@ -1,10 +1,16 @@
 import { DefaultMCPClient } from '../MCPClient';
 import { buildMCPUrl, DefaultMCPClientConfig } from '../defaults';
+import type { CloudRegion } from '../../../utils/types';
 import { z } from 'zod';
-import { spawnSync } from 'child_process';
+// On Windows, Claude Code ships as `claude.cmd` when installed via npm.
+// The stock `child_process.spawnSync` does not consult PATHEXT, so we
+// route through the cross-platform wrapper which handles the shim.
+import { spawnSync } from '../../../utils/cross-platform-spawn.js';
 import { analytics } from '../../../utils/analytics';
 import { debug } from '../../../utils/debug';
-import { findClaudeBinary } from './claude-binary';
+import * as os from 'os';
+import * as path from 'path';
+import * as fs from 'fs';
 
 export const ClaudeCodeMCPConfig = DefaultMCPClientConfig;
 
@@ -12,13 +18,47 @@ export type ClaudeCodeMCPConfig = z.infer<typeof DefaultMCPClientConfig>;
 
 export class ClaudeCodeMCPClient extends DefaultMCPClient {
   name = 'Claude Code';
+  private claudeBinaryPath: string | null = null;
 
   constructor() {
     super();
   }
 
   private findClaudeBinary(): string | null {
-    return findClaudeBinary();
+    if (this.claudeBinaryPath) {
+      return this.claudeBinaryPath;
+    }
+
+    // Common installation paths for Claude Code CLI
+    const possiblePaths = [
+      path.join(os.homedir(), '.local', 'bin', 'claude'),
+      path.join(os.homedir(), '.claude', 'local', 'claude'),
+      '/usr/local/bin/claude',
+      '/opt/homebrew/bin/claude',
+    ];
+
+    for (const claudePath of possiblePaths) {
+      if (fs.existsSync(claudePath)) {
+        debug(`  Found claude binary at: ${claudePath}`);
+        this.claudeBinaryPath = claudePath;
+        return claudePath;
+      }
+    }
+
+    // Search PATH directories manually — no exec, no tainted strings passed
+    // to child_process.
+    const pathDirs = (process.env.PATH ?? '').split(path.delimiter);
+    for (const dir of pathDirs) {
+      if (!dir) continue;
+      const candidate = path.join(dir, 'claude');
+      if (fs.existsSync(candidate)) {
+        debug(`  Found claude in PATH: ${candidate}`);
+        this.claudeBinaryPath = candidate;
+        return candidate;
+      }
+    }
+
+    return null;
   }
 
   isClientSupported(): Promise<boolean> {
@@ -27,7 +67,12 @@ export class ClaudeCodeMCPClient extends DefaultMCPClient {
       const claudeBinary = this.findClaudeBinary();
 
       if (!claudeBinary) {
-        debug('  Claude Code not found.');
+        debug('  Claude Code not found. Installation paths checked:');
+        debug(`    - ${path.join(os.homedir(), '.local', 'bin', 'claude')}`);
+        debug(`    - ${path.join(os.homedir(), '.claude', 'local', 'claude')}`);
+        debug(`    - /usr/local/bin/claude`);
+        debug(`    - /opt/homebrew/bin/claude`);
+        debug(`    - PATH`);
         return Promise.resolve(false);
       }
 
@@ -78,6 +123,7 @@ export class ClaudeCodeMCPClient extends DefaultMCPClient {
     apiKey?: string,
     selectedFeatures?: string[],
     local?: boolean,
+    zone: CloudRegion = 'us',
   ): Promise<{ success: boolean }> {
     const binary = this.findClaudeBinary();
     if (!binary) {
@@ -85,7 +131,7 @@ export class ClaudeCodeMCPClient extends DefaultMCPClient {
     }
 
     const serverName = local ? 'amplitude-local' : 'amplitude';
-    const url = buildMCPUrl('streamable-http', selectedFeatures, local);
+    const url = buildMCPUrl('streamable-http', selectedFeatures, local, zone);
 
     // Build args array — no shell interpolation, no injection risk
     const addArgs = ['mcp', 'add', '--transport', 'http', serverName, url];

@@ -72,7 +72,7 @@ const AmplitudeUserSchema = z.object({
 export type AmplitudeOrg = {
   id: string;
   name: string;
-  workspaces: Array<{
+  projects: Array<{
     id: string;
     name: string;
     environments?: Array<{
@@ -83,21 +83,29 @@ export type AmplitudeOrg = {
   }>;
 };
 
-/** Shared workspace type for environment helpers. */
-export type AmplitudeWorkspace = AmplitudeOrg['workspaces'][number];
+/**
+ * Shared project type for environment helpers.
+ *
+ * NOTE: In Amplitude's backend GraphQL schema this layer is called a
+ * "workspace"; the wizard's wire-level queries still use the `workspaces`
+ * field name. The TS surface, session state, and user-facing UI all use
+ * "project" to match the website and the rest of the Amplitude product.
+ */
+export type AmplitudeProject = AmplitudeOrg['projects'][number];
 
 /**
- * Extract the primary Amplitude app ID from a workspace.
+ * Extract the primary Amplitude app ID from a project.
  * Picks the lowest-rank environment that has an app ID.
  * Returns null if no such environment exists.
  *
  * Note: "app" is the canonical term for the ingestion surface that owns an
  * API key, per amplitude/amplitude (`app_id`) and amplitude/javascript
- * (`App` GraphQL type). Amplitude's UI also labels this "Project ID".
+ * (`App` GraphQL type). Amplitude's UI also labels this "Project ID" in
+ * some places — it's the numeric app ID, not the project layer above it.
  */
-export function extractAppId(ws: AmplitudeWorkspace): string | null {
+export function extractAppId(project: AmplitudeProject): string | null {
   return (
-    (ws.environments ?? [])
+    (project.environments ?? [])
       .slice()
       .sort((a, b) => a.rank - b.rank)
       .find((e) => e.app?.id)?.app?.id ?? null
@@ -148,8 +156,12 @@ export class ApiError extends Error {
 }
 
 /**
- * Fetches the authenticated user's org/workspace info from Amplitude's Data API.
+ * Fetches the authenticated user's org/project info from Amplitude's Data API.
  * Uses the OAuth id_token as the Authorization header (same as ampli CLI).
+ *
+ * The backend GraphQL response carries a `workspaces` field; we rename it to
+ * `projects` at this boundary so the rest of the wizard only sees the
+ * user-facing terminology.
  */
 export async function fetchAmplitudeUser(
   idToken: string,
@@ -182,7 +194,7 @@ export async function fetchAmplitudeUser(
       orgs: orgs.map((org) => ({
         id: org.id,
         name: org.name,
-        workspaces: org.workspaces,
+        projects: org.workspaces,
       })),
     };
   } catch (error) {
@@ -445,9 +457,9 @@ export type AmplitudeBranch = {
 };
 
 const BRANCHES_QUERY = `
-query branches($orgId: ID!, $workspaceId: ID!) {
+query branches($orgId: ID!, $projectId: ID!) {
   orgs(id: $orgId) {
-    workspaces(id: $workspaceId) {
+    workspaces(id: $projectId) {
       branches {
         id
         name
@@ -458,18 +470,18 @@ query branches($orgId: ID!, $workspaceId: ID!) {
   }
 }`;
 
-/** Fetches branches for a workspace. */
+/** Fetches branches for a project. */
 export async function fetchBranches(
   idToken: string,
   zone: AmplitudeZone,
   orgId: string,
-  workspaceId: string,
+  projectId: string,
 ): Promise<AmplitudeBranch[]> {
   const { dataApiUrl } = AMPLITUDE_ZONE_SETTINGS[zone];
   try {
     const response = await axios.post(
       dataApiUrl,
-      { query: BRANCHES_QUERY, variables: { orgId, workspaceId } },
+      { query: BRANCHES_QUERY, variables: { orgId, projectId } },
       {
         headers: {
           Authorization: idToken,
@@ -487,9 +499,9 @@ export async function fetchBranches(
   }
 }
 
-// ── Workspace event types ─────────────────────────────────────────────────
+// ── Project event types ──────────────────────────────────────────────────
 
-const WorkspaceEventsSchema = z.object({
+const ProjectEventsSchema = z.object({
   data: z.object({
     orgs: z.array(
       z.object({
@@ -513,10 +525,10 @@ const WorkspaceEventsSchema = z.object({
   }),
 });
 
-const WORKSPACE_EVENTS_QUERY = `
-query workspaceEvents($orgId: ID!, $workspaceId: ID!, $branchId: ID!, $versionId: ID!) {
+const PROJECT_EVENTS_QUERY = `
+query projectEvents($orgId: ID!, $projectId: ID!, $branchId: ID!, $versionId: ID!) {
   orgs(id: $orgId) {
-    workspaces(id: $workspaceId) {
+    workspaces(id: $projectId) {
       branches(id: $branchId) {
         versions(id: $versionId) {
           events { id name }
@@ -527,19 +539,19 @@ query workspaceEvents($orgId: ID!, $workspaceId: ID!, $branchId: ID!, $versionId
 }`;
 
 /**
- * Fetches the event type names cataloged in the default branch of a workspace.
- * Returns an empty array if the workspace has no events or the query fails.
+ * Fetches the event type names cataloged in the default branch of a project.
+ * Returns an empty array if the project has no events or the query fails.
  */
-export async function fetchWorkspaceEventTypes(
+export async function fetchProjectEventTypes(
   idToken: string,
   zone: AmplitudeZone,
   orgId: string,
-  workspaceId: string,
+  projectId: string,
 ): Promise<string[]> {
   const { dataApiUrl } = AMPLITUDE_ZONE_SETTINGS[zone];
   try {
     // Step 1: get default branch + its current version
-    const branches = await fetchBranches(idToken, zone, orgId, workspaceId);
+    const branches = await fetchBranches(idToken, zone, orgId, projectId);
     const defaultBranch = branches.find((b) => b.default) ?? branches[0];
     if (!defaultBranch) return [];
 
@@ -547,10 +559,10 @@ export async function fetchWorkspaceEventTypes(
     const response = await axios.post(
       dataApiUrl,
       {
-        query: WORKSPACE_EVENTS_QUERY,
+        query: PROJECT_EVENTS_QUERY,
         variables: {
           orgId,
-          workspaceId,
+          projectId,
           branchId: defaultBranch.id,
           versionId: defaultBranch.currentVersionId,
         },
@@ -563,7 +575,7 @@ export async function fetchWorkspaceEventTypes(
         },
       },
     );
-    const parsed = WorkspaceEventsSchema.parse(response.data);
+    const parsed = ProjectEventsSchema.parse(response.data);
     return (
       parsed.data.orgs[0]?.workspaces[0]?.branches[0]?.versions[0]?.events.map(
         (e) => e.name,
@@ -690,9 +702,9 @@ export type AmplitudeSource = {
 };
 
 const SOURCES_QUERY = `
-query sources($orgId: ID!, $workspaceId: ID!, $branchId: ID!, $versionId: ID!) {
+query sources($orgId: ID!, $projectId: ID!, $branchId: ID!, $versionId: ID!) {
   orgs(id: $orgId) {
-    workspaces(id: $workspaceId) {
+    workspaces(id: $projectId) {
       branches(id: $branchId) {
         versions(id: $versionId) {
           id
@@ -719,7 +731,7 @@ export async function fetchSources(
   idToken: string,
   zone: AmplitudeZone,
   orgId: string,
-  workspaceId: string,
+  projectId: string,
   branchId: string,
   versionId: string,
 ): Promise<AmplitudeSource[]> {
@@ -729,7 +741,7 @@ export async function fetchSources(
       dataApiUrl,
       {
         query: SOURCES_QUERY,
-        variables: { orgId, workspaceId, branchId, versionId },
+        variables: { orgId, projectId, branchId, versionId },
       },
       {
         headers: {
@@ -778,14 +790,20 @@ export interface McpEventsResult {
  * Falls back to a Claude agent with the Amplitude MCP configured if the direct
  * HTTP call fails, so the check survives MCP API drift.
  *
- * Requires the numeric Amplitude app ID (from workspace.environments[].app.id),
- * not the workspace UUID. The downstream Amplitude MCP tool API still accepts
+ * Requires the numeric Amplitude app ID (from project.environments[].app.id),
+ * not the project UUID. The downstream Amplitude MCP tool API still accepts
  * this as a `projectId` parameter (external contract we don't control).
  * Returns false on any error so callers can fall through.
  */
 export async function fetchHasAnyEventsMcp(
   accessToken: string,
   appId: string,
+  /**
+   * Optional abort signal — propagated to the underlying MCP fetch so the
+   * caller can cancel an in-flight ingestion poll on shutdown / Ctrl+C
+   * instead of letting it run to completion in the background.
+   */
+  abortSignal?: AbortSignal,
 ): Promise<McpEventsResult> {
   const NONE: McpEventsResult = {
     hasEvents: false,
@@ -796,6 +814,7 @@ export async function fetchHasAnyEventsMcp(
 
   const result = await callAmplitudeMcp<McpEventsResult>({
     accessToken,
+    abortSignal,
     label: 'fetchHasAnyEventsMcp',
 
     direct: async (callTool) => {

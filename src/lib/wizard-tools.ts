@@ -9,12 +9,43 @@
 
 import path from 'path';
 import fs from 'fs';
+import os from 'os';
+import AdmZip from 'adm-zip';
 import { z } from 'zod';
 import { logToFile } from '../utils/debug';
 import { atomicWriteJSON } from '../utils/atomic-write';
+import { readLocalEventPlan } from './event-plan-parser.js';
+import {
+  ensureDir,
+  getDashboardFile,
+  getEventsFile,
+  getProjectMetaDir,
+} from '../utils/storage-paths';
 import type { PackageManagerDetector } from './package-manager-detection';
 import { getUI } from '../ui';
 import type { EventPlanDecision } from '../ui/wizard-ui';
+import { wrapMcpServerWithSentry } from './observability/index';
+import { toWizardDashboardOpenUrl } from '../utils/dashboard-open-url';
+
+// Allow-listed hosts for remote skill downloads. The wizard ships skills
+// from amplitude/context-hub via GitHub Releases; nothing else should ever
+// be a download source. Any host not on this list — including raw IPs and
+// HTTP URLs — is rejected before we touch the filesystem.
+const ALLOWED_SKILL_HOSTS = new Set<string>([
+  'github.com',
+  'objects.githubusercontent.com',
+  'codeload.github.com',
+]);
+
+export function isAllowedSkillUrl(rawUrl: string): boolean {
+  try {
+    const u = new URL(rawUrl);
+    if (u.protocol !== 'https:') return false;
+    return ALLOWED_SKILL_HOSTS.has(u.hostname);
+  } catch {
+    return false;
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Skill types
@@ -33,16 +64,34 @@ export interface SkillMenu {
 // ---------------------------------------------------------------------------
 
 /**
+ * Bound on the remote skill-menu fetch. The wizard waits on this call before
+ * the agent can run, so an unbounded fetch on a stuck CDN connection would
+ * stall the entire setup. 15s comfortably covers a worst-case GitHub Releases
+ * fetch but ensures we fall back to bundled skills instead of hanging.
+ */
+const SKILL_MENU_FETCH_TIMEOUT_MS = 15_000;
+
+/**
  * Fetch the skill menu from a remote skills server (GitHub Releases).
- * Returns parsed data on success, `null` on failure.
+ * Returns parsed data on success, `null` on failure (including timeout —
+ * the caller falls back to bundled skills, so silently swallowing a slow
+ * network is the correct behavior).
  */
 export async function fetchSkillMenu(
   skillsBaseUrl: string,
 ): Promise<SkillMenu | null> {
+  const menuUrl = `${skillsBaseUrl}/skill-menu.json`;
+  logToFile(`fetchSkillMenu: fetching from ${menuUrl}`);
+
+  // Bound the request with an AbortController so a hung CDN connection
+  // doesn't stall agent startup. Timer is always cleared in `finally`.
+  const controller = new AbortController();
+  const timeoutId = setTimeout(
+    () => controller.abort(),
+    SKILL_MENU_FETCH_TIMEOUT_MS,
+  );
   try {
-    const menuUrl = `${skillsBaseUrl}/skill-menu.json`;
-    logToFile(`fetchSkillMenu: fetching from ${menuUrl}`);
-    const resp = await fetch(menuUrl);
+    const resp = await fetch(menuUrl, { signal: controller.signal });
     if (resp.ok) {
       const data = (await resp.json()) as SkillMenu;
       logToFile(
@@ -55,18 +104,46 @@ export async function fetchSkillMenu(
     logToFile(`fetchSkillMenu: failed with HTTP ${resp.status}`);
     return null;
   } catch (err) {
+    const isAbort =
+      err instanceof Error &&
+      (err.name === 'AbortError' ||
+        (err as Error & { code?: string }).code === 'ABORT_ERR');
     logToFile(
-      `fetchSkillMenu: error: ${
-        err instanceof Error ? err.message : String(err)
-      }`,
+      isAbort
+        ? `fetchSkillMenu: timed out after ${SKILL_MENU_FETCH_TIMEOUT_MS}ms`
+        : `fetchSkillMenu: error: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
     );
     return null;
+  } finally {
+    clearTimeout(timeoutId);
   }
 }
 
 /**
  * Download and extract a skill from a remote URL.
  * Installs to `<installDir>/.claude/skills/<id>/`.
+ *
+ * Hardened against three classes of local-attacker exploit:
+ *
+ * 1. **Symlink race** — the previous version wrote to a hardcoded path
+ *    `/tmp/amplitude-skill-<id>.zip`. A local user could pre-create that
+ *    path as a symlink to e.g. `~/.ampli.json`, and `curl -o` would follow
+ *    the link and overwrite the OAuth tokens. We now use `mkdtempSync` to
+ *    get a unique, mode-0700, unguessable temp directory.
+ * 2. **Untrusted host** — the previous version downloaded from any URL the
+ *    skill manifest contained. Skills are only ever published by
+ *    amplitude/context-hub via GitHub Releases, so we allowlist the
+ *    GitHub-owned hosts and reject anything else.
+ * 3. **Zip-slip** — naive zip extractors will follow `../../../etc/passwd`
+ *    entries straight out of the target dir. We extract into the scratch
+ *    tmp dir first, then walk the result and reject any entry whose
+ *    resolved real path escapes the scratch root.
+ *
+ * Cross-platform note: extraction goes through `adm-zip` rather than the
+ * `unzip` CLI so this works on Windows (which has no `unzip` by default).
+ * `adm-zip`'s API is sync, matching the rest of this function.
  */
 export function downloadSkill(
   skillEntry: SkillEntry,
@@ -75,20 +152,102 @@ export function downloadSkill(
   const { execFileSync } =
     require('child_process') as typeof import('child_process');
   const skillDir = path.join(installDir, '.claude', 'skills', skillEntry.id);
-  const tmpFile = `/tmp/amplitude-skill-${skillEntry.id}.zip`;
+
+  if (!isAllowedSkillUrl(skillEntry.downloadUrl)) {
+    const msg = `downloadSkill: refused untrusted URL: ${skillEntry.downloadUrl}`;
+    logToFile(msg);
+    return {
+      success: false,
+      error: 'Skill download URL is not from an allowed host',
+    };
+  }
+
+  // Unique unguessable scratch dir (mode 0700) — defeats /tmp symlink races.
+  // (Uses os.tmpdir() so this works on Windows too — PR 333.)
+  const tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'amplitude-skill-'));
+  const tmpFile = path.join(tmpDir, 'skill.zip');
+  const extractDir = path.join(tmpDir, 'extract');
 
   try {
+    fs.mkdirSync(extractDir, { recursive: true });
+
+    execFileSync('curl', [
+      '-sSfL', // -f: fail on HTTP errors; -S: show errors; -L: follow redirects
+      '--proto',
+      '=https',
+      '--max-time',
+      '30',
+      skillEntry.downloadUrl,
+      '-o',
+      tmpFile,
+    ]);
+
+    // Extract into the scratch dir, NOT directly into the target. This way
+    // any zip-slip entry lands somewhere inside `extractDir` (or fails the
+    // realpath check below), never inside the user's project.
+    //
+    // We use `adm-zip` instead of shelling out to the `unzip` CLI because
+    // Windows has no `unzip` binary by default, and the previous shell-out
+    // ENOENT'd for every Windows user. `adm-zip` is pure JS, sync, and
+    // does its own internal zip-slip filtering — but the realpath walker
+    // below remains as defense-in-depth (different code, different bugs).
+    const zip = new AdmZip(tmpFile);
+    // `maintainEntryPath = true` preserves directory structure;
+    // `overwrite = true` matches the previous `unzip -o` semantics.
+    zip.extractAllTo(extractDir, /* overwrite */ true);
+
+    // Defense-in-depth zip-slip check: walk every extracted entry and make
+    // sure its real path stays inside extractDir. `unzip` is supposed to
+    // refuse `../` paths since 6.0, but we don't trust that — version skew
+    // and symlink entries (which `unzip` happily creates by default) make
+    // it cheap to verify.
+    const extractRealRoot = fs.realpathSync(extractDir);
+    const walk = (dir: string): void => {
+      for (const entry of fs.readdirSync(dir, { withFileTypes: true })) {
+        const full = path.join(dir, entry.name);
+        // Use lstat so we catch symlinks pointing outside without following
+        // them.
+        const stat = fs.lstatSync(full);
+        if (stat.isSymbolicLink()) {
+          // Resolve the link target relative to the link's own directory.
+          const resolved = path.resolve(dir, fs.readlinkSync(full));
+          if (
+            resolved !== extractRealRoot &&
+            !resolved.startsWith(extractRealRoot + path.sep)
+          ) {
+            throw new Error(
+              `Zip-slip detected: symlink ${full} -> ${resolved} escapes ${extractRealRoot}`,
+            );
+          }
+        } else {
+          const real = fs.realpathSync(full);
+          if (
+            real !== extractRealRoot &&
+            !real.startsWith(extractRealRoot + path.sep)
+          ) {
+            throw new Error(
+              `Zip-slip detected: ${full} resolves to ${real}, outside ${extractRealRoot}`,
+            );
+          }
+          if (entry.isDirectory()) walk(full);
+        }
+      }
+    };
+    walk(extractDir);
+
+    // Move into the final location only after we've validated the contents.
     fs.mkdirSync(skillDir, { recursive: true });
-    execFileSync('curl', ['-sL', skillEntry.downloadUrl, '-o', tmpFile], {
-      timeout: 30000,
-    });
-    execFileSync('unzip', ['-o', tmpFile, '-d', skillDir], {
-      timeout: 30000,
-    });
-    try {
-      fs.unlinkSync(tmpFile);
-    } catch {
-      /* ignore cleanup errors */
+    for (const entry of fs.readdirSync(extractDir)) {
+      const src = path.join(extractDir, entry);
+      const dest = path.join(skillDir, entry);
+      // Remove any pre-existing file at dest so renameSync succeeds across
+      // file types (matches old `unzip -o` overwrite semantics).
+      try {
+        fs.rmSync(dest, { recursive: true, force: true });
+      } catch {
+        /* ignore */
+      }
+      fs.renameSync(src, dest);
     }
 
     logToFile(
@@ -99,6 +258,14 @@ export function downloadSkill(
     const msg = err instanceof Error ? err.message : String(err);
     logToFile(`downloadSkill: error: ${msg}`);
     return { success: false, error: msg };
+  } finally {
+    // Always clean up the scratch directory — never leave half-extracted
+    // attacker-controlled bytes lying around in /tmp.
+    try {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    } catch {
+      /* ignore cleanup errors */
+    }
   }
 }
 
@@ -178,6 +345,100 @@ export function loadBundledSkillMenu(): SkillMenu {
 }
 
 /**
+ * Strict skill-id allowlist: lowercase alphanumeric with hyphens or underscores
+ * only. Used to gate any path.join with a skillId so a hostile or malformed
+ * id can never escape the skills root via traversal characters (`..`, `/`).
+ */
+const SKILL_ID_ALLOWLIST = /^[a-z0-9][a-z0-9_-]*$/;
+
+/**
+ * Check whether a bundled skill exists on disk by searching across all
+ * category subdirectories under skills/. Used to decide whether to pre-stage
+ * a skill before the agent runs vs leave integration entry to the agent
+ * prompt's on-disk discovery path (`Glob` under `.claude/skills/` — the
+ * wizard-tools skill menu tools stay disabled).
+ */
+export function bundledSkillExists(skillId: string): boolean {
+  // Reject any skillId that's not a strict basename — defense in depth before
+  // the path.join below (skillId comes from internal callers but we treat it
+  // as untrusted at the boundary).
+  if (!SKILL_ID_ALLOWLIST.test(skillId)) return false;
+  const skillsRoot = getSkillsRootDir();
+  try {
+    for (const category of fs.readdirSync(skillsRoot)) {
+      // Same defense for category names read off disk.
+      if (!SKILL_ID_ALLOWLIST.test(category)) continue;
+      // skillId and category are both validated against SKILL_ID_ALLOWLIST
+      // above, so neither can contain `..` or path separators.
+      // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
+      const candidate = path.join(skillsRoot, category, skillId);
+      if (
+        fs.existsSync(candidate) &&
+        fs.statSync(candidate).isDirectory() &&
+        // candidate is derived solely from the validated inputs above.
+        // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
+        fs.existsSync(path.join(candidate, 'SKILL.md'))
+      ) {
+        return true;
+      }
+    }
+  } catch {
+    return false;
+  }
+  return false;
+}
+
+/**
+ * Pre-stage a deterministic set of skills into the user's `.claude/skills/`
+ * directory before the agent runs, so the agent can load them via the Skill
+ * tool without having to call load_skill_menu / install_skill in a loop.
+ *
+ * The constant skills (taxonomy + instrumentation + dashboard) are always
+ * the same; the integration skill is resolved per framework via the optional
+ * resolver and may be null if no matching skill exists on disk.
+ *
+ * Returns the list of skill IDs that were successfully staged.
+ */
+export function preStageSkills(
+  installDir: string,
+  integrationSkillId: string | null,
+): { staged: string[]; integrationStaged: boolean } {
+  const constantSkills = [
+    'wizard-prompt-supplement',
+    'amplitude-quickstart-taxonomy-agent',
+    'add-analytics-instrumentation',
+    'amplitude-chart-dashboard-plan',
+  ];
+  const staged: string[] = [];
+  for (const id of constantSkills) {
+    if (!bundledSkillExists(id)) {
+      logToFile(`preStageSkills: skipping ${id} — not bundled`);
+      continue;
+    }
+    const result = installBundledSkill(id, installDir);
+    if (result.success) {
+      staged.push(id);
+    } else {
+      logToFile(`preStageSkills: failed to stage ${id}: ${result.error}`);
+    }
+  }
+  let integrationStaged = false;
+  if (integrationSkillId && bundledSkillExists(integrationSkillId)) {
+    const result = installBundledSkill(integrationSkillId, installDir);
+    if (result.success) {
+      staged.push(integrationSkillId);
+      integrationStaged = true;
+    } else {
+      logToFile(
+        `preStageSkills: failed to stage integration skill ${integrationSkillId}: ${result.error}`,
+      );
+    }
+  }
+  logToFile(`preStageSkills: staged [${staged.join(', ')}]`);
+  return { staged, integrationStaged };
+}
+
+/**
  * Install a bundled skill by copying it to the project's .claude/skills/ dir.
  * Searches across all category subdirectories under skills/.
  */
@@ -209,14 +470,40 @@ export function installBundledSkill(
 }
 
 /**
+ * Filename of the single archived prior report kept in the install dir.
+ * Hoisted above WIZARD_GITIGNORE_PATTERNS so the array initializer can
+ * reference it — without this hoist, the temporal-dead-zone forces a
+ * duplicate string literal which silently drifts. Exported for tests
+ * and OutroScreen so the constant doesn't drift downstream either.
+ */
+export const PREVIOUS_SETUP_REPORT_FILENAME =
+  'amplitude-setup-report.previous.md';
+
+/**
  * Patterns the wizard writes into the user's project that should never be
- * committed to git. Kept as a const so `ensureWizardArtifactsIgnored` and
- * `cleanupWizardArtifacts` stay in sync with each other — anything we
- * gitignore should also be cleanup-eligible, and vice versa.
+ * committed to git. Kept as a const so `ensureWizardArtifactsIgnored` has a
+ * single source of truth for what to add to the user's .gitignore.
+ *
+ * The list is broader than what `cleanupWizardArtifacts` removes on exit:
+ * several entries are kept on disk on purpose (the user-facing setup report,
+ * canonical `.amplitude/` metadata, optional legacy dotfiles from older runs)
+ * but selected paths should still never be committed.
  *
  * Notes on each entry:
- *   - `.amplitude-events.json` — persisted event plan from confirm_event_plan.
- *     Useful for re-instrumentation but never belongs in source control.
+ *   - `.amplitude/dashboard.json` — dashboard URL; often treated as
+ *     machine-local. Other `.amplitude/*` files (`events.json`,
+ *     `project-binding.json`) are intentionally not gitignored here so teams
+ *     can commit metadata when they want.
+ *   - `.amplitude-events.json` / `.amplitude-dashboard.json` — legacy paths
+ *     from older wizard or skill versions. The wizard writes the canonical
+ *     plan under `.amplitude/events.json` (see `persistEventPlan`) but still
+ *     reads these when present; keep them gitignored so stray copies never get
+ *     committed.
+ *   - `amplitude-setup-report.previous.md` — wizard-managed archive of the
+ *     prior run's setup report. The CURRENT report
+ *     (`amplitude-setup-report.md`) is intentionally NOT gitignored —
+ *     many users want to commit it as part of their analytics docs. Only
+ *     the archived prior copy is a wizard implementation detail. (PR 316.)
  *   - `.claude/skills/integration-...` — single-use SDK-setup workflows;
  *     removed at end of run. (Pattern is `integration-...slash` in gitignore.)
  *   - The instrumentation/taxonomy skills are kept on disk so users can
@@ -225,11 +512,19 @@ export function installBundledSkill(
  *     diff and surprise users who run `git add .` after the wizard.
  */
 export const WIZARD_GITIGNORE_PATTERNS: readonly string[] = [
+  '.amplitude/dashboard.json',
   '.amplitude-events.json',
+  '.amplitude-dashboard.json',
+  // Note: amplitude-setup-report.md (the CURRENT report) is intentionally
+  // NOT gitignored — many users want to commit it as part of their
+  // analytics docs. Only the wizard-managed archive of the PRIOR report
+  // is hidden from source control. (PR 316.)
+  PREVIOUS_SETUP_REPORT_FILENAME,
   '.claude/skills/integration-*/',
   '.claude/skills/add-analytics-instrumentation/',
   '.claude/skills/amplitude-chart-dashboard-plan/',
   '.claude/skills/amplitude-quickstart-taxonomy-agent/',
+  '.claude/skills/wizard-prompt-supplement/',
 ];
 
 /** Marker comment identifying the block as wizard-managed. */
@@ -308,45 +603,101 @@ function escapeRegex(s: string): string {
 }
 
 /**
- * Delete `<installDir>/.amplitude-events.json` if present.
+ * Archive `<installDir>/amplitude-setup-report.md` to a single sibling
+ * `amplitude-setup-report.previous.md` if present.
  *
- * The wizard's `confirm_event_plan` MCP tool persists the approved plan to
- * this file so the TUI's Event Plan viewer can render it. The
- * commandments instruct the inner Claude agent to delete the file in the
- * conclude phase, but model variance means it's not always honored — so
- * the wizard cleans up itself as a backstop. Silent on errors.
+ * Called at the START of a wizard run so the outro screen never advertises
+ * a stale report from a previous run (e.g. against a different workspace,
+ * or before the user re-authenticated) as if it described THIS run. The
+ * fresh report still lands at the canonical `amplitude-setup-report.md`
+ * path so existing tooling, CI, and gitignore rules don't need to change.
+ *
+ * UX choice: we keep exactly ONE prior report, not a timestamped history.
+ * Most users want "the latest report" and at most "the one before that"
+ * for comparison after a workspace switch. A growing pile of timestamped
+ * files (`amplitude-setup-report.2026-04-27T09-16-23.md`, ...) clutters
+ * the project root after a handful of runs and adds zero value over the
+ * previous-only approach for the typical workflow. If anyone needs a
+ * deeper audit trail, git history or CI logs are the right place — not
+ * the project root.
+ *
+ * Silent on I/O errors so a failed archive never blocks the wizard run.
  */
-export function cleanupAmplitudeEventsFile(installDir: string): void {
-  const target = path.join(installDir, '.amplitude-events.json');
+export function archiveSetupReportFile(installDir: string): void {
+  const target = path.join(installDir, 'amplitude-setup-report.md');
+  const archivePath = path.join(installDir, PREVIOUS_SETUP_REPORT_FILENAME);
   try {
-    if (fs.existsSync(target)) {
-      fs.unlinkSync(target);
-      logToFile(`cleanupAmplitudeEventsFile: removed ${target}`);
-    }
+    if (!fs.existsSync(target)) return;
+    // rename atomically replaces an existing destination on POSIX, so a
+    // run-N+2 cleanly overwrites whatever previous.md held from run-N+1.
+    // Each run preserves the immediately-prior report; older ones roll off.
+    fs.renameSync(target, archivePath);
+    logToFile(`archiveSetupReportFile: ${target} → ${archivePath}`);
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
-    logToFile(`cleanupAmplitudeEventsFile: ${msg}`);
+    logToFile(`archiveSetupReportFile: ${msg}`);
   }
 }
 
 /**
- * Run wizard-artifact cleanup. Composes:
- *   - cleanupIntegrationSkills (remove `.claude/skills/integration-*`)
+ * Inverse of {@link archiveSetupReportFile}. Restores
+ * `amplitude-setup-report.previous.md` back to `amplitude-setup-report.md`
+ * if and only if the canonical path is currently absent.
  *
- * Notes on what's intentionally PRESERVED:
- *   - `.amplitude-events.json` stays on disk. It's the canonical record of
- *     the user's confirmed event plan. Deleting it on every exit (the
- *     short-lived behavior introduced in #261) broke resumability — a
- *     user who Ctrl+C'd, hit a transient error, or just wanted to re-run
- *     the wizard was forced to re-confirm their plan from scratch.
- *     `ensureWizardArtifactsIgnored` keeps it out of git so it can't
- *     pollute commits even when kept on disk.
+ * This protects against data loss on cancel / error paths: the wizard
+ * archives the prior report at run start, but if the run never reaches
+ * the conclude phase (Ctrl+C, agent crash, network error, etc.) nothing
+ * writes a fresh canonical report. Without this restore, the user is
+ * left with NO report at the canonical path — only the archive — which
+ * is functionally the same as deleting their previous report.
+ *
+ * Silent on I/O errors so a failed restore never blocks teardown.
+ */
+export function restoreSetupReportIfMissing(installDir: string): void {
+  const target = path.join(installDir, 'amplitude-setup-report.md');
+  const archivePath = path.join(installDir, PREVIOUS_SETUP_REPORT_FILENAME);
+  try {
+    // Only restore when the canonical slot is empty — never overwrite a
+    // fresh report that the agent did manage to write before failure.
+    if (fs.existsSync(target)) return;
+    if (!fs.existsSync(archivePath)) return;
+    fs.renameSync(archivePath, target);
+    logToFile(`restoreSetupReportIfMissing: ${archivePath} → ${target}`);
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    logToFile(`restoreSetupReportIfMissing: ${msg}`);
+  }
+}
+
+/**
+ * Run wizard-artifact cleanup.
+ *
+ * Currently composes a single step:
+ *   - cleanupIntegrationSkills (remove `.claude/skills/integration-*`,
+ *     onSuccess only — preserves them on cancel/error so a re-run
+ *     doesn't re-download the skill)
+ *
+ * Notes on what's intentionally PRESERVED on every exit (success, cancel,
+ * error):
+ *   - `<installDir>/.amplitude/events.json`, `project-binding.json`, and
+ *     `dashboard.json` — canonical project metadata. `events.json` is the
+ *     authoritative record of the user's confirmed event plan and is reused
+ *     across runs for re-instrumentation. `dashboard.json` is gitignored via
+ *     `.amplitude/dashboard.json` so machine-local URLs do not pollute commits;
+ *     other `.amplitude/*` files may be committed when teams want.
+ *   - Legacy `<installDir>/.amplitude-events.json` and
+ *     `.amplitude-dashboard.json` when they already exist — the wizard no
+ *     longer writes these paths but does not delete them; readers prefer
+ *     `.amplitude/` and fall back to legacy for migration.
+ *   - `<installDir>/amplitude-setup-report.md` — user-facing summary the
+ *     OutroScreen points at. Kept on disk so the user can read it after
+ *     exit; the next run overwrites it.
  *   - Instrumentation and taxonomy skills (everything in
- *     `.claude/skills/` that isn't `integration-*`) — users invoke these
- *     later for event discovery and dashboard planning.
+ *     `.claude/skills/` that isn't `integration-*`) — users invoke
+ *     these later for event discovery and dashboard planning.
+ *     `ensureWizardArtifactsIgnored` keeps them out of git.
  *
- * Each step is silent on its own errors so a failure in one doesn't block
- * the others. Safe to call from any exit path; idempotent.
+ * Silent on errors. Safe to call from any exit path; idempotent.
  */
 export function cleanupWizardArtifacts(
   installDir: string,
@@ -492,13 +843,42 @@ export function resolveEnvPath(
 }
 
 /**
+ * Env file basenames that are often **committed** as shared defaults (Vite,
+ * CRA, monorepos). Auto-appending them to `.gitignore` after `set_env_values`
+ * breaks those workflows and encourages putting API keys in tracked files.
+ * Browser Amplitude keys should live in `*.local` siblings instead.
+ */
+export const SHARED_COMMITTED_ENV_BASENAMES: ReadonlySet<string> = new Set([
+  '.env',
+  '.env.development',
+  '.env.production',
+  '.env.test',
+  '.env.staging',
+  '.env.defaults',
+  '.env.example',
+]);
+
+export function shouldSkipAutoGitignoreForEnvBasename(
+  envBasename: string,
+): boolean {
+  return SHARED_COMMITTED_ENV_BASENAMES.has(envBasename);
+}
+
+/**
  * Ensure the given env file basename is covered by .gitignore in the working directory.
  * Creates .gitignore if it doesn't exist; appends the entry if missing.
+ *
+ * Skips shared template names (see {@link SHARED_COMMITTED_ENV_BASENAMES}) so
+ * we never gitignore files many repos intentionally track.
  */
 export function ensureGitignoreCoverage(
   workingDirectory: string,
   envFileName: string,
 ): void {
+  if (shouldSkipAutoGitignoreForEnvBasename(envFileName)) {
+    return;
+  }
+
   const gitignorePath = path.join(workingDirectory, '.gitignore');
 
   if (fs.existsSync(gitignorePath)) {
@@ -565,16 +945,74 @@ export function mergeEnvValues(
 }
 
 // ---------------------------------------------------------------------------
+// Event-name normalization
+// ---------------------------------------------------------------------------
+
+/**
+ * Normalize an event name to the canonical Title Case shape mandated by
+ * the wizard commandments ("[Noun] [Past-Tense Verb]", 2–5 words, ≤50
+ * chars).
+ *
+ * The system prompt asks the model for Title Case, but the
+ * `confirm_event_plan` tool schema historically said "lowercase". When
+ * the agent saw both, it sometimes emitted snake_case or all-lowercase
+ * names, which then rendered as ugly bullets in the Event Plan viewer
+ * and broke chart legends downstream. Rather than reject and force a
+ * second prompt round-trip, normalize forgivingly here so the contract
+ * is always met regardless of which guidance the model believed.
+ *
+ * Soft normalization — never throws, never rejects. Returns the name
+ * unchanged if it's already correctly shaped; converts snake_case,
+ * kebab-case, camelCase, and ALL-LOWERCASE inputs into Title Case.
+ *
+ * Exported for unit testing.
+ */
+export function normalizeEventName(raw: string): string {
+  const trimmed = raw.trim();
+  if (!trimmed) return trimmed;
+  // Convert separators (underscore, hyphen, dot) to spaces.
+  let working = trimmed.replace(/[_\-.]+/g, ' ');
+  // Split camelCase / PascalCase boundaries: insert a space before any
+  // uppercase letter that follows a lowercase letter or digit. ASCII-only
+  // — event names are English by convention; non-ASCII is left alone so
+  // we don't munge intentional UTF-8 in pathological cases.
+  working = working.replace(/([a-z0-9])([A-Z])/g, '$1 $2');
+  // Collapse runs of whitespace.
+  working = working.replace(/\s+/g, ' ').trim();
+  if (!working) return trimmed;
+  // Title-case each word. Preserve fully-uppercase tokens of length ≤4
+  // (acronyms like "API", "URL", "SDK"); otherwise capitalize first
+  // letter and lowercase the rest.
+  const titled = working
+    .split(' ')
+    .map((word) => {
+      if (!word) return word;
+      if (word.length <= 4 && /^[A-Z]+$/.test(word)) return word;
+      return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
+    })
+    .join(' ');
+  // Cap at 50 chars to match the wizard's truncation rule.
+  return titled.length > 50 ? titled.slice(0, 45) + '…' : titled;
+}
+
+// ---------------------------------------------------------------------------
 // Event plan persistence
 // ---------------------------------------------------------------------------
 
 /**
- * Write the canonical event plan to `<workingDirectory>/.amplitude-events.json`
+ * Write the canonical event plan to `<workingDirectory>/.amplitude/events.json`
  * using the shape the wizard UI expects: `[{name, description}]`.
  *
+ * Does not write the legacy root `.amplitude-events.json` — readers use
+ * {@link readLocalEventPlan} which prefers the canonical file and still
+ * honors a pre-existing legacy dotfile from older runs.
+ *
  * The agent is instructed (via commandments + integration skills) not to
- * write this file itself — the wizard tool is the single writer so the
- * shape can't drift. Exported for testing.
+ * write the canonical file itself — the wizard tool is the single writer so
+ * the shape cannot drift. Exported for testing.
+ *
+ * The `.amplitude/` directory is created lazily on first write and is
+ * gitignored as a single line.
  *
  * Returns true on success, false on any filesystem error (the caller logs
  * but doesn't fail the tool call over persistence issues).
@@ -584,8 +1022,18 @@ export function persistEventPlan(
   events: Array<{ name: string; description: string }>,
 ): boolean {
   try {
-    const planPath = path.join(workingDirectory, '.amplitude-events.json');
-    atomicWriteJSON(planPath, events);
+    // Refuse to materialize an event plan in a directory the wizard wasn't
+    // pointed at. Without this guard, `getProjectMetaDir` + recursive mkdir
+    // would happily synthesize the parents — turning a typo or missing
+    // installDir into silent file creation in unexpected places.
+    if (!fs.existsSync(workingDirectory)) {
+      logToFile(
+        `persistEventPlan: working directory does not exist: ${workingDirectory}`,
+      );
+      return false;
+    }
+    ensureDir(getProjectMetaDir(workingDirectory), 0o755);
+    atomicWriteJSON(getEventsFile(workingDirectory), events);
     return true;
   } catch (err) {
     logToFile(
@@ -595,11 +1043,212 @@ export function persistEventPlan(
   }
 }
 
+/**
+ * Write the dashboard payload to the canonical
+ * `<workingDirectory>/.amplitude/dashboard.json`.
+ *
+ * Called from the dashboard file-watcher in `agent-interface.ts` whenever a
+ * valid dashboard file is detected. Idempotent and silent on errors.
+ */
+export function persistDashboard(
+  workingDirectory: string,
+  content: Record<string, unknown>,
+): boolean {
+  try {
+    if (!fs.existsSync(workingDirectory)) {
+      logToFile(
+        `persistDashboard: working directory does not exist: ${workingDirectory}`,
+      );
+      return false;
+    }
+    ensureDir(getProjectMetaDir(workingDirectory), 0o755);
+    atomicWriteJSON(getDashboardFile(workingDirectory), content);
+    return true;
+  } catch (err) {
+    logToFile(
+      `persistDashboard: ${err instanceof Error ? err.message : String(err)}`,
+    );
+    return false;
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Setup-report fallback writer
+// ---------------------------------------------------------------------------
+
+/**
+ * Information the fallback writer needs to produce a minimal report.
+ * All fields are optional — the writer degrades gracefully when something
+ * isn't available (e.g. the dashboard step never ran, the events file was
+ * never persisted, the framework wasn't detected).
+ */
+export interface FallbackReportContext {
+  /** Project root where the report file lands. Required. */
+  installDir: string;
+  /** Detected integration name (e.g. "nextjs", "vue"). */
+  integration?: string | null;
+  /** Dashboard URL returned by the Amplitude MCP. */
+  dashboardUrl?: string | null;
+  /** Workspace / project name shown in Amplitude UI. */
+  workspaceName?: string | null;
+  /** Environment name (e.g. "production", "development"). */
+  envName?: string | null;
+}
+
+/**
+ * Read the persisted event plan (canonical `.amplitude/events.json`, then
+ * legacy `.amplitude-events.json` by mtime). Returns an empty array on any
+ * failure — the fallback writer is best-effort.
+ */
+function readPersistedEventPlan(
+  installDir: string,
+): Array<{ name: string; description: string }> {
+  return readLocalEventPlan(installDir);
+}
+
+/**
+ * Render a minimal Markdown setup report from session state. Exported so
+ * tests can lock down the formatting without going through the filesystem.
+ */
+export function buildFallbackReport(ctx: FallbackReportContext): string {
+  const events = readPersistedEventPlan(ctx.installDir);
+  const lines: string[] = [];
+
+  lines.push('<wizard-report>');
+  lines.push('# Amplitude post-wizard report');
+  lines.push('');
+  lines.push(
+    "_This report was generated automatically by the Amplitude wizard. The agent didn't produce one this run, so the wizard wrote a minimal recap from what it knows._",
+  );
+  lines.push('');
+
+  lines.push('## Integration summary');
+  lines.push('');
+  const summaryStart = lines.length;
+  if (ctx.integration) lines.push(`- **Framework**: ${ctx.integration}`);
+  if (ctx.workspaceName) lines.push(`- **Project**: ${ctx.workspaceName}`);
+  if (ctx.envName) lines.push(`- **Environment**: ${ctx.envName}`);
+  if (lines.length === summaryStart) {
+    lines.push('- _Detected framework not available._');
+  }
+  lines.push('');
+
+  if (events.length > 0) {
+    lines.push('## Instrumented events');
+    lines.push('');
+    lines.push('| Event | Description |');
+    lines.push('| --- | --- |');
+    for (const e of events) {
+      const name = e.name.replace(/\|/g, '\\|');
+      const desc = (e.description || '').replace(/\|/g, '\\|');
+      lines.push(`| \`${name}\` | ${desc} |`);
+    }
+    lines.push('');
+  } else {
+    lines.push('## Instrumented events');
+    lines.push('');
+    lines.push(
+      '_No event plan was persisted. If this is unexpected, re-run the wizard or check `.amplitude/events.json` (or legacy `.amplitude-events.json`) in your project._',
+    );
+    lines.push('');
+  }
+
+  lines.push('## Analytics dashboard');
+  lines.push('');
+  if (ctx.dashboardUrl) {
+    lines.push(
+      `Open your dashboard: ${toWizardDashboardOpenUrl(ctx.dashboardUrl)}`,
+    );
+  } else {
+    lines.push(
+      "_The wizard didn't capture a dashboard URL. You can build one from your events at https://app.amplitude.com._",
+    );
+  }
+  lines.push('');
+
+  lines.push('## Next steps');
+  lines.push('');
+  lines.push(
+    '- Trigger the instrumented user flows in your app and confirm events appear in Amplitude.',
+  );
+  lines.push(
+    '- Set the Amplitude API key in your production environment (deploy platform settings or CI secrets).',
+  );
+  lines.push(
+    '- Re-run `npx @amplitude/wizard` if you want a richer end-of-run report — the agent writes a more detailed version when it reaches the conclude phase.',
+  );
+  lines.push('');
+  lines.push('</wizard-report>');
+  lines.push('');
+
+  return lines.join('\n');
+}
+
+/**
+ * Write `<installDir>/amplitude-setup-report.md` when the canonical
+ * path is empty. Safety net for runs where the agent skipped the
+ * conclude-phase report (model variance, ran out of turns, mid-run
+ * cancel before conclude, etc.).
+ *
+ * The companion `archiveSetupReportFile()` (run at the start of every
+ * run, in PR #316) moves any prior report to
+ * `amplitude-setup-report.previous.md`, so the canonical path is
+ * guaranteed to either be empty or freshly written by the current run
+ * when this function is called. There's no need for mtime / staleness
+ * logic — `existsSync` is authoritative.
+ *
+ * Returns:
+ *   - 'agent-wrote'    — agent wrote a fresh report this run; left untouched.
+ *   - 'fallback-wrote' — canonical was missing; wrote a stub.
+ *   - 'failed'         — write threw (permissions, disk full, etc.).
+ *
+ * Silent on errors; never throws — the wizard's outcome must not be
+ * blocked by a failed report write.
+ */
+export function writeFallbackReportIfMissing(
+  ctx: FallbackReportContext,
+): 'agent-wrote' | 'fallback-wrote' | 'failed' {
+  const reportPath = path.join(ctx.installDir, 'amplitude-setup-report.md');
+  try {
+    if (fs.existsSync(reportPath)) {
+      logToFile(
+        `writeFallbackReportIfMissing: agent already wrote ${reportPath}`,
+      );
+      return 'agent-wrote';
+    }
+
+    const content = buildFallbackReport(ctx);
+    fs.writeFileSync(reportPath, content, 'utf8');
+    logToFile(
+      `writeFallbackReportIfMissing: wrote stub report to ${reportPath}`,
+    );
+    return 'fallback-wrote';
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    logToFile(`writeFallbackReportIfMissing: ${msg}`);
+    return 'failed';
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Server factory
 // ---------------------------------------------------------------------------
 
 const SERVER_NAME = 'wizard-tools';
+
+/**
+ * Description appended to every tool's `reason` parameter. Kept as a constant
+ * so all wizard-tools schemas describe `reason` identically — the agent reads
+ * the description verbatim to decide what to write here.
+ */
+const REASON_FIELD_DESCRIPTION =
+  'A short sentence (≤25 words) explaining WHY you are invoking this tool right now — what you are trying to accomplish at this step. Captured in Agent Analytics so the team can understand intent across runs.';
+
+/**
+ * Reusable Zod field for the `reason` parameter required on every wizard tool.
+ * Adding `.min(1)` so an empty string is rejected — analytics needs real text.
+ */
+const reasonField = z.string().min(1).describe(REASON_FIELD_DESCRIPTION);
 
 /**
  * Create the unified in-process MCP server with all wizard tools.
@@ -614,15 +1263,22 @@ export async function createWizardToolsServer(options: WizardToolsOptions) {
   } = options;
   const { tool, createSdkMcpServer } = await getSDKModule();
 
-  // Load skill menu: try remote first, fall back to bundled
-  const menu = skillsBaseUrl
-    ? (await fetchSkillMenu(skillsBaseUrl)) ?? loadBundledSkillMenu()
-    : loadBundledSkillMenu();
-  const cachedSkillMenu: Record<string, SkillEntry[]> = menu?.categories ?? {};
-
-  const keys = Object.keys(cachedSkillMenu);
-  const categoryNames: [string, ...string[]] =
-    keys.length > 0 ? (keys as [string, ...string[]]) : ['integration'];
+  // Skill menu loading (cachedSkillMenu / categoryNames) intentionally
+  // skipped — the load_skill_menu / install_skill tools that consumed
+  // it are disabled (see the disabled-tool block further down). When
+  // those tools are re-enabled, restore the menu loading too:
+  //
+  //   const menu = skillsBaseUrl
+  //     ? (await fetchSkillMenu(skillsBaseUrl)) ?? loadBundledSkillMenu()
+  //     : loadBundledSkillMenu();
+  //   const cachedSkillMenu: Record<string, SkillEntry[]> = menu?.categories ?? {};
+  //   const keys = Object.keys(cachedSkillMenu);
+  //   const categoryNames: [string, ...string[]] =
+  //     keys.length > 0 ? (keys as [string, ...string[]]) : ['integration'];
+  //
+  // `skillsBaseUrl` is still threaded through this factory's signature
+  // so re-enabling doesn't require changing the public API.
+  void skillsBaseUrl;
 
   // -- check_env_keys -------------------------------------------------------
 
@@ -636,8 +1292,9 @@ export async function createWizardToolsServer(options: WizardToolsOptions) {
       keys: z
         .array(z.string())
         .describe('Environment variable key names to check'),
+      reason: reasonField,
     },
-    (args: { filePath: string; keys: string[] }) => {
+    (args: { filePath: string; keys: string[]; reason: string }) => {
       const resolved = resolveEnvPath(workingDirectory, args.filePath);
       logToFile(`check_env_keys: ${resolved}, keys: ${args.keys.join(', ')}`);
 
@@ -662,7 +1319,7 @@ export async function createWizardToolsServer(options: WizardToolsOptions) {
 
   const setEnvValues = tool(
     'set_env_values',
-    'Create or update environment variable keys in a .env file. Creates the file if it does not exist. Ensures .gitignore coverage.',
+    'Create or update environment variable keys in a .env file. Creates the file if it does not exist. Ensures .gitignore coverage for secret-local files (e.g. .env.local). For Vite and similar stacks, prefer `.env.development.local` / `.env.production.local` when the repo already tracks `.env.development` / `.env.production` — never rely on auto-gitignore for those tracked template names.',
     {
       filePath: z
         .string()
@@ -670,8 +1327,13 @@ export async function createWizardToolsServer(options: WizardToolsOptions) {
       values: z
         .record(z.string(), z.string())
         .describe('Key-value pairs to set'),
+      reason: reasonField,
     },
-    (args: { filePath: string; values: Record<string, string> }) => {
+    (args: {
+      filePath: string;
+      values: Record<string, string>;
+      reason: string;
+    }) => {
       const resolved = resolveEnvPath(workingDirectory, args.filePath);
       logToFile(
         `set_env_values: ${resolved}, keys: ${Object.keys(args.values).join(
@@ -692,9 +1354,14 @@ export async function createWizardToolsServer(options: WizardToolsOptions) {
 
       fs.writeFileSync(resolved, content, 'utf8');
 
-      // Ensure .gitignore coverage for this env file
+      // Ensure .gitignore coverage for this env file (skipped for shared
+      // committed templates like .env.development — see ensureGitignoreCoverage).
       const envFileName = path.basename(resolved);
       ensureGitignoreCoverage(workingDirectory, envFileName);
+
+      const skipNote = shouldSkipAutoGitignoreForEnvBasename(envFileName)
+        ? ' Note: this filename is often a committed env template; use a `.local` sibling for values that must stay untracked.'
+        : '';
 
       return {
         content: [
@@ -702,7 +1369,7 @@ export async function createWizardToolsServer(options: WizardToolsOptions) {
             type: 'text' as const,
             text: `Updated ${Object.keys(args.values).length} key(s) in ${
               args.filePath
-            }`,
+            }.${skipNote}`,
           },
         ],
       };
@@ -710,15 +1377,39 @@ export async function createWizardToolsServer(options: WizardToolsOptions) {
   );
 
   // -- detect_package_manager -----------------------------------------------
+  //
+  // The agent typically calls this 2–3 times during a run (before
+  // installing the SDK, before running typecheck, sometimes again before
+  // verification). Each call previously paid a fresh disk scan of the
+  // working directory and any framework-specific lockfile probes —
+  // observably 50–250ms in dev, longer on a slow FS. The package manager
+  // can't change mid-run, so memoize the first scan for the lifetime of
+  // this tools server (one server per wizard run).
+  //
+  // The cache is a Promise so concurrent calls share the same in-flight
+  // scan instead of racing.
+  let detectPMCache: Promise<
+    Awaited<ReturnType<typeof detectPackageManager>>
+  > | null = null;
 
   const detectPM = tool(
     'detect_package_manager',
     'Detect which package manager(s) the project uses. Returns the name, install command, and run command for each detected package manager. Call this before running any install commands.',
-    {},
-    async () => {
-      logToFile(`detect_package_manager: scanning ${workingDirectory}`);
+    {
+      reason: reasonField,
+    },
+    async (_args: { reason: string }) => {
+      if (detectPMCache) {
+        logToFile(`detect_package_manager: cache hit for ${workingDirectory}`);
+      } else {
+        logToFile(`detect_package_manager: scanning ${workingDirectory}`);
+        detectPMCache = detectPackageManager(workingDirectory).catch((err) => {
+          detectPMCache = null;
+          throw err;
+        });
+      }
 
-      const result = await detectPackageManager(workingDirectory);
+      const result = await detectPMCache;
 
       logToFile(
         `detect_package_manager: detected ${result.detected.length} package manager(s)`,
@@ -735,15 +1426,32 @@ export async function createWizardToolsServer(options: WizardToolsOptions) {
     },
   );
 
-  // -- load_skill_menu ------------------------------------------------------
-
+  // -- load_skill_menu / install_skill — DISABLED ───────────────────────────
+  //
+  // Both tools currently 400 in production: remote skill downloads return
+  // not-found errors and the bundled-skill fallback hits packs the agent
+  // can't make sense of without the runtime menu. Until the catalogue
+  // / download path is fixed, don't expose them to the agent — they
+  // confuse it more than they help (the agent loops calling
+  // load_skill_menu → install_skill → load_skill_menu) and waste turns.
+  //
+  // Constant skills (taxonomy + instrumentation + dashboard) are still
+  // pre-installed at runtime by `installConstantSkills`, so the agent
+  // can `Skill.load` them directly without going through this menu.
+  //
+  // To re-enable: uncomment the two `tool(...)` blocks below, add them
+  // back to the `tools: [...]` array on `createSdkMcpServer`, and add
+  // their names back to `WIZARD_TOOL_NAMES`. The original implementations
+  // are preserved here so re-enabling is a small diff.
+  /*
   const loadSkillMenu = tool(
     'load_skill_menu',
     'Load available Amplitude skills for a category. Returns skill IDs and names. Call this first, then use install_skill with the chosen ID.',
     {
       category: z.enum(categoryNames).describe('Skill category'),
+      reason: reasonField,
     },
-    (args: { category: string }) => {
+    (args: { category: string; reason: string }) => {
       const skills = cachedSkillMenu[args.category];
       if (!skills || skills.length === 0) {
         return {
@@ -769,8 +1477,6 @@ export async function createWizardToolsServer(options: WizardToolsOptions) {
     },
   );
 
-  // -- install_skill --------------------------------------------------------
-
   const installSkill = tool(
     'install_skill',
     'Download and install an Amplitude skill by ID. Call load_skill_menu first to see available skills. Extracts the skill to .claude/skills/<skillId>/.',
@@ -780,8 +1486,9 @@ export async function createWizardToolsServer(options: WizardToolsOptions) {
         .describe(
           'Skill ID from the skill menu (e.g., "integration-nextjs-app-router")',
         ),
+      reason: reasonField,
     },
-    (args: { skillId: string }) => {
+    (args: { skillId: string; reason: string }) => {
       if (!/^[a-z0-9][a-z0-9_-]*$/.test(args.skillId)) {
         return {
           content: [
@@ -794,7 +1501,6 @@ export async function createWizardToolsServer(options: WizardToolsOptions) {
         };
       }
 
-      // Look up download URL from cached menu
       const allSkills: SkillEntry[] = Object.values(cachedSkillMenu).flat();
       const skill = allSkills.find((s) => s.id === args.skillId);
       if (!skill) {
@@ -809,7 +1515,6 @@ export async function createWizardToolsServer(options: WizardToolsOptions) {
         };
       }
 
-      // Try remote download if URL available, otherwise use bundled copy
       const result = skill.downloadUrl
         ? downloadSkill(skill, workingDirectory)
         : installBundledSkill(args.skillId, workingDirectory);
@@ -835,6 +1540,7 @@ export async function createWizardToolsServer(options: WizardToolsOptions) {
       }
     },
   );
+  */
 
   // -- confirm --------------------------------------------------------------
 
@@ -845,8 +1551,9 @@ export async function createWizardToolsServer(options: WizardToolsOptions) {
       message: z
         .string()
         .describe('The confirmation question to show the user'),
+      reason: reasonField,
     },
-    async (args: { message: string }) => {
+    async (args: { message: string; reason: string }) => {
       logToFile(`confirm: ${args.message}`);
       const answer = await getUI().promptConfirm(args.message);
       return {
@@ -866,8 +1573,9 @@ export async function createWizardToolsServer(options: WizardToolsOptions) {
         .array(z.string())
         .min(2)
         .describe('The list of choices to present'),
+      reason: reasonField,
     },
-    async (args: { message: string; options: string[] }) => {
+    async (args: { message: string; options: string[]; reason: string }) => {
       logToFile(`choose: ${args.message}, options: ${args.options.join(', ')}`);
       const answer = await getUI().promptChoice(args.message, args.options);
       return {
@@ -892,7 +1600,7 @@ Returns: "approved", "skipped", or "feedback: <user message>"`,
             name: z
               .string()
               .describe(
-                'Short lowercase event name using spaces for separators, e.g. "user signed up", "product added to cart", "search performed". This is displayed as a bold label — keep it concise (2-5 words). Do NOT put descriptions or file paths here.',
+                'Title Case event name, [Noun] [Past-Tense Verb], 2-5 words. Examples: "User Signed Up", "Product Added To Cart", "Search Performed", "Checkout Started". NOT snake_case ("user_signed_up"), camelCase ("userSignedUp"), or lowercase ("user signed up"). Do NOT put descriptions or file paths here.',
               ),
             description: z
               .string()
@@ -903,18 +1611,34 @@ Returns: "approved", "skipped", or "feedback: <user message>"`,
         )
         .min(1)
         .describe('The list of events you plan to instrument'),
+      reason: reasonField,
     },
-    async (args: { events: Array<{ name: string; description: string }> }) => {
+    async (args: {
+      events: Array<{ name: string; description: string }>;
+      reason: string;
+    }) => {
       const { DEMO_MODE } = await import('./constants.js');
-      // Light normalization — truncate overly long names but don't try to
-      // extract names from descriptions.
-      const normalizedEvents = args.events.map((e) => ({
-        name:
-          e.name.trim().length > 50
-            ? e.name.trim().slice(0, 45) + '…'
-            : e.name.trim(),
-        description: e.description?.trim() || '',
-      }));
+      // Soft-gate the name format. Agents historically saw conflicting
+      // guidance (commandments said Title Case, the tool schema said
+      // lowercase) and emitted mixed shapes. Normalize forgivingly here
+      // so the persisted plan AND the user-facing prompt always match
+      // the canonical Title Case shape — no second prompt round-trip
+      // needed when the model gets it slightly wrong.
+      let normalizationCount = 0;
+      const normalizedEvents = args.events.map((e) => {
+        const original = e.name.trim();
+        const normalized = normalizeEventName(original);
+        if (normalized !== original) normalizationCount += 1;
+        return {
+          name: normalized,
+          description: e.description?.trim() || '',
+        };
+      });
+      if (normalizationCount > 0) {
+        logToFile(
+          `confirm_event_plan: normalized ${normalizationCount}/${args.events.length} event name(s) to Title Case`,
+        );
+      }
       const events =
         DEMO_MODE && normalizedEvents.length > 5
           ? normalizedEvents.slice(0, 5)
@@ -931,7 +1655,7 @@ Returns: "approved", "skipped", or "feedback: <user message>"`,
       } else {
         text = decision.decision; // 'approved' or 'skipped'
       }
-      // Persist the canonical event plan to .amplitude-events.json so the
+      // Persist the canonical event plan to `.amplitude/events.json` so the
       // watcher and return-run loader see the same {name, description} shape
       // regardless of what the agent would otherwise emit. Only write on
       // approved to avoid overwriting a prior good plan with a rejected one.
@@ -975,8 +1699,14 @@ Returns: "approved", "skipped", or "feedback: <user message>"`,
         .min(1)
         .max(500)
         .describe('Short human-readable message, shown verbatim to the user.'),
+      reason: reasonField,
     },
-    (args: { kind: StatusKind; code: string; detail: string }) => {
+    (args: {
+      kind: StatusKind;
+      code: string;
+      detail: string;
+      reason: string;
+    }) => {
       const now = Date.now();
       const key = `${args.kind}:${args.code}`;
       const history = reportHistory.get(key) ?? [];
@@ -1018,23 +1748,200 @@ Returns: "approved", "skipped", or "feedback: <user message>"`,
     },
   );
 
+  // -- record_dashboard -----------------------------------------------------
+  // Persists a dashboard the agent just created via the Amplitude MCP. This
+  // is the explicit hand-off from the in-loop agent (which does the actual
+  // chart/dashboard MCP calls during the "Build your starter dashboard" task) to the
+  // wizard's outro and post-agent step. Writes
+  // `<installDir>/.amplitude/dashboard.json` (via persistDashboard).
+  //
+  // When this tool fires, `createDashboardStep` finds the file on its next
+  // pass and short-circuits to its reuse path — no 90s MCP+sub-agent fallback,
+  // no "Creating charts and dashboard in Amplitude…" spinner hang.
+  const recordDashboard = tool(
+    'record_dashboard',
+    `Record an Amplitude dashboard you just created via the Amplitude MCP server.
+Call this tool IMMEDIATELY after \`create_dashboard\` returns successfully — it persists the URL and chart metadata so the wizard's outro can link to it and the post-agent fallback step can short-circuit.
+Required: dashboardUrl. Optional but recommended: dashboardId, charts (id/title/type per chart).
+Returns: "ok" on successful persistence, an error string otherwise. Idempotent — safe to call again with updated values.`,
+    {
+      dashboardUrl: z
+        .string()
+        .url()
+        .describe(
+          'The full HTTPS URL to the created dashboard in Amplitude (e.g. https://app.amplitude.com/.../dashboard/abc123). Must be a valid URL — the outro renders this as a clickable link.',
+        ),
+      dashboardId: z
+        .string()
+        .min(1)
+        .optional()
+        .describe(
+          'The dashboard ID returned by the Amplitude MCP create_dashboard call. Optional but recommended for downstream tooling.',
+        ),
+      charts: z
+        .array(
+          z.object({
+            id: z.string().optional(),
+            title: z.string().optional(),
+            type: z.string().optional(),
+          }),
+        )
+        .optional()
+        .describe(
+          'Metadata for each chart on the dashboard. Used by the wizard outro and analytics. Pass at least the title and type per chart (e.g. funnel, line, retention).',
+        ),
+      reason: reasonField,
+    },
+    (args: {
+      dashboardUrl: string;
+      dashboardId?: string;
+      charts?: Array<{ id?: string; title?: string; type?: string }>;
+      reason: string;
+    }) => {
+      const payload: Record<string, unknown> = {
+        dashboardUrl: args.dashboardUrl,
+      };
+      if (args.dashboardId) payload.dashboardId = args.dashboardId;
+      if (args.charts) payload.charts = args.charts;
+
+      const persistedCanonical = persistDashboard(workingDirectory, payload);
+
+      logToFile(
+        `record_dashboard: url=${args.dashboardUrl} charts=${
+          args.charts?.length ?? 0
+        } canonical=${persistedCanonical}`,
+      );
+
+      // Surface the dashboard URL on the session immediately so the outro
+      // (and any soft-error abort path in agent-runner that probes
+      // `agentArtifactsLookComplete`) sees the success even if the rest of
+      // the agent run trips on a late-stage flush. The post-agent step also
+      // sets this, but doing it here makes the in-loop path self-contained.
+      try {
+        getUI().setDashboardUrl(args.dashboardUrl);
+      } catch (err) {
+        logToFile(
+          `record_dashboard: ui.setDashboardUrl failed: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+      }
+
+      if (!persistedCanonical) {
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text: 'error: failed to persist dashboard to disk — see wizard log',
+            },
+          ],
+        };
+      }
+      return { content: [{ type: 'text' as const, text: 'ok' }] };
+    },
+  );
+
+  // -- wizard_feedback ------------------------------------------------------
+  // Structured agent-side feedback for blocked or stuck states. Distinct from
+  // the user-facing /feedback slash command (`trackWizardFeedback`); this one
+  // is invoked by the agent itself when it can't move forward, and emits a
+  // queryable event for Agent Analytics so we can find broken flows without
+  // grepping logs. Only used for in-run blockers — successful runs should not
+  // call this.
+  const wizardFeedback = tool(
+    'wizard_feedback',
+    'Report a structured blocker or warning when you (the agent) cannot move forward. Use this for unresolvable states, unexpected codebase shapes, missing prerequisites, or persistent tool failures — NOT for routine progress updates (use report_status for those). Surfaces as a queryable signal in Agent Analytics so the team can see where runs get stuck.',
+    {
+      goal: z
+        .string()
+        .min(1)
+        .max(500)
+        .describe('What you were trying to accomplish at this step.'),
+      steps_tried: z
+        .array(z.string().min(1).max(500))
+        .min(1)
+        .describe(
+          'The concrete steps or tool calls you attempted before reporting this blocker.',
+        ),
+      blocker: z
+        .string()
+        .min(1)
+        .max(1000)
+        .describe(
+          'What is preventing you from continuing — error message, missing file, ambiguous codebase shape, etc.',
+        ),
+      severity: z
+        .enum(['warn', 'error'])
+        .describe(
+          '"warn" if you can continue with a degraded result; "error" if the run cannot proceed.',
+        ),
+      reason: reasonField,
+    },
+    (args: {
+      goal: string;
+      steps_tried: string[];
+      blocker: string;
+      severity: 'warn' | 'error';
+      reason: string;
+    }) => {
+      logToFile(
+        `wizard_feedback (${args.severity}): goal="${args.goal}" blocker="${args.blocker}"`,
+      );
+      // Lazy-import to avoid a static dependency cycle: utils/analytics
+      // imports from lib/* indirectly through other shared modules, and we
+      // want this MCP server to remain importable from anywhere without
+      // pulling the analytics client into module init.
+      void (async () => {
+        try {
+          const { analytics } = await import('../utils/analytics.js');
+          analytics.wizardCapture('agent feedback submitted', {
+            goal: args.goal,
+            'steps tried': args.steps_tried,
+            blocker: args.blocker,
+            severity: args.severity,
+            reason: args.reason,
+          });
+        } catch (err) {
+          logToFile(
+            `wizard_feedback: analytics emit failed: ${
+              err instanceof Error ? err.message : String(err)
+            }`,
+          );
+        }
+      })();
+      return {
+        content: [{ type: 'text' as const, text: 'feedback recorded' }],
+      };
+    },
+  );
+
   // -- Assemble server ------------------------------------------------------
 
-  return createSdkMcpServer({
+  const rawServer = createSdkMcpServer({
     name: SERVER_NAME,
     version: '1.0.0',
     tools: [
       checkEnvKeys,
       setEnvValues,
       detectPM,
-      loadSkillMenu,
-      installSkill,
+      // loadSkillMenu and installSkill intentionally not exposed — see
+      // the disabled-tool block above for context. Constant skills are
+      // pre-installed at runtime so the agent can `Skill.load` them
+      // directly.
       confirm,
       choose,
       confirmEventPlan,
       reportStatus,
+      recordDashboard,
+      wizardFeedback,
     ],
   });
+
+  // Wrap with Sentry auto-instrumentation so every wizard-tools call gets a
+  // span in the active trace. No-op when telemetry is disabled — returns
+  // the raw server unchanged. The agent SDK types `createSdkMcpServer` as
+  // returning `unknown`, so we narrow to `object` here for the wrapper.
+  return wrapMcpServerWithSentry(rawServer as object);
 }
 
 /** Tool names exposed by the wizard-tools server, for use in allowedTools */
@@ -1042,10 +1949,16 @@ export const WIZARD_TOOL_NAMES = [
   `${SERVER_NAME}:check_env_keys`,
   `${SERVER_NAME}:set_env_values`,
   `${SERVER_NAME}:detect_package_manager`,
-  `${SERVER_NAME}:load_skill_menu`,
-  `${SERVER_NAME}:install_skill`,
+  // load_skill_menu / install_skill intentionally omitted while the
+  // skill catalogue / download path is broken — see the disabled-tool
+  // block in this file for context.
   `${SERVER_NAME}:confirm`,
   `${SERVER_NAME}:choose`,
   `${SERVER_NAME}:confirm_event_plan`,
   `${SERVER_NAME}:report_status`,
+  `${SERVER_NAME}:record_dashboard`,
+  `${SERVER_NAME}:wizard_feedback`,
 ];
+
+/** Stable server name — used by hooks to namespace `mcp__wizard-tools__*` tool calls. */
+export const WIZARD_TOOLS_SERVER_NAME = SERVER_NAME;

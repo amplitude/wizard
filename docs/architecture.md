@@ -158,7 +158,7 @@ detection, and post-agent steps are completely mode-agnostic.
 | **Rendering** | Ink (React for terminals) with full-screen layout, tabs, colors | Simple `console.log` with Unicode markers (`┌ │ ✔ ▲ ✖`) | NDJSON — one JSON object per line to stdout |
 | **State management** | `WizardStore` with nanostores — reactive atoms, subscriptions, re-renders | No reactive state; session mutations are no-ops | No reactive state; emits status/progress/result events |
 | **Screen routing** | `WizardRouter` walks declarative flow pipelines | No screens, no routing, no transitions | No screens, no routing |
-| **Overlays** | Stack-based interrupts (outage, settings override, snake game) | Warnings printed to console, then continue | Warnings emitted as JSON events |
+| **Overlays** | Stack-based interrupts (outage, snake game) | Warnings printed to console, then continue | Warnings emitted as JSON events |
 | **Slash commands** | `/region`, `/login`, `/logout`, `/whoami`, `/mcp`, `/slack`, `/feedback`, `/snake`, `/exit` — always available | None | None |
 | **Prompts** | Block the agent — user must respond (confirm, choose, approve event plan) | Auto-resolve: `promptConfirm` → `false`, `promptChoice` → `""`, `promptEventPlan` → `approved` | Auto-resolve: `promptConfirm` → `true`, `promptChoice` → first option, `promptEventPlan` → `approved` |
 | **Error retry** | User presses R to retry; `setRunError()` blocks until user decides | `setRunError()` returns `false` immediately (no retry) | `setRunError()` emits error event, returns `false` (no retry) |
@@ -279,7 +279,7 @@ IntroScreen                   Shows detected framework, user confirms
 RegionSelectScreen            US or EU (skipped for returning users)
      │
      ▼
-AuthScreen (SUSI flow)        OAuth → org picker → workspace picker → API key
+AuthScreen (SUSI flow)        OAuth → org picker → project picker → API key
      │
      ▼
 DataSetupScreen               Checks activation level via API:
@@ -300,7 +300,7 @@ McpScreen                     Install Amplitude MCP server into editors
      │                        (VS Code, Cursor, Zed, Claude Desktop,
      │                         Claude Code, Codex)
      ▼
-DataIngestionCheckScreen      Polls activation API every 30s until events arrive
+DataIngestionCheckScreen      Polls for events; Enter/q can skip verification; x exits to resume later
      │
      ▼
 ChecklistScreen               First chart → first dashboard (unlocks after chart)
@@ -471,7 +471,7 @@ WizardSession
 ├─ OAuth / auth state
 │   pendingOrgs, pendingAuthIdToken, pendingAuthAccessToken,
 │   pendingAuthCloudRegion, selectedOrgId, selectedOrgName,
-│   selectedWorkspaceId, selectedWorkspaceName, selectedEnvName,
+│   selectedProjectId, selectedProjectName, selectedEnvName,
 │   apiKeyNotice
 │
 ├─ Credentials (set when auth completes)
@@ -596,6 +596,14 @@ runAgent(config, prompt, options, spinner, runConfig, middleware?)
 ├─ Error detection in output:
 │   AUTH_ERROR, MCP_MISSING, RESOURCE_MISSING, RATE_LIMIT, API_ERROR
 │
+├─ Auth-retry short-circuit:
+│   The Claude SDK retries 401s ~10× with exponential backoff (~3 min).
+│   A 401 won't recover within a run, so after AUTH_RETRY_LIMIT (=2)
+│   consecutive `api_retry` system messages with error_status 401 (or
+│   matching auth-error patterns), runAgent calls
+│   controller.abort('auth_failed') and returns AUTH_ERROR. The runner
+│   shows a friendly outro pointing to /signup as a manual fallback.
+│
 └─ Return { error?: AgentErrorType, message?: string }
 ```
 
@@ -701,17 +709,49 @@ The project API key is persisted per-project via:
 
 ### 3. Project config (`.ampli.json` in the project directory)
 
-Zone, org, workspace, and project selections written by the Amplitude CLI
-toolchain. Read by `src/lib/ampli-config.ts`.
+Zone, org, project, and environment selections written by the Amplitude CLI
+toolchain. Read by `src/lib/ampli-config.ts`. Stored key is `ProjectId`;
+legacy files with `WorkspaceId` are auto-migrated to `ProjectId` on read, and
+`writeAmpliConfig` only emits the new key.
 
 ### 4. Crash-recovery checkpoint (`src/lib/session-checkpoint.ts`)
 
 A sanitized session snapshot (no credentials or tokens) saved to
-`$TMPDIR/amplitude-wizard-checkpoint.json`. On restart, if the checkpoint matches
-the current project directory and is less than 24 hours old, the wizard restores:
-region, org/workspace selection, framework detection results, and intro state.
-This lets users resume where they left off after a crash without re-doing setup.
-Checkpoints are deleted on successful completion via `clearCheckpoint()`.
+`~/.amplitude/wizard/runs/<sha256(installDir)>/checkpoint.json`. Per-project
+under the cache root so two parallel wizard runs in different directories
+can't clobber each other's checkpoint. On restart, if the checkpoint
+matches the current project directory and is less than 24 hours old, the
+wizard restores: region, org/project selection, framework detection
+results, and intro state. This lets users resume where they left off
+after a crash without re-doing setup. Checkpoints are deleted on
+successful completion via `clearCheckpoint()`.
+
+### 5. Wizard storage layout (`src/utils/storage-paths.ts`)
+
+Single source of truth for every wizard-managed path. Two storage roots:
+
+- **Per-user cache root: `~/.amplitude/wizard/`** (override with
+  `AMPLITUDE_WIZARD_CACHE_DIR`)
+  - `runs/<sha256(installDir)>/log.txt` — per-project debug log
+  - `runs/<sha256(installDir)>/log.ndjson` — structured log mirror
+  - `runs/<sha256(installDir)>/benchmark.json` — benchmark middleware output
+  - `runs/<sha256(installDir)>/checkpoint.json` — crash-recovery snapshot
+  - `plans/<planId>.json` — plan/apply artifacts (24h TTL)
+  - `state/<attemptId>.json` — agent recovery state for compactions
+  - `update-check.json` — npm registry latest-version cache (24h TTL)
+- **Per-project metadata dir: `<installDir>/.amplitude/`**
+  - `events.json` — approved event plan (preserved across runs)
+  - `dashboard.json` — URL of the dashboard the agent created
+
+Both are gitignored (the project meta dir as a single `.amplitude/`
+line). The agent contract is unchanged: `confirm_event_plan` is the
+canonical writer for `events.json`. A legacy mirror at
+`<installDir>/.amplitude-events.json` is also written for backwards
+compatibility with bundled integration skills; both the canonical and
+legacy paths are gitignored and preserved across runs (the legacy
+mirror is dropped once context-hub ships a skill set that reads the
+canonical path). The `/diagnostics` slash command prints the full
+layout for the current project — useful when filing bug reports.
 
 ---
 
@@ -737,7 +777,7 @@ OAuth PKCE flow
      └─ Auto-detect region from token claims
            │
            ▼
-     Org picker (if multiple) → Workspace picker (if multiple) → API key
+     Org picker (if multiple) → Project picker (if multiple) → API key
 ```
 
 **CI mode auth:** Pass `--api-key <key>` on the command line. The wizard uses this
@@ -830,7 +870,7 @@ method with its behavior in each mode:
    ├─ Check stored API key
    ├─ If single environment → auto-select
    ├─ If multiple → defer to AuthScreen picker
-   └─ Pre-populate org/workspace from ampli.json
+   └─ Pre-populate org/project from ampli.json
 
 4. Initialize feature flags (non-blocking)
 
@@ -973,14 +1013,14 @@ npx @amplitude/wizard --ci --install-dir . --api-key <KEY> --project-id 12345
 |--------|------|-------------------|-------------------|-------------|
 | **IntroScreen** | `screens/IntroScreen.tsx` | `detectionComplete`, `frameworkConfig`, `detectedFrameworkLabel` | `introConcluded` (via `concludeIntro()`) | Shows detected framework, user confirms or picks manually. Three states: detecting (spinner), failed (auto-Generic), succeeded (menu) |
 | **RegionSelectScreen** | `screens/RegionSelectScreen.tsx` | `region`, `regionForced` | `region` (via `setRegion()`) | US/EU picker. Skipped for returning users |
-| **AuthScreen** | `screens/AuthScreen.tsx` | `pendingOrgs`, tokens, `selectedOrgId`, `selectedWorkspaceId`, `credentials` | Org/workspace selection, `credentials`, `region` | Multi-step SUSI flow with org → workspace → environment pickers |
+| **AuthScreen** | `screens/AuthScreen.tsx` | `pendingOrgs`, tokens, `selectedOrgId`, `selectedProjectId`, `credentials` | Org/project selection, `credentials`, `region` | Multi-step SUSI flow with org → project → environment pickers |
 | **DataSetupScreen** | `screens/DataSetupScreen.tsx` | `projectHasData` | `activationLevel`, `snippetConfigured` | Checks activation via API. Routes: none→setup, partial→options, full→skip |
 | **ActivationOptionsScreen** | `screens/ActivationOptionsScreen.tsx` | `snippetConfigured` | `outroData` | Help test locally, debug, docs, or exit |
 | **SetupScreen** | `screens/SetupScreen.tsx` | Framework questions | `frameworkContext[key]` | Auto-detects answers, shows picker for unresolved questions |
 | **FeatureOptInScreen** | `screens/FeatureOptInScreen.tsx` | `discoveredFeatures` | `additionalFeatureQueue`, `optInFeaturesComplete` | Multi-select picklist (all on by default) for opt-in features (LLM, Session Replay). Skipped in CI/agent (auto-confirmed) and when nothing was discovered |
 | **RunScreen** | `screens/RunScreen.tsx` | `tasks`, `eventPlan`, `statusMessages`, `discoveredFeatures`, `additionalFeatureQueue`, `additionalFeatureCurrent`, `additionalFeatureCompleted` | `requestedTab` (clear) | Observational: 3–4 tabs (Status, Event plan (conditional), All logs, Snake). Shows ProgressList including queued additional features as task items |
 | **McpScreen** | `screens/McpScreen.tsx` | `runPhase`, `amplitudePreDetected` | `mcpComplete`, `mcpOutcome`, `mcpInstalledClients` | Detect editors → confirm → pick → install. Also handles pre-detected choice |
-| **DataIngestionCheckScreen** | `screens/DataIngestionCheckScreen.tsx` | `region`, org/project IDs | `dataIngestionConfirmed` | Polls activation API every 30s. Exit with q/Esc |
+| **DataIngestionCheckScreen** | `screens/DataIngestionCheckScreen.tsx` | `region`, org/project IDs | `dataIngestionConfirmed` | Polls activation API every 30s. Enter/q skip verification (confirm if no events); x exits; Esc back |
 | **ChecklistScreen** | `screens/ChecklistScreen.tsx` | `checklistChartComplete`, `checklistDashboardComplete` | `checklistComplete` | First chart → first dashboard. Dashboard locked until chart done |
 | **SlackScreen** | `screens/SlackScreen.tsx` | `selectedOrgName`, `selectedOrgId`, `region` | `slackComplete`, `slackOutcome` | 4 phases: prompt → opening → waiting → done |
 | **OutroScreen** | `screens/OutroScreen.tsx` | `outroData` | — | Success: picker (view report, open dashboard, exit). Error/cancel: any key exits |

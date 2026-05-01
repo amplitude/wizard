@@ -1,8 +1,10 @@
 // Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
 
 exports[`AuthScreen snapshots > renders the OAuth waiting state with spinner and login URL 1`] = `
-"⠋ Waiting for authentication…
+"⠋ Signing you in…
 
 If the browser didn't open, copy and paste this URL:
-https://app.amplitude.com/oauth?response_type=code&client_id=wizard"
+https://app.amplitude.com/oauth?response_type=code&client_id=wizard
+
+[R] Retry browser  [M] Enter API key manually  [Esc] Cancel"
 `;

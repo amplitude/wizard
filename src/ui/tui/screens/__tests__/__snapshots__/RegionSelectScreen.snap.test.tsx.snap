@@ -8,7 +8,8 @@ Current: US ─ pick a new region below
 ▸ [1] United States (app.amplitude.com)
   [2] Europe (app.eu.amplitude.com)
 
-· Data residency affects API endpoints and compliance. You can change this later with /region."
+· Data residency affects API endpoints and compliance. You can change this later with /region.
+· You'll need to sign in again for the new region."
 `;
 
 exports[`RegionSelectScreen snapshots > renders the first-time region picker (US/EU) 1`] = `

@@ -18,6 +18,15 @@ export const RunPhase = {
 } as const;
 export type RunPhase = (typeof RunPhase)[keyof typeof RunPhase];
 
+export const PostAgentStepStatus = {
+  Pending: 'pending',
+  InProgress: 'in_progress',
+  Completed: 'completed',
+  Skipped: 'skipped',
+} as const;
+export type PostAgentStepStatus =
+  (typeof PostAgentStepStatus)[keyof typeof PostAgentStepStatus];
+
 export const AdditionalFeature = {
   LLM: 'llm',
   SessionReplay: 'session_replay',

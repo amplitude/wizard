@@ -26,19 +26,76 @@ import {
 } from '../../../lib/console-query.js';
 import { DEFAULT_AMPLITUDE_ZONE } from '../../../lib/constants.js';
 import { resolveZone } from '../../../lib/zone-resolution.js';
+import { getLogFile, getRunDir } from '../../../utils/storage-paths.js';
 import {
   COMMANDS,
+  checkCommandBlockedByRun,
   getWhoamiText,
+  getDiagnosticsText,
+  isKnownCommand,
   parseFeedbackSlashInput,
   parseCreateProjectSlashInput,
 } from '../console-commands.js';
 import { analytics } from '../../../utils/analytics.js';
 import { trackWizardFeedback } from '../../../utils/track-wizard-feedback.js';
+import { collectDiagnostics } from '../../../lib/diagnostics-collector.js';
 import { KeyHintBar, type KeyHint } from './KeyHintBar.js';
 import { useScreenHintsValue } from '../hooks/useScreenHints.js';
 
+async function submitFeedbackWithConsent(
+  message: string,
+  store: WizardStore,
+): Promise<void> {
+  try {
+    const includeDiagnostics = await store.promptConfirm(
+      'Share diagnostics about your framework and OS to help us improve?',
+    );
+    analytics.wizardCapture('feedback diagnostics consent', {
+      consented: includeDiagnostics,
+    });
+    const diagnostics = includeDiagnostics
+      ? await collectDiagnostics({
+          session: store.session,
+          wizardVersion: store.version,
+          detectedFrameworks: store.session.detectionResults ?? undefined,
+        }).catch((err: unknown) => {
+          analytics.wizardCapture('feedback diagnostics failed', {
+            'error message': err instanceof Error ? err.message : String(err),
+          });
+          return undefined;
+        })
+      : undefined;
+    await trackWizardFeedback(message, diagnostics);
+    store.setCommandFeedback(
+      diagnostics
+        ? 'Thanks — your feedback and diagnostics were sent.'
+        : 'Thanks — your feedback was sent.',
+    );
+  } catch (err: unknown) {
+    store.setCommandFeedback(
+      `Could not send feedback: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
+  }
+}
+
 function executeCommand(raw: string, store: WizardStore): string | void {
   const [cmd] = raw.trim().split(/\s+/);
+
+  // Guard: commands flagged `requiresIdle` would mutate session credentials,
+  // region, or org/project selection out from under an in-flight agent run.
+  // Surface a tailored message and bail before dispatching.
+  if (cmd) {
+    const blockedMessage = checkCommandBlockedByRun(
+      cmd,
+      store.session.runPhase,
+    );
+    if (blockedMessage) {
+      store.setCommandFeedback(blockedMessage, 6000);
+      return;
+    }
+  }
 
   switch (cmd) {
     case '/region':
@@ -69,9 +126,8 @@ function executeCommand(raw: string, store: WizardStore): string | void {
                   email: userInfo.email,
                   org_id: store.session.selectedOrgId ?? undefined,
                   org_name: store.session.selectedOrgName ?? undefined,
-                  workspace_id: store.session.selectedWorkspaceId ?? undefined,
-                  workspace_name:
-                    store.session.selectedWorkspaceName ?? undefined,
+                  project_id: store.session.selectedProjectId ?? undefined,
+                  project_name: store.session.selectedProjectName ?? undefined,
                   app_id: store.session.selectedAppId,
                   env_name: store.session.selectedEnvName,
                   region: zone,
@@ -100,17 +156,7 @@ function executeCommand(raw: string, store: WizardStore): string | void {
         store.setCommandFeedback('Usage: /feedback <your message>');
         break;
       }
-      void trackWizardFeedback(message)
-        .then(() =>
-          store.setCommandFeedback('Thanks — your feedback was sent.'),
-        )
-        .catch((err: unknown) => {
-          store.setCommandFeedback(
-            `Could not send feedback: ${
-              err instanceof Error ? err.message : String(err)
-            }`,
-          );
-        });
+      void submitFeedbackWithConsent(message, store);
       break;
     }
     case '/mcp':
@@ -143,14 +189,15 @@ function executeCommand(raw: string, store: WizardStore): string | void {
       store.showSnakeOverlay();
       break;
     case '/debug': {
-      // Surface a redacted diagnostic snapshot — credentials / tokens are
-      // stripped. Writes the full snapshot to stderr for copy/paste
-      // sharing; the console only shows a brief summary.
+      // Write a redacted diagnostic snapshot to a file the user can read
+      // AFTER the wizard exits. Earlier versions wrote to stderr while
+      // Ink owned the terminal — Ink's diff-based redraw doesn't account
+      // for stderr writes, so the JSON either got painted over or
+      // interleaved with the live frame. The file approach is boring,
+      // robust, and gives the user something they can copy directly into
+      // a bug report.
       void import('../utils/diagnostics.js')
-        .then(({ createDiagnosticSnapshot }) => {
-          // Use the real wizard version (set on the store by startTUI from
-          // package.json). Using a hardcoded placeholder would make every
-          // bug-report snapshot read "wizard_version: dev".
+        .then(async ({ createDiagnosticSnapshot }) => {
           const snapshot = createDiagnosticSnapshot(
             store,
             store.version || 'unknown',
@@ -163,15 +210,6 @@ function executeCommand(raw: string, store: WizardStore): string | void {
             };
             tasks_count?: number;
           };
-          try {
-            process.stderr.write(
-              '\n[/debug] diagnostic snapshot:\n' +
-                JSON.stringify(snapshot, null, 2) +
-                '\n',
-            );
-          } catch {
-            // ignore broken pipe
-          }
           const summary =
             `flow: ${snapshot.active_flow ?? 'n/a'} | screen: ${
               snapshot.current_screen ?? 'n/a'
@@ -180,16 +218,71 @@ function executeCommand(raw: string, store: WizardStore): string | void {
             `zone: ${snapshot.session?.region ?? 'n/a'} | tasks: ${
               snapshot.tasks_count ?? 0
             }`;
-          store.setCommandFeedback(
-            summary + ' (full snapshot written to stderr)',
-            30_000,
-          );
+          try {
+            const fs = await import('node:fs');
+            const path = await import('node:path');
+            const runDir = getRunDir(store.session.installDir);
+            fs.mkdirSync(runDir, { recursive: true, mode: 0o700 });
+            const snapshotPath = path.join(runDir, 'debug-snapshot.json');
+            fs.writeFileSync(
+              snapshotPath,
+              JSON.stringify(snapshot, null, 2),
+              'utf8',
+            );
+            store.setCommandFeedback(
+              `${summary} · saved to ${snapshotPath}`,
+              30_000,
+            );
+          } catch {
+            // Filesystem write failed (read-only fs, permissions, etc.)
+            // — fall back to surfacing the summary alone. Don't write to
+            // stderr; corrupting the TUI mid-render is the original bug.
+            store.setCommandFeedback(
+              `${summary} · (could not save full snapshot to disk)`,
+              30_000,
+            );
+          }
         })
         .catch(() => {
+          // Surface the actual per-project log path. Two parallel runs land
+          // their logs in different directories — pointing at /tmp here
+          // would send users to the wrong (or shared) file.
           store.setCommandFeedback(
-            'Diagnostics unavailable. See /tmp/amplitude-wizard.log.',
+            `Diagnostics unavailable. See ${getLogFile(
+              store.session.installDir,
+            )}.`,
           );
         });
+      break;
+    }
+    case '/diagnostics': {
+      // Print the wizard's storage layout to a file so the user can read
+      // it AFTER the wizard exits. Same rationale as /debug: writing to
+      // stderr while Ink owns the terminal corrupts the live frame.
+      const text = getDiagnosticsText(store.session.installDir);
+      void (async () => {
+        try {
+          const fs = await import('node:fs');
+          const path = await import('node:path');
+          const runDir = getRunDir(store.session.installDir);
+          fs.mkdirSync(runDir, { recursive: true, mode: 0o700 });
+          const diagPath = path.join(runDir, 'diagnostics.txt');
+          fs.writeFileSync(diagPath, text + '\n', 'utf8');
+          store.setCommandFeedback(
+            `Storage paths saved to ${diagPath} · log file: ${getLogFile(
+              store.session.installDir,
+            )}`,
+            30_000,
+          );
+        } catch {
+          store.setCommandFeedback(
+            `Could not write diagnostics file. Log file: ${getLogFile(
+              store.session.installDir,
+            )}`,
+            30_000,
+          );
+        }
+      })();
       break;
     }
     case '/exit':
@@ -274,7 +367,19 @@ export const ConsoleView = ({
   const separator = Layout.separatorChar.repeat(Math.max(0, innerWidth - 2));
   const pendingPrompt = store.pendingPrompt;
 
-  // Watch for activation keys while the input is dormant
+  const showConsoleChrome = store.session.introConcluded;
+
+  // Watch for activation keys while the input is dormant.
+  //
+  // The event-plan UI has two phases: Y/S/F options and optional free-text
+  // feedback. While EITHER is showing, do not activate the slash console on
+  // `/` or Tab — only feedback mode used to block those keys, so Tab during
+  // options mode stole focus, stranded `confirm_event_plan`, and could tear
+  // down the run with AGENT_FAILED (stdin / agent subprocess conflict).
+  // Feedback typing still uses the dedicated handler below (verbatim chars).
+  const eventPlanPromptShowing =
+    !!pendingPrompt && pendingPrompt.kind === 'event-plan';
+
   useInput(
     (char, key) => {
       if (key.escape || char === 'q' || char === 'Q') {
@@ -306,6 +411,7 @@ export const ConsoleView = ({
         store.clearScreenError();
         return;
       }
+      if (!showConsoleChrome) return;
       if (char === '/') {
         activate('/');
       } else if (
@@ -316,11 +422,11 @@ export const ConsoleView = ({
         activate('');
       }
     },
-    { isActive: !inputActive },
+    { isActive: !inputActive && !eventPlanPromptShowing },
   );
 
   const handleSubmit = (value: string) => {
-    const isSlashCommand = value.startsWith('/');
+    const isSlashCommand = isKnownCommand(value);
     analytics.wizardCapture('agent message sent', {
       'message length': value.length,
       'is slash command': isSlashCommand,
@@ -606,37 +712,50 @@ export const ConsoleView = ({
         </Box>
       )}
 
-      {/* Key hints + console input */}
-      <KeyHintBar
-        hints={effectiveHints as KeyHint[] | undefined}
-        width={innerWidth}
-        showAskHint={
-          store.session.credentials !== null && store.session.introConcluded
-        }
-      />
-      <Box paddingX={Layout.paddingX}>
-        <Text color={inputActive ? Colors.accent : Colors.muted}>
-          {Icons.prompt}{' '}
-        </Text>
-        {inputActive ? (
-          <SlashCommandInput
-            key={inputKey}
-            commands={COMMANDS}
-            isActive={inputActive}
-            initialValue={initialValue}
-            onSubmit={handleSubmit}
-            onDeactivate={deactivate}
+      {/* Key hints + console input — hidden on Intro to keep focus on the
+          framework picker. Render a fixed-height placeholder so the content
+          area doesn't jump when Continue transitions to the next screen. */}
+      {showConsoleChrome ? (
+        <>
+          <KeyHintBar
+            hints={effectiveHints as KeyHint[] | undefined}
+            width={innerWidth}
+            showAskHint={
+              store.session.credentials !== null &&
+              store.session.introConcluded &&
+              !eventPlanPromptShowing
+            }
           />
-        ) : (
-          <Text color={Colors.disabled}>
-            {store.session.credentials !== null && store.session.introConcluded
-              ? visibleHistory.length > 0
-                ? 'Press / for commands · Tab to ask · Esc to hide answer'
-                : 'Press / for commands or Tab to ask a question'
-              : 'Press / for commands'}
-          </Text>
-        )}
-      </Box>
+          <Box paddingX={Layout.paddingX}>
+            <Text color={inputActive ? Colors.accent : Colors.muted}>
+              {Icons.prompt}{' '}
+            </Text>
+            {inputActive ? (
+              <SlashCommandInput
+                key={inputKey}
+                commands={COMMANDS}
+                isActive={inputActive}
+                initialValue={initialValue}
+                onSubmit={handleSubmit}
+                onDeactivate={deactivate}
+              />
+            ) : (
+              <Text color={Colors.disabled}>
+                {store.session.credentials !== null &&
+                store.session.introConcluded
+                  ? eventPlanPromptShowing
+                    ? 'Finish the plan above ([Y]/[S]/[F]) — / and Tab resume after.'
+                    : visibleHistory.length > 0
+                      ? 'Press / for commands · Tab to ask · Esc to hide answer'
+                      : 'Press / for commands or Tab to ask a question'
+                  : 'Press / for commands'}
+              </Text>
+            )}
+          </Box>
+        </>
+      ) : (
+        <Box height={2} />
+      )}
     </Box>
   );
 };

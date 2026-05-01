@@ -20,6 +20,21 @@ pnpm build
 
 **Requirements:** Node.js >= 20, pnpm
 
+## Agent-assisted development (Cursor, Claude Code, etc.)
+
+- **`CLAUDE.md`** at the repo root is the **canonical** file most coding agents load. It documents architecture, Ink/TUI conventions (Esc / `useScreenInput` / `useEscapeBack`), and PR expectations.
+- **`CONTRIBUTING.md`** (this file) is for **human** contributors: setup, tests, commits, PRs.
+- In a **fresh clone or git worktree**, run **`pnpm install`** before **`pnpm test`** or **`pnpm exec vitest`** — otherwise `vitest` is not on `PATH` and installs look incomplete.
+- When you change **`src/ui/tui/`**, **`flows.ts`**, **`router.ts`**, or navigation-related **`store.ts`**, run **focused Vitest** (stable pool; fewer flakes than a full wide run):
+
+  ```bash
+  pnpm exec vitest run --pool=forks --maxWorkers=1 \
+    src/ui/tui/__tests__/router.test.ts \
+    src/ui/tui/__tests__/flow-invariants.test.ts
+  ```
+
+  Add any `src/ui/tui/screens/__tests__/` files that cover screens you edited.
+
 ### Local LLM proxy
 
 The wizard routes Claude API calls through an LLM gateway. For local development
@@ -75,9 +90,12 @@ A CI check enforces this on PR titles.
 1. Fork the repo and create a branch from `main`
 2. Make your changes
 3. Add or update tests as needed
-4. Run `pnpm lint` and `pnpm test` to verify
-5. Open a PR with a conventional commit title
-6. Fill in the PR description with a summary and test plan
+4. Run `pnpm lint` and `pnpm test` to verify (for TUI/router/flow edits, also run the focused Vitest command under **Agent-assisted development**)
+5. If `git status` shows you are **behind** `origin/<your-branch>`, run **`git pull --rebase origin <branch>`** before **`git push`**
+6. Open a PR with a conventional commit title
+7. Fill in the PR description with a summary and test plan
+8. If you used a **`/reflect`** session on the work, paste the numbered checklist into the PR (or link to it); skip with “N/A” only for non-agent sessions
+9. After **`git push`**, open the PR with **`gh pr create --fill`** when the GitHub CLI is available and authenticated (otherwise use the compare URL from the push output)
 
 ## Adding a new framework
 

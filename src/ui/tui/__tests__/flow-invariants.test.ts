@@ -6,8 +6,21 @@
  * invariants.
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import fc from 'fast-check';
+
+// Stub disk-backed zone signals so property tests don't pick up the
+// developer's real auth / ampli config. The Wizard flow's RegionSelect gate
+// uses `tryResolveZone`, which reads ampli config + stored user as Tier
+// 2/3 — without these mocks, sessions with `region: null` would still
+// resolve to a non-null zone via disk and skip RegionSelect.
+vi.mock('../../../utils/ampli-settings.js', () => ({
+  getStoredUser: vi.fn(() => undefined),
+}));
+vi.mock('../../../lib/ampli-config.js', () => ({
+  readAmpliConfig: vi.fn(() => ({ ok: false, error: 'not_found' })),
+}));
+
 import { WizardRouter, Screen, Overlay, Flow } from '../router.js';
 import { FLOWS } from '../flows.js';
 import {
@@ -46,13 +59,13 @@ function mockCredentials() {
 
 /**
  * Apply a complete authenticated state to a session: credentials plus org
- * and workspace names (the two required by Auth.isComplete). Env name is
+ * and project names (the two required by Auth.isComplete). Env name is
  * set too — it's optional for Auth but realistic for a fully-resolved flow.
  */
 function applyAuthComplete(s: WizardSession) {
   s.credentials = mockCredentials();
   s.selectedOrgName = 'Acme';
-  s.selectedWorkspaceName = 'Amplitude';
+  s.selectedProjectName = 'Amplitude';
   s.selectedEnvName = 'Production';
 }
 
@@ -571,6 +584,48 @@ describe('WizardRouter complete happy path', () => {
 
     expect(router.resolve(session)).toBe(Screen.Mcp);
   });
+
+  it('locally-fully-wired re-runs skip Run but STILL show DataIngestionCheck', () => {
+    // Activation Check pre-flight: when all four local signals are present
+    // (SDK dep, source import, ampli.json scope, event plan on disk), the
+    // wizard short-circuits past Setup + Run by setting `activationLevel:
+    // 'full'` AND `localInstrumentationComplete: true`. The SECOND flag is
+    // what keeps DataIngestionCheck running — without it, a user who
+    // re-runs pre-deploy (no remote events yet) would silently skip the
+    // ingestion verification UX. With both set, they land on
+    // DataIngestionCheck after Mcp, which is the correct UX.
+    const session = buildSession({});
+    const router = new WizardRouter(Flow.Wizard);
+
+    session.introConcluded = true;
+    session.region = 'us';
+    applyAuthComplete(session);
+    session.projectHasData = true;
+    session.activationLevel = 'full';
+    session.localInstrumentationComplete = true;
+    session.mcpComplete = true; // walk past Mcp to land on the next entry
+
+    expect(router.resolve(session)).toBe(Screen.DataIngestionCheck);
+  });
+
+  it('remote-confirmed full activation still skips DataIngestionCheck (no localInstrumentationComplete)', () => {
+    // Counter-case: when activation reaches 'full' via the API check
+    // (50+ events in the project) and NOT via the local pre-flight,
+    // localInstrumentationComplete stays false. DataIngestionCheck must
+    // still be skipped — events are already flowing, no need to poll.
+    const session = buildSession({});
+    const router = new WizardRouter(Flow.Wizard);
+
+    session.introConcluded = true;
+    session.region = 'us';
+    applyAuthComplete(session);
+    session.projectHasData = true;
+    session.activationLevel = 'full';
+    session.localInstrumentationComplete = false;
+    session.mcpComplete = true;
+
+    expect(router.resolve(session)).toBe(Screen.Slack);
+  });
 });
 
 // ── Overlay tests ────────────────────────────────────────────────────
@@ -597,8 +652,8 @@ describe('WizardRouter overlay behavior', () => {
     expect(router.resolve(session)).toBe(Screen.RegionSelect);
 
     // Push and pop overlay
-    router.pushOverlay(Overlay.SettingsOverride);
-    expect(router.resolve(session)).toBe(Overlay.SettingsOverride);
+    router.pushOverlay(Overlay.Outage);
+    expect(router.resolve(session)).toBe(Overlay.Outage);
 
     router.popOverlay();
     expect(router.resolve(session)).toBe(Screen.RegionSelect);
@@ -783,6 +838,26 @@ describe('WizardRouter additional invariants', () => {
     expect(router.resolve(session)).toBe(Screen.RegionSelect);
   });
 
+  it('returning users skip RegionSelect when zone is resolvable from disk', async () => {
+    // Regression: after `wizard login`, ~/.ampli.json has the stored
+    // user's zone but session.region stays null (it represents *this
+    // run's* user intent). tryResolveZone reads disk Tier 2/3, so the
+    // gate must use it — not session.region — to skip RegionSelect.
+    const { getStoredUser } = await import('../../../utils/ampli-settings.js');
+    vi.mocked(getStoredUser).mockReturnValueOnce({
+      id: 'user-123',
+      email: 'returning@example.com',
+      firstName: 'R',
+      lastName: 'U',
+      zone: 'eu',
+    });
+    const session = freshSession();
+    session.introConcluded = true;
+    // session.region stays null — disk zone alone is enough.
+    const router = new WizardRouter(Flow.Wizard);
+    expect(router.resolve(session)).not.toBe(Screen.RegionSelect);
+  });
+
   it('full activation always lands on Mcp before Outro (no skipping post-run setup)', () => {
     // Regression target: a previous version of the flow accidentally let
     // full-activation users skip MCP entirely, depriving them of Claude
@@ -877,7 +952,6 @@ describe('WizardRouter additional invariants', () => {
             fc.constantFrom('push' as const, 'pop' as const),
             fc.constantFrom(
               Overlay.Outage,
-              Overlay.SettingsOverride,
               Overlay.Snake,
               Overlay.Mcp,
               Overlay.Slack,

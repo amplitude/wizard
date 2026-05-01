@@ -24,9 +24,6 @@ Follow these steps in order to complete the integration:
 ## Reference files
 
 - `references/EXAMPLE.md` - Astro (Hybrid) example project code
-- `references/browser-unified-sdk.md` - Amplitude documentation for Browser Unified Sdk
-- `references/browser-sdk-2.md` - Or install unified SDK to get access to all Amplitude products
-- `references/amplitude-quickstart.md` - Amplitude documentation for Amplitude Quickstart
 - `references/basic-integration-1.0-begin.md` - Amplitude setup - begin
 - `references/basic-integration-1.1-edit.md` - Amplitude setup - edit
 - `references/basic-integration-1.2-revise.md` - Amplitude setup - revise

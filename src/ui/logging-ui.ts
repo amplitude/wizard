@@ -9,7 +9,7 @@ import {
   type SpinnerHandle,
   type EventPlanDecision,
 } from './wizard-ui';
-import type { RetryState } from '../lib/wizard-session';
+import type { RetryState, PostAgentStep } from '../lib/wizard-session';
 
 export class LoggingUI implements WizardUI {
   intro(message: string): void {
@@ -20,12 +20,20 @@ export class LoggingUI implements WizardUI {
     console.log(`└  ${message}`);
   }
 
-  cancel(message: string, options?: { docsUrl?: string }): void {
+  cancel(message: string, options?: { docsUrl?: string }): Promise<void> {
     // Cancel implies failure/abort — direct to stderr so callers can detect it
     console.error(`■  ${message}`);
     if (options?.docsUrl) {
       console.error(`│  Manual setup guide: ${options.docsUrl}`);
     }
+    // No TUI in logging mode — stderr write completes synchronously,
+    // resolve immediately so wizardAbort isn't held up.
+    return Promise.resolve();
+  }
+
+  setOutroData(data: import('../lib/wizard-session.js').OutroData): void {
+    // No TUI to render — emit the message inline so CI logs capture it.
+    if (data.message) console.error(`■  ${data.message}`);
   }
 
   log = {
@@ -89,11 +97,43 @@ export class LoggingUI implements WizardUI {
     console.log(`◇  ${message}`);
   }
 
-  heartbeat(statuses: string[]): void {
-    if (statuses.length === 0) return;
+  seedPostAgentSteps(steps: PostAgentStep[]): void {
+    if (steps.length === 0) return;
+    console.log(
+      `│  Finalizing in Amplitude (${steps.length} step${
+        steps.length === 1 ? '' : 's'
+      })…`,
+    );
+  }
+
+  setPostAgentStep(
+    id: string,
+    patch: { status: PostAgentStep['status']; reason?: string },
+  ): void {
+    if (patch.status === 'in_progress') {
+      console.log(`◌  ${id}…`);
+    } else if (patch.status === 'completed') {
+      console.log(`●  ${id} done`);
+    } else if (patch.status === 'skipped') {
+      const reason = patch.reason ? ` — ${patch.reason}` : '';
+      console.log(`⊘  ${id} skipped${reason}`);
+    }
+  }
+
+  heartbeat(data: {
+    statuses: string[];
+    elapsedMs: number;
+    attempt?: number;
+  }): void {
+    // Only paint when there's something to summarize — a beat with no
+    // recent statuses is a liveness signal for orchestrators (AgentUI
+    // surfaces it on NDJSON), not user-facing log noise.
+    if (data.statuses.length === 0) return;
+    const seconds = Math.round(data.elapsedMs / 1000);
     // End the current in-progress spinner line before printing
     process.stdout.write('\n');
-    for (const s of statuses) {
+    console.log(`│  Still working — ${seconds}s elapsed`);
+    for (const s of data.statuses) {
       console.log(`│  ${s}`);
     }
   }
@@ -143,23 +183,6 @@ export class LoggingUI implements WizardUI {
     );
   }
 
-  showSettingsOverride(
-    keys: string[],
-    _backupAndFix: () => boolean,
-  ): Promise<void> {
-    // Security warning — stderr
-    console.error(
-      `▲  Security warning: .claude/settings.json overrides detected`,
-    );
-    for (const key of keys) {
-      console.error(`│    • ${key}`);
-    }
-    console.error(
-      `│  These overrides prevent the Wizard from accessing the Amplitude LLM Gateway.`,
-    );
-    return Promise.resolve();
-  }
-
   startRun(): void {
     // No-op in CI mode
   }
@@ -176,8 +199,8 @@ export class LoggingUI implements WizardUI {
     appId: number;
     orgId?: string | null;
     orgName?: string | null;
-    workspaceId?: string | null;
-    workspaceName?: string | null;
+    projectId?: string | null;
+    projectName?: string | null;
     envName?: string | null;
   }): void {
     // No-op in CI mode — credentials are handled directly
@@ -230,8 +253,34 @@ export class LoggingUI implements WizardUI {
     }
   }
 
+  applyJourneyTransition(
+    stepId: import('../lib/journey-state.js').JourneyStepId,
+    status: import('../lib/journey-state.js').JourneyStatus,
+  ): void {
+    console.log(`◌  journey: ${stepId} ${status}`);
+  }
+
   setEventPlan(_events: Array<{ name: string; description: string }>): void {
     // No-op in CI mode
+  }
+
+  recordFileChangePlanned(data: {
+    path: string;
+    operation: 'create' | 'modify' | 'delete';
+  }): void {
+    // CI logs the plan-then-apply pair as a single line per file. Verbose
+    // enough to be useful when scanning a CI run, quiet enough not to drown
+    // out the rest of the output.
+    console.log(`◌  ${data.operation} ${data.path}`);
+  }
+
+  recordFileChangeApplied(_data: {
+    path: string;
+    operation: 'create' | 'modify' | 'delete';
+    bytes?: number;
+  }): void {
+    // The planned-line above already announced the write. Skip the applied
+    // line in CI to avoid doubling the per-file output volume.
   }
 
   setEventIngestionDetected(_eventNames: string[]): void {

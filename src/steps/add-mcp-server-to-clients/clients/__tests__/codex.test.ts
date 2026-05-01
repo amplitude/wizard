@@ -1,17 +1,19 @@
 import { vi, describe, it, expect, beforeEach, type Mock } from 'vitest';
 import { CodexMCPClient } from '../codex';
-import { execSync, spawnSync } from 'node:child_process';
+import { execSync } from 'node:child_process';
+// `spawnSync` is now imported from the cross-platform wrapper to fix
+// Windows `.cmd` shim resolution; mock the wrapper, not bare child_process.
+import { spawnSync } from '../../../../utils/cross-platform-spawn';
 import { analytics } from '../../../../utils/analytics';
 
 vi.mock('node:child_process', () => ({
   execSync: vi.fn(),
-  spawnSync: vi.fn(),
 }));
 
-vi.mock('node:fs', async () => {
-  const actual = await vi.importActual<typeof import('node:fs')>('node:fs');
-  return { ...actual, existsSync: vi.fn(() => true) };
-});
+vi.mock('../../../../utils/cross-platform-spawn', () => ({
+  spawn: vi.fn(),
+  spawnSync: vi.fn(),
+}));
 
 vi.mock('../../../../utils/analytics', () => ({
   analytics: {
@@ -28,10 +30,14 @@ describe('CodexMCPClient', () => {
   });
 
   describe('isClientSupported', () => {
-    it('returns true when codex binary is at a user path and ~/.codex exists', async () => {
-      execSyncMock.mockReturnValue('/opt/homebrew/bin/codex\n');
+    it('returns true when codex binary is available', async () => {
+      execSyncMock.mockReturnValue(undefined);
+
       const client = new CodexMCPClient();
       await expect(client.isClientSupported()).resolves.toBe(true);
+      expect(execSyncMock).toHaveBeenCalledWith('codex --version', {
+        stdio: 'ignore',
+      });
     });
 
     it('returns false when codex binary is missing', async () => {
@@ -41,29 +47,6 @@ describe('CodexMCPClient', () => {
 
       const client = new CodexMCPClient();
       await expect(client.isClientSupported()).resolves.toBe(false);
-    });
-
-    it('returns false when codex is bundled under /Library/Application Support (e.g. Conductor)', async () => {
-      // macOS-only guard — on Linux CI runners, process.platform !== 'darwin'
-      // so the /Library/Application Support/ check is skipped and detection
-      // falls through to the ~/.codex existence check (mocked true).
-      const originalPlatform = process.platform;
-      Object.defineProperty(process, 'platform', {
-        value: 'darwin',
-        writable: true,
-      });
-      execSyncMock.mockReturnValue(
-        '/Users/u/Library/Application Support/com.conductor.app/bin/codex\n',
-      );
-      try {
-        const client = new CodexMCPClient();
-        await expect(client.isClientSupported()).resolves.toBe(false);
-      } finally {
-        Object.defineProperty(process, 'platform', {
-          value: originalPlatform,
-          writable: true,
-        });
-      }
     });
   });
 

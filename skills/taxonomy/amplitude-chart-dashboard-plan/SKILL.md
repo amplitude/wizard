@@ -129,12 +129,17 @@ the app — no deployment required.
 
 ## MCP call sequence
 
-Use the Amplitude MCP to create charts and dashboard. Suggested order:
+Use the Amplitude MCP to create charts and dashboard, then hand the result
+back to the wizard. Order:
 
-1. Call `create_chart` (or equivalent MCP tool) for each chart in the plan.
-   Collect the returned chart IDs.
+1. Call `create_chart` (or equivalent Amplitude MCP tool) for each chart in
+   the plan. Collect the returned chart IDs.
 2. Call `create_dashboard` with all chart IDs and the dashboard metadata.
-3. Record the returned dashboard URL.
+3. Call the wizard-tools `record_dashboard` MCP tool with the dashboard URL,
+   ID, and chart metadata. **This is required** — `record_dashboard` is
+   what makes the dashboard visible to the wizard outro and to downstream
+   tooling. It also short-circuits the wizard's slow post-agent fallback
+   step. Skipping it is the most common bug in this skill.
 
 **Use exact event names** from `.amplitude-events.json` — do not
 normalize, lowercase, or rename them when constructing chart definitions.
@@ -142,30 +147,34 @@ The event names must match exactly what was instrumented.
 
 ---
 
-## Output: what to write to `.amplitude-dashboard.json`
+## Output: hand the dashboard back to the wizard
 
-After dashboard creation, write a file named `.amplitude-dashboard.json` in
-the project root with this shape (replace with real values):
+Call the `record_dashboard` MCP tool (server: `wizard-tools`) immediately
+after `create_dashboard` returns. Required argument: `dashboardUrl`.
+Recommended: `dashboardId`, `charts` (array of `{ id, title, type }`).
+Always include a brief `reason` per the wizard's tool-call convention.
 
-```json
+```jsonc
+// Example call shape
 {
   "dashboardUrl": "https://app.amplitude.com/123456/dashboard/abc",
   "dashboardId": "abc",
   "charts": [
-    {
-      "id": "chart-id-1",
-      "title": "Onboarding Funnel",
-      "type": "funnel",
-      "funnel": "Onboarding"
-    }
+    { "id": "chart-id-1", "title": "Onboarding Funnel", "type": "funnel" },
+    { "id": "chart-id-2", "title": "Daily Actives", "type": "line" }
   ],
-  "createdAt": "2025-01-15T12:00:00Z"
+  "reason": "Persisting the starter dashboard so the wizard outro links to it."
 }
 ```
 
-This file is read by the wizard to surface the dashboard URL in the checklist.
-It is also listed in the setup report. Remove it after the setup report is
-written (same as `.amplitude-events.json`).
+`record_dashboard` writes both the canonical
+`<projectRoot>/.amplitude/dashboard.json` and the legacy
+`<projectRoot>/.amplitude-dashboard.json` mirror. Do NOT write either
+file yourself — that path drifts from the canonical schema and the wizard
+will silently re-run the dashboard step from scratch.
+
+After the call returns `"ok"`, mark the "Build your starter dashboard" todo
+completed.
 
 ---
 

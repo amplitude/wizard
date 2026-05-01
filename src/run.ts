@@ -1,9 +1,14 @@
-import { type WizardSession, buildSession } from './lib/wizard-session';
+import {
+  AuthOnboardingPath,
+  type WizardSession,
+  buildSession,
+  isCreateAccountOnboarding,
+} from './lib/wizard-session';
 
 import { Integration, DETECTION_TIMEOUT_MS } from './lib/constants';
 import { readEnvironment } from './utils/environment';
+import { resolveInstallDir } from './utils/install-dir';
 import { getUI } from './ui';
-import path from 'path';
 import fs from 'node:fs/promises';
 import { FRAMEWORK_REGISTRY } from './lib/registry';
 import { analytics } from './utils/analytics';
@@ -12,6 +17,7 @@ import { EventEmitter } from 'events';
 import chalk from 'chalk';
 import { logToFile } from './utils/debug';
 import { wizardAbort } from './utils/wizard-abort';
+import { NoOrgsError } from './utils/zone-probe';
 import { getVersionCheckInfo } from './lib/version-check';
 import { initFeatureFlags } from './lib/feature-flags';
 import { autoEnableOptInFeatures } from './lib/feature-discovery';
@@ -25,6 +31,7 @@ type Args = {
   installDir?: string;
   default?: boolean;
   signup?: boolean;
+  authOnboarding?: 'sign-in' | 'create-account';
   signupEmail?: string;
   signupFullName?: string;
   localMcp?: boolean;
@@ -54,24 +61,26 @@ export async function runWizard(
     ...readEnvironment(),
   };
 
-  let resolvedInstallDir: string;
-  if (finalArgs.installDir) {
-    if (path.isAbsolute(finalArgs.installDir)) {
-      resolvedInstallDir = finalArgs.installDir;
-    } else {
-      resolvedInstallDir = path.join(process.cwd(), finalArgs.installDir);
-    }
-  } else {
-    resolvedInstallDir = process.cwd();
-  }
-
-  // Build session if not provided (CI mode passes one pre-built)
+  // installDir precedence (highest wins):
+  //   1. TUI directory picker — already mutated session.installDir via
+  //      store.changeInstallDir() before runWizard is called.
+  //   2. --install-dir / AMPLITUDE_WIZARD_INSTALL_DIR — flowed into the
+  //      session at buildSession() time.
+  //   3. process.cwd() — buildSession's default.
+  //
+  // Trust the session as the single source of truth. Only the fresh-
+  // session path needs to resolve from CLI args — and buildSession does
+  // that via its zod schema (resolveInstallDir handles `~` expansion).
+  // The previous code unconditionally re-assigned session.installDir
+  // from finalArgs.installDir, which silently reverted any TUI
+  // directory change back to the original CLI value.
   if (!session) {
     session = buildSession({
       debug: finalArgs.debug,
       forceInstall: finalArgs.forceInstall,
-      installDir: resolvedInstallDir,
+      installDir: resolveInstallDir(finalArgs.installDir),
       ci: finalArgs.ci,
+      authOnboarding: finalArgs.authOnboarding,
       signup: finalArgs.signup,
       signupEmail: finalArgs.signupEmail,
       signupFullName: finalArgs.signupFullName,
@@ -84,8 +93,6 @@ export async function runWizard(
       region: finalArgs.region,
     });
   }
-
-  session.installDir = resolvedInstallDir;
 
   getUI().intro(`Welcome to the Amplitude setup wizard`);
 
@@ -101,12 +108,14 @@ export async function runWizard(
   analytics.wizardCapture('session started', {
     integration,
     ci: session.ci ?? false,
-    signup: session.signup ?? false,
+    'account creation flow': isCreateAccountOnboarding(session),
   });
 
-  // Non-interactive modes (CI / agent) skip the FeatureOptIn picklist, so
-  // auto-enable every discovered opt-in feature here. The TUI flow handles
-  // its own discovery + picklist confirmation in bin.ts.
+  // Non-interactive modes (CI / agent) auto-enable every discovered
+  // opt-in feature here so the agent run gets the same SR + G&S + LLM
+  // coverage as an interactive TUI run (bin.ts handles the TUI side via
+  // store.autoEnableInlineAddons). Both paths converge on the same set
+  // of inline addons — there is no picker in either flow.
   if ((session.ci || session.agent) && !session.optInFeaturesComplete) {
     await initFeatureFlags().catch(() => {
       // Flag init failure is non-fatal — LLM gate just stays off
@@ -128,7 +137,7 @@ export async function runWizard(
         debug: session.debug,
         forceInstall: session.forceInstall,
         default: false,
-        signup: session.signup,
+        authOnboardingPath: session.authOnboardingPath,
         localMcp: session.localMcp,
         ci: session.ci,
         menu: session.menu,
@@ -167,6 +176,21 @@ export async function runWizard(
 
       const debugInfo = session.debug && errorStack ? `\n\n${errorStack}` : '';
 
+      // NoOrgsError is a terminal condition — the user's account literally
+      // has no organizations on this zone. Re-running the same wizard with
+      // the same auth and zone will produce the same result, so offering
+      // a "press R to retry" is misleading. Route straight through abort()
+      // so registered cleanup, analytics, and Sentry capture all run, and
+      // the process exits with the standard contract instead of looping
+      // back through setRunError → setRunError → setRunError forever.
+      if (error instanceof NoOrgsError) {
+        await wizardAbort({
+          message: errorMessage,
+          error: error as Error,
+        });
+        return;
+      }
+
       retry = await getUI().setRunError(error as Error);
       if (!retry) {
         await wizardAbort({
@@ -192,6 +216,35 @@ export interface DetectionResult {
 }
 
 /**
+ * Race a promise against a timeout, returning the resolved value on the
+ * win path or the literal `'timeout'` sentinel if the deadline fires first.
+ *
+ * Unlike a bare `Promise.race([work(), setTimeout(resolve('timeout'), ms)])`,
+ * this clears the timer when `work()` wins so the timer callback never fires
+ * after detection completes. Across ~18 frameworks racing in parallel that
+ * leak adds up to ~18 stranded timers per detection cycle, each holding the
+ * resolved closure (and the framework's installDir reference) alive until
+ * `timeoutMs` elapses.
+ *
+ * Rejections from `work()` propagate to the caller — only timeouts surface
+ * as the sentinel value, matching the previous behavior.
+ */
+async function raceWithTimeoutSentinel<T>(
+  work: Promise<T>,
+  timeoutMs: number,
+): Promise<T | 'timeout'> {
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  const timeoutPromise = new Promise<'timeout'>((resolve) => {
+    timer = setTimeout(() => resolve('timeout'), timeoutMs);
+  });
+  try {
+    return await Promise.race([work, timeoutPromise]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+  }
+}
+
+/**
  * Run all framework detectors in parallel and return the full results array.
  * The winner is the first detected framework in Integration enum order
  * (preserving the existing priority behavior).
@@ -211,6 +264,29 @@ export async function detectAllFrameworks(
       durationMs: 0,
       timedOut: false,
       error: 'installDir not readable',
+    }));
+  }
+
+  try {
+    const st = await fs.stat(installDir);
+    if (!st.isDirectory()) {
+      logToFile(`[detection] installDir is not a directory: ${installDir}`);
+      return Object.values(Integration).map((integration) => ({
+        integration,
+        detected: false,
+        durationMs: 0,
+        timedOut: false,
+        error: 'installDir not a directory',
+      }));
+    }
+  } catch {
+    logToFile(`[detection] installDir stat failed: ${installDir}`);
+    return Object.values(Integration).map((integration) => ({
+      integration,
+      detected: false,
+      durationMs: 0,
+      timedOut: false,
+      error: 'installDir stat failed',
     }));
   }
 
@@ -246,7 +322,7 @@ export async function detectAllFrameworks(
                 debug: false,
                 forceInstall: false,
                 default: false,
-                signup: false,
+                authOnboardingPath: AuthOnboardingPath.SignIn,
                 localMcp: false,
                 ci: false,
                 menu: false,
@@ -270,12 +346,7 @@ export async function detectAllFrameworks(
       };
 
       try {
-        const result = await Promise.race([
-          work(),
-          new Promise<'timeout'>((resolve) =>
-            setTimeout(() => resolve('timeout'), timeoutMs),
-          ),
-        ]);
+        const result = await raceWithTimeoutSentinel(work(), timeoutMs);
 
         if (result === 'timeout') {
           const durationMs = Math.round(performance.now() - start);

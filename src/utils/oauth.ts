@@ -2,8 +2,9 @@
  * Amplitude OAuth2/PKCE flow — adapted from Amplitude wizard's oauth.ts but
  * hitting Amplitude's auth endpoints (same as the ampli CLI).
  *
- * Key difference from Amplitude: checks ~/.ampli.json for an existing ampli CLI
- * session first, so users who ran `ampli login` can skip re-authenticating.
+ * Key difference from a bare OAuth client: checks the wizard session store
+ * for an existing session first (migrates legacy `~/.ampli.json` on read),
+ * so returning users skip re-authenticating when tokens are still valid.
  */
 
 import * as crypto from 'node:crypto';
@@ -28,6 +29,7 @@ import {
   storeToken,
   type StoredUser,
 } from './ampli-settings.js';
+import { clearStaleProjectState } from './clear-stale-project-state.js';
 import { withWizardSpan, addBreadcrumb } from '../lib/observability/index.js';
 
 // SVG assets inlined from ../javascript
@@ -124,19 +126,87 @@ function generateState(): string {
   return crypto.randomBytes(16).toString('hex');
 }
 
-async function startCallbackServer(): Promise<{
+/**
+ * Compares two strings using a constant-time comparison to mitigate timing
+ * side-channels (PR 335 — security hardening). Returns false immediately
+ * when lengths differ (not a leak — length is also encoded by the
+ * on-the-wire query string, and we only ever compare strings of fixed
+ * wizard-generated length).
+ */
+function safeEqualString(a: string, b: string): boolean {
+  const aBuf = Buffer.from(a, 'utf8');
+  const bBuf = Buffer.from(b, 'utf8');
+  if (aBuf.length !== bBuf.length) return false;
+  return crypto.timingSafeEqual(aBuf, bBuf);
+}
+
+/**
+ * Error thrown when no port in the OAUTH_PORT range is available. Callers
+ * surface `userMessage` instead of the raw error.
+ */
+export class OAuthPortInUseError extends Error {
+  readonly userMessage: string;
+  readonly basePort: number;
+  constructor(basePort: number) {
+    const userMessage = `Couldn't open the local authorization server (port ${basePort} is in use). Close any other wizard runs on this machine and try again.`;
+    super(userMessage);
+    this.name = 'OAuthPortInUseError';
+    this.userMessage = userMessage;
+    this.basePort = basePort;
+  }
+}
+
+/**
+ * Maximum number of consecutive ports to try after OAUTH_PORT on EADDRINUSE.
+ *
+ * The Amplitude OAuth app only accepts redirect URIs whose port is in this
+ * allowlisted range, which is why we don't use port 0 (OS-assigned).
+ * Concurrent wizard runs each pick the next free port in the range.
+ */
+export const OAUTH_PORT_RETRY_LIMIT = 10;
+
+// Re-exported (was non-export after PR 339's refactor wrapped this with
+// the port-retry loop) so the state-validation unit tests from PR 335
+// can drive it directly without going through the `__testing` shim.
+export async function startCallbackServer(): Promise<{
   server: http.Server;
+  port: number;
+  waitForCallback: (expectedState: string) => Promise<string>;
+}> {
+  let lastErr: NodeJS.ErrnoException | undefined;
+  for (let offset = 0; offset <= OAUTH_PORT_RETRY_LIMIT; offset++) {
+    const candidate = OAUTH_PORT + offset;
+    try {
+      return await tryStartCallbackServer(candidate);
+    } catch (e) {
+      const err = e as NodeJS.ErrnoException;
+      if (err && err.code === 'EADDRINUSE') {
+        lastErr = err;
+        continue;
+      }
+      throw e;
+    }
+  }
+  // Exhausted retries — surface a typed error with helpful copy.
+  void lastErr;
+  throw new OAuthPortInUseError(OAUTH_PORT);
+}
+
+function tryStartCallbackServer(port: number): Promise<{
+  server: http.Server;
+  port: number;
   waitForCallback: (expectedState: string) => Promise<string>;
 }> {
   return new Promise((resolve, reject) => {
     let callbackResolve: (code: string) => void;
     let callbackReject: (error: Error) => void;
+    let expectedStateClosure: string | null = null;
 
     const waitForCallback = (expectedState: string) =>
       new Promise<string>((res, rej) => {
         callbackResolve = res;
         callbackReject = rej;
-        void expectedState; // validated below in handleRequest
+        expectedStateClosure = expectedState;
       });
 
     const server = http.createServer((req, res) => {
@@ -145,9 +215,10 @@ async function startCallbackServer(): Promise<{
         res.end();
         return;
       }
-      const url = new URL(req.url, `http://localhost:${OAUTH_PORT}`);
+      const url = new URL(req.url, `http://127.0.0.1:${port}`);
       const code = url.searchParams.get('code');
       const error = url.searchParams.get('error');
+      const stateParam = url.searchParams.get('state');
 
       if (error) {
         const cancelled = error === 'access_denied';
@@ -167,6 +238,25 @@ async function startCallbackServer(): Promise<{
         return;
       }
 
+      // CSRF defense: validate `state` against the value generated when the
+      // OAuth flow began. Mismatch (or missing) indicates a forged callback
+      // (e.g. a malicious site forcing the wizard to consume the attacker's
+      // auth code) — reject loudly without exchanging the code.
+      if (
+        !stateParam ||
+        !expectedStateClosure ||
+        !safeEqualString(stateParam, expectedStateClosure)
+      ) {
+        res.writeHead(400, { 'Content-Type': 'text/html; charset=utf-8' });
+        res.end(
+          `<html><head><meta charset="UTF-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>Amplitude</title>${OAUTH_CALLBACK_STYLES}</head><body><div class="card"><div class="logo">${AMPLITUDE_WORDMARK_SVG}</div><div class="icon icon-error">✕</div><h1>Invalid request</h1><p>This sign-in link is invalid or has expired. Please try again from your terminal.</p></div></body></html>`,
+        );
+        callbackReject(
+          new Error('OAuth state mismatch — possible CSRF, callback rejected'),
+        );
+        return;
+      }
+
       if (code) {
         res.writeHead(200, { 'Content-Type': 'text/html; charset=utf-8' });
         res.end(
@@ -181,8 +271,42 @@ async function startCallbackServer(): Promise<{
       }
     });
 
-    server.listen(OAUTH_PORT, () => resolve({ server, waitForCallback }));
-    server.on('error', reject);
+    // Single-shot error handler for the listen() call. Detached after
+    // listen succeeds so later runtime errors don't reject this
+    // already-resolved promise.
+    const onListenError = (err: Error) => reject(err);
+    server.once('error', onListenError);
+
+    // Bind to 127.0.0.1 only — the OAuth callback should NEVER be
+    // reachable from other hosts on the network. Listening on 0.0.0.0
+    // would let an attacker on the same LAN race the user's browser to
+    // deliver a forged callback. (PR 339 made the port dynamic so
+    // concurrent wizard runs don't EADDRINUSE-collide.)
+    server.listen(port, '127.0.0.1', () => {
+      server.removeListener('error', onListenError);
+      resolve({ server, port, waitForCallback });
+    });
+  });
+}
+
+/** Exported for tests only. */
+export const __testing = {
+  /** Bind to a single concrete port — exposed so tests can simulate EADDRINUSE
+   *  without going through the OAUTH_PORT-anchored retry loop. */
+  tryStartCallbackServer: (port: number) => tryStartCallbackServer(port),
+  /** Run the retry loop. */
+  startCallbackServer: () => startCallbackServer(),
+  closeServer: (server: http.Server) => closeServer(server),
+};
+
+/** Closes an HTTP server, swallowing errors. Idempotent. */
+function closeServer(server: http.Server): Promise<void> {
+  return new Promise((resolve) => {
+    if (!server.listening) {
+      resolve();
+      return;
+    }
+    server.close(() => resolve());
   });
 }
 
@@ -190,6 +314,7 @@ async function exchangeCodeForToken(
   code: string,
   codeVerifier: string,
   zone: AmplitudeZone,
+  redirectPort: number,
 ): Promise<OAuthTokenResponse> {
   const { oAuthHost, oAuthClientId } = AMPLITUDE_ZONE_SETTINGS[zone];
   const response = await axios.post(
@@ -197,7 +322,7 @@ async function exchangeCodeForToken(
     new URLSearchParams({
       grant_type: 'authorization_code',
       code,
-      redirect_uri: `http://localhost:${OAUTH_PORT}/callback`,
+      redirect_uri: `http://localhost:${redirectPort}/callback`,
       client_id: oAuthClientId,
       code_verifier: codeVerifier,
     }).toString(),
@@ -216,15 +341,33 @@ export interface AmplitudeAuthResult {
 /**
  * Performs the Amplitude OAuth2/PKCE flow.
  *
- * 1. Checks ~/.ampli.json for a valid existing session (shared with ampli CLI),
- *    unless forceFresh is true (used for new projects with no local ampli.json).
+ * 1. Checks the wizard OAuth session file for a valid existing session,
+ *    unless forceFresh is true (used for new projects with no local binding).
  * 2. If none, opens the browser to auth.amplitude.com and awaits callback.
- * 3. Stores the resulting tokens back to ~/.ampli.json.
+ * 3. Stores the resulting tokens in the wizard session store.
  */
 export async function performAmplitudeAuth(options: {
   zone?: AmplitudeZone;
   /** Skip cached credentials and require fresh browser auth. */
   forceFresh?: boolean;
+  /**
+   * Project directory the wizard is running against. Used on a successful
+   * fresh-OAuth completion (browser-returned code → tokens) to wipe
+   * pre-existing per-project state so the new account doesn't inherit the
+   * prior account's API key, workspace binding, or session checkpoint.
+   * Symmetric with `performSignupOrAuth`'s wipe — see MCP-196.
+   *
+   * Not used on the cached-token short-circuit: that path returns the
+   * existing user's tokens unchanged, no auth event has occurred, the
+   * cached project state belongs to that same user.
+   */
+  installDir: string;
+  /**
+   * Optional abort signal — when triggered, closes the local callback server
+   * and rejects the auth promise with an AbortError. Lets SIGINT/cleanup
+   * paths reclaim the OAuth port without waiting for the 2-minute timeout.
+   */
+  signal?: AbortSignal;
 }): Promise<AmplitudeAuthResult> {
   return withWizardSpan(
     'auth.oauth.login',
@@ -240,10 +383,12 @@ export async function performAmplitudeAuth(options: {
 async function performAmplitudeAuthInner(options: {
   zone?: AmplitudeZone;
   forceFresh?: boolean;
+  installDir: string;
+  signal?: AbortSignal;
 }): Promise<AmplitudeAuthResult> {
   const zone = options.zone ?? DEFAULT_AMPLITUDE_ZONE;
 
-  // ── 1. Try existing ampli CLI session ────────────────────────────
+  // ── 1. Try existing cached session ────────────────────────────
   // Skip when forceFresh — used for new projects where we don't know
   // which org applies, so the user must explicitly authenticate.
   logToFile('[oauth] performAmplitudeAuth called', {
@@ -265,9 +410,9 @@ async function performAmplitudeAuthInner(options: {
     );
     if (existing) {
       getUI().log.info(
-        chalk.dim('Using existing Amplitude session from ~/.ampli.json'),
+        chalk.dim('Using existing Amplitude session (wizard credentials)'),
       );
-      addBreadcrumb('auth', 'Reused cached ampli session');
+      addBreadcrumb('auth', 'Reused cached OAuth session');
       return {
         idToken: existing.idToken,
         accessToken: existing.accessToken,
@@ -284,19 +429,41 @@ async function performAmplitudeAuthInner(options: {
   const state = generateState();
   const { oAuthHost, oAuthClientId } = AMPLITUDE_ZONE_SETTINGS[zone];
 
+  // Bind the server first so we know which port to advertise as redirect_uri.
+  // Concurrent wizard runs step through the OAUTH_PORT range until one is free.
+  let serverHandle: {
+    server: http.Server;
+    port: number;
+    waitForCallback: (expectedState: string) => Promise<string>;
+  };
+  try {
+    serverHandle = await startCallbackServer();
+  } catch (e) {
+    if (e instanceof OAuthPortInUseError) {
+      getUI().log.error(
+        `${chalk.red('Authorization failed:')}\n\n${e.userMessage}`,
+      );
+      analytics.captureException(e, { step: 'oauth_port_in_use' });
+      await abort();
+      throw e;
+    }
+    throw e;
+  }
+  const { server, port, waitForCallback } = serverHandle;
+
   const authUrl = new URL(`${oAuthHost}/oauth2/auth`);
   authUrl.searchParams.set('client_id', oAuthClientId);
-  authUrl.searchParams.set(
-    'redirect_uri',
-    `http://localhost:${OAUTH_PORT}/callback`,
-  );
+  authUrl.searchParams.set('redirect_uri', `http://localhost:${port}/callback`);
   authUrl.searchParams.set('response_type', 'code');
   authUrl.searchParams.set('code_challenge', codeChallenge);
   authUrl.searchParams.set('code_challenge_method', 'S256');
   authUrl.searchParams.set('scope', 'openid offline');
   authUrl.searchParams.set('state', state);
-
-  const { server, waitForCallback } = await startCallbackServer();
+  // Forward the CLI install UUID so a future onenav change can stitch
+  // browser-side auth events to the CLI's Amplitude device_id. Hydra strips
+  // unknown params on its redirect to the login page today, so this is inert
+  // until the login page (or its server) opts in to reading it.
+  authUrl.searchParams.set('amp_device_id', analytics.getAnonymousId());
 
   getUI().setLoginUrl(authUrl.toString());
 
@@ -309,12 +476,34 @@ async function performAmplitudeAuthInner(options: {
   const spinner = getUI().spinner();
   spinner.start('Waiting for Amplitude authorization...');
 
+  // Abort wiring — when the wizard-wide signal fires (SIGINT, /exit, etc.)
+  // close the server immediately so the next run can reclaim the port.
+  let abortReject: ((err: Error) => void) | null = null;
+  const abortPromise = new Promise<never>((_, reject) => {
+    abortReject = reject;
+  });
+  const onAbort = () => {
+    if (abortReject) {
+      const err = new Error('Authorization aborted');
+      err.name = 'AbortError';
+      abortReject(err);
+    }
+  };
+  if (options.signal) {
+    if (options.signal.aborted) {
+      onAbort();
+    } else {
+      options.signal.addEventListener('abort', onAbort, { once: true });
+    }
+  }
+
   try {
     const code = await Promise.race([
       waitForCallback(state),
       new Promise<never>((_, reject) =>
         setTimeout(() => reject(new Error('Authorization timed out')), 120_000),
       ),
+      abortPromise,
     ]);
 
     logToFile('[oauth] auth code received, exchanging for token');
@@ -323,7 +512,7 @@ async function performAmplitudeAuthInner(options: {
       'auth.oauth.exchange_code',
       'auth.oauth',
       { zone },
-      async () => exchangeCodeForToken(code, codeVerifier, zone),
+      async () => exchangeCodeForToken(code, codeVerifier, zone, port),
     );
     logToFile('[oauth] token exchange response', {
       token_type: tokenResponse.token_type,
@@ -335,7 +524,6 @@ async function performAmplitudeAuthInner(options: {
       id_token_prefix: tokenResponse.id_token?.slice(0, 20) + '…',
     });
 
-    server.close();
     getUI().setLoginUrl(null);
     spinner.stop('Authorization complete!');
 
@@ -346,10 +534,23 @@ async function performAmplitudeAuthInner(options: {
       zone,
     };
 
-    // ── 3. Persist to ~/.ampli.json (shared with ampli CLI) ──────────
-    // User details (name/email) are filled in after fetchAmplitudeUser()
+    // ── 3. Persist to wizard session store (canonical + legacy mirror) ───
+    // User details (name/email) are filled in after fetchAmplitudeUser().
+    // storeToken() uses atomicWriteJSON (temp + rename) — concurrent wizard
+    // runs cannot corrupt the file. Last-writer-wins for the access token
+    // is acceptable since all issued refresh tokens stay valid.
+    //
+    // Stored `expiresAt` tracks the id_token's TTL (1h on Ory's default
+    // OIDC config), not the access_token's `expires_in` (24h). The
+    // wizard authenticates with the id_token, so `tryRefreshToken` must
+    // refresh on id_token expiry to avoid 401s mid-run. Falls back to
+    // `expires_in` if the JWT can't be decoded — never strictly worse.
+    const { resolveStoredExpiryMs } = await import('./jwt-exp.js');
     const expiresAt = new Date(
-      Date.now() + tokenResponse.expires_in * 1000,
+      resolveStoredExpiryMs({
+        idToken: tokenResponse.id_token,
+        expiresInSeconds: tokenResponse.expires_in,
+      }),
     ).toISOString();
     const pendingUser: StoredUser = {
       id: 'pending',
@@ -358,13 +559,23 @@ async function performAmplitudeAuthInner(options: {
       email: '',
       zone,
     };
+    // Wipe pre-existing per-project state BEFORE persisting the new
+    // account's tokens. Mirrors the wipe in performSignupOrAuth — both
+    // "fresh tokens just landed for what may be a different account"
+    // entry points use the same helper so install-dir-keyed surfaces
+    // (keychain, .env.local, project ampli.json bindings, session
+    // checkpoint) don't carry over the prior account's data into the
+    // new one. Idempotent in the same-account case (just re-resolves
+    // from backend on the next read), correct in the different-account
+    // case. See MCP-196.
+    clearStaleProjectState(options.installDir);
     storeToken(pendingUser, {
       accessToken: tokenResponse.access_token,
       idToken: tokenResponse.id_token,
       refreshToken: tokenResponse.refresh_token,
       expiresAt,
     });
-    logToFile('[oauth] token stored to ~/.ampli.json, returning result', {
+    logToFile('[oauth] token stored to wizard session file, returning result', {
       zone,
       expiresAt,
     });
@@ -372,11 +583,12 @@ async function performAmplitudeAuthInner(options: {
     return result;
   } catch (e) {
     spinner.stop('Authorization failed.');
-    server.close();
     const error = e instanceof Error ? e : new Error('Unknown error');
     logToFile('[oauth] error during auth flow', error);
 
-    if (error.message.includes('timeout')) {
+    if (error.name === 'AbortError') {
+      // Wizard-level cancellation — caller already surfaces this; stay quiet.
+    } else if (error.message.includes('timeout')) {
       getUI().log.error('Authorization timed out. Please try again.');
     } else if (error.message.includes('access_denied')) {
       getUI().log.info(
@@ -395,6 +607,14 @@ async function performAmplitudeAuthInner(options: {
     analytics.captureException(error, { step: 'oauth_flow' });
     await abort();
     throw error;
+  } finally {
+    // Always release the port — timeout, success, error, or abort. Without
+    // this, a SIGINT during browser auth leaves the listener bound and the
+    // next wizard run hits EADDRINUSE.
+    if (options.signal) {
+      options.signal.removeEventListener('abort', onAbort);
+    }
+    await closeServer(server);
   }
 }
 
@@ -412,6 +632,10 @@ export async function refreshAccessToken(
   expiresAt: string;
 }> {
   const { oAuthHost, oAuthClientId } = AMPLITUDE_ZONE_SETTINGS[zone];
+  // Bound the refresh exchange — without this, a hung OAuth endpoint
+  // (corporate proxy, transient flake) freezes the wizard indefinitely
+  // because callers like `refreshTokenIfStale` block agent boot on it.
+  // 10s matches `token-refresh.ts`'s silent fetch path.
   const response = await axios.post(
     `${oAuthHost}/oauth2/token`,
     new URLSearchParams({
@@ -419,14 +643,27 @@ export async function refreshAccessToken(
       refresh_token: refreshToken,
       client_id: oAuthClientId,
     }).toString(),
-    { headers: { 'Content-Type': 'application/x-www-form-urlencoded' } },
+    {
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      timeout: 10_000,
+    },
   );
   const parsed = OAuthTokenResponseSchema.parse(response.data);
+  // Source `expiresAt` from the rotated id_token's `exp` claim — the
+  // id_token's TTL is the binding constraint for our API calls. See
+  // `src/utils/jwt-exp.ts` for rationale. Falls back to `expires_in`
+  // when the JWT can't be decoded.
+  const { resolveStoredExpiryMs } = await import('./jwt-exp.js');
   return {
     accessToken: parsed.access_token,
     idToken: parsed.id_token,
     refreshToken: parsed.refresh_token,
-    expiresAt: new Date(Date.now() + parsed.expires_in * 1000).toISOString(),
+    expiresAt: new Date(
+      resolveStoredExpiryMs({
+        idToken: parsed.id_token,
+        expiresInSeconds: parsed.expires_in,
+      }),
+    ).toISOString(),
   };
 }
 
@@ -438,7 +675,7 @@ export type OAuthConfig = { scopes: string[]; signup?: boolean };
 export async function performOAuthFlow(
   _config: OAuthConfig,
 ): Promise<OAuthTokenResponse> {
-  const result = await performAmplitudeAuth({});
+  const result = await performAmplitudeAuth({ installDir: process.cwd() });
   return {
     access_token: result.accessToken,
     id_token: result.idToken,

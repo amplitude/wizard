@@ -26,14 +26,14 @@ const WIZARD_STEPS: Array<{ screen: Screen; label: string }> = [
 /** Screens that belong to each step (for grouping substeps). */
 const STEP_SCREENS: Record<string, Screen[]> = {
   Welcome: [Screen.Intro],
-  Auth: [Screen.RegionSelect, Screen.Auth, Screen.DataSetup],
-  Setup: [
-    Screen.ActivationOptions,
-    Screen.Setup,
-    Screen.FeatureOptIn,
-    Screen.Run,
-    Screen.Mcp,
+  Auth: [
+    Screen.RegionSelect,
+    Screen.EmailCapture,
+    Screen.ToS,
+    Screen.Auth,
+    Screen.DataSetup,
   ],
+  Setup: [Screen.ActivationOptions, Screen.Setup, Screen.Run, Screen.Mcp],
   Verify: [Screen.DataIngestionCheck],
   Done: [Screen.Outro, Screen.Slack],
 };

@@ -11,6 +11,7 @@ import {
   getFastAPIVersionBucket,
   FastAPIProjectType,
   findFastAPIAppFile,
+  IGNORE_PATTERNS,
 } from './utils';
 
 interface FastAPIContext extends Record<string, unknown> {
@@ -68,7 +69,7 @@ export const FASTAPI_AGENT_CONFIG: FrameworkConfig<FastAPIContext> = {
         ],
         {
           cwd: installDir,
-          ignore: ['**/venv/**', '**/.venv/**', '**/env/**', '**/.env/**'],
+          ignore: IGNORE_PATTERNS,
         },
       );
 
@@ -96,13 +97,7 @@ export const FASTAPI_AGENT_CONFIG: FrameworkConfig<FastAPIContext> = {
         ['**/main.py', '**/app.py', '**/application.py', '**/__init__.py'],
         {
           cwd: installDir,
-          ignore: [
-            '**/venv/**',
-            '**/.venv/**',
-            '**/env/**',
-            '**/.env/**',
-            '**/__pycache__/**',
-          ],
+          ignore: IGNORE_PATTERNS,
         },
       );
 
