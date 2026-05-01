@@ -15,9 +15,15 @@ Names >50 chars are auto-truncated.
 
 **Exception:** only when Phase 1 of the full-repo-instrumentation skill confirms an existing convention (5+ existing tracking calls, ≥80% consistent, intentionally codified). One or two stray strings do NOT qualify.
 
+## Optional — `category` per event (wizard-proxy dashboard planner)
+
+You MAY add **`category`** on each event row so **`POST /dashboards`** can plan funnels/retention more accurately. Allowed values **only**: `SIGNUP`, `ACTIVATION`, `ENGAGEMENT`, `CONVERSION`, `OTHER` (exact spelling, upper case). Wrong or unknown values are ignored client-side — prefer omitting to guessing.
+
+Use **one** category per custom event when the role is clear (e.g. signup flow → `SIGNUP`, core habit → `ENGAGEMENT`). Do not encode category in the **event name**; keep names as human actions per the rules above.
+
 ## CRITICAL — `confirm_event_plan` owns the plan JSON
 
-`confirm_event_plan` owns the initial write of `.amplitude/events.json` (mirrored to legacy `.amplitude-events.json`). Do NOT write either file yourself before or during the `confirm_event_plan` flow with a different shape (`event_name`, `eventName`, `file_path`, etc.) — drifting from the canonical `[{name, description}]` shape will render blank bullets in the Event Plan viewer.
+`confirm_event_plan` owns the initial write of `.amplitude/events.json` (mirrored to legacy `.amplitude-events.json`). Do NOT write either file yourself before or during the `confirm_event_plan` flow with a different shape (`event_name`, `eventName`, `file_path`, etc.) — drifting from the canonical `[{ name, description, category? }, …]` shape will render blank bullets in the Event Plan viewer.
 
 After all instrumentation is complete you MAY rewrite `.amplitude-events.json` to add the `file` field per the post-instrumentation reference, but you must keep the canonical `name` / `description` keys.
 

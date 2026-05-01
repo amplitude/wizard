@@ -20,7 +20,9 @@ import {
 import {
   parseEventPlanContent,
   readLocalEventPlan,
+  type ParsedEventPlanEntry,
 } from '../lib/event-plan-parser.js';
+import { readWizardContext } from '../lib/read-wizard-context.js';
 import { resolveZone } from '../lib/zone-resolution';
 import { DEFAULT_AMPLITUDE_ZONE, Integration } from '../lib/constants.js';
 import { getUI } from '../ui';
@@ -37,7 +39,7 @@ const LEGACY_DASHBOARD_FILE = '.amplitude-dashboard.json';
 const DASHBOARD_TIMEOUT_MS = 36_000;
 
 interface EventsFile {
-  events: Array<{ name: string; description: string }>;
+  events: ParsedEventPlanEntry[];
 }
 
 const DashboardFileSchema = z.object({
@@ -188,9 +190,20 @@ export async function createDashboardStep(
       const zone = resolveZone(session, DEFAULT_AMPLITUDE_ZONE, {
         readDisk: true,
       });
-      const productName =
-        session.selectedProjectName?.trim() ||
-        path.basename(session.installDir);
+      const wizardCtx = readWizardContext(session.installDir);
+      const fromCtxName = wizardCtx?.productDisplayName?.trim();
+      const fromSessionName = session.selectedProjectName?.trim();
+      const fallbackDirName = path.basename(session.installDir);
+      const productName = fromCtxName || fromSessionName || fallbackDirName;
+      if (!fromCtxName && !fromSessionName) {
+        ui.log.warn(
+          'Starter dashboard uses this folder name as the product label. Prefer an Amplitude project name or add `productDisplayName` to `.amplitude/wizard-context.json` for a clearer title.',
+        );
+      }
+      const sdkVersion = wizardCtx?.sdkVersion?.trim();
+      const autocaptureEnabled =
+        wizardCtx?.autocaptureEnabled ?? autocaptureLikelyEnabled(integration);
+
       const apiResult = await createWizardDashboard(
         accessToken,
         zone,
@@ -200,12 +213,14 @@ export async function createDashboardStep(
           product: {
             name: productName,
             framework: integration,
+            ...(sdkVersion ? { sdkVersion } : {}),
           },
           events: events.events.map((e) => ({
             name: e.name,
             ...(e.description ? { description: e.description } : {}),
+            ...(e.category ? { category: e.category } : {}),
           })),
-          autocaptureEnabled: autocaptureLikelyEnabled(integration),
+          autocaptureEnabled,
         },
         { signal: controller.signal },
       );

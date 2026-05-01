@@ -16,7 +16,53 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { readLocalEventPlan } from '../event-plan-parser.js';
+import {
+  parseEventPlanContent,
+  readLocalEventPlan,
+} from '../event-plan-parser.js';
+
+describe('parseEventPlanContent', () => {
+  it('preserves valid wizard-proxy category values', () => {
+    const out = parseEventPlanContent(
+      JSON.stringify([
+        {
+          name: 'User Signed Up',
+          description: 'Signup done',
+          category: 'SIGNUP',
+        },
+      ]),
+    );
+    expect(out).toEqual([
+      {
+        name: 'User Signed Up',
+        description: 'Signup done',
+        category: 'SIGNUP',
+      },
+    ]);
+  });
+
+  it('drops invalid category strings', () => {
+    const out = parseEventPlanContent(
+      JSON.stringify([
+        { name: 'Click', description: 'click', category: 'not-a-real-enum' },
+      ]),
+    );
+    expect(out).toEqual([{ name: 'Click', description: 'click' }]);
+  });
+
+  it('trims category whitespace before validation', () => {
+    const out = parseEventPlanContent(
+      JSON.stringify([
+        {
+          name: 'Order Completed',
+          description: 'done',
+          category: ' CONVERSION ',
+        },
+      ]),
+    );
+    expect(out?.[0].category).toBe('CONVERSION');
+  });
+});
 
 describe('readLocalEventPlan', () => {
   let installDir: string;

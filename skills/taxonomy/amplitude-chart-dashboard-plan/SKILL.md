@@ -25,8 +25,10 @@ server-side right after this agent run using your `.amplitude-events.json`.
 
 ## Inputs
 
-1. **`.amplitude-events.json`** — lists every event name (and optionally
-   description) that was instrumented.
+1. **`.amplitude/events.json`** (or legacy `.amplitude-events.json`) — lists
+   every event **name**, **description**, optional **`category`** (`SIGNUP` /
+   `ACTIVATION` / `ENGAGEMENT` / `CONVERSION` / `OTHER`) for the wizard-proxy
+   planner, and optional **`file`** after instrumentation.
 
 2. **Taxonomy funnels** — from `amplitude-quickstart-taxonomy-agent` or your
    own read of the events. Identify 2–5 product funnels (Onboarding, Core Loop,

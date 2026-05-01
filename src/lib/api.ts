@@ -9,6 +9,7 @@ import {
   WIZARD_USER_AGENT,
   type AmplitudeZone,
 } from './constants.js';
+import type { WizardDashboardEventCategory } from './wizard-dashboard-contract.js';
 import { callAmplitudeMcp } from './mcp-with-fallback.js';
 import { getHostFromRegion, getLlmGatewayUrlFromHost } from '../utils/urls.js';
 
@@ -535,7 +536,11 @@ export interface CreateWizardDashboardInput {
   orgId: string;
   appId: string;
   product: { name: string; framework: string; sdkVersion?: string };
-  events: Array<{ name: string; description?: string }>;
+  events: Array<{
+    name: string;
+    description?: string;
+    category?: WizardDashboardEventCategory;
+  }>;
   autocaptureEnabled: boolean;
   dryRun?: boolean;
 }

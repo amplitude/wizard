@@ -168,7 +168,10 @@ describe('createDashboardStep', () => {
 
   const ui = (
     uiModule as unknown as {
-      __ui: { applyJourneyTransition: ReturnType<typeof vi.fn> };
+      __ui: {
+        applyJourneyTransition: ReturnType<typeof vi.fn>;
+        log: { warn: ReturnType<typeof vi.fn> };
+      };
     }
   ).__ui;
 
@@ -196,7 +199,10 @@ describe('createDashboardStep', () => {
       installDir,
       selectedOrgId: overrides.selectedOrgId ?? '123',
       selectedAppId: overrides.selectedAppId ?? '456',
-      selectedProjectName: overrides.selectedProjectName ?? 'My App',
+      selectedProjectName:
+        overrides.selectedProjectName !== undefined
+          ? overrides.selectedProjectName
+          : 'My App',
       ...overrides,
     };
   }
@@ -368,5 +374,129 @@ describe('createDashboardStep', () => {
     });
 
     expect(session.dashboardFallbackPhase).toBe('completed');
+  });
+
+  it('forwards per-event category to createWizardDashboard', async () => {
+    fs.unlinkSync(path.join(installDir, '.amplitude-events.json'));
+    fs.mkdirSync(path.join(installDir, '.amplitude'), { recursive: true });
+    fs.writeFileSync(
+      path.join(installDir, '.amplitude', 'events.json'),
+      JSON.stringify([
+        {
+          name: 'Hello API Called',
+          description: 'test',
+          category: 'ENGAGEMENT',
+        },
+      ]),
+    );
+    mockedCreateWizardDashboard.mockResolvedValue({
+      dashboardUrl: 'https://app.amplitude.com/org/1/dashboard/abc',
+      dashboardId: 'abc',
+      charts: [],
+    });
+
+    await createDashboardStep({
+      session: baseSession() as never,
+      accessToken: 'token',
+      integration: Integration.nextjs,
+    });
+
+    expect(mockedCreateWizardDashboard).toHaveBeenCalledWith(
+      'token',
+      expect.anything(),
+      expect.objectContaining({
+        events: [
+          expect.objectContaining({
+            name: 'Hello API Called',
+            category: 'ENGAGEMENT',
+          }),
+        ],
+      }),
+      expect.anything(),
+    );
+  });
+
+  it('uses wizard-context.json for autocaptureEnabled when present', async () => {
+    fs.mkdirSync(path.join(installDir, '.amplitude'), { recursive: true });
+    fs.writeFileSync(
+      path.join(installDir, '.amplitude', 'wizard-context.json'),
+      JSON.stringify({ autocaptureEnabled: false }),
+    );
+    mockedCreateWizardDashboard.mockResolvedValue({
+      dashboardUrl: 'https://app.amplitude.com/org/1/dashboard/abc',
+      dashboardId: 'abc',
+      charts: [],
+    });
+
+    await createDashboardStep({
+      session: baseSession() as never,
+      accessToken: 'token',
+      integration: Integration.nextjs,
+    });
+
+    expect(mockedCreateWizardDashboard).toHaveBeenCalledWith(
+      'token',
+      expect.anything(),
+      expect.objectContaining({ autocaptureEnabled: false }),
+      expect.anything(),
+    );
+  });
+
+  it('uses wizard-context productDisplayName and sdkVersion on the payload', async () => {
+    fs.mkdirSync(path.join(installDir, '.amplitude'), { recursive: true });
+    fs.writeFileSync(
+      path.join(installDir, '.amplitude', 'wizard-context.json'),
+      JSON.stringify({
+        productDisplayName: 'Billing Portal',
+        sdkVersion: '2.36.2',
+      }),
+    );
+    mockedCreateWizardDashboard.mockResolvedValue({
+      dashboardUrl: 'https://app.amplitude.com/org/1/dashboard/abc',
+      dashboardId: 'abc',
+      charts: [],
+    });
+
+    await createDashboardStep({
+      session: baseSession({ selectedProjectName: null }) as never,
+      accessToken: 'token',
+      integration: Integration.nextjs,
+    });
+
+    expect(mockedCreateWizardDashboard).toHaveBeenCalledWith(
+      'token',
+      expect.anything(),
+      expect.objectContaining({
+        product: expect.objectContaining({
+          name: 'Billing Portal',
+          framework: Integration.nextjs,
+          sdkVersion: '2.36.2',
+        }),
+      }),
+      expect.anything(),
+    );
+    expect(ui.log.warn).not.toHaveBeenCalled();
+  });
+
+  it('warns when product label falls back to folder name only', async () => {
+    mockedCreateWizardDashboard.mockResolvedValue({
+      dashboardUrl: 'https://app.amplitude.com/org/1/dashboard/abc',
+      dashboardId: 'abc',
+      charts: [],
+    });
+
+    await createDashboardStep({
+      session: baseSession({ selectedProjectName: null }) as never,
+      accessToken: 'token',
+      integration: Integration.nextjs,
+    });
+
+    expect(ui.log.warn).toHaveBeenCalledWith(
+      expect.stringContaining('folder name'),
+    );
+    const [, , payload] = mockedCreateWizardDashboard.mock.calls[0];
+    expect((payload as { product: { name: string } }).product.name).toBe(
+      path.basename(installDir),
+    );
   });
 });
