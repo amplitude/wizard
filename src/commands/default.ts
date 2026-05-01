@@ -758,7 +758,29 @@ export const defaultCommand: CommandModule = {
                 '../utils/signup-or-auth.js'
               );
               const s = tui.store.session;
-              if (
+              if (s.signupAuth !== null) {
+                // SigningUpScreen already completed the direct-signup POST
+                // (success arm), wrote tokens to ~/.ampli.json via
+                // replaceStoredUser, and stored the result on the session.
+                // Hydrate `auth` directly from that result so we don't
+                // re-POST to the provisioning endpoint (which would return
+                // requires_redirect for the now-existing account and fall
+                // through to a spurious browser OAuth flow).
+                auth = {
+                  idToken: s.signupAuth.idToken,
+                  accessToken: s.signupAuth.accessToken,
+                  refreshToken: s.signupAuth.refreshToken,
+                  zone: s.signupAuth.zone,
+                };
+                signupUserInfo = s.signupAuth.userInfo;
+                signupTokensObtained = true;
+                tui.store.setSignupMagicLinkUrl(
+                  s.signupAuth.dashboardUrl ?? null,
+                );
+                getUI().log.info(
+                  'Direct signup succeeded; using newly created account.',
+                );
+              } else if (
                 isCreateAccountOnboarding(s) &&
                 s.signupEmail &&
                 s.signupFullName &&
