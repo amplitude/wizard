@@ -128,9 +128,10 @@ function readStringField(value: unknown, key: string): string | undefined {
  *      the call returning means the agent finished the planning step;
  *      the user's verdict on the plan is orthogonal).
  *   4. **wire** — any Edit/Write tool firing AFTER plan has completed.
- *      Pre → in_progress. (No explicit completion signal — the
- *      sequential-ordering invariant in `applyJourneyTransition` rolls
- *      it up to `completed` when step 5 starts.)
+ *      Pre → in_progress. There is no completion signal on write-tool Post
+ *      (historically, the first Post flipped the pill to "done" while
+ *      multi-file instrumentation continued). The store's sequential cascade
+ *      in `renderJourneyTasks` rolls wire up to `completed` when step 5 starts.
  *   5. **dashboard** — Amplitude MCP `create_chart` / `create_dashboard` /
  *      `update_chart` / `update_dashboard` tools (in_progress) and
  *      `mcp__wizard-tools__record_dashboard` (Post → completed).
