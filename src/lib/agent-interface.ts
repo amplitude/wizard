@@ -79,6 +79,7 @@ import {
   type HookEvent,
   buildHooksConfig,
 } from './agent-hooks';
+import { getAgentDriver } from './agent-driver';
 
 /**
  * Mirror of @anthropic-ai/claude-agent-sdk ThinkingConfig. We mirror locally
@@ -140,14 +141,13 @@ type SDKQueryFn = (params: {
   options?: SDKQueryOptions;
 }) => AsyncIterable<unknown>;
 
-// Dynamic import cache for ESM module
-let _sdkModule: { query: SDKQueryFn } | null = null;
+// Backed by the AgentDriver port (see `./agent-driver`). Keeps the historical
+// `{ query }` shape so the rest of this file is untouched. Tests override the
+// driver via `setAgentDriver` and the next call here picks it up — no SDK
+// import is ever performed under a test override.
 async function getSDKModule(): Promise<{ query: SDKQueryFn }> {
-  if (!_sdkModule) {
-    const mod = await import('@anthropic-ai/claude-agent-sdk');
-    _sdkModule = { query: mod.query as SDKQueryFn };
-  }
-  return _sdkModule;
+  const driver = await getAgentDriver();
+  return { query: driver as unknown as SDKQueryFn };
 }
 
 /**
