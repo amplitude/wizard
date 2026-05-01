@@ -1,8 +1,9 @@
 /**
- * EmailCaptureScreen — Collect user email during --signup flow.
+ * EmailCaptureScreen — Collect user email on the create-account onboarding path
+ * (`--auth-onboarding create-account`; legacy alias: `--signup`).
  *
- * Required before Terms of Service acceptance. Pre-populates from
- * --signup-email flag if provided.
+ * Required before Terms of Service acceptance. Pre-populates from `--email` /
+ * `WizardSession.signupEmail` when the CLI or session already supplied them.
  */
 
 import { Box, Text } from 'ink';

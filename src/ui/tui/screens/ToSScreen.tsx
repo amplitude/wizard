@@ -1,5 +1,6 @@
 /**
- * ToSScreen — Terms of Service acceptance for --signup flow.
+ * ToSScreen — Terms of Service acceptance on the create-account onboarding path
+ * (`--auth-onboarding create-account`; legacy alias: `--signup`).
  *
  * Pattern inspired by Stripe CLI: presents terms and privacy policy
  * links, requires explicit acceptance before proceeding to authentication.

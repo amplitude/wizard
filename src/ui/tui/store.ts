@@ -275,7 +275,7 @@ export class WizardStore {
 
   /**
    * Return to the welcome (Intro) screen. Used by Esc on RegionSelect and by
-   * signup EmailCapture when the user backs out before entering an account.
+   * create-account EmailCapture when the user backs out before entering an account.
    * Does not clear region or framework — Continue from Intro re-resolves the
    * same downstream gates.
    */
