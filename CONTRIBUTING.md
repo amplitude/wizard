@@ -91,10 +91,11 @@ A CI check enforces this on PR titles.
 2. Make your changes
 3. Add or update tests as needed
 4. Run `pnpm lint` and `pnpm test` to verify (for TUI/router/flow edits, also run the focused Vitest command under **Agent-assisted development**)
-5. Open a PR with a conventional commit title
-6. Fill in the PR description with a summary and test plan
-7. If you used a **`/reflect`** session on the work, paste the numbered checklist into the PR (or link to it); skip with “N/A” only for non-agent sessions
-8. After **`git push`**, open the PR with **`gh pr create --fill`** when the GitHub CLI is available and authenticated (otherwise use the compare URL from the push output)
+5. If `git status` shows you are **behind** `origin/<your-branch>`, run **`git pull --rebase origin <branch>`** before **`git push`**
+6. Open a PR with a conventional commit title
+7. Fill in the PR description with a summary and test plan
+8. If you used a **`/reflect`** session on the work, paste the numbered checklist into the PR (or link to it); skip with “N/A” only for non-agent sessions
+9. After **`git push`**, open the PR with **`gh pr create --fill`** when the GitHub CLI is available and authenticated (otherwise use the compare URL from the push output)
 
 ## Adding a new framework
 

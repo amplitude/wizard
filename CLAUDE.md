@@ -151,6 +151,7 @@ The `/diagnostics` slash command prints the full layout for the current project 
 ## Pull requests
 
 - Run the **`/reflect`** skill on the session and paste the numbered checklist into the PR description (or link to it). Treat that as part of the PR artifact, not optional narration. Human-oriented PR steps also live in [`CONTRIBUTING.md`](./CONTRIBUTING.md). When running **`/reflect`**, treat **this repo’s `CLAUDE.md`** as the canonical place to de-dupe proposals — a global `~/.claude/CLAUDE.md` may be absent in worktrees or sandboxes.
+- If **`git status`** shows your branch is **behind** its upstream (e.g. `origin/your-branch`), run **`git pull --rebase origin <branch>`** before **`git push`** so the push is fast-forward and history stays linear.
 - After you **`git push`** a branch, prefer opening the PR with the GitHub CLI: **`gh pr create --fill`** (or pass `--title` / `--body` explicitly). If `gh` is not installed or authenticated, use the compare URL your `git push` printed instead.
 - After changing **`src/ui/tui/`** screens, **`flows.ts`**, **`router.ts`**, or **`store.ts`** navigation-related code, run Vitest in a stable pool before pushing (avoids fork timeouts / flakes on wide runs):
 
