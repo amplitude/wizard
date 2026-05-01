@@ -312,7 +312,7 @@ describe('wizardAbort', () => {
 
   // ── isWizardAbortInProgress flag ───────────────────────────────────────
   //
-  // Regression test for the "Press any key to exit hangs after q on
+  // Regression test for the "Press any key to exit hangs after x on
   // DataIngestionCheckScreen" bug. Several screens navigate to the cancel
   // outro via `setOutroData` without going through wizardAbort; the
   // OutroScreen dismissal handler reads this flag to decide whether to

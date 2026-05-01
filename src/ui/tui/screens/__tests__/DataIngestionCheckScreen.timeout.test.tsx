@@ -4,7 +4,7 @@
  * Hard rule: when the activation API fails AND the catalog fetch hangs,
  * the user must NOT be stuck on "Checking your event catalog…" forever.
  * A 15s `withTimeout` wrapper around the catalog fetch falls through to
- * `setEventTypes([])`, which unblocks the [Enter] / [q] hints.
+ * `setEventTypes([])`, which unblocks the Enter/q skip and x exit hints.
  *
  * We use vitest fake timers to fast-forward past the 15s timeout instead
  * of waiting in real time — see https://vitest.dev/api/vi.html#vi-usefaketimers.
