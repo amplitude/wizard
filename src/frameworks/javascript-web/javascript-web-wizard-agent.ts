@@ -4,10 +4,8 @@ import type { FrameworkConfig } from '../../lib/framework-config';
 import { Integration } from '../../lib/constants';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import { hasPackageInstalled } from '../../utils/package-json';
 import { tryGetPackageJson } from '../../utils/package-json-light';
 import {
-  FRAMEWORK_PACKAGES,
   detectJsPackageManager,
   detectBundler,
   hasIndexHtml,
@@ -15,6 +13,7 @@ import {
 } from './utils';
 import { detectNodePackageManagersLight as detectNodePackageManagers } from '../../lib/package-manager-detection-light';
 import { BROWSER_UNIFIED_SDK_PROMPT_LINE } from '../_shared/browser-sdk-prompt';
+import { javascriptWebBlockedByFrameworkPackage } from '../_shared/javascript-web-blocking-policy';
 
 export const JAVASCRIPT_WEB_AGENT_CONFIG: FrameworkConfig<JavaScriptContext> = {
   metadata: {
@@ -52,11 +51,8 @@ export const JAVASCRIPT_WEB_AGENT_CONFIG: FrameworkConfig<JavaScriptContext> = {
         return false;
       }
 
-      // Exclude projects with known framework packages
-      for (const frameworkPkg of FRAMEWORK_PACKAGES) {
-        if (hasPackageInstalled(frameworkPkg, packageJson)) {
-          return false;
-        }
+      if (javascriptWebBlockedByFrameworkPackage(packageJson)) {
+        return false;
       }
 
       const { installDir } = options;
