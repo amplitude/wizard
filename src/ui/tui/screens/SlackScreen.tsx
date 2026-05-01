@@ -74,10 +74,10 @@ export const SlackScreen = ({
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const unmountedRef = useRef(false);
 
-  // Esc → goBack when there is no ConfirmationInput (those wire Esc via
-  // escCancelOrRouterBack so we never double-fire). Opening / Verifying are
-  // short-lived states where the user may still want to unwind.
-  const confirmationPhase =
+  // ConfirmationInput phases wire Esc through onCancel → escCancelOrRouterBack.
+  // Everywhere else (Opening / Verifying spinner, Done celebration before
+  // auto-advance) we want Esc → goBack when the router allows it.
+  const confirmationInputPhase =
     phase === Phase.Prompt ||
     phase === Phase.Waiting ||
     phase === Phase.NotConnected;
@@ -85,8 +85,7 @@ export const SlackScreen = ({
     enabled:
       !standalone &&
       onComplete === undefined &&
-      !confirmationPhase &&
-      (phase === Phase.Opening || phase === Phase.Verifying),
+      !confirmationInputPhase,
   });
 
   // Clear any pending timer on unmount and flag as unmounted so late-resolving
