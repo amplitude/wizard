@@ -739,17 +739,22 @@ export const DataIngestionCheckScreen = ({
     }
 
     // Enter-guard: if the user is staring at the skip-confirm prompt,
-    // 'y' confirms the skip, anything else cancels it. This is the
-    // second-Enter step Cassie's feedback called for — without it,
-    // hitting Enter when no events were detected silently confirmed
-    // verification, which was easy to do by accident.
+    // the same keys that opened it (Enter, q) plus y confirm the skip;
+    // anything else dismisses it. Re-pressing Enter/q must not toggle the
+    // prompt off — users expect the trigger key to confirm.
     if (awaitingSkipConfirm) {
-      if (_char === 'y' || _char === 'Y') {
+      if (
+        _char === 'y' ||
+        _char === 'Y' ||
+        _char === 'q' ||
+        _char === 'Q' ||
+        key.return
+      ) {
         if (pollingRef.current !== null) clearInterval(pollingRef.current);
         store.setDataIngestionConfirmed();
         return;
       }
-      // Any other key (incl. Esc, Enter, n) dismisses the prompt.
+      // Any other key (e.g. Esc, n) dismisses the prompt.
       setAwaitingSkipConfirm(false);
       return;
     }

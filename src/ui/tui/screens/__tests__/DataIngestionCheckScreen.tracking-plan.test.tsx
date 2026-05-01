@@ -270,6 +270,55 @@ describe('DataIngestionCheckScreen — tracking plan + skip guard', () => {
     unmount();
   });
 
+  it('confirms verification when skip-confirm is acknowledged with Enter (second press)', async () => {
+    fetchProjectActivationStatusMock.mockRejectedValue(new Error('boom'));
+    fetchProjectEventTypesMock.mockResolvedValue([]);
+
+    const store = makeStore(installDir);
+    const setDataIngestionConfirmedSpy = vi.spyOn(
+      store,
+      'setDataIngestionConfirmed',
+    );
+    const { stdin, unmount } = render(
+      <DataIngestionCheckScreen store={store} />,
+    );
+
+    await settle(150);
+
+    stdin.write('\r');
+    await settle();
+    expect(setDataIngestionConfirmedSpy).not.toHaveBeenCalled();
+
+    stdin.write('\r');
+    await settle();
+    expect(setDataIngestionConfirmedSpy).toHaveBeenCalledTimes(1);
+
+    unmount();
+  });
+
+  it('confirms verification when skip-confirm is acknowledged with q (second press)', async () => {
+    const store = makeStore(installDir);
+    const setDataIngestionConfirmedSpy = vi.spyOn(
+      store,
+      'setDataIngestionConfirmed',
+    );
+    const { stdin, unmount } = render(
+      <DataIngestionCheckScreen store={store} />,
+    );
+
+    await settle(150);
+
+    stdin.write('q');
+    await settle();
+    expect(setDataIngestionConfirmedSpy).not.toHaveBeenCalled();
+
+    stdin.write('q');
+    await settle();
+    expect(setDataIngestionConfirmedSpy).toHaveBeenCalledTimes(1);
+
+    unmount();
+  });
+
   it('skips the guard when cataloged events provide a fallback signal', async () => {
     fetchProjectActivationStatusMock.mockRejectedValue(new Error('boom'));
     // Catalog returns names — that's the user's positive signal that
