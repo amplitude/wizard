@@ -14,6 +14,7 @@ import { atom, map } from 'nanostores';
 import { TaskStatus, type EventPlanDecision } from '../wizard-ui.js';
 import {
   AuthOnboardingPath,
+  isCreateAccountOnboarding,
   type WizardSession,
   type OutroData,
   type DiscoveredFeature,
@@ -811,6 +812,34 @@ export class WizardStore {
     this.$session.setKey('selectedProjectId', null);
     this.$session.setKey('selectedProjectName', null);
     this.$session.setKey('selectedEnvName', null);
+    this.emitChange();
+  }
+
+  /**
+   * Rewind to Intro (Welcome). Used when Esc means “step back before region /
+   * signup” — not for /region mid-session (`regionForced`), where tearing down
+   * the spine would surprise users switching DC.
+   */
+  backToWelcome(): void {
+    if (this.session.regionForced) {
+      return;
+    }
+    this.$session.setKey('introConcluded', false);
+    this.$session.setKey('region', null);
+
+    if (isCreateAccountOnboarding(this.session)) {
+      this.$session.setKey('emailCaptureComplete', false);
+      this.$session.setKey('tosAccepted', null);
+      this.$session.setKey('signupEmail', null);
+      this.$session.setKey('signupFullName', null);
+      this.$session.setKey('signupTokensObtained', false);
+      this.$session.setKey('signupMagicLinkUrl', null);
+      this.$session.setKey('pendingAuthAccessToken', null);
+      this.$session.setKey('pendingAuthIdToken', null);
+      this.$session.setKey('pendingOrgs', null);
+    }
+
+    analytics.wizardCapture('back navigation', { to: 'welcome' });
     this.emitChange();
   }
 

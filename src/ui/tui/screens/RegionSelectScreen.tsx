@@ -19,7 +19,7 @@ import { Colors, Icons } from '../styles.js';
 import type { KeyHint } from '../components/KeyHintBar.js';
 import type { CloudRegion } from '../../../lib/wizard-session.js';
 
-const REGION_HINTS: readonly KeyHint[] = Object.freeze([
+const REGION_HINTS_BASE: readonly KeyHint[] = Object.freeze([
   { key: '↑↓', label: 'Navigate' },
   { key: 'Enter', label: 'Select' },
 ]);
@@ -43,9 +43,13 @@ const REGIONS: Array<{ label: string; hint: string; value: CloudRegion }> = [
 
 export const RegionSelectScreen = ({ store }: RegionSelectScreenProps) => {
   useWizardStore(store);
-  useEscapeBack(store, { extraHints: REGION_HINTS });
 
   const { session } = store;
+
+  useEscapeBack(store, {
+    extraHints: REGION_HINTS_BASE,
+    enabled: !session.regionForced,
+  });
 
   const heading = session.regionForced
     ? 'Switch data-center region'

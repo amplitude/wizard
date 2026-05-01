@@ -18,7 +18,7 @@ import {
   PRIVACY_POLICY_URL,
 } from '../../../lib/constants.js';
 
-const TOS_HINTS: readonly KeyHint[] = Object.freeze([
+const TOS_EXTRA_HINTS: readonly KeyHint[] = Object.freeze([
   { key: '↑↓', label: 'Navigate' },
   { key: 'Enter', label: 'Select' },
 ]);
@@ -40,7 +40,7 @@ const OPTIONS = [
 
 export const ToSScreen = ({ store }: ToSScreenProps) => {
   useWizardStore(store);
-  useEscapeBack(store, { extraHints: TOS_HINTS });
+  useEscapeBack(store, { extraHints: TOS_EXTRA_HINTS });
 
   const handleSelect = (value: string | string[]) => {
     const choice = Array.isArray(value) ? value[0] : value;
