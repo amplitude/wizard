@@ -2312,4 +2312,3 @@ describe('WizardStore', () => {
     });
   });
 });
-

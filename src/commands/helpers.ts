@@ -648,9 +648,7 @@ export function isAuthTaskGateReady(
   if (session.regionForced) return false;
   if (session.signup && session.tosAccepted !== true) return false;
   const signupCeremonySettled =
-    !session.signup ||
-    session.signupAuth !== null ||
-    session.signupAbandoned;
+    !session.signup || session.signupAuth !== null || session.signupAbandoned;
   if (!signupCeremonySettled) return false;
   return true;
 }

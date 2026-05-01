@@ -578,11 +578,15 @@ export class WizardStore {
 
   setSignupEmail(email: string): void {
     this.$session.setKey('signupEmail', email);
+    analytics.wizardCapture('signup email captured', { 'has email': !!email });
     this.emitChange();
   }
 
   setSignupFullName(name: string): void {
     this.$session.setKey('signupFullName', name.trim());
+    analytics.wizardCapture('signup full name captured', {
+      'has name': !!name.trim(),
+    });
     this.emitChange();
   }
 
@@ -652,20 +656,6 @@ export class WizardStore {
       }
     })();
 
-    this.emitChange();
-  }
-
-  setSignupEmail(email: string): void {
-    this.$session.setKey('signupEmail', email);
-    analytics.wizardCapture('signup email captured', { 'has email': !!email });
-    this.emitChange();
-  }
-
-  setSignupFullName(fullName: string): void {
-    this.$session.setKey('signupFullName', fullName);
-    analytics.wizardCapture('signup full name captured', {
-      'has name': !!fullName,
-    });
     this.emitChange();
   }
 

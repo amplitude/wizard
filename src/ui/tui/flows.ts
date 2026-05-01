@@ -188,6 +188,10 @@ export const FLOWS: Record<Flow, FlowEntry[]> = {
       screen: Screen.SignupEmail,
       show: (s) => s.signup && s.signupEmail === null,
       isComplete: (s) => !s.signup || s.signupEmail !== null,
+      revert: (store) => {
+        if (!store.session.signup) return false;
+        return false;
+      },
     },
     // 2c. Signup POST firing point. Mounts whenever we have an email,
     //     a region (so we know which provisioning host to hit), no
@@ -211,6 +215,10 @@ export const FLOWS: Record<Flow, FlowEntry[]> = {
         s.signupAuth !== null ||
         s.signupAbandoned ||
         !allRequiredFieldsCollected(s),
+      revert: (store) => {
+        if (!store.session.signup) return false;
+        return false;
+      },
     },
     // 2d. Full-name collection. Shown only when the server's last response
     //     listed 'full_name' as required AND we don't already have it.
@@ -224,6 +232,10 @@ export const FLOWS: Record<Flow, FlowEntry[]> = {
         !s.signup ||
         !s.signupRequiredFields.includes('full_name') ||
         s.signupFullName !== null,
+      revert: (store) => {
+        if (!store.session.signup) return false;
+        return false;
+      },
     },
     // 3. Authenticate (SUSI for new users, silent login check for returning users).
     //    Skipped on error so auth-failure runs route directly to Outro.
