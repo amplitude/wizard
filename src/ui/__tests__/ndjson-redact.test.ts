@@ -134,14 +134,84 @@ describe('redactEvent', () => {
     ]);
   });
 
-  it('is idempotent', () => {
+  it('is idempotent across all redaction kinds', () => {
+    // Covers @timestamp, session_id, run_id, durations, install-dir paths,
+    // and nested UUIDs in one go — proves a redacted payload pipes back
+    // through unchanged, which matters when scenario tests redact at
+    // capture time AND a snapshot reviewer redacts again before saving.
     const event = {
       '@timestamp': '2026-05-01T12:34:56.789Z',
       session_id: 'a1b2c3d4-1111-4222-8333-abcdef012345',
+      run_id: '11111111-2222-4333-8444-555555555555',
+      data: {
+        event: 'setup_complete',
+        durationMs: 12345,
+        elapsedMs: 6789,
+        amplitude: { orgId: '99999999-aaaa-4bbb-8ccc-dddddddddddd' },
+        files: { written: ['/tmp/wizard-X/src/a.ts'] },
+      },
     };
-    const once = redactEvent(structuredClone(event));
-    const twice = redactEvent(structuredClone(once));
+    const once = redactEvent(structuredClone(event), {
+      installDir: '/tmp/wizard-X',
+    });
+    const twice = redactEvent(structuredClone(once), {
+      installDir: '/tmp/wizard-X',
+    });
     expect(twice).toEqual(once);
+  });
+
+  it('honors extraDurationFields for events that introduce new wall-clock keys', () => {
+    // Without this hook, a future event (say one that ships its own
+    // `latencyMs` or `cacheReadMs`) would slip volatile values into
+    // snapshots until somebody noticed the diff churn. Pin the behavior.
+    const event = {
+      type: 'lifecycle',
+      data: {
+        event: 'agent_metrics',
+        durationMs: 1000,
+        latencyMs: 2000,
+        cacheReadMs: 3000,
+      },
+    };
+    const redacted = redactEvent(structuredClone(event), {
+      extraDurationFields: ['latencyMs', 'cacheReadMs'],
+    });
+    expect(redacted.data).toMatchObject({
+      durationMs: REDACTED.duration,
+      latencyMs: REDACTED.duration,
+      cacheReadMs: REDACTED.duration,
+    });
+  });
+
+  it('redacts ISO timestamps embedded inside nested message strings', () => {
+    // The wire format hoists `@timestamp` to the envelope, but inner-agent
+    // log lines and verbose error traces frequently embed ISO timestamps
+    // into free-form `message`-shaped strings. Without redaction those
+    // would churn on every run.
+    const event = {
+      type: 'error',
+      data: {
+        event: 'verification_result',
+        failures: [
+          'verification failed at 2026-05-01T12:34:56.789Z (gateway 502)',
+        ],
+      },
+    };
+    const redacted = redactEvent(structuredClone(event));
+    const failures = (redacted.data as { failures: string[] }).failures;
+    expect(failures[0]).toContain(REDACTED.timestamp);
+    expect(failures[0]).not.toContain('2026-05-01T12:34:56.789Z');
+  });
+
+  it('returns the same reference passed in (ergonomic chaining)', () => {
+    // Docstring promises `redactEvent` mutates and returns the same object
+    // reference. A regression that returns a structured clone would break
+    // tests that pre-capture references for assertion.
+    const event: Record<string, unknown> = {
+      '@timestamp': '2026-05-01T12:34:56.789Z',
+    };
+    const out = redactEvent(event);
+    expect(out).toBe(event);
   });
 });
 
