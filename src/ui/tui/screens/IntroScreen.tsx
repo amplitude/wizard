@@ -397,8 +397,8 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
             message={
               session.userEmail
                 ? narrow
-                  ? 'Signed in — continue or new org'
-                  : `You're signed in as ${session.userEmail}. Continue to workspace setup, or create a new Amplitude organization.`
+                  ? 'Signed in — continue, or new account (other email)'
+                  : `You're signed in as ${session.userEmail}. Continue to workspace setup. Use the second option only if you need a new Amplitude account with a different email—skip it when this login is enough.`
                 : narrow
                 ? 'Sign in or create account'
                 : 'Sign in to an existing Amplitude account, or create a new one'
@@ -424,8 +424,8 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
               {
                 label: session.userEmail
                   ? narrow
-                    ? 'New organization'
-                    : 'Continue — create new organization'
+                    ? 'New account (other email)'
+                    : 'Create a new Amplitude account'
                   : narrow
                   ? 'Continue — new account'
                   : 'Continue — create a new account',
@@ -433,7 +433,7 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
                 ...(!narrow
                   ? {
                       hint: session.userEmail
-                        ? 'sign-up flow'
+                        ? 'different email; rare'
                         : 'new organization',
                     }
                   : {}),
