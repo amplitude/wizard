@@ -1588,6 +1588,64 @@ export function isSafeBackgroundedInstall(command: string): boolean {
   return true;
 }
 
+const CAN_USE_TOOL_LOG_MAX_JSON_CHARS = 2400;
+
+let canUseToolLogCounter = 0;
+
+/**
+ * Shrink large tool I/O before writing to the structured log file (every
+ * `canUseTool` hit can carry multi‑KB MCP payloads).
+ */
+export function redactToolLogPayload(value: unknown): unknown {
+  if (typeof value === 'string') {
+    if (value.length <= CAN_USE_TOOL_LOG_MAX_JSON_CHARS) return value;
+    return {
+      _truncated: true,
+      length: value.length,
+      preview: `${value.slice(0, CAN_USE_TOOL_LOG_MAX_JSON_CHARS)}…`,
+    };
+  }
+  if (value === null || typeof value !== 'object') {
+    return value;
+  }
+  let json: string;
+  try {
+    json = JSON.stringify(value);
+  } catch {
+    return '[unserializable]';
+  }
+  if (json.length <= CAN_USE_TOOL_LOG_MAX_JSON_CHARS) {
+    return value;
+  }
+  const keys =
+    !Array.isArray(value) && value !== null
+      ? Object.keys(value as Record<string, unknown>).slice(0, 48)
+      : undefined;
+  return {
+    _truncated: true,
+    approxLength: json.length,
+    keys,
+    preview: `${json.slice(0, CAN_USE_TOOL_LOG_MAX_JSON_CHARS)}…`,
+  };
+}
+
+/** Whether this `canUseTool` invocation should emit file logs (increments sample counter once). */
+function evaluateCanUseToolFileLogging(options: WizardOptions): boolean {
+  const debugFlag =
+    Boolean(options.debug) ||
+    process.env.AMPLITUDE_WIZARD_DEBUG === '1' ||
+    process.env.AMPLITUDE_WIZARD_VERBOSE === '1' ||
+    process.env.AMPLITUDE_WIZARD_DEBUG_CAN_USE_TOOL === '1';
+  const sampleRaw = process.env.AMPLITUDE_WIZARD_CAN_USE_TOOL_LOG_SAMPLE;
+  const sampleEvery =
+    sampleRaw !== undefined && sampleRaw !== ''
+      ? Math.max(1, Number.parseInt(sampleRaw, 10) || 0)
+      : 0;
+  canUseToolLogCounter += 1;
+  const sampled = sampleEvery > 0 && canUseToolLogCounter % sampleEvery === 0;
+  return debugFlag || sampled;
+}
+
 /**
  * Permission hook that allows only safe commands.
  * - Package manager install commands
@@ -2991,12 +3049,20 @@ export async function runAgent(
               ENABLE_TOOL_SEARCH: 'auto:0',
             },
             canUseTool: (toolName: string, input: unknown) => {
-              logToFile('canUseTool called:', { toolName, input });
+              const logThis = evaluateCanUseToolFileLogging(options);
+              if (logThis) {
+                logToFile('canUseTool called:', {
+                  toolName,
+                  input: redactToolLogPayload(input),
+                });
+              }
               const result = wizardCanUseTool(
                 toolName,
                 input as Record<string, unknown>,
               );
-              logToFile('canUseTool result:', result);
+              if (logThis) {
+                logToFile('canUseTool result:', redactToolLogPayload(result));
+              }
               return Promise.resolve(result);
             },
             tools: { type: 'preset', preset: 'claude_code' },
