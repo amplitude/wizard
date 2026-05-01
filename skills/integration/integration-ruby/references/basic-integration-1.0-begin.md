@@ -19,7 +19,7 @@ Look for opportunities to track client-side events.
 
 Do not skip server-side events - they capture actions that cannot be tracked client-side.
 
-Create a new file with a JSON array at the root of the project: .amplitude-events.json. It should include one object for each event we want to add: event name, event description, and the file path we want to place the event in. If events already exist, don't duplicate them; supplement them.
+After drafting the event list, persist it through the wizard-tools **`confirm_event_plan`** tool so it is written to the canonical path **`<projectRoot>/.amplitude/events.json`**. Each entry should include event name, event description, and the file path where the event will be placed. If events already exist, don't duplicate them; supplement them. Do **not** create a root-level `.amplitude-events.json` file — current Amplitude Wizard builds only read the plan from `.amplitude/events.json`.
 
 **Event names MUST use Title Case with spaces** following the [Noun] + [Past-Tense Verb] pattern (e.g., "Button Clicked", "Sign Up Completed", "Cart Viewed"). Do NOT use snake_case (button_clicked), camelCase (buttonClicked), or SCREAMING_SNAKE (BUTTON_CLICKED). Property names should use snake_case (e.g., button_text, page_url).
 

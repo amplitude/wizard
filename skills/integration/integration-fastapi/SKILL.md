@@ -3,7 +3,7 @@ name: integration-fastapi
 description: Amplitude integration for FastAPI applications
 metadata:
   author: Amplitude
-  version: dev
+  version: 1.2.6
 ---
 
 # Amplitude integration for FastAPI
@@ -14,15 +14,16 @@ This skill helps you add Amplitude analytics to FastAPI applications.
 
 Follow these steps in order to complete the integration:
 
-1. `basic-integration-1.0-begin.md` - Amplitude Setup - Begin ← **Start here**
-2. `basic-integration-1.1-edit.md` - Amplitude Setup - Edit
-3. `basic-integration-1.2-revise.md` - Amplitude Setup - Revise
-4. `basic-integration-1.3-conclude.md` - Amplitude Setup - Conclusion
+1. `references/basic-integration-1.0-begin.md` - Amplitude Setup - Begin ← **Start here**
+2. `references/basic-integration-1.1-edit.md` - Amplitude Setup - Edit
+3. `references/basic-integration-1.2-revise.md` - Amplitude Setup - Revise
+4. `references/basic-integration-1.3-conclude.md` - Amplitude Setup - Conclusion
 
 ## Reference files
 
 - `references/EXAMPLE.md` - FastAPI example project code
-- `references/python.md` - Amplitude documentation for Python
+- `references/python.md` - Python
+- `references/amplitude-quickstart.md` - Amplitude documentation for Amplitude Quickstart
 - `references/basic-integration-1.0-begin.md` - Amplitude setup - begin
 - `references/basic-integration-1.1-edit.md` - Amplitude setup - edit
 - `references/basic-integration-1.2-revise.md` - Amplitude setup - revise
