@@ -79,7 +79,11 @@ function readConfig(explicitPath?: string): Record<string, unknown> {
   if (oauthEntriesPresent(primary)) {
     return primary;
   }
-  if (oauthEntriesPresent(legacy)) {
+  // Only migrate from legacy when the primary file doesn't exist on disk.
+  // If primary exists (even as `{}`), it was written intentionally (e.g. by
+  // clearStoredCredentials) and legacy data must not be resurrected.
+  const primaryFileExists = fs.existsSync(primaryPath);
+  if (!primaryFileExists && oauthEntriesPresent(legacy)) {
     const merged: Record<string, unknown> = { ...legacy, ...primary };
     try {
       ensureDir(getCacheRoot());

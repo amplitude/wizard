@@ -90,7 +90,10 @@ export interface AmpliConfig {
 
 export type AmpliConfigParseResult =
   | { ok: true; config: AmpliConfig }
-  | { ok: false; error: 'not_found' | 'invalid_json' | 'merge_conflicts' };
+  | {
+      ok: false;
+      error: 'not_found' | 'read_error' | 'invalid_json' | 'merge_conflicts';
+    };
 
 // ── Pure logic (unit-testable) ────────────────────────────────────────────────
 
@@ -232,13 +235,14 @@ function readAmpliConfigFile(filePath: string): AmpliConfigParseResult {
     raw = fs.readFileSync(filePath, 'utf-8');
   } catch (err) {
     const code = (err as NodeJS.ErrnoException).code;
-    if (code !== 'ENOENT') {
-      log.debug('readAmpliConfigFile: read failed', {
-        path: filePath,
-        'error message': err instanceof Error ? err.message : String(err),
-      });
+    if (code === 'ENOENT') {
+      return { ok: false, error: 'not_found' };
     }
-    return { ok: false, error: 'not_found' };
+    log.debug('readAmpliConfigFile: read failed', {
+      path: filePath,
+      'error message': err instanceof Error ? err.message : String(err),
+    });
+    return { ok: false, error: 'read_error' };
   }
   return parseAmpliConfig(raw);
 }
