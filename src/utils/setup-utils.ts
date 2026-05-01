@@ -441,7 +441,7 @@ export async function tryResolveCredentialsForCi(installDir: string): Promise<{
 export async function getOrAskForProjectData(
   _options: Pick<
     WizardOptions,
-    'accountCreationFlow' | 'ci' | 'apiKey' | 'appId'
+    'authOnboardingPath' | 'ci' | 'apiKey' | 'appId'
   > & {
     installDir?: string;
   },

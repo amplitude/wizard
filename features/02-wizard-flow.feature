@@ -24,7 +24,7 @@ Feature: Wizard flow
 
   Scenario: Signup flow requires email capture before ToS
     Given I have no credentials stored in "~/.ampli.json"
-    When the wizard launches with "--signup"
+    When the wizard launches with "--auth-onboarding create-account"
     And I continue past the intro
     And I select the "US" region
     Then I should be on the EmailCaptureScreen
@@ -33,7 +33,7 @@ Feature: Wizard flow
 
   Scenario: Signup flow requires explicit ToS acceptance
     Given I have no credentials stored in "~/.ampli.json"
-    When the wizard launches with "--signup"
+    When the wizard launches with "--auth-onboarding create-account"
     And I continue past the intro
     And I select the "US" region
     And I enter my email address
@@ -43,7 +43,7 @@ Feature: Wizard flow
 
   Scenario: Signup flow can be cancelled from ToS screen
     Given I have no credentials stored in "~/.ampli.json"
-    When the wizard launches with "--signup"
+    When the wizard launches with "--auth-onboarding create-account"
     And I continue past the intro
     And I select the "US" region
     And I enter my email address
@@ -53,7 +53,7 @@ Feature: Wizard flow
 
   Scenario: Email is pre-filled from --signup-email flag
     Given I have no credentials stored in "~/.ampli.json"
-    When the wizard launches with "--signup --signup-email test@example.com"
+    When the wizard launches with "--auth-onboarding create-account --email test@example.com"
     And I continue past the intro
     And I select the "US" region
     Then I should be on the EmailCaptureScreen
@@ -61,7 +61,7 @@ Feature: Wizard flow
 
   Scenario: Existing customer email detected during signup offers login option
     Given I have no credentials stored in "~/.ampli.json"
-    When the wizard launches with "--signup"
+    When the wizard launches with "--auth-onboarding create-account"
     And I continue past the intro
     And I select the "US" region
     And I enter an email that belongs to an existing customer
@@ -70,7 +70,7 @@ Feature: Wizard flow
 
   Scenario: Existing customer chooses to log in instead
     Given I have no credentials stored in "~/.ampli.json"
-    When the wizard launches with "--signup"
+    When the wizard launches with "--auth-onboarding create-account"
     And I continue past the intro
     And I select the "US" region
     And I enter an email that belongs to an existing customer
@@ -80,7 +80,7 @@ Feature: Wizard flow
 
   Scenario: Existing customer chooses to use a different email
     Given I have no credentials stored in "~/.ampli.json"
-    When the wizard launches with "--signup"
+    When the wizard launches with "--auth-onboarding create-account"
     And I continue past the intro
     And I select the "US" region
     And I enter an email that belongs to an existing customer

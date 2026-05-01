@@ -17,6 +17,7 @@ import {
   WIZARD_USER_AGENT,
 } from './constants';
 import {
+  AuthOnboardingPath,
   type AdditionalFeature,
   ADDITIONAL_FEATURE_PROMPTS,
   TRAILING_FEATURES,
@@ -2082,7 +2083,7 @@ const DEFAULT_WIZARD_OPTIONS: WizardOptions = {
   forceInstall: false,
   installDir: process.cwd(),
   default: false,
-  accountCreationFlow: false,
+  authOnboardingPath: AuthOnboardingPath.SignIn,
   localMcp: false,
   ci: false,
   menu: false,

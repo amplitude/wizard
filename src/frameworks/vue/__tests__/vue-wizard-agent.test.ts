@@ -10,7 +10,7 @@ function makeOptions(installDir: string) {
     debug: false,
     forceInstall: false,
     default: false,
-    signup: false,
+    authOnboardingPath: 'sign_in',
     localMcp: false,
     ci: false,
     menu: false,
