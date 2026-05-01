@@ -4,7 +4,7 @@ import { getUI } from './helpers';
 export const resetCommand: CommandModule = {
   command: 'reset',
   describe:
-    'Remove wizard-managed artifacts from the current project (events plan, dashboard URL, setup report, org/project binding in ampli.json). Leaves OAuth, API keys, and tracking-plan fields intact.',
+    'Remove project wizard state (`.amplitude/`, legacy `.amplitude-*.json`, setup report) and clear org/project/zone in `.amplitude/project-binding.json` and mirrored `ampli.json`. OAuth, API keys, and tracking-plan fields are left intact.',
   builder: (yargs) =>
     yargs.options({
       'install-dir': {
@@ -39,9 +39,9 @@ export const resetCommand: CommandModule = {
       // a fresh setup run on this codebase" gesture, not "I'm done with
       // Amplitude entirely."
       //
-      // Strip auth from ampli.json / project-binding **before** deleting
-      // `.amplitude/`, otherwise `readAmpliConfig` would migrate legacy
-      // `ampli.json` back onto disk and recreate the directory.
+      // Clear binding from canonical + legacy mirror before removing
+      // `.amplitude/`, or readAmpliConfig would migrate from `ampli.json` and
+      // recreate the directory.
       try {
         clearAuthFieldsInAmpliConfig(installDir);
       } catch {
