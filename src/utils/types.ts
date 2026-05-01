@@ -46,9 +46,9 @@ export type WizardOptions = {
   default: boolean;
 
   /**
-   * Whether to create a new Amplitude account during setup.
+   * Whether the run is on the path to create a new Amplitude account (`--signup`).
    */
-  signup: boolean;
+  accountCreationFlow: boolean;
 
   /**
    * Whether to use the local MCP server at http://localhost:8787/mcp

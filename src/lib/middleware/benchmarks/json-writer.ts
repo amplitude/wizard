@@ -5,10 +5,10 @@
  * and writes it to a JSON file. Returns the BenchmarkData for backward compat.
  */
 
-import fs from 'fs';
 import { getUI } from '../../../ui';
 import chalk from 'chalk';
 import { logToFile } from '../../../utils/debug';
+import { atomicWriteJSON } from '../../../utils/atomic-write.js';
 import { AgentSignals } from '../../agent-interface';
 import type {
   Middleware,
@@ -172,7 +172,7 @@ export class JsonWriterPlugin implements Middleware {
 
   private writeBenchmarkData(data: BenchmarkData): void {
     try {
-      fs.writeFileSync(this.outputPath, JSON.stringify(data, null, 2));
+      atomicWriteJSON(this.outputPath, data, 0o600);
       logToFile(`Benchmark data written to ${this.outputPath}`);
       getUI().log.info(
         `${chalk.blue('●')} ${chalk.cyan(

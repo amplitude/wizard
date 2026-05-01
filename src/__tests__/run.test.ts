@@ -7,25 +7,35 @@ import { Integration } from '../lib/constants';
 vi.mock('../lib/agent-runner');
 vi.mock('../utils/analytics');
 vi.mock('../lib/wizard-session', () => ({
-  buildSession: (args: Record<string, unknown>) => ({
-    debug: false,
-    forceInstall: false,
-    installDir: process.cwd(),
-    ci: false,
-    signup: false,
-    localMcp: false,
-    menu: false,
-    setupConfirmed: false,
-    integration: null,
-    frameworkContext: {},
-    frameworkContextAnswerOrder: [],
-    typescript: false,
-    credentials: null,
-    serviceStatus: null,
-    outroData: null,
-    frameworkConfig: null,
-    ...args,
-  }),
+  buildSession: (args: Record<string, unknown>) => {
+    const {
+      signup,
+      accountCreationFlow: acf,
+      ...rest
+    } = args as Record<string, unknown> & {
+      signup?: boolean;
+      accountCreationFlow?: boolean;
+    };
+    return {
+      debug: false,
+      forceInstall: false,
+      installDir: process.cwd(),
+      ci: false,
+      localMcp: false,
+      menu: false,
+      setupConfirmed: false,
+      integration: null,
+      frameworkContext: {},
+      frameworkContextAnswerOrder: [],
+      typescript: false,
+      credentials: null,
+      serviceStatus: null,
+      outroData: null,
+      frameworkConfig: null,
+      ...rest,
+      accountCreationFlow: Boolean(acf ?? signup ?? false),
+    };
+  },
 }));
 vi.mock('../ui', () => ({
   getUI: vi.fn().mockReturnValue({
@@ -115,7 +125,7 @@ describe('runWizard error handling', { timeout: 30_000 }, () => {
     expect(mockAnalytics.shutdown).not.toHaveBeenCalled();
   });
 
-  it('passes signup=true to session started when session.signup is set', async () => {
+  it('passes account creation flow=true to session started when --signup is set', async () => {
     mockAnalytics.wizardCapture = vi.fn();
     const testArgs = {
       integration: Integration.nextjs,
@@ -128,11 +138,11 @@ describe('runWizard error handling', { timeout: 30_000 }, () => {
 
     expect(mockAnalytics.wizardCapture).toHaveBeenCalledWith(
       'session started',
-      expect.objectContaining({ signup: true }),
+      expect.objectContaining({ 'account creation flow': true }),
     );
   });
 
-  it('passes signup=false to session started when session.signup is unset', async () => {
+  it('passes account creation flow=false to session started when --signup is unset', async () => {
     mockAnalytics.wizardCapture = vi.fn();
     const testArgs = {
       integration: Integration.nextjs,
@@ -144,7 +154,7 @@ describe('runWizard error handling', { timeout: 30_000 }, () => {
 
     expect(mockAnalytics.wizardCapture).toHaveBeenCalledWith(
       'session started',
-      expect.objectContaining({ signup: false }),
+      expect.objectContaining({ 'account creation flow': false }),
     );
   });
 

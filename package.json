@@ -1,6 +1,6 @@
 {
   "name": "@amplitude/wizard",
-  "version": "1.13.3",
+  "version": "1.14.0",
   "homepage": "https://github.com/amplitude/wizard",
   "repository": "https://github.com/amplitude/wizard",
   "description": "The Amplitude wizard helps you to configure your project",
@@ -78,7 +78,7 @@
     "zod-to-json-schema": "3.25.1"
   },
   "devDependencies": {
-    "@anthropic-ai/sdk": "0.79.0",
+    "@anthropic-ai/sdk": "0.91.1",
     "@cucumber/cucumber": "12.7.0",
     "@eslint/js": "10.0.1",
     "@types/adm-zip": "~0.5.8",

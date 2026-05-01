@@ -1,5 +1,4 @@
 import type { CommandModule } from 'yargs';
-import { resolve } from 'path';
 import {
   getUI,
   setUI,
@@ -593,18 +592,11 @@ export const defaultCommand: CommandModule = {
           // Import from the lightweight parser module (not agent-interface)
           // so we don't pull in the Claude Agent SDK / UI singleton here.
           try {
-            const fs = await import('fs');
-            const { parseEventPlanContent } = await import(
+            const { readLocalEventPlan } = await import(
               '../lib/event-plan-parser.js'
             );
-            const evtPath = resolve(
-              session.installDir,
-              '.amplitude-events.json',
-            );
-            const events = parseEventPlanContent(
-              fs.readFileSync(evtPath, 'utf-8'),
-            );
-            if (events && events.length > 0) {
+            const events = readLocalEventPlan(session.installDir);
+            if (events.length > 0) {
               tui.store.setEventPlan(
                 events.filter((e) => e.name.trim().length > 0),
               );
@@ -682,7 +674,9 @@ export const defaultCommand: CommandModule = {
               const { DEFAULT_AMPLITUDE_ZONE } = await import(
                 '../lib/constants.js'
               );
-              const { storeToken } = await import('../utils/ampli-settings.js');
+              const { storeToken, getStoredToken } = await import(
+                '../utils/ampli-settings.js'
+              );
 
               // Wait for the user to dismiss the welcome screen AND pick a
               // region before opening the OAuth URL. This ensures the logo
@@ -761,7 +755,7 @@ export const defaultCommand: CommandModule = {
               );
               const s = tui.store.session;
               if (
-                s.signup &&
+                s.accountCreationFlow &&
                 s.signupEmail &&
                 s.signupFullName &&
                 !s.signupTokensObtained
@@ -796,10 +790,27 @@ export const defaultCommand: CommandModule = {
                   auth = null;
                 }
               } else if (s.signupTokensObtained) {
+                // EmailCaptureScreen already called replaceStoredUser + set
+                // signupTokensObtained. Without hydrating `auth` here,
+                // performAmplitudeAuth({ forceFresh }) runs on a fresh install
+                // dir and skips ~/.ampli.json — spurious browser OAuth.
                 signupTokensObtained = true;
-                getUI().log.info(
-                  'Using signup tokens obtained during email capture.',
-                );
+                const fromDisk = getStoredToken(undefined, zone);
+                if (fromDisk) {
+                  auth = {
+                    idToken: fromDisk.idToken,
+                    accessToken: fromDisk.accessToken,
+                    refreshToken: fromDisk.refreshToken,
+                    zone,
+                  };
+                  getUI().log.info(
+                    'Using signup tokens obtained during email capture.',
+                  );
+                } else {
+                  getUI().log.warn(
+                    'Signup tokens were recorded but none found on disk; opening OAuth.',
+                  );
+                }
               }
 
               if (auth === null) {

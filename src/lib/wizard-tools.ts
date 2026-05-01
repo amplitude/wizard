@@ -402,6 +402,7 @@ export function preStageSkills(
   integrationSkillId: string | null,
 ): { staged: string[]; integrationStaged: boolean } {
   const constantSkills = [
+    'wizard-prompt-supplement',
     'amplitude-quickstart-taxonomy-agent',
     'add-analytics-instrumentation',
     'amplitude-chart-dashboard-plan',
@@ -527,6 +528,7 @@ export const WIZARD_GITIGNORE_PATTERNS: readonly string[] = [
   '.claude/skills/add-analytics-instrumentation/',
   '.claude/skills/amplitude-chart-dashboard-plan/',
   '.claude/skills/amplitude-quickstart-taxonomy-agent/',
+  '.claude/skills/wizard-prompt-supplement/',
 ];
 
 /** Marker comment identifying the block as wizard-managed. */

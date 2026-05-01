@@ -114,22 +114,25 @@ export const FLOWS: Record<Flow, FlowEntry[]> = {
     // 2a. Email capture — shown only during --signup flow before ToS.
     {
       screen: Screen.EmailCapture,
-      show: (s) => s.signup && !s.emailCaptureComplete,
-      isComplete: (s) => !s.signup || s.emailCaptureComplete,
+      show: (s) => s.accountCreationFlow && !s.emailCaptureComplete,
+      isComplete: (s) => !s.accountCreationFlow || s.emailCaptureComplete,
       revert: (store) => {
         // No-op when signup is false (screen was never shown)
-        if (!store.session.signup) return false;
+        if (!store.session.accountCreationFlow) return false;
         store.resetEmailCapture();
       },
     },
     // 2b. Terms of Service — shown only during --signup flow after email capture.
     {
       screen: Screen.ToS,
-      show: (s) => s.signup && s.emailCaptureComplete && s.tosAccepted !== true,
-      isComplete: (s) => !s.signup || s.tosAccepted === true,
+      show: (s) =>
+        s.accountCreationFlow &&
+        s.emailCaptureComplete &&
+        s.tosAccepted !== true,
+      isComplete: (s) => !s.accountCreationFlow || s.tosAccepted === true,
       revert: (store) => {
         // No-op when signup is false (screen was never shown)
-        if (!store.session.signup) return false;
+        if (!store.session.accountCreationFlow) return false;
         store.resetToS();
       },
     },
