@@ -279,11 +279,15 @@ export class WizardStore {
    * same downstream gates.
    */
   rewindIntro(): void {
-    this.router._setDirection('pop');
+    if (!this._reverting) {
+      this.router._setDirection('pop');
+    }
     this.$session.setKey('introConcluded', false);
     analytics.wizardCapture('back navigation', { to: 'intro' });
     this.$version.set(this.$version.get() + 1);
-    this._detectTransition();
+    if (!this._reverting) {
+      this._detectTransition();
+    }
   }
 
   /**
