@@ -10,6 +10,7 @@ import {
   ADDITIONAL_FEATURE_PROMPTS,
   ADDITIONAL_FEATURE_LABELS,
   INLINE_FEATURES,
+  isCreateAccountOnboarding,
 } from './wizard-session';
 import {
   tryGetPackageJson,
@@ -315,7 +316,7 @@ function sessionToOptions(session: WizardSession): WizardOptions {
     debug: session.debug,
     forceInstall: session.forceInstall,
     default: false,
-    accountCreationFlow: session.accountCreationFlow,
+    authOnboardingPath: session.authOnboardingPath,
     localMcp: session.localMcp,
     ci: session.ci,
     menu: session.menu,
@@ -699,7 +700,7 @@ async function runAgentWizardBody(
   // Only fall back to getOrAskForProjectData for CI mode or non-TUI fallback.
   if (!session.credentials) {
     const authResult = await getOrAskForProjectData({
-      accountCreationFlow: session.accountCreationFlow,
+      authOnboardingPath: session.authOnboardingPath,
       ci: session.ci,
       apiKey: session.apiKey,
       appId: session.appId,
@@ -1276,7 +1277,7 @@ async function runAgentWizardBody(
   }
 
   // Build outro data and store it for OutroScreen
-  const continueUrl = session.accountCreationFlow
+  const continueUrl = isCreateAccountOnboarding(session)
     ? session.signupMagicLinkUrl ?? OUTBOUND_URLS.products(cloudRegion)
     : undefined;
 

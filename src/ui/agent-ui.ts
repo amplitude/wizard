@@ -507,7 +507,7 @@ export class AgentUI implements WizardUI {
 
   /**
    * Emit a structured `signup_input_required` lifecycle event when the
-   * wizard is invoked with `--agent --signup` but one or more required
+   * wizard is invoked with `--agent --auth-onboarding create-account` but one or more required
    * inputs are missing (region, email, full-name, accept-tos). The
    * orchestrator inspects `missing[]`, prompts the human for the
    * missing values, and re-invokes the wizard with `resumeCommand` plus

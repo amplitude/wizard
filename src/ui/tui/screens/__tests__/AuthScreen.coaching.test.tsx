@@ -46,11 +46,11 @@ describe('AuthScreen — browser-fallback coaching', () => {
     expect(frame).not.toContain('Still waiting');
   });
 
-  it('uses signup-aware copy after --signup email capture', () => {
+  it('uses signup-aware copy on the create-account onboarding path', () => {
     const store = makeStoreForSnapshot({
       introConcluded: true,
       region: 'us',
-      accountCreationFlow: true,
+      authOnboardingPath: 'create_account',
       emailCaptureComplete: true,
       tosAccepted: true,
       loginUrl: 'https://app.amplitude.com/oauth?x=y',
@@ -81,7 +81,7 @@ describe('AuthScreen — browser-fallback coaching', () => {
     const store = makeStoreForSnapshot({
       introConcluded: true,
       region: 'us',
-      accountCreationFlow: true,
+      authOnboardingPath: 'create_account',
       emailCaptureComplete: true,
       tosAccepted: true,
       loginUrl: null,

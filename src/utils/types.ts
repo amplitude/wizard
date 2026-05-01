@@ -46,9 +46,10 @@ export type WizardOptions = {
   default: boolean;
 
   /**
-   * Whether the run is on the path to create a new Amplitude account (`--signup`).
+   * Sign in to an existing Amplitude account vs create a new one during onboarding
+   * (`--auth-onboarding`, or the Intro picker in TUI).
    */
-  accountCreationFlow: boolean;
+  authOnboardingPath: 'sign_in' | 'create_account';
 
   /**
    * Whether to use the local MCP server at http://localhost:8787/mcp

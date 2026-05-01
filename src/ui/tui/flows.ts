@@ -9,7 +9,10 @@
  * to resolve which screen to show.
  */
 
-import type { WizardSession } from '../../lib/wizard-session.js';
+import {
+  type WizardSession,
+  isCreateAccountOnboarding,
+} from '../../lib/wizard-session.js';
 // WizardStore is used by the FlowEntry.revert callback signature below
 // (PR 301 — Esc-based back navigation).
 import type { WizardStore } from './store.js';
@@ -114,28 +117,28 @@ export const FLOWS: Record<Flow, FlowEntry[]> = {
         store.resetAuthForRegionChange();
       },
     },
-    // 2a. Email capture — shown only during --signup flow before ToS.
+    // 2a. Email capture — create-account path only, before ToS.
     {
       screen: Screen.EmailCapture,
-      show: (s) => s.accountCreationFlow && !s.emailCaptureComplete,
-      isComplete: (s) => !s.accountCreationFlow || s.emailCaptureComplete,
+      show: (s) => isCreateAccountOnboarding(s) && !s.emailCaptureComplete,
+      isComplete: (s) =>
+        !isCreateAccountOnboarding(s) || s.emailCaptureComplete,
       revert: (store) => {
-        // No-op when signup is false (screen was never shown)
-        if (!store.session.accountCreationFlow) return false;
+        if (!isCreateAccountOnboarding(store.session)) return false;
         store.resetEmailCapture();
       },
     },
-    // 2b. Terms of Service — shown only during --signup flow after email capture.
+    // 2b. Terms of Service — create-account path after email capture.
     {
       screen: Screen.ToS,
       show: (s) =>
-        s.accountCreationFlow &&
+        isCreateAccountOnboarding(s) &&
         s.emailCaptureComplete &&
         s.tosAccepted !== true,
-      isComplete: (s) => !s.accountCreationFlow || s.tosAccepted === true,
+      isComplete: (s) =>
+        !isCreateAccountOnboarding(s) || s.tosAccepted === true,
       revert: (store) => {
-        // No-op when signup is false (screen was never shown)
-        if (!store.session.accountCreationFlow) return false;
+        if (!isCreateAccountOnboarding(store.session)) return false;
         store.resetToS();
       },
     },

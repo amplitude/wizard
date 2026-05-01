@@ -367,7 +367,7 @@ project — handy for filing bug reports.
 |------|---------|-------------|
 | `--debug` | `AMPLITUDE_WIZARD_DEBUG` | Enable verbose logging |
 | `--verbose` | `AMPLITUDE_WIZARD_VERBOSE` | Print diagnostic info to the log |
-| `--signup` | `AMPLITUDE_WIZARD_SIGNUP` | Create a new Amplitude account during setup |
+| `--auth-onboarding` | `AMPLITUDE_WIZARD_AUTH_ONBOARDING` | **Interactive TUI:** pick “Continue — sign in” or “Continue — create…” on Intro (writes the same `authOnboardingPath` as this flag). **CI / `--agent` / no TTY:** pass `sign-in` (default) or `create-account` so OAuth follows the right path. Legacy env `AMPLITUDE_WIZARD_SIGNUP=1` maps to `create-account`. |
 | `--local-mcp` | `AMPLITUDE_WIZARD_LOCAL_MCP` | Use local MCP server at `http://localhost:8787/mcp` |
 | `--ci` | `AMPLITUDE_WIZARD_CI` | Non-interactive execution |
 | `--api-key <key>` | `AMPLITUDE_WIZARD_API_KEY` | Amplitude API key (skips OAuth) |

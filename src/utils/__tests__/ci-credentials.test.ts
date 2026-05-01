@@ -145,7 +145,7 @@ describe('getOrAskForProjectData — CI mode without explicit api key', () => {
     await expect(
       getOrAskForProjectData({
         ci: true,
-        signup: false,
+        authOnboardingPath: 'sign_in',
         installDir: '/tmp/ci-proj',
       }),
     ).rejects.toThrow('wizard-abort');
@@ -162,7 +162,7 @@ describe('getOrAskForProjectData — CI mode without explicit api key', () => {
 
     const result = await getOrAskForProjectData({
       ci: true,
-      signup: false,
+      authOnboardingPath: 'sign_in',
       installDir: '/tmp/ci-proj',
     });
 

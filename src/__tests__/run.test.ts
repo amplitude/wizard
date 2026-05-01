@@ -6,37 +6,6 @@ import { Integration } from '../lib/constants';
 
 vi.mock('../lib/agent-runner');
 vi.mock('../utils/analytics');
-vi.mock('../lib/wizard-session', () => ({
-  buildSession: (args: Record<string, unknown>) => {
-    const {
-      signup,
-      accountCreationFlow: acf,
-      ...rest
-    } = args as Record<string, unknown> & {
-      signup?: boolean;
-      accountCreationFlow?: boolean;
-    };
-    return {
-      debug: false,
-      forceInstall: false,
-      installDir: process.cwd(),
-      ci: false,
-      localMcp: false,
-      menu: false,
-      setupConfirmed: false,
-      integration: null,
-      frameworkContext: {},
-      frameworkContextAnswerOrder: [],
-      typescript: false,
-      credentials: null,
-      serviceStatus: null,
-      outroData: null,
-      frameworkConfig: null,
-      ...rest,
-      accountCreationFlow: Boolean(acf ?? signup ?? false),
-    };
-  },
-}));
 vi.mock('../ui', () => ({
   getUI: vi.fn().mockReturnValue({
     log: {
@@ -125,11 +94,11 @@ describe('runWizard error handling', { timeout: 30_000 }, () => {
     expect(mockAnalytics.shutdown).not.toHaveBeenCalled();
   });
 
-  it('passes account creation flow=true to session started when --signup is set', async () => {
+  it('passes account creation flow=true to session started when create-account is selected', async () => {
     mockAnalytics.wizardCapture = vi.fn();
     const testArgs = {
       integration: Integration.nextjs,
-      signup: true,
+      authOnboarding: 'create-account' as const,
     };
 
     mockRunAgentWizard.mockResolvedValue(undefined);
@@ -142,7 +111,7 @@ describe('runWizard error handling', { timeout: 30_000 }, () => {
     );
   });
 
-  it('passes account creation flow=false to session started when --signup is unset', async () => {
+  it('passes account creation flow=false to session started when sign-in is the path', async () => {
     mockAnalytics.wizardCapture = vi.fn();
     const testArgs = {
       integration: Integration.nextjs,
@@ -170,7 +139,7 @@ describe('runWizard error handling', { timeout: 30_000 }, () => {
         forceInstall: false,
         installDir: '/picked/by/tui',
         ci: false,
-        signup: false,
+        authOnboardingPath: 'sign_in',
         localMcp: false,
         menu: false,
         setupConfirmed: false,

@@ -1,9 +1,9 @@
-import type { WizardSession } from './wizard-session.js';
+import { AuthOnboardingPath, type WizardSession } from './wizard-session.js';
 
 /** Subset of session fields that gate direct (non-TUI) account provisioning. */
 export type AccountCreationProvisioningSessionSlice = Pick<
   WizardSession,
-  'accountCreationFlow' | 'signupEmail' | 'signupFullName'
+  'authOnboardingPath' | 'signupEmail' | 'signupFullName'
 >;
 
 /**
@@ -14,7 +14,7 @@ export function accountCreationProvisioningInputsReady(
   session: AccountCreationProvisioningSessionSlice,
 ): boolean {
   return Boolean(
-    session.accountCreationFlow &&
+    session.authOnboardingPath === AuthOnboardingPath.CreateAccount &&
       session.signupEmail &&
       session.signupFullName,
   );
