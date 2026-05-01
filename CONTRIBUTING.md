@@ -24,6 +24,7 @@ pnpm build
 
 - **`CLAUDE.md`** at the repo root is the **canonical** file most coding agents load. It documents architecture, Ink/TUI conventions (Esc / `useScreenInput` / `useEscapeBack`), and PR expectations.
 - **`CONTRIBUTING.md`** (this file) is for **human** contributors: setup, tests, commits, PRs.
+- In a **fresh clone or git worktree**, run **`pnpm install`** before **`pnpm test`** or **`pnpm exec vitest`** — otherwise `vitest` is not on `PATH` and installs look incomplete.
 - When you change **`src/ui/tui/`**, **`flows.ts`**, **`router.ts`**, or navigation-related **`store.ts`**, run **focused Vitest** (stable pool; fewer flakes than a full wide run):
 
   ```bash
@@ -93,6 +94,7 @@ A CI check enforces this on PR titles.
 5. Open a PR with a conventional commit title
 6. Fill in the PR description with a summary and test plan
 7. If you used a **`/reflect`** session on the work, paste the numbered checklist into the PR (or link to it); skip with “N/A” only for non-agent sessions
+8. After **`git push`**, open the PR with **`gh pr create --fill`** when the GitHub CLI is available and authenticated (otherwise use the compare URL from the push output)
 
 ## Adding a new framework
 

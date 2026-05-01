@@ -8,6 +8,7 @@
 
 ## Checklist
 
+- [ ] Opened PR with **`gh pr create`** after push (or N/A — e.g. opened via GitHub UI)
 - [ ] `pnpm lint` and `pnpm test` pass (or N/A with reason)
 - [ ] TUI / router / `flows.ts` / navigation `store.ts` changes: ran focused Vitest  
       `pnpm exec vitest run --pool=forks --maxWorkers=1` on the relevant `src/ui/tui/**/__tests__/*` paths (or N/A)

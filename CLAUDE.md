@@ -120,7 +120,7 @@ OAuth flow, analytics tracking, env var handling, API key storage, debug logging
 If a callsite is inside the TUI or runs during a wizard session, prefer `observability/logger.ts`. Bare `console.log` in production source paths is an anti-pattern.
 
 Key additions:
-- `atomic-write.ts` — crash-safe JSON writes via temp-file + rename. Used for credentials, checkpoints, plans, agent recovery snapshots, update-check cache, benchmark JSON, canonical project metadata under `.amplitude/`, and other opted-in JSON persistence — not every byte the process writes (logs append, mkdir, editor installs, etc.).
+- `atomic-write.ts` — crash-safe JSON writes via temp-file + rename. Used by session checkpointing and config persistence.
 - `token-refresh.ts` — silent OAuth token refresh using stored refresh tokens. Proactively refreshes 5 minutes before expiry, falls back to full browser auth on failure.
 - `storage-paths.ts` — single source of truth for every path the wizard reads or writes. Per-user cache at `~/.amplitude/wizard/`, per-project metadata at `<installDir>/.amplitude/`. Override the cache root with `AMPLITUDE_WIZARD_CACHE_DIR` (used by tests).
 - `storage-migration.ts` — one-shot migration from the old `$TMPDIR/amplitude-wizard-*` + project-root dotfile layout. Idempotent, runs at startup. Drop after one release.
@@ -143,14 +143,15 @@ The `/diagnostics` slash command prints the full layout for the current project 
 
 **Security invariants:**
 - Credential files use `0o600` permissions (owner read/write only)
-- Security- and recovery-sensitive JSON uses `atomicWriteJSON()` (temp-file + rename) so a crash mid-write leaves the prior file intact. Append-only logs (`log.txt` / `log.ndjson`), directory creation, streamed or editor-facing writes, and intentional exceptions (e.g. `.env.local` handling per platform/editor constraints) are outside that contract.
+- All file writes use `atomicWriteJSON()` (temp-file + rename) to prevent corruption on crash
 - Checkpoint files never contain tokens, API keys, or access tokens
 - Config scoping validates org ID against live data to prevent cross-project leakage
 - Zone priority: CLI flag > env var > stored config (prevents env var pollution across projects)
 
 ## Pull requests
 
-- Run the **`/reflect`** skill on the session and paste the numbered checklist into the PR description (or link to it). Treat that as part of the PR artifact, not optional narration. Human-oriented PR steps also live in [`CONTRIBUTING.md`](./CONTRIBUTING.md).
+- Run the **`/reflect`** skill on the session and paste the numbered checklist into the PR description (or link to it). Treat that as part of the PR artifact, not optional narration. Human-oriented PR steps also live in [`CONTRIBUTING.md`](./CONTRIBUTING.md). When running **`/reflect`**, treat **this repo’s `CLAUDE.md`** as the canonical place to de-dupe proposals — a global `~/.claude/CLAUDE.md` may be absent in worktrees or sandboxes.
+- After you **`git push`** a branch, prefer opening the PR with the GitHub CLI: **`gh pr create --fill`** (or pass `--title` / `--body` explicitly). If `gh` is not installed or authenticated, use the compare URL your `git push` printed instead.
 - After changing **`src/ui/tui/`** screens, **`flows.ts`**, **`router.ts`**, or **`store.ts`** navigation-related code, run Vitest in a stable pool before pushing (avoids fork timeouts / flakes on wide runs):
 
   ```bash
