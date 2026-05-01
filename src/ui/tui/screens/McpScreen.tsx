@@ -167,7 +167,7 @@ export const McpScreen = ({
     markDone(store, McpOutcome.Skipped, [], standalone, onComplete);
   };
 
-  /** Esc on the install confirm: router back when possible, else skip MCP. */
+  /** Esc on MCP confirm: router back when possible, else skip MCP. */
   const escCancelOrRouterBack = () => {
     if (store.canGoBack()) {
       store.goBack();
@@ -177,8 +177,8 @@ export const McpScreen = ({
   };
 
   // Esc → goBack on spinner / client picker / pre-detected choice. Disabled on
-  // Ask because ConfirmationInput owns Esc there (wired to escCancelOrRouterBack
-  // so we don't double-fire with this hook).
+  // Ask because ConfirmationInput owns Esc there (`onEscape` →
+  // escCancelOrRouterBack so we don't double-fire with this hook).
   const escapeBackEnabled =
     !standalone &&
     !isOverlay &&
@@ -328,9 +328,10 @@ export const McpScreen = ({
                         : 'Install the Amplitude MCP server to your editor?'
                     }
                     confirmLabel={isRemove ? 'Remove MCP' : 'Install MCP'}
-                    cancelLabel={store.canGoBack() ? 'Back' : 'No thanks'}
+                    cancelLabel="No thanks"
                     onConfirm={handleConfirm}
-                    onCancel={escCancelOrRouterBack}
+                    onCancel={handleSkip}
+                    onEscape={escCancelOrRouterBack}
                   />
                 </Box>
               </>
