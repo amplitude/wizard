@@ -246,20 +246,6 @@ export const FLOWS: Record<Flow, FlowEntry[]> = {
         return false;
       },
     },
-    // 2b. Full-name collection for direct signup. Shown only when --signup
-    //     was passed and the flag wasn't. Writes session.signupFullName.
-    {
-      screen: Screen.SignupFullName,
-      show: (s) => s.signup && s.signupFullName === null,
-      isComplete: (s) => !s.signup || s.signupFullName !== null,
-    },
-    // 2c. Email collection for direct signup. Shown only when --signup
-    //     was passed and the flag wasn't. Writes session.signupEmail.
-    {
-      screen: Screen.SignupEmail,
-      show: (s) => s.signup && s.signupEmail === null,
-      isComplete: (s) => !s.signup || s.signupEmail !== null,
-    },
     // 3. Authenticate (SUSI for new users, silent login check for returning users).
     //    Skipped on error so auth-failure runs route directly to Outro.
     //

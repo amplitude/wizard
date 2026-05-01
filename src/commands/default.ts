@@ -345,12 +345,17 @@ export const defaultCommand: CommandModule = {
         // the TUI-only safety check that clears credentials when no org is
         // selected. Without this, a successful signup would get silently
         // cleared and the browser would open anyway, defeating the point.
-        await runDirectSignupIfRequested(session, 'OAuth', async () => {
-          const { resolveCredentials } = await import(
-            '../lib/credential-resolution.js'
-          );
-          await resolveCredentials(session, { requireOrgId: false });
-        });
+        await runDirectSignupIfRequested(
+          session,
+          'OAuth',
+          async () => {
+            const { resolveCredentials } = await import(
+              '../lib/credential-resolution.js'
+            );
+            await resolveCredentials(session, { requireOrgId: false });
+          },
+          { canPrompt: true },
+        );
 
         await lazyRunWizard(
           options as Parameters<typeof lazyRunWizard>[0],

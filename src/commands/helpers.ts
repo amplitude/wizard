@@ -686,7 +686,14 @@ export const runDirectSignupIfRequested = async (
   session: import('../lib/wizard-session').WizardSession,
   fallbackLabel: string,
   onSuccess?: () => Promise<void>,
+  opts?: { canPrompt?: boolean },
 ): Promise<void> => {
+  if (opts?.canPrompt && session.accountCreationFlow) {
+    const { promptForMissingSignupFields } = await import(
+      '../utils/signup-prompt.js'
+    );
+    await promptForMissingSignupFields(session);
+  }
   if (!accountCreationProvisioningInputsReady(session)) {
     return;
   }

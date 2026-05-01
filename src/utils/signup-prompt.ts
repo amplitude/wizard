@@ -4,7 +4,7 @@ import { EMAIL_REGEX } from '../lib/constants.js';
 export async function promptForMissingSignupFields(
   session: WizardSession,
 ): Promise<void> {
-  if (!session.signup) return;
+  if (!session.accountCreationFlow) return;
 
   const { select, input } = await import('@inquirer/prompts');
 
