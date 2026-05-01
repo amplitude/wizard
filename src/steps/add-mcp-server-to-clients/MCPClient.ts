@@ -2,29 +2,29 @@ import * as fs from 'fs';
 import * as path from 'path';
 import * as jsonc from 'jsonc-parser';
 import { z } from 'zod';
+import type { CloudRegion } from '../../utils/types';
 import { getDefaultServerConfig } from './defaults';
 
 export type MCPServerConfig = Record<string, unknown>;
 
 const MCPConfigSchema = z.record(z.string(), z.record(z.string(), z.unknown()));
 
-/** Result of an addServer/removeServer call. `error` is a short, user-surfaceable message. */
-export interface AddServerResult {
-  success: boolean;
-  error?: string;
-}
-
 export abstract class MCPClient {
   name: string;
   abstract getConfigPath(): Promise<string>;
   abstract getServerPropertyName(): string;
   abstract isServerInstalled(local?: boolean): Promise<boolean>;
+  // `zone` defaults to 'us' for backward compat with the existing call
+  // sites and tests. EU users SHOULD pass their resolved zone — the URL
+  // gets baked into editor configs (Claude Code, Cursor, VS Code) and
+  // persists past the wizard run.
   abstract addServer(
     apiKey?: string,
     selectedFeatures?: string[],
     local?: boolean,
-  ): Promise<AddServerResult>;
-  abstract removeServer(local?: boolean): Promise<AddServerResult>;
+    zone?: CloudRegion,
+  ): Promise<{ success: boolean }>;
+  abstract removeServer(local?: boolean): Promise<{ success: boolean }>;
   abstract isClientSupported(): Promise<boolean>;
 }
 
@@ -44,8 +44,9 @@ export abstract class DefaultMCPClient extends MCPClient {
     type: 'sse' | 'streamable-http',
     selectedFeatures?: string[],
     local?: boolean,
+    zone: CloudRegion = 'us',
   ): MCPServerConfig {
-    return getDefaultServerConfig(apiKey, type, selectedFeatures, local);
+    return getDefaultServerConfig(apiKey, type, selectedFeatures, local, zone);
   }
 
   async isServerInstalled(local?: boolean): Promise<boolean> {
@@ -74,8 +75,9 @@ export abstract class DefaultMCPClient extends MCPClient {
     apiKey?: string,
     selectedFeatures?: string[],
     local?: boolean,
-  ): Promise<AddServerResult> {
-    return this._addServerType(apiKey, 'sse', selectedFeatures, local);
+    zone: CloudRegion = 'us',
+  ): Promise<{ success: boolean }> {
+    return this._addServerType(apiKey, 'sse', selectedFeatures, local, zone);
   }
 
   async _addServerType(
@@ -83,7 +85,8 @@ export abstract class DefaultMCPClient extends MCPClient {
     type: 'sse' | 'streamable-http',
     selectedFeatures?: string[],
     local?: boolean,
-  ): Promise<AddServerResult> {
+    zone: CloudRegion = 'us',
+  ): Promise<{ success: boolean }> {
     try {
       const configPath = await this.getConfigPath();
       const configDir = path.dirname(configPath);
@@ -105,6 +108,7 @@ export abstract class DefaultMCPClient extends MCPClient {
         type,
         selectedFeatures,
         local,
+        zone,
       );
       if (!existingConfig[serverPropertyName]) {
         existingConfig[serverPropertyName] = {};
@@ -129,15 +133,12 @@ export abstract class DefaultMCPClient extends MCPClient {
       await fs.promises.writeFile(configPath, modifiedContent, 'utf8');
 
       return { success: true };
-    } catch (err) {
-      return {
-        success: false,
-        error: err instanceof Error ? err.message : String(err),
-      };
+    } catch {
+      return { success: false };
     }
   }
 
-  async removeServer(local?: boolean): Promise<AddServerResult> {
+  async removeServer(local?: boolean): Promise<{ success: boolean }> {
     try {
       const configPath = await this.getConfigPath();
 

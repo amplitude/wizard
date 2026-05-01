@@ -1,12 +1,13 @@
 import { z } from 'zod';
-import { execSync, spawnSync } from 'node:child_process';
-import * as fs from 'node:fs';
-import * as path from 'node:path';
-import * as os from 'node:os';
+import { execSync } from 'node:child_process';
+// `codex` ships as `codex.cmd` when installed via npm on Windows; the
+// stock `spawnSync` does not consult PATHEXT and ENOENTs on the bare
+// name. `execSync` routes through `cmd.exe` and is fine.
+import { spawnSync } from '../../../utils/cross-platform-spawn.js';
 
 import { DefaultMCPClient } from '../MCPClient';
 import { buildMCPUrl, DefaultMCPClientConfig } from '../defaults';
-import { isBundledByHostApp } from './bundled-binary';
+import type { CloudRegion } from '../../../utils/types';
 
 import { analytics } from '../../../utils/analytics';
 
@@ -22,26 +23,12 @@ export class CodexMCPClient extends DefaultMCPClient {
   }
 
   isClientSupported(): Promise<boolean> {
-    // Require the binary on PATH, the ~/.codex/ user-data dir, AND (on
-    // macOS) that the binary wasn't silently bundled by an outer tool
-    // (Conductor et al. ship their own `codex`; the user didn't install
-    // it and would be surprised to see Codex pop up in the picker).
-    let resolved: string;
     try {
-      // `where` on Windows, `command -v` on POSIX. execSync always runs
-      // through the platform's default shell, so the builtin resolves.
-      // `where` can return multiple paths separated by newlines; take the first.
-      const probe =
-        process.platform === 'win32' ? 'where codex' : 'command -v codex';
-      resolved = execSync(probe, { encoding: 'utf8' }).split(/\r?\n/)[0].trim();
+      execSync('codex --version', { stdio: 'ignore' });
+      return Promise.resolve(true);
     } catch {
       return Promise.resolve(false);
     }
-    if (!resolved) return Promise.resolve(false);
-    if (isBundledByHostApp(resolved)) {
-      return Promise.resolve(false);
-    }
-    return Promise.resolve(fs.existsSync(path.join(os.homedir(), '.codex')));
   }
 
   getConfigPath(): Promise<string> {
@@ -81,9 +68,10 @@ export class CodexMCPClient extends DefaultMCPClient {
     apiKey?: string,
     selectedFeatures?: string[],
     local?: boolean,
+    zone: CloudRegion = 'us',
   ): Promise<{ success: boolean }> {
     const serverName = local ? 'amplitude-local' : 'amplitude';
-    const url = buildMCPUrl('streamable-http', selectedFeatures, local);
+    const url = buildMCPUrl('streamable-http', selectedFeatures, local, zone);
 
     const args = ['mcp', 'add', serverName, '--url', url];
 

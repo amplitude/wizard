@@ -10,11 +10,9 @@ import {
   getSupportedClients,
   removeMCPServer,
   getInstalledClients,
-  resolveClientsForMode,
-  type ClaudeCodeInstallMode,
 } from '../../../steps/add-mcp-server-to-clients/index.js';
-import type { MCPClient } from '../../../steps/add-mcp-server-to-clients/MCPClient.js';
 import { ALL_FEATURE_VALUES } from '../../../steps/add-mcp-server-to-clients/defaults.js';
+import type { CloudRegion } from '../../../utils/types.js';
 import { logToFile } from '../../../utils/debug.js';
 
 const RawMCPClientSchema = z
@@ -26,38 +24,18 @@ const RawMCPClientSchema = z
     message: 'addServer must be a function',
   });
 
+interface RawMCPClient {
+  name: string;
+  addServer(
+    apiKey: string | undefined,
+    features: string[],
+    local: boolean,
+    zone: CloudRegion,
+  ): Promise<{ success: boolean } | undefined>;
+}
+
 export interface McpClientInfo {
   name: string;
-}
-
-export interface McpInstallFailure {
-  name: string;
-  error?: string;
-}
-
-export interface McpInstallResult {
-  installed: string[];
-  failures: McpInstallFailure[];
-}
-
-export interface McpInstallOptions {
-  /**
-   * How to install on Claude Code:
-   *  - 'plugin' (default): install the Amplitude Claude Code plugin (bundles MCP + slash commands)
-   *  - 'mcp': install only the raw MCP server entry
-   * Ignored for other editors.
-   */
-  claudeCodeMode?: ClaudeCodeInstallMode;
-
-  /** Called right before install of each client so the UI can show "connecting to X…". */
-  onClientStart?: (name: string) => void;
-
-  /** Called after each client finishes so the UI can tick it off live. */
-  onClientComplete?: (result: {
-    name: string;
-    success: boolean;
-    error?: string;
-  }) => void;
 }
 
 export interface McpInstaller {
@@ -66,13 +44,17 @@ export interface McpInstaller {
 
   /**
    * Install the Amplitude MCP server to the given clients.
-   * Returns per-client success/failure so callers can show actual error messages
-   * rather than collapsing everything into a single empty-result "skipped" state.
+   *
+   * `zone` is read at install-time (not at construction) because the user's
+   * region isn't known when the installer is created at app mount — it's
+   * picked on RegionSelect later. The MCP URL written into each editor's
+   * config persists past the wizard run, so passing the wrong zone leaves
+   * an EU user pointed at the US MCP host forever. Defaults to 'us' for
+   * test stubs and rare callers without zone context.
+   *
+   * Returns names of successfully installed clients.
    */
-  install(
-    clientNames: string[],
-    options?: McpInstallOptions,
-  ): Promise<McpInstallResult>;
+  install(clientNames: string[], zone?: CloudRegion): Promise<string[]>;
 
   /** Remove the Amplitude MCP server from all installed clients. Returns names of removed clients. */
   remove(): Promise<string[]>;
@@ -98,15 +80,15 @@ export function createMcpInstaller(local = false): McpInstaller {
 
     async install(
       clientNames: string[],
-      options?: McpInstallOptions,
-    ): Promise<McpInstallResult> {
+      zone: CloudRegion = 'us',
+    ): Promise<string[]> {
       const features = [...ALL_FEATURE_VALUES];
 
       // No access token — write URL only and let each editor handle OAuth on
       // first use. Pre-populating a token would break after 24 hours.
       const accessToken: string | undefined = undefined;
 
-      const selectedClients: MCPClient[] = [];
+      const toInstall: RawMCPClient[] = [];
       for (const c of cachedClients) {
         if (!clientNames.includes(c.name)) continue;
         const parsed = RawMCPClientSchema.safeParse(c.raw);
@@ -116,13 +98,10 @@ export function createMcpInstaller(local = false): McpInstaller {
           );
           continue;
         }
-        // Use the original instance — Zod strips the prototype chain.
-        selectedClients.push(c.raw as MCPClient);
+        // Use the original instance, not parsed.data — Zod creates a plain-object
+        // copy which strips the prototype chain and breaks `this` inside class methods.
+        toInstall.push(c.raw as RawMCPClient);
       }
-
-      // Swap Claude Code's MCP client for the plugin client when requested.
-      const mode = options?.claudeCodeMode ?? 'mcp';
-      const toInstall = await resolveClientsForMode(selectedClients, mode);
 
       if (toInstall.length === 0) {
         logToFile(
@@ -130,52 +109,34 @@ export function createMcpInstaller(local = false): McpInstaller {
             clientNames,
           )}, cached=${JSON.stringify(cachedClients.map((c) => c.name))}`,
         );
-        return { installed: [], failures: [] };
+        return [];
       }
 
-      // Installs are independent — each client writes its own config or
-      // shells out to its own CLI. Run in parallel so one slow client
-      // (typically Claude Code's plugin install, which clones a marketplace
-      // git repo on first run) doesn't block the others.
-      const outcomes = await Promise.all(
-        toInstall.map(async (client) => {
-          options?.onClientStart?.(client.name);
-          try {
-            const result = await client.addServer(accessToken, features, local);
-            const success = !!result?.success;
-            const error = success ? undefined : result?.error;
-            if (!success) {
-              logToFile(
-                `[McpInstaller] addServer failed for ${client.name}${
-                  error ? `: ${error}` : ''
-                }`,
-              );
-            }
-            options?.onClientComplete?.({
-              name: client.name,
-              success,
-              error,
-            });
-            return { name: client.name, success, error };
-          } catch (err) {
-            const msg = err instanceof Error ? err.message : String(err);
+      const installed: string[] = [];
+      for (const client of toInstall) {
+        try {
+          const result = await client.addServer(
+            accessToken,
+            features,
+            local,
+            zone,
+          );
+          if (result?.success) {
+            installed.push(client.name);
+          } else {
             logToFile(
-              `[McpInstaller] addServer threw for ${client.name}: ${msg}`,
+              `[McpInstaller] addServer returned success=false for ${client.name}`,
             );
-            options?.onClientComplete?.({
-              name: client.name,
-              success: false,
-              error: msg,
-            });
-            return { name: client.name, success: false, error: msg };
           }
-        }),
-      );
-      const installed = outcomes.filter((o) => o.success).map((o) => o.name);
-      const failures: McpInstallFailure[] = outcomes
-        .filter((o) => !o.success)
-        .map((o) => ({ name: o.name, error: o.error }));
-      return { installed, failures };
+        } catch (err) {
+          logToFile(
+            `[McpInstaller] addServer threw for ${client.name}: ${
+              err instanceof Error ? err.message : String(err)
+            }`,
+          );
+        }
+      }
+      return installed;
     },
 
     async remove(): Promise<string[]> {

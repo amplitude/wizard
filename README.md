@@ -11,7 +11,7 @@ The wizard authenticates you, detects your framework, runs an AI agent to
 instrument the SDK and events, verifies data is flowing, and walks you through
 your first chart and dashboard. All from the terminal.
 
-Requires Node.js >= 18.17.0.
+Requires Node.js >= 20.
 
 ## Supported frameworks
 
@@ -50,7 +50,17 @@ npx @amplitude/wizard
 4. **Verify** — confirms events are flowing into Amplitude
 5. **Explore** — walks you through your first chart, dashboard, and taxonomy
 
-Type `/help` at any time to see available commands.
+Every successful run drops an `amplitude-setup-report.md` at the project
+root summarizing what changed, what to verify, and how to extend the
+instrumentation. The previous run's report is archived alongside it as
+`amplitude-setup-report.previous.md`.
+
+For browser-based SDK projects (Next.js, Vue, React Router, JavaScript
+web), the wizard auto-enables Autocapture, Session Replay, and Guides &
+Surveys when the project is using Amplitude's unified Browser SDK — no
+extra opt-in screens. Type any slash command (e.g. `/whoami`,
+`/diagnostics`) at any time; the prompt accepts them throughout the
+session.
 
 ## Running modes
 
@@ -79,6 +89,34 @@ AI coding agents can drive the wizard end-to-end. Point your agent at the
 CLI and it will detect the framework, check project state, and report back
 as JSON — no prompt parsing required.
 
+### Claude Code (recommended)
+
+The wizard ships a Claude Code skill at `.claude/skills/amplitude-setup/`
+inside the published npm package. Once `@amplitude/wizard` is available
+(via `npx` or `npm install`), Claude Code will discover the skill when
+the user asks to set up Amplitude. The skill drives the right commands
+in the right order, surfaces every important moment to the user (which
+Amplitude app, which events, which files are about to be written), and
+never silently auto-approves.
+
+What the skill enforces:
+
+- Always runs `apply` in the foreground so NDJSON streams in real time.
+- Always passes `--confirm-app` so the user gets to confirm which
+  Amplitude app the wizard will write events into.
+- Always surfaces the proposed `event_plan` to the user and re-invokes
+  with `--approve-events` / `--skip-events` / `--revise-events`
+  based on the user's answer.
+- After `setup_complete` it pins the project context to `amplitude.appId`
+  for follow-up Amplitude MCP queries — no more "wrong project" charts.
+
+If your project doesn't pick up the skill automatically, copy it once:
+
+```bash
+mkdir -p .claude/skills
+cp -R "$(npm root)/@amplitude/wizard/.claude/skills/amplitude-setup" .claude/skills/
+```
+
 **Kick it off from your agent:**
 
 ```
@@ -92,6 +130,9 @@ npx @amplitude/wizard manifest            # introspect the CLI surface (JSON)
 npx @amplitude/wizard detect --json       # detect framework
 npx @amplitude/wizard status --json       # get full project state
 npx @amplitude/wizard auth status --json  # check if the human is logged in
+npx @amplitude/wizard plan --json         # build a setup plan (no writes) → planId
+npx @amplitude/wizard apply --plan-id <id> --yes   # execute a previously generated plan
+npx @amplitude/wizard verify --json       # confirm SDK + API key + framework are in place
 npx @amplitude/wizard --agent             # run the full wizard in NDJSON mode
 ```
 
@@ -121,6 +162,9 @@ npx @amplitude/wizard auth token            # stdout: <access-token>
 | `manifest` | JSON | Machine-readable CLI surface (flags, env vars, exit codes, glossary) |
 | `detect [--json]` | JSON or human | Detect the framework |
 | `status [--json]` | JSON or human | Full project state: framework, SDK, API key, auth |
+| `plan [--json]` | JSON or human | Build a structured setup plan (framework, SDK, file changes); persists a `planId` for 24h. No writes. |
+| `apply --plan-id <id> --yes` | NDJSON or human | Execute a previously generated plan. Requires `--yes`; pair with `--force` for destructive overwrites. |
+| `verify [--json]` | JSON or human | Cheap, no-network check that SDK + API key + framework are all in place. Exits non-zero on failure. |
 | `auth status [--json]` | JSON or human | Login state + token expiry |
 | `auth token` | raw token or JSON | Print stored OAuth token for scripts |
 
@@ -129,15 +173,22 @@ and force human-readable output. `--json` enables JSON output without the
 auto-approve side effects of `--agent` (so you can script but still get
 prompted for confirmation when needed).
 
+**Plan / apply / verify.** For orchestrators that want a human in the loop on
+the diff, split the run into three phases: `plan` builds a `WizardPlan`
+(framework, SDK, intended file changes) and returns a `planId`; `apply
+--plan-id <id> --yes` executes it within 24 hours; `verify` confirms the
+result. `plan` and `verify` never write to disk. The `plan` JSON output
+includes a ready-to-run `resumeFlags` array — feed it straight back into
+`apply`.
+
 **Selecting an Amplitude project.** Amplitude's hierarchy is
-Org → Workspace → Project → Environment. When multiple match, pick one
-with a flag — `--project-id` is unambiguous; the others narrow when
-needed:
+Org → Project → Environment → App. When multiple match, pick one with a
+flag — `--project-id` is unambiguous; the others narrow when needed:
 
 | Flag | When to use |
 |------|-------------|
-| `--project-id <id>` | Numeric project ID (e.g. `769610`). Most unambiguous selector. |
-| `--workspace-id <uuid>` | Narrow to one workspace when env names collide. |
+| `--project-id <id>` | Numeric app/environment ID (e.g. `769610`). Most unambiguous selector. |
+| `--workspace-id <uuid>` | Narrow to one project when env names collide. (Flag name kept for backward compat with the ampli CLI; scopes to an Amplitude Project.) |
 | `--org <name>` | Case-insensitive partial match on org name. |
 | `--env <name>` | Amplitude environment (e.g. `Production`). NOT a POSIX env var. |
 
@@ -156,9 +207,16 @@ full glossary.
 | `AMPLITUDE_TOKEN` | OAuth access-token override (requires prior login) |
 | `AMPLITUDE_WIZARD_TOKEN` | Alias for `AMPLITUDE_TOKEN` |
 | `AMPLITUDE_WIZARD_AGENT=1` | Force agent mode (NDJSON, auto-approve) |
+| `AMPLITUDE_WIZARD_MAX_TURNS` | Override the inner agent's per-run turn cap (default 200) |
+| `DATA_INGESTION_TIMEOUT_MS` | Override max wait (ms) for `--agent` ingestion polling after install; when unset, CI uses 10m and interactive agent uses 20m (see `src/lib/data-ingestion-agent-poll.ts`) |
+| `AMPLITUDE_WIZARD_DEBUG_CAN_USE_TOOL=1` | Log each inner-agent `canUseTool` gate decision to the wizard log file (with payload redaction) |
+| `AMPLITUDE_WIZARD_CAN_USE_TOOL_LOG_SAMPLE` | If set to a positive integer N, log every Nth `canUseTool` call without enabling full debug |
 
 **NDJSON schema.** Every event emitted in `--agent` mode carries a `v:1`
-version tag and a typed envelope. See
+version tag and a typed envelope. The stream includes inner-agent
+`lifecycle` events plus `file_change` events for every write the agent
+makes — orchestrators can render a live diff without tailing the
+filesystem. See
 [docs/dual-mode-architecture.md](./docs/dual-mode-architecture.md) for the
 full schema and deprecation policy.
 
@@ -253,6 +311,8 @@ Tools exposed:
 |------|---------|
 | `detect_framework` | Detect the framework used in a project |
 | `get_project_status` | Full setup state: framework, SDK, API key, auth |
+| `plan_setup` | Build a `WizardPlan` (framework, SDK, intended file changes) and return a `planId`. Read-only — no writes. Pair with the `apply` CLI subcommand to execute. |
+| `verify_setup` | No-network check that SDK + API key + framework are all in place. Returns `{ outcome, failures }`. |
 | `get_auth_status` | Whether the user is logged in and when their token expires |
 | `get_auth_token` | Return the stored OAuth access token (security-sensitive) |
 
@@ -262,19 +322,21 @@ Available at any point during the wizard:
 
 | Command | Description |
 |---------|-------------|
-| `/help` | List available commands |
-| `/whoami` | Show current user, org, project, and region |
-| `/org` | Switch the active org |
-| `/project` | Switch the active project |
+| `/whoami` | Show current user, org, and project |
 | `/region` | Switch data-center region (US / EU) |
 | `/login` | Re-authenticate |
-| `/logout` | Clear credentials |
-| `/chart` | Set up a new chart |
-| `/dashboard` | Create a new dashboard |
-| `/taxonomy` | Interact with the taxonomy agent |
-| `/overview` | Open the project overview in the browser |
-| `/slack` | Connect your Amplitude project to Slack |
-| `/feedback` | Send product feedback |
+| `/logout` | Clear stored credentials |
+| `/create-project` | Create a new Amplitude project inline |
+| `/mcp` | Install or remove the Amplitude MCP server in your editor |
+| `/slack` | Set up the Amplitude Slack integration |
+| `/feedback` | Send product feedback (with optional consent-gated diagnostics) |
+| `/clear` | Clear the Q&A conversation history |
+| `/debug` | Print a diagnostic snapshot (safe to share) |
+| `/diagnostics` | Show wizard storage paths (log file, cache, project meta dir) |
+| `/exit` | Exit the wizard |
+
+Some commands (`/login`, `/logout`, `/region`, `/create-project`) are paused
+while a setup run is active — cancel with Ctrl+C or wait for it to finish.
 
 ## Session and credentials
 
@@ -283,10 +345,16 @@ sessions refresh silently — you won't be asked to re-authenticate unless
 necessary. If the wizard is interrupted, the next launch in the same directory
 picks up where you left off.
 
-Credentials are stored in `~/.ampli.json` with restricted permissions. Project
-settings live in `.ampli.json` in your project directory (safe to commit for
-team sharing). API keys use your OS keychain when available, otherwise
-`.env.local` (gitignored).
+| What | Where |
+|------|-------|
+| OAuth tokens | `~/.ampli.json` (chmod 0600, owner-only) |
+| API keys | OS keychain (macOS Keychain, Linux `secret-tool`); falls back to `<project>/.env.local` |
+| Per-project cache (logs, checkpoints, plans, agent state) | `~/.amplitude/wizard/runs/<sha>/...` |
+| Project metadata (event plan, dashboard URL) | `<project>/.amplitude/` (gitignored) |
+| Setup report | `<project>/amplitude-setup-report.md` (the previous run is archived to `amplitude-setup-report.previous.md`) |
+
+Run `/diagnostics` at any time to print the exact paths for the current
+project — handy for filing bug reports.
 
 ## CLI reference
 
@@ -299,7 +367,7 @@ team sharing). API keys use your OS keychain when available, otherwise
 |------|---------|-------------|
 | `--debug` | `AMPLITUDE_WIZARD_DEBUG` | Enable verbose logging |
 | `--verbose` | `AMPLITUDE_WIZARD_VERBOSE` | Print diagnostic info to the log |
-| `--signup` | `AMPLITUDE_WIZARD_SIGNUP` | Create a new Amplitude account during setup |
+| `--auth-onboarding` | `AMPLITUDE_WIZARD_AUTH_ONBOARDING` | **Interactive TUI:** pick “Continue — sign in” or “Continue — create…” on Intro (writes the same `authOnboardingPath` as this flag). **CI / `--agent` / no TTY:** pass `sign-in` (default) or `create-account` so OAuth follows the right path. Legacy env `AMPLITUDE_WIZARD_SIGNUP=1` maps to `create-account`. |
 | `--local-mcp` | `AMPLITUDE_WIZARD_LOCAL_MCP` | Use local MCP server at `http://localhost:8787/mcp` |
 | `--ci` | `AMPLITUDE_WIZARD_CI` | Non-interactive execution |
 | `--api-key <key>` | `AMPLITUDE_WIZARD_API_KEY` | Amplitude API key (skips OAuth) |
@@ -313,7 +381,9 @@ team sharing). API keys use your OS keychain when available, otherwise
 | `--agent` | `AMPLITUDE_WIZARD_AGENT` | NDJSON output + auto-approve prompts |
 | `--json` | — | Machine-readable JSON (does NOT auto-approve prompts) |
 | `--human` | — | Force human output (overrides `--json` auto-detect when piped) |
-| `--yes` / `-y` | — | Skip all prompts, same as `--ci` |
+| `--yes` / `-y` | `AMPLITUDE_WIZARD_YES` | Skip all prompts and allow the inner agent to write files (required for `apply`) |
+| `--auto-approve` | `AMPLITUDE_WIZARD_AUTO_APPROVE` | Silently pick the recommended choice on `needs_input` prompts. Does **not** grant write capability — pair with `--yes` for that. |
+| `--force` | `AMPLITUDE_WIZARD_FORCE` | Allow destructive writes (overwrite/delete existing files); implies `--yes`. |
 | `--integration <name>` | — | Force a specific integration |
 | `--menu` | `AMPLITUDE_WIZARD_MENU` | Show framework selection menu |
 | `--force-install` | `AMPLITUDE_WIZARD_FORCE_INSTALL` | Install packages even if peer checks fail |
@@ -325,6 +395,7 @@ team sharing). API keys use your OS keychain when available, otherwise
 |---------|--------|
 | `AMPLITUDE_TOKEN` | OAuth access-token override (requires prior `amplitude-wizard login`) |
 | `AMPLITUDE_WIZARD_TOKEN` | Alias for `AMPLITUDE_TOKEN` |
+| `AMPLITUDE_WIZARD_MAX_TURNS` | Override the inner agent's per-run turn cap (default 200, max 10000). Useful for very long-running setups. |
 
 ### Exit codes
 
@@ -366,6 +437,8 @@ pnpm try          # run the wizard from source (no build needed)
 | `skills/` | Bundled markdown instructions the AI agent follows at runtime |
 
 See [CLAUDE.md](./CLAUDE.md) for full architecture documentation.
+
+**Contributing:** [CONTRIBUTING.md](./CONTRIBUTING.md) — setup, tests, and PR workflow (including AI-assisted changes and when to attach a **`/reflect`** checklist).
 
 ### Testing
 

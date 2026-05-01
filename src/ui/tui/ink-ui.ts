@@ -12,7 +12,8 @@ import type {
   EventPlanDecision,
 } from '../wizard-ui.js';
 import type { WizardStore } from './store.js';
-import type { RetryState } from '../../lib/wizard-session.js';
+import type { RetryState, PostAgentStep } from '../../lib/wizard-session.js';
+import { toCredentialAppId } from '../../lib/wizard-session.js';
 import { Overlay } from './router.js';
 import { RunPhase, OutroKind } from './session-constants.js';
 
@@ -53,18 +54,20 @@ export class InkUI implements WizardUI {
     appId: number;
     orgId?: string | null;
     orgName?: string | null;
-    workspaceId?: string | null;
-    workspaceName?: string | null;
+    projectId?: string | null;
+    projectName?: string | null;
     envName?: string | null;
   }): void {
     // The store-level WizardSession.credentials type only carries the four
-    // core fields; org/workspace names live elsewhere on the session. Scope
+    // core fields; org/project names live elsewhere on the session. Scope
     // fields here are for the NDJSON layer only — the TUI path ignores them.
     this.store.setCredentials({
       accessToken: credentials.accessToken,
       projectApiKey: credentials.projectApiKey,
       host: credentials.host,
-      appId: credentials.appId,
+      // Re-validate at the trust boundary: the upstream NDJSON contract
+      // accepts a raw `number`, but the store type is `AppId | 0`.
+      appId: toCredentialAppId(credentials.appId),
     });
   }
 
@@ -103,13 +106,6 @@ export class InkUI implements WizardUI {
     this.store.setRetryState(state);
   }
 
-  showSettingsOverride(
-    keys: string[],
-    backupAndFix: () => boolean,
-  ): Promise<void> {
-    return this.store.showSettingsOverride(keys, backupAndFix);
-  }
-
   startRun(): void {
     this.store.setRunPhase(RunPhase.Running);
   }
@@ -120,7 +116,11 @@ export class InkUI implements WizardUI {
     return true;
   }
 
-  cancel(message: string, options?: { docsUrl?: string }): void {
+  setOutroData(data: import('../../lib/wizard-session.js').OutroData): void {
+    this.store.setOutroData(data);
+  }
+
+  async cancel(message: string, options?: { docsUrl?: string }): Promise<void> {
     this.store.pushStatus(stripAnsi(message));
 
     if (!this.store.session.outroData) {
@@ -129,6 +129,12 @@ export class InkUI implements WizardUI {
         message: stripAnsi(message),
         docsUrl: options?.docsUrl,
       });
+    } else {
+      // Re-emit existing outroData so subscribers (OutroScreen) re-render.
+      // Business-logic callers that direct-mutate `session.outroData` don't
+      // fire change events, so without this the OutroScreen could miss the
+      // updated state when cancel() is called immediately after.
+      this.store.setOutroData(this.store.session.outroData);
     }
 
     // Advance past Run screen (RunPhase.Error also skips MCP screen)
@@ -137,6 +143,28 @@ export class InkUI implements WizardUI {
       this.store.session.runPhase === RunPhase.Idle
     ) {
       this.store.setRunPhase(RunPhase.Error);
+    }
+
+    // Block until the user dismisses the OutroScreen (or a safety
+    // timeout fires). Without this, wizardAbort would call process.exit
+    // before Ink rendered the next frame and the user would never see
+    // the cancel/error message — they'd just get a half-rendered status
+    // banner and a sudden process death.
+    //
+    // Safety timeout exists because the TUI can theoretically deadlock
+    // (e.g. an error during render itself). 5 minutes is generous —
+    // long enough for a human to read the bug-report instructions and
+    // open the log file, short enough that an unattended CI run that
+    // somehow reaches this path doesn't hang forever.
+    const SAFETY_TIMEOUT_MS = 5 * 60 * 1000;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const timeoutPromise = new Promise<void>((resolve) => {
+      timer = setTimeout(resolve, SAFETY_TIMEOUT_MS);
+    });
+    try {
+      await Promise.race([this.store.outroDismissed(), timeoutPromise]);
+    } finally {
+      if (timer) clearTimeout(timer);
     }
   }
 
@@ -176,11 +204,26 @@ export class InkUI implements WizardUI {
     };
   }
 
+  seedPostAgentSteps(steps: PostAgentStep[]): void {
+    this.store.seedPostAgentSteps(steps);
+  }
+
+  setPostAgentStep(
+    id: string,
+    patch: { status: PostAgentStep['status']; reason?: string },
+  ): void {
+    this.store.setPostAgentStep(id, patch);
+  }
+
   pushStatus(message: string): void {
     this.store.pushStatus(message);
   }
 
-  heartbeat(_statuses: string[]): void {
+  heartbeat(_data: {
+    statuses: string[];
+    elapsedMs: number;
+    attempt?: number;
+  }): void {
     // TUI already shows live status updates reactively via pushStatus — no-op
   }
 
@@ -202,6 +245,28 @@ export class InkUI implements WizardUI {
     todos: Array<{ content: string; status: string; activeForm?: string }>,
   ): void {
     this.store.syncTodos(todos);
+  }
+
+  applyJourneyTransition(
+    stepId: import('../../lib/journey-state.js').JourneyStepId,
+    status: import('../../lib/journey-state.js').JourneyStatus,
+  ): void {
+    this.store.applyJourneyTransition(stepId, status);
+  }
+
+  recordFileChangePlanned(data: {
+    path: string;
+    operation: 'create' | 'modify' | 'delete';
+  }): void {
+    this.store.recordFileChangePlanned(data);
+  }
+
+  recordFileChangeApplied(data: {
+    path: string;
+    operation: 'create' | 'modify' | 'delete';
+    bytes?: number;
+  }): void {
+    this.store.recordFileChangeApplied(data);
   }
 
   setEventPlan(events: Array<{ name: string; description: string }>): void {

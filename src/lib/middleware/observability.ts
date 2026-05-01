@@ -24,6 +24,7 @@ import {
 } from '../observability/sentry';
 import { rotateRunId } from '../observability/correlation';
 import { analytics } from '../../utils/analytics';
+import { getUI } from '../../ui';
 
 const log = createLogger('agent');
 
@@ -41,6 +42,16 @@ export function createObservabilityMiddleware(): Middleware {
   let runSpan: WizardSpan | null = null;
   let totalToolCalls = 0;
   let totalMessages = 0;
+  /**
+   * Per-tool invocation counts so the finalize emit can hand
+   * orchestrators a "where did the time/cost go" breakdown without
+   * forcing them to parse every `progress: tool_call` event. Keys are
+   * the SDK's tool-name strings (e.g. `"Read"`, `"Edit"`,
+   * `"mcp__amplitude-wizard__check_env_keys"`); values are integer
+   * counts. Empty when the run had no tool_use blocks (auth-required
+   * early-exits, etc.).
+   */
+  let toolCallsByTool: Record<string, number> = {};
 
   return {
     name: 'observability',
@@ -48,6 +59,7 @@ export function createObservabilityMiddleware(): Middleware {
     onInit() {
       totalToolCalls = 0;
       totalMessages = 0;
+      toolCallsByTool = {};
       // Rotate the run ID so retries get distinct correlation
       rotateRunId();
       log.info('Agent run started');
@@ -69,6 +81,10 @@ export function createObservabilityMiddleware(): Middleware {
             totalToolCalls++;
             if (currentPhaseTiming) currentPhaseTiming.toolCalls++;
             const toolName = block.name ?? 'unknown';
+            // Increment the per-tool counter alongside the aggregate.
+            // Stable across phase transitions — the finalize emit
+            // reports the full-run breakdown.
+            toolCallsByTool[toolName] = (toolCallsByTool[toolName] ?? 0) + 1;
             log.debug(`Tool call: ${toolName}`, {
               tool: toolName,
               phase: ctx.currentPhase,
@@ -193,6 +209,38 @@ export function createObservabilityMiddleware(): Middleware {
         'is error': isError,
         'num turns': resultMessage.num_turns,
       });
+
+      // Surface aggregated metrics on the NDJSON stream for
+      // orchestrators (cost / token / tool-call accounting).
+      // AgentUI implements `emitAgentMetrics`; InkUI / LoggingUI
+      // are no-ops. Wrapped in try/catch so any UI hiccup doesn't
+      // disturb the rest of finalize. Token counts come straight
+      // from the SDK's terminal `result` message — `usage` and
+      // `total_cost_usd` are populated when the SDK reports them.
+      try {
+        const usage = resultMessage.usage;
+        // Only ship `toolCallsByTool` when there were actual tool
+        // calls — empty objects in the NDJSON envelope just bloat the
+        // stream and offer no signal. Auth-required / no-op runs that
+        // exit before the inner agent fires any tools should land
+        // without the field rather than with `{}`.
+        const hasToolCalls = Object.keys(toolCallsByTool).length > 0;
+        getUI().emitAgentMetrics?.({
+          durationMs: totalDurationMs,
+          inputTokens: usage?.input_tokens,
+          outputTokens: usage?.output_tokens,
+          cacheReadInputTokens: usage?.cache_read_input_tokens,
+          cacheCreationInputTokens: usage?.cache_creation_input_tokens,
+          costUsd: resultMessage.total_cost_usd,
+          numTurns: resultMessage.num_turns,
+          totalToolCalls,
+          totalMessages,
+          isError,
+          ...(hasToolCalls ? { toolCallsByTool } : {}),
+        });
+      } catch {
+        /* metrics emission must not disturb finalize */
+      }
 
       // Close the final phase span (if any) + the run span.
       if (currentPhaseTiming) {

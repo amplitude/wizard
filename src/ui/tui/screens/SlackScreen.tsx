@@ -14,6 +14,7 @@ import { useState, useEffect, useRef } from 'react';
 import type { WizardStore } from '../store.js';
 import { SlackOutcome } from '../store.js';
 import { useWizardStore } from '../hooks/useWizardStore.js';
+import { useEscapeBack } from '../hooks/useEscapeBack.js';
 import { ConfirmationInput, TerminalLink } from '../primitives/index.js';
 import { Colors, Icons } from '../styles.js';
 import {
@@ -23,6 +24,7 @@ import {
 import { OUTBOUND_URLS } from '../../../lib/constants.js';
 import { useResolvedZone } from '../hooks/useResolvedZone.js';
 import { logToFile } from '../../../utils/debug.js';
+import { wizardSuccessExit } from '../../../utils/wizard-abort.js';
 import opn from 'opn';
 
 interface SlackScreenProps {
@@ -37,6 +39,8 @@ enum Phase {
   Prompt = 'prompt',
   Opening = 'opening',
   Waiting = 'waiting',
+  Verifying = 'verifying',
+  NotConnected = 'notConnected',
   Done = 'done',
 }
 
@@ -51,7 +55,10 @@ const markDone = (
   } else {
     store.setSlackComplete(outcome);
     if (standalone) {
-      process.exit(0);
+      // Standalone /slack slash-command run — flush analytics
+      // (the just-fired 'Slack Setup Complete' event) before the
+      // process exits.
+      void wizardSuccessExit(0);
     }
   }
 };
@@ -65,10 +72,27 @@ export const SlackScreen = ({
 
   const [phase, setPhase] = useState<Phase>(Phase.Prompt);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const unmountedRef = useRef(false);
 
-  // Clear any pending timer on unmount
+  // ConfirmationInput phases wire Esc through onCancel → escCancelOrRouterBack.
+  // Everywhere else (Opening / Verifying spinner, Done celebration before
+  // auto-advance) we want Esc → goBack when the router allows it.
+  const confirmationInputPhase =
+    phase === Phase.Prompt ||
+    phase === Phase.Waiting ||
+    phase === Phase.NotConnected;
+  useEscapeBack(store, {
+    enabled:
+      !standalone &&
+      onComplete === undefined &&
+      !confirmationInputPhase,
+  });
+
+  // Clear any pending timer on unmount and flag as unmounted so late-resolving
+  // async work won't schedule new timers or call markDone.
   useEffect(() => {
     return () => {
+      unmountedRef.current = true;
       if (timerRef.current !== null) clearTimeout(timerRef.current);
     };
   }, []);
@@ -95,12 +119,12 @@ export const SlackScreen = ({
     if (accessToken && orgId) {
       void fetchSlackConnectionStatus(accessToken, region, orgId).then(
         (isConnected) => {
-          if (cancelled) return;
+          if (cancelled || unmountedRef.current) return;
           logToFile(`[SlackScreen] slackConnectionStatus=${isConnected}`);
           if (isConnected) {
             setPhase(Phase.Done);
             timerRef.current = setTimeout(() => {
-              if (!cancelled) {
+              if (!cancelled && !unmountedRef.current) {
                 markDone(
                   store,
                   SlackOutcome.Configured,
@@ -136,6 +160,7 @@ export const SlackScreen = ({
 
     // Try the direct Slack OAuth URL first; fall back to settings page.
     const open = (url: string) => {
+      if (unmountedRef.current) return;
       setOpenedUrl(url);
       logToFile(
         `[SlackScreen] opening ${
@@ -159,12 +184,60 @@ export const SlackScreen = ({
     markDone(store, SlackOutcome.Skipped, standalone, onComplete);
   };
 
+  /** Esc on confirm prompts: step back in the flow when possible, else skip Slack. */
+  const escCancelOrRouterBack = () => {
+    if (store.canGoBack()) {
+      store.goBack();
+    } else {
+      handleSkip();
+    }
+  };
+
   const handleDone = () => {
-    setPhase(Phase.Done);
-    timerRef.current = setTimeout(
-      () => markDone(store, SlackOutcome.Configured, standalone, onComplete),
-      1500,
+    // Don't trust the user's "yes" — re-verify against the App API. The
+    // OAuth handshake can silently fail (closed tab, denied consent, popup
+    // blocker) and we'd otherwise celebrate a connection that doesn't
+    // exist.
+    const credentials = store.session.credentials;
+    const orgId = store.session.selectedOrgId;
+    const accessToken = credentials?.accessToken;
+
+    if (!accessToken || !orgId) {
+      // No way to verify — fall back to trusting the user. This matches
+      // the pre-existing behavior for unauthenticated/standalone runs.
+      setPhase(Phase.Done);
+      timerRef.current = setTimeout(
+        () => markDone(store, SlackOutcome.Configured, standalone, onComplete),
+        1500,
+      );
+      return;
+    }
+
+    setPhase(Phase.Verifying);
+    void fetchSlackConnectionStatus(accessToken, region, orgId).then(
+      (isConnected) => {
+        if (unmountedRef.current) return;
+        logToFile(
+          `[SlackScreen] post-confirm slackConnectionStatus=${isConnected}`,
+        );
+        if (isConnected) {
+          setPhase(Phase.Done);
+          timerRef.current = setTimeout(
+            () =>
+              markDone(store, SlackOutcome.Configured, standalone, onComplete),
+            1500,
+          );
+        } else {
+          setPhase(Phase.NotConnected);
+        }
+      },
     );
+  };
+
+  const handleRetry = () => {
+    // User wants another shot — re-open the auth URL and go back to
+    // Waiting so they can confirm again.
+    handleConnect();
   };
 
   return (
@@ -195,9 +268,9 @@ export const SlackScreen = ({
             <ConfirmationInput
               message={`Connect the "${appName}" Slack app to your workspace?`}
               confirmLabel="Connect"
-              cancelLabel="Skip for now"
+              cancelLabel={store.canGoBack() ? 'Back' : 'Skip for now'}
               onConfirm={handleConnect}
-              onCancel={handleSkip}
+              onCancel={escCancelOrRouterBack}
             />
           </Box>
         )}
@@ -244,9 +317,35 @@ export const SlackScreen = ({
               <ConfirmationInput
                 message="Connected to Slack?"
                 confirmLabel="Yes, connected"
-                cancelLabel="Skip for now"
+                cancelLabel={store.canGoBack() ? 'Back' : 'Skip for now'}
                 onConfirm={handleDone}
-                onCancel={handleSkip}
+                onCancel={escCancelOrRouterBack}
+              />
+            </Box>
+          </Box>
+        )}
+
+        {phase === Phase.Verifying && (
+          <Box marginTop={1}>
+            <Text color={Colors.active}>
+              Checking your Slack connection{Icons.ellipsis}
+            </Text>
+          </Box>
+        )}
+
+        {phase === Phase.NotConnected && (
+          <Box flexDirection="column" marginTop={1}>
+            <Text color={Colors.warning}>
+              We don&apos;t see the Slack connection yet. Make sure you finished
+              authorizing the {appName} app in your browser.
+            </Text>
+            <Box marginTop={1}>
+              <ConfirmationInput
+                message="Try again?"
+                confirmLabel="Retry"
+                cancelLabel={store.canGoBack() ? 'Back' : 'Skip anyway'}
+                onConfirm={handleRetry}
+                onCancel={escCancelOrRouterBack}
               />
             </Box>
           </Box>

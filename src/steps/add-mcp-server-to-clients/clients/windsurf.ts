@@ -1,30 +1,15 @@
-import { z } from 'zod';
+/**
+ * Windsurf — DEPRECATED. Uninstall-only. Drop in next release.
+ *
+ * Keeps `removeServer` alive so users with a stale `~/.codeium/windsurf/
+ * mcp_config.json` `mcpServers.amplitude` entry from a previous wizard
+ * install can scrub it via the uninstall flow. Not registered in
+ * `getSupportedClients()` — install path is a no-op.
+ */
 import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
-import { DefaultMCPClient, MCPServerConfig } from '../MCPClient';
-import { buildMCPUrl } from '../defaults';
-
-export const WindsurfMCPConfig = z
-  .object({
-    mcpServers: z.record(
-      z.string(),
-      z.union([
-        z.object({
-          serverUrl: z.string().optional(),
-          headers: z.record(z.string(), z.string()).optional(),
-        }),
-        z.object({
-          command: z.string().optional(),
-          args: z.array(z.string()).optional(),
-          env: z.record(z.string(), z.string()).optional(),
-        }),
-      ]),
-    ),
-  })
-  .passthrough();
-
-export type WindsurfMCPConfig = z.infer<typeof WindsurfMCPConfig>;
+import { DefaultMCPClient } from '../MCPClient';
 
 export class WindsurfMCPClient extends DefaultMCPClient {
   name = 'Windsurf';
@@ -33,11 +18,14 @@ export class WindsurfMCPClient extends DefaultMCPClient {
     return 'mcpServers';
   }
 
-  isClientSupported(): Promise<boolean> {
-    // Windsurf creates ~/.codeium/windsurf/ on first launch.
-    return Promise.resolve(
-      fs.existsSync(path.join(os.homedir(), '.codeium', 'windsurf')),
-    );
+  /** Uninstall-only: returns true only when a stale config file exists. */
+  async isClientSupported(): Promise<boolean> {
+    try {
+      const configPath = await this.getConfigPath();
+      return fs.existsSync(configPath);
+    } catch {
+      return false;
+    }
   }
 
   getConfigPath(): Promise<string> {
@@ -46,32 +34,7 @@ export class WindsurfMCPClient extends DefaultMCPClient {
     );
   }
 
-  getServerConfig(
-    apiKey: string | undefined,
-    type: 'sse' | 'streamable-http',
-    selectedFeatures?: string[],
-    local?: boolean,
-  ): MCPServerConfig {
-    // Windsurf uses `serverUrl` (not `url`) for remote MCP servers.
-    const config: MCPServerConfig = {
-      serverUrl: buildMCPUrl(type, selectedFeatures, local),
-    };
-    if (apiKey) {
-      config.headers = { Authorization: `Bearer ${apiKey}` };
-    }
-    return config;
-  }
-
-  async addServer(
-    apiKey?: string,
-    selectedFeatures?: string[],
-    local?: boolean,
-  ): Promise<{ success: boolean }> {
-    return this._addServerType(
-      apiKey,
-      'streamable-http',
-      selectedFeatures,
-      local,
-    );
+  addServer(): Promise<{ success: boolean }> {
+    return Promise.resolve({ success: false });
   }
 }

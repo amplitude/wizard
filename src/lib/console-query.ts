@@ -8,7 +8,7 @@
 import type { WizardSession } from './wizard-session.js';
 import { getLlmGatewayUrlFromHost } from '../utils/urls.js';
 import { RunPhase } from './wizard-session.js';
-import { getAgent } from './agent-interface.js';
+import { buildAgentEnv, getAgent } from './agent-interface.js';
 import { safeParseSDKMessage } from './middleware/schemas.js';
 import { WIZARD_TOOL_NAMES } from './wizard-tools.js';
 
@@ -62,8 +62,8 @@ export function buildSessionContext(session: WizardSession): string {
     lines.push(`Framework: ${session.detectedFrameworkLabel}`);
   if (session.integration) lines.push(`Integration: ${session.integration}`);
   if (session.selectedOrgName) lines.push(`Org: ${session.selectedOrgName}`);
-  if (session.selectedWorkspaceName)
-    lines.push(`Workspace: ${session.selectedWorkspaceName}`);
+  if (session.selectedProjectName)
+    lines.push(`Project: ${session.selectedProjectName}`);
   // Amplitude's UI labels this "Project ID" — keep user-facing label familiar
   // even though the canonical code term is `appId`.
   if (session.credentials?.appId)
@@ -121,6 +121,17 @@ export async function queryConsole(
 
   const collectedText: string[] = [];
 
+  // Forward x-amp-wizard-session-id so slash-prompt LLM calls land in the
+  // SAME Agent Analytics session as the main agent run, instead of falling
+  // through to the proxy's per-token-hash fallback (which would collapse all
+  // slash-prompt queries across every wizard run a user has ever done into
+  // one synthetic session).
+  //
+  // We rebuild ANTHROPIC_CUSTOM_HEADERS here rather than read from process.env
+  // because the SDK subprocess sets the env scoped to its query() call —
+  // process.env never sees the value the main run injected.
+  const customHeaders = buildAgentEnv({}, {}, agentConfig.agentSessionId);
+
   const response = query({
     prompt: userMessage,
     options: {
@@ -130,7 +141,10 @@ export async function queryConsole(
       mcpServers: agentConfig.mcpServers,
       allowedTools: WIZARD_TOOL_NAMES,
       systemPrompt: sessionContext + historyBlock,
-      env: process.env,
+      env: {
+        ...process.env,
+        ANTHROPIC_CUSTOM_HEADERS: customHeaders,
+      },
     },
   });
 

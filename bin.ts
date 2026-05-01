@@ -9,85 +9,121 @@
 import { sanitizeNestedClaudeEnv } from './src/lib/sanitize-claude-env';
 sanitizeNestedClaudeEnv();
 
-// Dev-mode marker: `pnpm dev` writes dist/.dev-mode after the initial build;
-// `pnpm build` wipes dist/ so the marker is absent for published / prod runs.
-// When present, set NODE_ENV=development so IS_DEV (src/lib/constants.ts)
-// picks the dev telemetry key. Must run before any import that reads NODE_ENV
-// at module-load time.
+// Install EPIPE-tolerant error handlers on stdout/stderr before any
+// downstream module can write. Without this, a closed receiver
+// (parent process dies, output piped through `head`, outer agent
+// crashes) crashes the wizard with an uncaught EPIPE. See production
+// Sentry: WIZARD-CLI-8 (agent-ui emit), WIZARD-CLI-5 (afterWriteDispatched).
+import { installPipeErrorHandlers } from './src/utils/pipe-errors';
+installPipeErrorHandlers();
+
+// Process-level safety net. Without this, a throw inside an agent
+// hook, MCP callback, or stray promise chain crashes Node with a raw
+// stack trace — no Outro, no checkpoint flush, no Sentry. The handler
+// captures the error, saves a checkpoint, and routes through
+// `wizardAbort` so the user lands on the Error outro with recovery
+// affordances (Retry / Resume / Open log / Bug report).
+import { installSafetyNet } from './src/utils/safety-net';
+installSafetyNet();
+
+// Default NODE_ENV based on installation source. Without this, React's CJS
+// entry (node_modules/react/index.js) falls through to react.development.js
+// whenever NODE_ENV is unset — about 10× larger and noticeably slower on Ink
+// mount. We want dev React only for actual development; everything else
+// (real npx invocations, global installs, local installs) should get the
+// minified production build.
+//
+// Resolution order (first match wins):
+//   1. NODE_ENV already set        → respected (CI, vitest, pnpm scripts, ops)
+//   2. dist/.dev-mode marker       → 'development' (pnpm dev writes it)
+//   3. __dirname inside node_modules → 'production' (npx, global, local install)
+//   4. Anything else                → 'development' (pnpm try, tsx, direct node)
+//
+// The path-based fallback means contributors don't have to remember to set
+// NODE_ENV in package.json scripts — running `node dist/bin.js` from the
+// source tree, `tsx bin.ts`, `pnpm try`, or `pnpm link --global` (the bin
+// realpaths back to the repo) all stay in development. Only published
+// tarballs flip to production.
+//
+// Must run before any import that reads NODE_ENV at module-load time.
 import { existsSync } from 'node:fs';
-import { resolve as resolvePath } from 'node:path';
-if (
-  process.env.NODE_ENV === undefined &&
-  existsSync(resolvePath(__dirname, '.dev-mode'))
-) {
-  process.env.NODE_ENV = 'development';
+import { resolve as resolvePath, sep as pathSep } from 'node:path';
+if (process.env.NODE_ENV === undefined) {
+  if (existsSync(resolvePath(__dirname, '.dev-mode'))) {
+    process.env.NODE_ENV = 'development';
+  } else if (__dirname.includes(`${pathSep}node_modules${pathSep}`)) {
+    process.env.NODE_ENV = 'production';
+  } else {
+    process.env.NODE_ENV = 'development';
+  }
 }
 
-import { satisfies } from 'semver';
 import { red } from './src/utils/logging';
 import { config as loadDotenv } from 'dotenv';
-loadDotenv();
+// Skip dotenv when there's no .env to load. dotenv parses the file even
+// when it's missing, which is wasted work for `--help`, `manifest`,
+// `auth token`, and the agent-orchestrated subcommands that never
+// expect a project .env. Keeps cold start lean for those paths.
+if (existsSync(resolvePath(process.cwd(), '.env'))) {
+  loadDotenv();
+}
 
 import yargs from 'yargs';
 import { hideBin } from 'yargs/helpers';
 import chalk from 'chalk';
 
-/**
- * Dev mode toggle — when set (e.g. via `pnpm try` / `pnpm dev`), internal
- * flags like --local-mcp show up in --help. End users never see them.
- */
-const IS_WIZARD_DEV = process.env.AMPLITUDE_WIZARD_DEV === '1';
-
-import { readFileSync } from 'fs';
-import { resolve, dirname, join } from 'path';
-import { z } from 'zod';
-
-const WIZARD_VERSION: string = (() => {
-  // npm/pnpm set this when running via package scripts
-  if (process.env.npm_package_version) return process.env.npm_package_version;
-  // Fallback: read package.json relative to this file
-  try {
-    const pkg = z
-      .object({ version: z.string().optional() })
-      .passthrough()
-      .parse(
-        JSON.parse(
-          readFileSync(
-            resolve(dirname(__filename), '..', 'package.json'),
-            'utf-8',
-          ),
-        ),
-      );
-    return pkg.version ?? 'unknown';
-  } catch {
-    return 'unknown';
+// Honor the NO_COLOR / FORCE_COLOR standards (https://no-color.org,
+// https://force-color.org) globally. Doing this at module scope ensures every
+// downstream `chalk.*` call — from yargs help to LoggingUI — respects the
+// user's choice. We also drop color when stdout is not a TTY, which matters
+// for pipes and CI systems that capture the wizard's output.
+(() => {
+  if (process.env.NO_COLOR !== undefined) {
+    chalk.level = 0;
+    return;
+  }
+  if (process.env.FORCE_COLOR !== undefined) {
+    // Let chalk's own FORCE_COLOR parsing win; no override needed.
+    return;
+  }
+  if (!process.stdout.isTTY) {
+    chalk.level = 0;
   }
 })();
 
-const NODE_VERSION_RANGE = '>=18.17.0';
+import {
+  CLI_INVOCATION,
+  IS_WIZARD_DEV,
+  WIZARD_VERSION,
+} from './src/commands/context';
 
-// Have to run this above the other imports because they are importing clack that
-// has the problematic imports.
-if (!satisfies(process.version, NODE_VERSION_RANGE)) {
+const MIN_NODE_MAJOR = 20;
+
+// Inline check instead of `semver.satisfies` so we don't pay the
+// ~50KB-of-regex import cost on every cold start just to compare a
+// single integer. The package still depends on semver for richer
+// version logic elsewhere (update-notifier, framework detect helpers),
+// but those are loaded lazily — bin.ts shouldn't be.
+//
+// Have to run this above the other imports because they are importing
+// clack that has the problematic imports.
+const nodeMajor = Number(process.versions.node.split('.')[0]);
+if (!Number.isFinite(nodeMajor) || nodeMajor < MIN_NODE_MAJOR) {
   red(
-    `Amplitude wizard requires Node.js ${NODE_VERSION_RANGE}. You are using Node.js ${process.version}. Please upgrade your Node.js version.`,
+    `Amplitude wizard requires Node.js >=${MIN_NODE_MAJOR}. You are using Node.js ${process.version}. Please upgrade your Node.js version.`,
   );
   process.exit(1);
 }
 
-import { isNonInteractiveEnvironment } from './src/utils/environment';
 import { EMAIL_REGEX } from './src/lib/constants';
-import type { AmplitudeZone } from './src/lib/constants';
-import { getUI, setUI } from './src/ui';
-import { LoggingUI } from './src/ui/logging-ui';
+import { getUI } from './src/ui';
 import { cleanupShellCompletionLine } from './src/utils/cleanup-shell-rc';
 // Remove the broken `eval "$(amplitude-wizard completion)"` line that earlier
 // versions silently appended to the user's shell rc.
 cleanupShellCompletionLine();
 import { analytics } from './src/utils/analytics';
-import { ExitCode } from './src/lib/exit-codes';
 import { detectNestedAgent } from './src/lib/detect-nested-agent';
-import { AgentUI } from './src/ui/agent-ui';
+import type { AgentUI as AgentUIType } from './src/ui/agent-ui';
 import {
   initLogger,
   initCorrelation,
@@ -97,365 +133,25 @@ import {
 } from './src/lib/observability';
 import type { LogLevel } from './src/lib/observability';
 
-// Dynamic import to avoid preloading wizard-session.ts as CJS, which
-// prevents the TUI's ESM dynamic imports from resolving named exports.
-const lazyRunWizard = async (
-  ...args: Parameters<typeof import('./src/run')['runWizard']>
-) => {
-  const { runWizard } = await import('./src/run.js');
-  return runWizard(...args);
-};
-
-/**
- * How the user invoked this CLI — echoed back in help/error messages so we
- * don't tell `npx @amplitude/wizard` users to run `amplitude-wizard login`
- * (which only works when globally installed).
- *
- * npx stages packages under a cache path containing `/_npx/`. Everything
- * else is treated as a direct bin invocation.
- */
-const CLI_INVOCATION: string = (() => {
-  const scriptPath = process.argv[1] ?? '';
-  if (scriptPath.includes('/_npx/') || scriptPath.includes('\\_npx\\')) {
-    return 'npx @amplitude/wizard';
-  }
-  // npm >= 7 implements `npx` as `npm exec`, which always sets
-  // npm_command=exec — even when npx resolves to an already-installed copy
-  // (e.g. running `npx @amplitude/wizard` from inside this repo, or from
-  // a project that depends on it). argv[1] doesn't contain /_npx/ in that
-  // case, so this catches it.
-  if (process.env.npm_command === 'exec') {
-    return 'npx @amplitude/wizard';
-  }
-  return 'amplitude-wizard';
-})();
-
-/**
- * Build a WizardSession from CLI argv, avoiding the repeated 12-field literal.
- */
-const buildSessionFromOptions = async (
-  options: Record<string, unknown>,
-  overrides?: { ci?: boolean },
-) => {
-  const { buildSession } = await import('./src/lib/wizard-session.js');
-  return buildSession({
-    debug: options.debug as boolean | undefined,
-    verbose: options.verbose as boolean | undefined,
-    forceInstall: options.forceInstall as boolean | undefined,
-    installDir: options.installDir as string | undefined,
-    ci: overrides?.ci ?? false,
-    signup: options.signup as boolean | undefined,
-    localMcp: options.localMcp as boolean | undefined,
-    apiKey: options.apiKey as string | undefined,
-    menu: options.menu as boolean | undefined,
-    signupEmail: options.email as string | undefined,
-    signupFullName: options['full-name'] as string | undefined,
-    // --region is canonical; --zone is a yargs alias, so `options.region`
-    // is populated by either flag.
-    region: options.region as AmplitudeZone | undefined,
-    integration: options.integration as Parameters<
-      typeof buildSession
-    >[0]['integration'],
-    benchmark: options.benchmark as boolean | undefined,
-    // yargs normalizes --app-id (primary) / --project-id (alias) to `appId`.
-    appId: options.appId as string | undefined,
-    appName: options.appName as string | undefined,
-  });
-};
-
-/**
- * Shared credential resolution for non-interactive modes (agent + CI).
- * Handles --api-key shortcut, OAuth token refresh, and pendingOrgs.
- *
- * @param mode - 'agent' prompts via AgentUI, 'ci' auto-selects first env
- */
-const resolveNonInteractiveCredentials = async (
-  session: import('./src/lib/wizard-session').WizardSession,
-  options: Record<string, unknown>,
-  mode: 'agent' | 'ci',
-  agentUI?: import('./src/ui/agent-ui').AgentUI,
-) => {
-  // Fast path: --api-key / AMPLITUDE_WIZARD_API_KEY provided. This is a real
-  // project API key, safe to embed into generated client-side code (it ends
-  // up in amplitude.init('${projectApiKey}') calls).
-  //
-  // AMPLITUDE_TOKEN / AMPLITUDE_WIZARD_TOKEN is an OAuth *access token*, NOT a
-  // project API key. It must never be used as projectApiKey — doing so would
-  // (a) leak an OAuth secret into client bundles and (b) break SDK init since
-  // it isn't a valid ingestion key. OAuth tokens fall through to
-  // resolveCredentials below, which reads the full stored session from
-  // ~/.ampli.json (idToken, refreshToken) and fetches the real project API
-  // key from the Amplitude API.
-  if (session.apiKey) {
-    const { DEFAULT_HOST_URL } = await import('./src/lib/constants.js');
-    session.credentials = {
-      accessToken: session.apiKey,
-      projectApiKey: session.apiKey,
-      host: DEFAULT_HOST_URL,
-      appId: session.appId ?? 0,
-    };
-    session.projectHasData = false;
-    return;
-  }
-
-  // Resolve credentials from stored OAuth tokens. AMPLITUDE_TOKEN /
-  // AMPLITUDE_WIZARD_TOKEN (if set) overrides the stored access token so
-  // an automation can inject a fresh one — but a prior `amplitude-wizard
-  // login` is still required because we need the stored idToken to fetch
-  // the project API key.
-  const envAccessToken =
-    process.env.AMPLITUDE_TOKEN ?? process.env.AMPLITUDE_WIZARD_TOKEN;
-  const { resolveCredentials, resolveEnvironmentSelection } = await import(
-    './src/lib/credential-resolution.js'
-  );
-  await resolveCredentials(session, {
-    requireOrgId: false,
-    org: options.org as string | undefined,
-    env: options.env as string | undefined,
-    workspaceId: options.workspaceId as string | undefined,
-    appId: options.appId as string | undefined,
-    accessTokenOverride: envAccessToken,
-  });
-
-  // ── Non-interactive create-project ────────────────────────────────
-  // `--project-name <name>` triggers an inline project creation when the
-  // authenticated user has an org but no projects to choose from (or when
-  // the orchestrator explicitly asks for a fresh project). Must not prompt.
-  const projectName = (options.appName as string | undefined)?.trim();
-  if (
-    projectName &&
-    session.pendingOrgs &&
-    !session.credentials &&
-    session.pendingAuthIdToken &&
-    session.pendingAuthAccessToken
-  ) {
-    const { createAmplitudeApp, ApiError } = await import('./src/lib/api.js');
-    const { getHostFromRegion } = await import('./src/utils/urls.js');
-    const { persistApiKey } = await import('./src/utils/api-key-store.js');
-
-    // Pick an org: --org flag if provided, else the first org with access.
-    const orgFlag = (options.org as string | undefined)?.toLowerCase();
-    const org =
-      (orgFlag &&
-        session.pendingOrgs.find(
-          (o) =>
-            o.name.toLowerCase() === orgFlag || o.id.toLowerCase() === orgFlag,
-        )) ||
-      session.pendingOrgs[0];
-
-    if (!org) {
-      if (mode === 'agent' && agentUI) {
-        agentUI.emitProjectCreateError({
-          code: 'MISSING_ORG',
-          message:
-            'No Amplitude organization available to create a project in.',
-          name: projectName,
-        });
-      } else {
-        getUI().log.error(
-          'No Amplitude organization available to create a project in.',
-        );
-      }
-      process.exit(ExitCode.AUTH_REQUIRED);
-    }
-
-    const { resolveZone } = await import('./src/lib/zone-resolution.js');
-    const { DEFAULT_AMPLITUDE_ZONE } = await import('./src/lib/constants.js');
-    // Pre-OAuth CLI path: session.region may be unset, fall back to disk tiers.
-    const zone = resolveZone(session, DEFAULT_AMPLITUDE_ZONE, {
-      readDisk: true,
-    });
-    if (mode === 'agent' && agentUI) {
-      agentUI.emitProjectCreateStart({ orgId: org.id, name: projectName });
-    } else {
-      getUI().log.info(
-        `Creating Amplitude project "${projectName}" in ${org.name}…`,
-      );
-    }
-
-    try {
-      const created = await createAmplitudeApp(
-        session.pendingAuthAccessToken,
-        zone,
-        { orgId: org.id, name: projectName },
-      );
-
-      // Persist outside the API's error path — the project exists on the
-      // backend at this point. A local persist failure (FS permission, etc.)
-      // must not be reported as a create-project error, because the
-      // orchestrator retry would then hit NAME_TAKEN.
-      try {
-        persistApiKey(created.apiKey, session.installDir);
-      } catch (persistErr) {
-        const msg =
-          persistErr instanceof Error ? persistErr.message : String(persistErr);
-        getUI().log.warn(
-          `Project created but failed to persist API key locally: ${msg}. ` +
-            `Set AMPLITUDE_API_KEY=<key> manually or rerun once the issue is resolved.`,
-        );
-      }
-      session.selectedOrgId = org.id;
-      session.selectedOrgName = org.name;
-      session.selectedEnvName = created.name;
-      session.credentials = {
-        accessToken: session.pendingAuthAccessToken ?? '',
-        idToken: session.pendingAuthIdToken,
-        projectApiKey: created.apiKey,
-        host: getHostFromRegion(zone),
-        appId: Number.parseInt(created.appId, 10) || 0,
-      };
-      session.projectHasData = false;
-
-      if (mode === 'agent' && agentUI) {
-        agentUI.emitProjectCreateSuccess({
-          appId: created.appId,
-          name: created.name,
-          orgId: org.id,
-        });
-      } else {
-        getUI().log.info(`Project created: ${created.name} (${created.appId})`);
-      }
-    } catch (err) {
-      const isApi = err instanceof ApiError;
-      const code = isApi && err.code ? err.code : 'INTERNAL';
-      const message = err instanceof Error ? err.message : String(err);
-
-      if (mode === 'agent' && agentUI) {
-        agentUI.emitProjectCreateError({
-          code: code as Parameters<
-            typeof agentUI.emitProjectCreateError
-          >[0]['code'],
-          message,
-          name: projectName,
-        });
-      } else {
-        getUI().log.error(`Create project failed (${code}): ${message}`);
-      }
-
-      // NAME_TAKEN gets a dedicated exit code so orchestrators can
-      // distinguish "pick a new name" from generic failures.
-      if (code === 'NAME_TAKEN') process.exit(ExitCode.PROJECT_NAME_TAKEN);
-      if (code === 'FORBIDDEN' || code === 'QUOTA_REACHED')
-        process.exit(ExitCode.AUTH_REQUIRED);
-      if (code === 'INVALID_REQUEST') process.exit(ExitCode.INVALID_ARGS);
-      process.exit(ExitCode.AGENT_FAILED);
-    }
-  }
-
-  // Handle multiple environments
-  if (session.pendingOrgs && !session.credentials) {
-    if (mode === 'ci') {
-      // CI mode: auto-select first environment with an API key
-      for (const org of session.pendingOrgs) {
-        for (const ws of org.workspaces) {
-          const env = (ws.environments ?? [])
-            .filter((e) => e.app?.apiKey)
-            .sort((a, b) => a.rank - b.rank)[0];
-          if (env) {
-            await resolveEnvironmentSelection(session, {
-              orgId: org.id,
-              workspaceId: ws.id,
-              env: env.name,
-            });
-            getUI().log.info(
-              `Resolved Amplitude API key non-interactively (CI mode): ${org.name} / ${ws.name} / ${env.name}`,
-            );
-            break;
-          }
-        }
-        if (session.credentials) break;
-      }
-      if (!session.credentials) {
-        if (projectName) {
-          // --project-name was provided but the create-project block was
-          // skipped (e.g. missing idToken). Surface a clear error instead
-          // of silently continuing without credentials.
-          process.stderr.write(
-            'Error: could not create project — authentication token is missing or expired. ' +
-              `Run \`${CLI_INVOCATION} login\` and re-run.\n`,
-          );
-          process.exit(ExitCode.AUTH_REQUIRED);
-        } else {
-          process.stderr.write(
-            'Error: no Amplitude projects with API keys available. ' +
-              'Pass `--project-name "<name>"` to create one, or create one ' +
-              'in the Amplitude UI and re-run.\n',
-          );
-          process.exit(ExitCode.INVALID_ARGS);
-        }
-      }
-    } else if (agentUI) {
-      // Agent mode: emit a structured prompt event with the full
-      // org/workspace/app/env hierarchy. The orchestrator can either
-      // reply on stdin with { appId } or re-invoke with --app-id (globally
-      // unique, identifies the env directly).
-      //
-      // If the orchestrator provides an unknown appId, promptEnvironmentSelection
-      // THROWS rather than silently picking a random env — we route that to
-      // env_selection_failed with the mismatch message in the instruction.
-      let selection: Awaited<
-        ReturnType<(typeof agentUI)['promptEnvironmentSelection']>
-      >;
-      try {
-        selection = await agentUI.promptEnvironmentSelection(
-          session.pendingOrgs,
-        );
-      } catch (err) {
-        const detail = err instanceof Error ? err.message : String(err);
-        agentUI.emitAuthRequired({
-          reason: 'env_selection_failed',
-          instruction:
-            `${detail} Re-run ${CLI_INVOCATION} with --app-id <id> set to ` +
-            'a value from the choices array in the last prompt event.',
-          loginCommand: [...CLI_INVOCATION.split(' '), 'login'],
-        });
-        process.exit(ExitCode.AUTH_REQUIRED);
-      }
-      const resolved = await resolveEnvironmentSelection(session, selection);
-      if (!resolved) {
-        agentUI.emitAuthRequired({
-          reason: 'env_selection_failed',
-          instruction:
-            'Could not resolve an Amplitude environment with an API key. ' +
-            `Pass --app-id <id> when re-running ${CLI_INVOCATION}.`,
-          loginCommand: [...CLI_INVOCATION.split(' '), 'login'],
-        });
-        process.exit(ExitCode.AUTH_REQUIRED);
-      }
-    }
-  }
-
-  // If we still don't have credentials, auth is required
-  if (!session.credentials) {
-    if (mode === 'agent' && agentUI) {
-      const loginCommand = [...CLI_INVOCATION.split(' '), 'login'];
-      const resumeCommand = [...CLI_INVOCATION.split(' '), '--agent'];
-      agentUI.emitAuthRequired({
-        reason: 'no_stored_credentials',
-        instruction:
-          'Not signed in to Amplitude. Ask the user to run ' +
-          `\`${loginCommand.join(' ')}\` in a terminal to authenticate, ` +
-          `then re-run \`${resumeCommand.join(' ')}\` to resume.`,
-        loginCommand,
-        resumeCommand,
-      });
-      process.exit(ExitCode.AUTH_REQUIRED);
-    }
-    // CI mode falls through — runWizard will handle missing credentials
-  }
-
-  // Log what was resolved so the caller can see it
-  if (mode === 'agent' && session.credentials) {
-    const parts = [
-      session.selectedOrgName,
-      session.selectedWorkspaceName,
-      session.selectedEnvName,
-    ].filter(Boolean);
-    if (parts.length > 0) {
-      getUI().log.info(`Using: ${parts.join(' / ')}`);
-    }
-  }
-};
+import {
+  defaultCommand,
+  loginCommand,
+  logoutCommand,
+  resetCommand,
+  whoamiCommand,
+  feedbackCommand,
+  slackCommand,
+  regionCommand,
+  detectCommand,
+  projectsCommand,
+  planCommand,
+  applyCommand,
+  verifyCommand,
+  statusCommand,
+  authCommand,
+  mcpCommand,
+  manifestCommand,
+} from './src/commands';
 
 /**
  * Run the direct-signup wrapper for agent / CI / classic modes.
@@ -565,6 +261,7 @@ const runDirectSignupIfRequested = async (
   const rawArgv = process.argv.slice(2);
   const isAgent =
     rawArgv.includes('--agent') || process.env.AMPLITUDE_WIZARD_AGENT === '1';
+  if (isAgent) process.env.AMPLITUDE_WIZARD_AGENT = '1';
   const isCi =
     rawArgv.includes('--ci') ||
     rawArgv.includes('--yes') ||
@@ -587,11 +284,22 @@ const runDirectSignupIfRequested = async (
 
   // Initialize Sentry error tracking.
   // Respects DO_NOT_TRACK=1 and AMPLITUDE_WIZARD_NO_TELEMETRY=1 for opt-out.
-  initSentry({
+  //
+  // Fire-and-forget: `initSentry` is async because it lazy-imports the
+  // heavy `@sentry/node` module (~80–150 ms saved on cold start). Awaiting
+  // here would re-block the bootstrap; not awaiting means events captured
+  // in the first ~tens of milliseconds before init resolves are silently
+  // dropped — acceptable for a CLI's startup window. A `.catch(() => {})`
+  // tail keeps an unhandled-rejection event from leaking out.
+  void initSentry({
     sessionId: analytics.getAnonymousId(),
     version: WIZARD_VERSION,
     mode,
     debug: isDebug,
+  }).catch(() => {
+    // Sentry init failure is already swallowed inside initSentry — this
+    // catch is belt-and-braces against a future regression that throws
+    // outside the inner try/catch.
   });
 
   // Set session-scoped properties so every event includes mode/version/platform.
@@ -599,6 +307,15 @@ const runDirectSignupIfRequested = async (
   analytics.setSessionProperty('wizard_version', WIZARD_VERSION);
   analytics.setSessionProperty('platform', process.platform);
   analytics.setSessionProperty('node_version', process.version);
+
+  // Non-blocking background update check — prints a one-line notice on
+  // stderr when a newer version is available. Auto-skips in CI / piped /
+  // agent modes via shouldCheckForUpdates().
+  void import('./src/utils/update-notifier.js')
+    .then(({ scheduleUpdateCheck }) =>
+      scheduleUpdateCheck('@amplitude/wizard', WIZARD_VERSION),
+    )
+    .catch(() => {});
 
   // Route logger terminal output through the UI singleton.
   setTerminalSink((level: LogLevel, namespace: string, msg: string) => {
@@ -636,12 +353,21 @@ const runDirectSignupIfRequested = async (
       `Detected nested agent invocation via ${nested.envVar}=${nested.envValue}. ` +
       `Inherited outer-agent env vars were sanitized; the setup agent will run normally.`;
     if (mode === 'agent') {
-      new AgentUI().emitNestedAgent({
-        signal: nested.signal,
-        envVar: nested.envVar,
-        instruction: detail,
-        bypassEnv: 'AMPLITUDE_WIZARD_ALLOW_NESTED',
-      });
+      // Lazy-load AgentUI: in non-agent modes the entire NDJSON-emit module
+      // (and its zod / readline / dashboard-url deps) is dead code — keeping
+      // the import at module scope was paying ~80–150ms of cold-start tax for
+      // every TUI/CI launch. Fire-and-forget: emitNestedAgent is a single
+      // safePipeWrite to stdout, callers don't observe completion.
+      void import('./src/ui/agent-ui.js')
+        .then((mod: { AgentUI: new () => AgentUIType }) => {
+          new mod.AgentUI().emitNestedAgent({
+            signal: nested.signal,
+            envVar: nested.envVar,
+            instruction: detail,
+            bypassEnv: 'AMPLITUDE_WIZARD_ALLOW_NESTED',
+          });
+        })
+        .catch(() => {});
     } else {
       // Surface a soft breadcrumb for interactive + CI users too, not just
       // --debug. If sanitization ever regresses, this is the only signal a
@@ -684,10 +410,18 @@ void yargs(hideBin(process.argv))
       describe: 'use default options for all prompts',
       type: 'boolean',
     },
+    'auth-onboarding': {
+      describe:
+        'sign-in (default) or create-account — same choice as the first two Intro menu items; use in CI/agent when there is no TUI',
+      choices: ['sign-in', 'create-account'] as const,
+      type: 'string',
+    },
+    // Hidden: AMPLITUDE_WIZARD_SIGNUP=1 still maps via argv for strict env mode.
     signup: {
       default: false,
-      describe: 'create a new Amplitude account during setup',
       type: 'boolean',
+      hidden: true,
+      describe: 'deprecated: use --auth-onboarding create-account',
     },
     'local-mcp': {
       default: false,
@@ -702,6 +436,25 @@ void yargs(hideBin(process.argv))
       describe: 'run non-interactively (for CI pipelines)',
       type: 'boolean',
     },
+    'auto-approve': {
+      default: false,
+      describe:
+        'silently pick the recommended choice on `needs_input` (no writes)',
+      type: 'boolean',
+    },
+    yes: {
+      alias: 'y',
+      default: false,
+      describe:
+        'skip all prompts; allow the inner agent to write files (required for `apply` subcommand)',
+      type: 'boolean',
+    },
+    force: {
+      default: false,
+      describe:
+        'allow destructive writes (overwrite/delete existing files); implies --yes',
+      type: 'boolean',
+    },
     'api-key': {
       // Dev-only escape hatch. In normal flows the wizard fetches the
       // project's API key via OAuth — the user should never have to paste one.
@@ -711,6 +464,17 @@ void yargs(hideBin(process.argv))
       type: 'string',
       hidden: !IS_WIZARD_DEV,
     },
+    // Internal: shadow flag so yargs `.env('AMPLITUDE_WIZARD')` doesn't
+    // reject AMPLITUDE_WIZARD_PROXY_BEARER under `.strict()`. The actual
+    // value is read directly from process.env in resolveCredentials —
+    // we just need to declare the camelCased flag so strict mode allows
+    // the auto-mapped `--proxy-bearer` argv key. Never documented; never
+    // passed via CLI.
+    'proxy-bearer': {
+      describe: 'internal: AMPLITUDE_WIZARD_PROXY_BEARER env-var passthrough',
+      type: 'string',
+      hidden: true,
+    },
     'app-id': {
       // Canonical term across amplitude/amplitude (Python `app_id`) and
       // amplitude/javascript (TS `appId`). Numeric, e.g. 769610. The only
@@ -718,7 +482,6 @@ void yargs(hideBin(process.argv))
       describe:
         'Amplitude app ID (numeric, e.g. 769610) — the only scope flag needed in agent mode',
       type: 'string',
-      alias: 'project-id',
     },
     'app-name': {
       // `--project-name` kept as alias for existing callers; internally we
@@ -728,11 +491,20 @@ void yargs(hideBin(process.argv))
       type: 'string',
       alias: 'project-name',
     },
+    // Canonical name for the Amplitude hierarchy level between Org and
+    // Environment. The Amplitude website uses "Project"; the GraphQL backend
+    // still uses "workspace" internally. Agents should prefer --app-id, which
+    // is globally unique and unambiguous — --project-id remains available for
+    // interactive/legacy callers that only know their project UUID.
+    'project-id': {
+      describe: 'Amplitude project ID (UUID; previously --workspace-id)',
+      type: 'string',
+    },
     // --workspace-id / --org / --env remain parseable (yargs env fallbacks,
-    // interactive legacy, CI scripts). Hidden from public help — agents should
-    // use --app-id, which is globally unique and unambiguous.
+    // interactive legacy, CI scripts). Hidden from public help — superseded
+    // by --project-id (same semantics, new name).
     'workspace-id': {
-      describe: 'Amplitude workspace ID (UUID) — legacy; prefer --app-id',
+      describe: false as unknown as string, // hidden legacy alias of --project-id
       type: 'string',
       hidden: true,
     },
@@ -757,7 +529,8 @@ void yargs(hideBin(process.argv))
       type: 'boolean',
     },
     email: {
-      describe: 'email to use when creating a new account (requires --signup)',
+      describe:
+        'email to use when creating a new account (requires --auth-onboarding create-account)',
       type: 'string',
       coerce: (value: string | undefined) => {
         if (value === undefined) return value;
@@ -769,7 +542,7 @@ void yargs(hideBin(process.argv))
     },
     'full-name': {
       describe:
-        'full name to use when creating a new account (requires --signup)',
+        'full name to use when creating a new account (requires --auth-onboarding create-account)',
       type: 'string',
       coerce: (value: string | undefined) => {
         if (value === undefined) return value;
@@ -779,1564 +552,145 @@ void yargs(hideBin(process.argv))
         return value;
       },
     },
+    'accept-tos': {
+      default: false,
+      describe:
+        'explicitly agree to Amplitude Terms of Service when using --auth-onboarding create-account in --ci or --agent',
+      type: 'boolean',
+    },
+    // Hidden shadows of env-only flags. .env('AMPLITUDE_WIZARD') auto-maps
+    // AMPLITUDE_WIZARD_DEV / _LOG / _TOKEN / _AGENT / _INSTALL_DIR / _CLASSIC
+    // to these option names; declaring them here lets .strict() accept the
+    // env-var injection on every command (not just $0 where they're visible).
+    dev: {
+      hidden: true,
+      describe: 'internal: AMPLITUDE_WIZARD_DEV env-var passthrough',
+      type: 'boolean',
+    },
+    log: {
+      hidden: true,
+      describe: 'internal: AMPLITUDE_WIZARD_LOG env-var passthrough',
+      type: 'string',
+    },
+    token: {
+      hidden: true,
+      describe: 'internal: AMPLITUDE_WIZARD_TOKEN env-var passthrough',
+      type: 'string',
+    },
+    agent: {
+      hidden: true,
+      describe: 'internal: AMPLITUDE_WIZARD_AGENT env-var passthrough',
+      type: 'boolean',
+    },
+    'install-dir': {
+      hidden: true,
+      describe: 'internal: AMPLITUDE_WIZARD_INSTALL_DIR env-var passthrough',
+      type: 'string',
+    },
+    classic: {
+      hidden: true,
+      describe: 'internal: AMPLITUDE_WIZARD_CLASSIC env-var passthrough',
+      type: 'boolean',
+    },
+    // The `apply` subcommand spawns a child wizard process and passes the
+    // validated plan ID via `AMPLITUDE_WIZARD_PLAN_ID`. Without this hidden
+    // shadow, .env('AMPLITUDE_WIZARD') auto-maps that env var to `planId`
+    // on the default $0 command, and .strict() rejects it as unknown —
+    // crashing the apply child immediately after `apply_started`.
+    'plan-id': {
+      hidden: true,
+      describe: 'internal: AMPLITUDE_WIZARD_PLAN_ID env-var passthrough',
+      type: 'string',
+    },
+    // AMPLITUDE_WIZARD_SKIP_BOOTSTRAP=1 disables the per-project storage
+    // bootstrap (migration shim + per-project log routing). Used by the
+    // CLI test harness; `.env('AMPLITUDE_WIZARD')` auto-maps it to
+    // `skipBootstrap` and `.strict()` rejects it without this shadow.
+    'skip-bootstrap': {
+      hidden: true,
+      describe: 'internal: AMPLITUDE_WIZARD_SKIP_BOOTSTRAP env-var passthrough',
+      type: 'boolean',
+    },
+    // Force the env-selection prompt to emit a `needs_input` for
+    // `app_selection` even when there's a single match. The skill
+    // always passes this so the user gets to confirm which app the
+    // wizard is about to write events into — no silent auto-pick.
+    // Honored via `AMPLITUDE_WIZARD_CONFIRM_APP=1` in the spawned
+    // child process so the inner agent's environment-selection path
+    // can read it without reaching back into yargs argv.
+    'confirm-app': {
+      default: false,
+      describe:
+        'Force a needs_input app_selection prompt even when only one app matches',
+      type: 'boolean',
+    },
+    // AMPLITUDE_WIZARD_CONTEXT=<path> hands an orchestrator-context file to
+    // a spawned wizard child. `.env('AMPLITUDE_WIZARD')` auto-maps it to a
+    // `--context` arg, but the actual flag is `--context-file`, so without
+    // this hidden shadow `.strict()` crashes the wizard with
+    // "Unknown argument: context" — silently breaking the documented
+    // env-var fallback path used by orchestrators.
+    context: {
+      hidden: true,
+      describe: 'internal: AMPLITUDE_WIZARD_CONTEXT env-var passthrough',
+      type: 'string',
+    },
+    // The apply child receives the user's resolved decision/feedback through
+    // env vars (AMPLITUDE_WIZARD_EVENT_PLAN_DECISION /
+    // AMPLITUDE_WIZARD_EVENT_PLAN_FEEDBACK). Without these shadows yargs
+    // strict mode rejects them, breaking the entire pre-resolved event-plan
+    // flow.
+    'event-plan-decision': {
+      hidden: true,
+      describe:
+        'internal: AMPLITUDE_WIZARD_EVENT_PLAN_DECISION env-var passthrough',
+      type: 'string',
+    },
+    'event-plan-feedback': {
+      hidden: true,
+      describe:
+        'internal: AMPLITUDE_WIZARD_EVENT_PLAN_FEEDBACK env-var passthrough',
+      type: 'string',
+    },
+    // The benchmark middleware (src/lib/middleware/config.ts) reads these env
+    // vars directly. Without these shadows, `.env('AMPLITUDE_WIZARD')` auto-
+    // maps them to argv keys that `.strict()` then rejects — crashing every
+    // command (including `--help`) with "Unknown argument: benchmarkFile" the
+    // moment a developer has one of them exported in their shell.
+    'benchmark-file': {
+      hidden: true,
+      describe: 'internal: AMPLITUDE_WIZARD_BENCHMARK_FILE env-var passthrough',
+      type: 'string',
+    },
+    'benchmark-config': {
+      hidden: true,
+      describe:
+        'internal: AMPLITUDE_WIZARD_BENCHMARK_CONFIG env-var passthrough',
+      type: 'string',
+    },
+    'log-file': {
+      hidden: true,
+      describe: 'internal: AMPLITUDE_WIZARD_LOG_FILE env-var passthrough',
+      type: 'string',
+    },
   })
-  .command(
-    ['$0'],
-    'Run the Amplitude setup wizard',
-    (yargs) => {
-      return yargs.options({
-        region: {
-          // Required for --signup in non-TUI modes: the backend does
-          // not route across regions, so the client must POST to the
-          // correct provisioning endpoint (us or eu). In the TUI this
-          // is covered by the RegionSelect screen; agent/CI/classic
-          // have no prompt, so this flag is the only way to signal
-          // regional intent on a first-time signup. When provided in
-          // TUI mode, pre-populates the region and skips RegionSelect.
-          // `--zone` is accepted as an alias for consistency with the
-          // `wizard login` subcommand.
-          describe: 'data center region for --signup in non-interactive modes',
-          choices: ['us', 'eu'] as const,
-          type: 'string',
-          alias: 'zone',
-        },
-        'force-install': {
-          default: false,
-          describe: 'install packages even if dependency checks fail',
-          type: 'boolean',
-        },
-        'install-dir': {
-          describe: 'project directory to instrument',
-          type: 'string',
-        },
-        integration: {
-          describe: 'framework to set up (skips auto-detection)',
-          choices: [
-            'nextjs',
-            'vue',
-            'react-router',
-            'django',
-            'flask',
-            'fastapi',
-            'javascript_web',
-            'javascript_node',
-            'python',
-          ],
-          type: 'string',
-        },
-        menu: {
-          default: false,
-          describe: 'show a framework picker instead of auto-detecting',
-          type: 'boolean',
-        },
-        benchmark: {
-          default: false,
-          describe: 'collect performance metrics during the run',
-          type: 'boolean',
-        },
-        agent: {
-          default: false,
-          describe: 'emit structured NDJSON output for automation',
-          type: 'boolean',
-        },
-        yes: {
-          alias: 'y',
-          default: false,
-          describe: 'Skip all prompts and use defaults (same as --ci)',
-          type: 'boolean',
-        },
-        classic: {
-          default: false,
-          describe: 'use the classic prompt-based UI',
-          type: 'boolean',
-        },
-      });
-    },
-    (argv) => {
-      const options = { ...argv };
-
-      // --env is redundant with --app-id (each Amplitude env has its own
-      // app.id, so the numeric app-id already identifies the env). Keep the
-      // flag parseable for legacy scripts, but nudge callers toward --app-id.
-      // Surfaced via stderr for interactive/CI; agent mode re-emits it as a
-      // structured NDJSON log event once AgentUI exists.
-      const envDeprecationWarning = options.env
-        ? '[deprecation] --env is redundant with --app-id — prefer ' +
-          '--app-id <id> (globally unique, identifies the env directly). ' +
-          '--env will be removed in a future release.'
-        : null;
-      const willRunAsAgent =
-        options.agent || process.env.AMPLITUDE_WIZARD_AGENT === '1';
-      if (envDeprecationWarning && !willRunAsAgent) {
-        process.stderr.write(`${envDeprecationWarning}\n`);
-      }
-
-      // CI mode validation and TTY check
-      if (
-        options.agent ||
-        process.env.AMPLITUDE_WIZARD_AGENT === '1' ||
-        (!options.ci &&
-          !options.yes &&
-          !options.classic &&
-          process.env.AMPLITUDE_WIZARD_CLASSIC !== '1' &&
-          isNonInteractiveEnvironment())
-      ) {
-        // Agent mode (explicit --agent or auto-detected non-TTY)
-        if (!options.agent) options.agent = true;
-        void (async () => {
-          const { AgentUI } = await import('./src/ui/agent-ui.js');
-          const agentUI = new AgentUI();
-          setUI(agentUI);
-          if (!options.installDir) options.installDir = process.cwd();
-
-          // Surface the --env deprecation warning as a structured log event
-          // so orchestrators can parse it (raw stderr would mix with NDJSON).
-          if (envDeprecationWarning) {
-            agentUI.log.warn(envDeprecationWarning);
-          }
-
-          const session = await buildSessionFromOptions(options);
-          session.agent = true;
-
-          // Attempt direct signup before falling through to cached-token
-          // resolution. Agent mode has no browser, so a null result continues
-          // to resolveNonInteractiveCredentials, which handles cached tokens
-          // or exits cleanly with AUTH_REQUIRED.
-          await runDirectSignupIfRequested(session, 'cached-token resolution', {
-            canPrompt: false,
-          });
-
-          await resolveNonInteractiveCredentials(
-            session,
-            options,
-            'agent',
-            agentUI,
-          );
-          await lazyRunWizard(
-            options as Parameters<typeof lazyRunWizard>[0],
-            session,
-          );
-        })();
-      } else if (options.ci || options.yes) {
-        // CI mode: no prompts, auto-select first environment
-        setUI(new LoggingUI());
-        if (!options.installDir) options.installDir = process.cwd();
-
-        void (async () => {
-          const session = await buildSessionFromOptions(options, { ci: true });
-
-          // Attempt direct signup before falling through to cached-token
-          // resolution. CI mode has no browser, so a null result continues to
-          // resolveNonInteractiveCredentials, which handles cached tokens or
-          // exits cleanly with AUTH_REQUIRED.
-          await runDirectSignupIfRequested(session, 'cached-token resolution', {
-            canPrompt: false,
-          });
-
-          await resolveNonInteractiveCredentials(session, options, 'ci');
-          await lazyRunWizard(
-            options as Parameters<typeof lazyRunWizard>[0],
-            session,
-          );
-        })();
-      } else if (
-        options.classic ||
-        process.env.AMPLITUDE_WIZARD_CLASSIC === '1'
-      ) {
-        // Classic mode: interactive prompts without the rich TUI
-        void (async () => {
-          const session = await buildSessionFromOptions(options);
-
-          // Attempt direct signup before falling through to OAuth browser
-          // flow. On success, run resolveCredentials so agent-runner's
-          // !session.credentials guard skips the OAuth call. On null/failure,
-          // classic mode proceeds normally — getOrAskForProjectData calls
-          // performAmplitudeAuth, which opens a browser (valid for classic).
-          //
-          // requireOrgId: false — classic has no AuthScreen to recover from
-          // the TUI-only safety check that clears credentials when no org is
-          // selected. Without this, a successful signup would get silently
-          // cleared and the browser would open anyway, defeating the point.
-          await runDirectSignupIfRequested(
-            session,
-            'OAuth',
-            { canPrompt: true },
-            async () => {
-              const { resolveCredentials } = await import(
-                './src/lib/credential-resolution.js'
-              );
-              await resolveCredentials(session, { requireOrgId: false });
-            },
-          );
-
-          await lazyRunWizard(
-            options as Parameters<typeof lazyRunWizard>[0],
-            session,
-          );
-        })();
-      } else {
-        // Interactive TTY: launch the Ink TUI
-        void (async () => {
-          try {
-            const { startTUI } = await import('./src/ui/tui/start-tui.js');
-            const tui = startTUI(WIZARD_VERSION);
-
-            // Build session from CLI args and attach to store
-            const session = await buildSessionFromOptions(options);
-
-            // If --api-key was provided, skip the OAuth/TUI auth flow entirely.
-            if (session.apiKey) {
-              const { DEFAULT_HOST_URL } = await import(
-                './src/lib/constants.js'
-              );
-              session.credentials = {
-                accessToken: session.apiKey,
-                projectApiKey: session.apiKey,
-                host: DEFAULT_HOST_URL,
-                appId: session.appId ?? 0,
-              };
-              session.projectHasData = false;
-            } else {
-              // Pre-populate region + credentials from stored OAuth tokens.
-              const { logToFile } = await import('./src/utils/debug.js');
-
-              // Check for crash-recovery checkpoint
-              const { loadCheckpoint } = await import(
-                './src/lib/session-checkpoint.js'
-              );
-              const checkpoint = loadCheckpoint(session.installDir);
-              if (checkpoint) {
-                Object.assign(session, checkpoint);
-                session.introConcluded = false;
-                session._restoredFromCheckpoint = true;
-                logToFile(
-                  '[bin] restored session from crash-recovery checkpoint',
-                );
-              }
-
-              // Resolve credentials using shared logic (token refresh,
-              // env auto-select, pendingOrgs population)
-              const { resolveCredentials } = await import(
-                './src/lib/credential-resolution.js'
-              );
-              await resolveCredentials(session);
-
-              // Resolve org/workspace display names so /whoami shows them.
-              // Also extracts the numeric analytics project ID for MCP event detection.
-              // Fire-and-forget so it doesn't block startup.
-              // Hydrate org/workspace display names after credential
-              // resolution succeeds. Gate on credentials (not region) because
-              // resolveCredentials no longer cache-writes session.region;
-              // gating on region would silently skip hydration for returning
-              // agent-mode users whose zone comes from storedUser, not an
-              // explicit flag.
-              if (session.credentials && session.selectedOrgId) {
-                const { getStoredUser, getStoredToken } = await import(
-                  './src/utils/ampli-settings.js'
-                );
-                const { fetchAmplitudeUser, extractAppId } = await import(
-                  './src/lib/api.js'
-                );
-                const { resolveZone } = await import(
-                  './src/lib/zone-resolution.js'
-                );
-                const { DEFAULT_AMPLITUDE_ZONE } = await import(
-                  './src/lib/constants.js'
-                );
-                const storedUser = getStoredUser();
-                const realUser =
-                  storedUser && storedUser.id !== 'pending' ? storedUser : null;
-                // Fire-and-forget user refresh during CLI startup: session may
-                // not yet have region set, so fall back to disk tiers.
-                const zone = resolveZone(session, DEFAULT_AMPLITUDE_ZONE, {
-                  readDisk: true,
-                });
-                const storedToken = realUser
-                  ? getStoredToken(realUser.id, realUser.zone)
-                  : getStoredToken(undefined, zone);
-                logToFile(
-                  `[bin] fire-and-forget: storedToken=${
-                    storedToken ? 'found' : 'null'
-                  }`,
-                );
-                if (storedToken) {
-                  fetchAmplitudeUser(storedToken.idToken, zone)
-                    .then((userInfo) => {
-                      let changed = false;
-                      if (userInfo.email && !session.userEmail) {
-                        session.userEmail = userInfo.email;
-                        changed = true;
-                      }
-                      if (userInfo.email) {
-                        analytics.setDistinctId(userInfo.email);
-                        analytics.identifyUser({
-                          email: userInfo.email,
-                          org_id: session.selectedOrgId ?? undefined,
-                          org_name: session.selectedOrgName ?? undefined,
-                          workspace_id:
-                            session.selectedWorkspaceId ?? undefined,
-                          workspace_name:
-                            session.selectedWorkspaceName ?? undefined,
-                          app_id: session.selectedAppId,
-                          env_name: session.selectedEnvName,
-                          region: zone,
-                          integration: session.integration,
-                        });
-                      }
-                      if (session.selectedOrgId) {
-                        // Fall back to the first org if the stored ID is stale
-                        // (e.g. session checkpoint from a different account).
-                        const org =
-                          userInfo.orgs.find(
-                            (o) => o.id === session.selectedOrgId,
-                          ) ?? userInfo.orgs[0];
-                        logToFile(
-                          `[bin] fire-and-forget: orgs=${userInfo.orgs
-                            .map((o) => o.id)
-                            .join(',')}, looking for ${
-                            session.selectedOrgId
-                          }, using=${org?.id ?? 'none'}`,
-                        );
-                        if (org) {
-                          session.selectedOrgName = org.name;
-                          changed = true;
-                          // Fall back to the first workspace if the stored ID is stale.
-                          const ws = session.selectedWorkspaceId
-                            ? org.workspaces.find(
-                                (w) => w.id === session.selectedWorkspaceId,
-                              ) ?? org.workspaces[0]
-                            : org.workspaces[0];
-                          if (ws) {
-                            session.selectedWorkspaceName = ws.name;
-                            // Extract the Amplitude app ID from the lowest-rank environment.
-                            const appId = extractAppId(ws);
-                            logToFile(
-                              `[bin] app ID resolution: environments=${
-                                ws.environments?.length ?? 'null'
-                              }, appId=${appId}`,
-                            );
-                            if (appId) session.selectedAppId = appId;
-                          } else {
-                            logToFile(
-                              `[bin] app ID resolution: no workspaces in org ${org.id}`,
-                            );
-                          }
-                        }
-                      }
-                      if (changed && tui.store.session === session) {
-                        tui.store.emitChange();
-                      }
-                    })
-                    .catch((err: unknown) => {
-                      logToFile(
-                        `[bin] fire-and-forget fetchAmplitudeUser failed: ${
-                          err instanceof Error ? err.message : String(err)
-                        }`,
-                      );
-                    });
-                }
-              }
-            }
-
-            tui.store.session = session;
-
-            // Load event plan from a previous run (if it exists) so the
-            // Events tab is available immediately on returning runs.
-            // Dynamic-import keeps the Claude Agent SDK out of bin.ts load.
-            try {
-              const fs = await import('fs');
-              const { parseEventPlanContent } = await import(
-                './src/lib/agent-interface.js'
-              );
-              const evtPath = resolve(
-                session.installDir,
-                '.amplitude-events.json',
-              );
-              const events = parseEventPlanContent(
-                fs.readFileSync(evtPath, 'utf-8'),
-              );
-              if (events && events.length > 0) {
-                tui.store.setEventPlan(
-                  events.filter((e) => e.name.trim().length > 0),
-                );
-              }
-            } catch {
-              // No event plan file yet — that's fine
-            }
-
-            // Initialize Amplitude Experiment feature flags (non-blocking).
-            const { initFeatureFlags } = await import(
-              './src/lib/feature-flags.js'
-            );
-            await initFeatureFlags().catch(() => {
-              // Flag init failure is non-fatal — all flags default to off
-            });
-
-            // Apply SDK-level opt-out based on feature flags
-            analytics.applyOptOut();
-
-            const { FRAMEWORK_REGISTRY } = await import(
-              './src/lib/registry.js'
-            );
-            const { detectAllFrameworks } = await import('./src/run.js');
-            const installDir = session.installDir ?? process.cwd();
-
-            // Verbose startup diagnostics — always written to the log file;
-            // visible in the RunScreen "Logs" tab.
-            if (session.verbose || session.debug) {
-              const { enableDebugLogs, logToFile } = await import(
-                './src/utils/debug.js'
-              );
-              enableDebugLogs();
-              logToFile('[verbose] Amplitude Wizard starting');
-              logToFile(`[verbose] node          : ${process.version}`);
-              logToFile(`[verbose] process.cwd() : ${process.cwd()}`);
-              logToFile(`[verbose] installDir    : ${installDir}`);
-              logToFile(`[verbose] platform      : ${process.platform}`);
-              logToFile(`[verbose] argv          : ${process.argv.join(' ')}`);
-            }
-
-            const { DETECTION_TIMEOUT_MS } = await import(
-              './src/lib/constants.js'
-            );
-
-            // ── OAuth + account setup ──────────────────────────────
-            // Runs concurrently with framework detection while AuthScreen shows.
-            // When OAuth completes, store.setOAuthComplete() triggers the
-            // AuthScreen SUSI pickers (org → workspace → API key).
-            // AuthScreen calls store.setCredentials() when done, advancing the
-            // router past Auth → RegionSelect → DataSetup → to IntroScreen.
-            const authTask = (async () => {
-              // Skip the full OAuth + SUSI flow when credentials were pre-populated
-              // from ~/.ampli.json + the saved API key (returning user).
-              if (tui.store.session.credentials !== null) return;
-
-              try {
-                const { ampliConfigExists } = await import(
-                  './src/lib/ampli-config.js'
-                );
-                const { performAmplitudeAuth } = await import(
-                  './src/utils/oauth.js'
-                );
-                const { fetchAmplitudeUser } = await import('./src/lib/api.js');
-                const { DEFAULT_AMPLITUDE_ZONE } = await import(
-                  './src/lib/constants.js'
-                );
-                const { storeToken } = await import(
-                  './src/utils/ampli-settings.js'
-                );
-
-                const forceFresh = !ampliConfigExists(installDir);
-
-                // Wait for the user to dismiss the welcome screen AND pick a
-                // region before opening the OAuth URL. This ensures the logo
-                // and intro are visible before the browser opens.
-                await new Promise<void>((resolve) => {
-                  if (
-                    tui.store.session.introConcluded &&
-                    tui.store.session.region !== null
-                  ) {
-                    resolve();
-                    return;
-                  }
-                  const unsub = tui.store.subscribe(() => {
-                    if (
-                      tui.store.session.introConcluded &&
-                      tui.store.session.region !== null
-                    ) {
-                      unsub();
-                      resolve();
-                    }
-                  });
-                });
-                const { resolveZone } = await import(
-                  './src/lib/zone-resolution.js'
-                );
-                const zone = resolveZone(
-                  tui.store.session,
-                  DEFAULT_AMPLITUDE_ZONE,
-                  { readDisk: false },
-                );
-
-                // Try direct signup first when --signup + email + fullName are provided
-                // and the feature flag is enabled. performSignupOrAuth returns null when
-                // any of those gates are missing, or when the server returns a non-success
-                // response — in which case we fall through to the existing OAuth flow
-                // (TUI has a browser; this fallback is valid).
-                //
-                // On signup success, the wrapper already fetched the real user
-                // profile (with provisioning retry) and persisted tokens to
-                // ~/.ampli.json — so we carry its userInfo through and skip the
-                // redundant fetch + storeToken below.
-                let auth: Awaited<
-                  ReturnType<typeof performAmplitudeAuth>
-                > | null = null;
-                let signupUserInfo: Awaited<
-                  ReturnType<typeof fetchAmplitudeUser>
-                > | null = null;
-                // True iff direct signup produced fresh tokens in this run.
-                // Used by the downstream fetchAmplitudeUser catch to
-                // distinguish a provisioning-lag recovery (signup succeeded,
-                // but user data not yet available) from the normal
-                // expired-token case.
-                let signupTokensObtained = false;
-                const { trackSignupAttempt } = await import(
-                  './src/utils/signup-or-auth.js'
-                );
-                const s = tui.store.session;
-                if (s.signup && s.signupEmail && s.signupFullName) {
-                  const { performSignupOrAuth } = await import(
-                    './src/utils/signup-or-auth.js'
-                  );
-                  try {
-                    const signupResult = await performSignupOrAuth({
-                      email: s.signupEmail,
-                      fullName: s.signupFullName,
-                      zone,
-                    });
-                    if (signupResult !== null) {
-                      auth = signupResult;
-                      signupUserInfo = signupResult.userInfo;
-                      signupTokensObtained = true;
-                      getUI().log.info(
-                        'Direct signup succeeded; using newly created account.',
-                      );
-                    }
-                  } catch (err) {
-                    trackSignupAttempt({ status: 'wrapper_exception', zone });
-                    getUI().log.warn(
-                      `Direct signup errored: ${
-                        err instanceof Error ? err.message : String(err)
-                      }. Falling back to OAuth.`,
-                    );
-                    auth = null;
-                  }
-                }
-
-                if (auth === null) {
-                  auth = await performAmplitudeAuth({ zone, forceFresh });
-                }
-
-                // Update login URL (clears the "copy this URL" hint)
-                tui.store.setLoginUrl(null);
-
-                // Zone was already selected by the user before OAuth started.
-                const cloudRegion = zone;
-
-                let userInfo;
-                if (signupUserInfo) {
-                  // Wrapper already fetched userInfo and stored tokens — no
-                  // redundant network call, no browser fallback needed.
-                  userInfo = signupUserInfo;
-                } else {
-                  try {
-                    userInfo = await fetchAmplitudeUser(
-                      auth.idToken,
-                      cloudRegion,
-                    );
-                  } catch {
-                    if (signupTokensObtained) {
-                      // Signup succeeded moments ago so the tokens can't be
-                      // expired — the fetch failure is almost certainly
-                      // backend provisioning lag for a brand-new account.
-                      // Surface the transition so the user isn't confused
-                      // when a browser opens after "signup succeeded", and
-                      // emit telemetry so we can measure how often the rare
-                      // edge case actually hits production.
-                      getUI().log.info(
-                        'Account created, but user data is still being provisioned. ' +
-                          'Opening browser to complete sign-in…',
-                      );
-                      trackSignupAttempt({
-                        status: 'browser_fallback_after_signup',
-                        zone,
-                      });
-                    }
-                    // Token may be expired — re-open the browser for a fresh login
-                    tui.store.setLoginUrl(null);
-                    auth = await performAmplitudeAuth({
-                      zone,
-                      forceFresh: true,
-                    });
-                    userInfo = await fetchAmplitudeUser(
-                      auth.idToken,
-                      cloudRegion,
-                    );
-                  }
-                  // Persist to ~/.ampli.json (signup path already did this)
-                  storeToken(
-                    {
-                      id: userInfo.id,
-                      firstName: userInfo.firstName,
-                      lastName: userInfo.lastName,
-                      email: userInfo.email,
-                      zone: auth.zone,
-                    },
-                    {
-                      accessToken: auth.accessToken,
-                      idToken: auth.idToken,
-                      refreshToken: auth.refreshToken,
-                      expiresAt: new Date(
-                        Date.now() + 3600 * 1000,
-                      ).toISOString(),
-                    },
-                  );
-                }
-
-                // Populate user email for /whoami display
-                session.userEmail = userInfo.email;
-                analytics.setDistinctId(userInfo.email);
-                analytics.identifyUser({ email: userInfo.email });
-
-                // Signal AuthScreen — triggers org/workspace/API key pickers
-                tui.store.setOAuthComplete({
-                  accessToken: auth.accessToken,
-                  idToken: auth.idToken,
-                  cloudRegion,
-                  orgs: userInfo.orgs,
-                });
-              } catch (err) {
-                // Auth failure is non-fatal here — agent-runner will retry/handle it
-                if (process.env.DEBUG || process.env.AMPLITUDE_WIZARD_DEBUG) {
-                  console.error('OAuth setup error:', err);
-                }
-              }
-            })();
-
-            // ── Framework detection ────────────────────────────────
-            // Runs concurrently with auth while AuthScreen shows.
-            // Each detector has its own per-framework timeout internally,
-            // so no outer timeout is needed.
-            const detectionTask = (async () => {
-              const results = await detectAllFrameworks(installDir);
-
-              // Store full results on session for diagnostics
-              session.detectionResults = results;
-
-              const detectedIntegration = results.find(
-                (r) => r.detected,
-              )?.integration;
-
-              if (detectedIntegration) {
-                const config = FRAMEWORK_REGISTRY[detectedIntegration];
-
-                // Run gatherContext for the friendly variant label
-                if (config.metadata.gatherContext) {
-                  try {
-                    const context = await Promise.race([
-                      config.metadata.gatherContext({
-                        installDir,
-                        debug: session.debug,
-                        forceInstall: session.forceInstall,
-                        default: false,
-                        signup: session.signup,
-                        localMcp: session.localMcp,
-                        ci: session.ci,
-                        menu: session.menu,
-                        benchmark: session.benchmark,
-                      }),
-                      new Promise<Record<string, never>>((resolve) =>
-                        setTimeout(() => resolve({}), DETECTION_TIMEOUT_MS),
-                      ),
-                    ]);
-                    for (const [key, value] of Object.entries(context)) {
-                      if (!(key in session.frameworkContext)) {
-                        tui.store.setFrameworkContext(key, value);
-                      }
-                    }
-                  } catch {
-                    // Detection failed — will show generic name
-                  }
-                }
-
-                tui.store.setFrameworkConfig(detectedIntegration, config);
-
-                if (!session.detectedFrameworkLabel) {
-                  tui.store.setDetectedFramework(config.metadata.name);
-                }
-              }
-
-              // Feature discovery — deterministic scan of package.json deps
-              try {
-                const { readFileSync } = await import('fs');
-                const pkgPath = join(installDir, 'package.json');
-                const pkg = JSON.parse(readFileSync(pkgPath, 'utf-8')) as {
-                  dependencies?: Record<string, string>;
-                  devDependencies?: Record<string, string>;
-                };
-                const allDeps = {
-                  ...pkg.dependencies,
-                  ...pkg.devDependencies,
-                };
-                const depNames = Object.keys(allDeps);
-
-                const { DiscoveredFeature } = await import(
-                  './src/lib/wizard-session.js'
-                );
-
-                if (
-                  depNames.some((d) =>
-                    ['stripe', '@stripe/stripe-js'].includes(d),
-                  )
-                ) {
-                  tui.store.addDiscoveredFeature(DiscoveredFeature.Stripe);
-                }
-
-                // LLM SDK detection — sourced from Amplitude LLM analytics skill
-                // Gated by the wizard-llm-analytics feature flag.
-                const { isFlagEnabled } = await import(
-                  './src/lib/feature-flags.js'
-                );
-                const { FLAG_LLM_ANALYTICS } = await import(
-                  './src/lib/feature-flags.js'
-                );
-                if (isFlagEnabled(FLAG_LLM_ANALYTICS)) {
-                  const LLM_PACKAGES = [
-                    'openai',
-                    '@anthropic-ai/sdk',
-                    'ai',
-                    '@ai-sdk/openai',
-                    'langchain',
-                    '@langchain/openai',
-                    '@langchain/langgraph',
-                    '@google/generative-ai',
-                    '@google/genai',
-                    '@instructor-ai/instructor',
-                    '@mastra/core',
-                    'portkey-ai',
-                  ];
-                  if (depNames.some((d) => LLM_PACKAGES.includes(d))) {
-                    tui.store.addDiscoveredFeature(DiscoveredFeature.LLM);
-                  }
-                }
-              } catch {
-                // No package.json or parse error — skip feature discovery
-              }
-
-              // Signal detection is done — IntroScreen shows picker or results
-              tui.store.setDetectionComplete();
-            })();
-
-            // Gate runWizard on the user reaching RunScreen — at that point
-            // auth, data check, and any setup questions are all complete.
-            const { Screen } = await import('./src/ui/tui/router.js');
-            tui.store.onEnterScreen(Screen.Run, () =>
-              tui.store.completeSetup(),
-            );
-
-            // Session checkpointing — save at key transitions so crash
-            // recovery can skip already-completed steps.
-            const { saveCheckpoint, clearCheckpoint } = await import(
-              './src/lib/session-checkpoint.js'
-            );
-            // After auth completes (most expensive step to repeat)
-            tui.store.onEnterScreen(Screen.DataSetup, () => {
-              saveCheckpoint(tui.store.session);
-            });
-            // Before agent starts (captures all setup state)
-            tui.store.onEnterScreen(Screen.Run, () => {
-              saveCheckpoint(tui.store.session);
-            });
-            // Clear checkpoint only on successful completion — error/cancel
-            // should preserve the checkpoint so users can resume next run.
-            tui.store.onEnterScreen(Screen.Outro, () => {
-              if (tui.store.session.outroData?.kind === 'success') {
-                clearCheckpoint(tui.store.session.installDir);
-              }
-            });
-
-            // Save checkpoint on unexpected termination (Ctrl+C).
-            // First Ctrl+C saves checkpoint and exits promptly.
-            // Second Ctrl+C within the grace window force-kills immediately.
-            let sigintReceived = false;
-            process.on('SIGINT', () => {
-              if (sigintReceived) {
-                // Second Ctrl+C — force-kill without waiting
-                process.exit(130);
-              }
-              sigintReceived = true;
-
-              // Force-kill after 1 second if checkpoint save hangs
-              const forceTimer = setTimeout(() => process.exit(130), 1_000);
-              // Unref so it doesn't keep the event loop alive
-              if (forceTimer.unref) forceTimer.unref();
-
-              try {
-                saveCheckpoint(tui.store.session);
-              } catch {
-                // Best-effort — don't block exit
-              }
-
-              // Best-effort flush — the 1s force-kill timer bounds the wait
-              void analytics.flush().finally(() => process.exit(130));
-            });
-
-            // Wait for auth and framework detection to finish concurrently.
-            await Promise.all([authTask, detectionTask]);
-
-            if (session.verbose || session.debug) {
-              const { logToFile } = await import('./src/utils/debug.js');
-              logToFile(
-                `[verbose] detection    : ${
-                  tui.store.session.integration ?? 'none'
-                }`,
-              );
-              logToFile(
-                `[verbose] framework    : ${
-                  tui.store.session.detectedFrameworkLabel ?? 'unknown'
-                }`,
-              );
-              logToFile(
-                `[verbose] region       : ${
-                  tui.store.session.region ?? 'not set'
-                }`,
-              );
-            }
-
-            // Blocks until onEnterScreen(Screen.Run) fires completeSetup().
-            await tui.waitForSetup();
-
-            // Before calling the AI agent, do a quick static check to see if
-            // Amplitude is already installed in the project. If so, skip the
-            // agent entirely and advance directly to MCP setup.
-            const { detectAmplitudeInProject } = await import(
-              './src/lib/detect-amplitude.js'
-            );
-            const localDetection = detectAmplitudeInProject(installDir);
-
-            if (localDetection.confidence !== 'none') {
-              const { logToFile: log } = await import('./src/utils/debug.js');
-              log(
-                `[bin] Amplitude already detected (${
-                  localDetection.reason ?? 'unknown'
-                }) — prompting on MCP screen (continue vs run wizard)`,
-              );
-              const { RunPhase, OutroKind } = await import(
-                './src/lib/wizard-session.js'
-              );
-              tui.store.setAmplitudePreDetected();
-              tui.store.setRunPhase(RunPhase.Completed);
-              const runWizardAnyway =
-                await tui.store.waitForPreDetectedChoice();
-              if (runWizardAnyway) {
-                log(
-                  '[bin] user chose to run setup wizard despite pre-detection',
-                );
-                tui.store.resetForAgentAfterPreDetected();
-                await lazyRunWizard(
-                  options as Parameters<typeof lazyRunWizard>[0],
-                  tui.store.session,
-                );
-              } else {
-                tui.store.setOutroData({ kind: OutroKind.Success });
-              }
-            } else {
-              await lazyRunWizard(
-                options as Parameters<typeof lazyRunWizard>[0],
-                tui.store.session,
-              );
-            }
-
-            // Keep the outro screen visible — let process.exit() handle cleanup
-          } catch (err) {
-            // TUI unavailable (e.g., in test environment) — continue with default UI
-            if (process.env.DEBUG || process.env.AMPLITUDE_WIZARD_DEBUG) {
-              console.error('TUI init failed:', err);
-            }
-            await lazyRunWizard(options as Parameters<typeof lazyRunWizard>[0]);
-          }
-        })();
-      }
-    },
-  )
-  .command(
-    'login',
-    'Log in to your Amplitude account',
-    (yargs) => {
-      return yargs.options({
-        region: {
-          describe: 'data center region (us or eu)',
-          choices: ['us', 'eu'] as const,
-          default: 'us' as const,
-          type: 'string',
-          // `--zone` is the pre-existing name; kept as an alias so any
-          // scripts using `wizard login --zone` continue to work.
-          alias: 'zone',
-        },
-      });
-    },
-    (argv) => {
-      void (async () => {
-        setUI(new LoggingUI());
-        const { performAmplitudeAuth } = await import('./src/utils/oauth.js');
-        const { fetchAmplitudeUser } = await import('./src/lib/api.js');
-        const { storeToken } = await import('./src/utils/ampli-settings.js');
-        // `--region` is canonical; `argv.zone` is the yargs alias mirror.
-        const zone = argv.region as 'us' | 'eu';
-
-        try {
-          const { getStoredUser, getStoredToken } = await import(
-            './src/utils/ampli-settings.js'
-          );
-          // If a valid cached session exists, display the stored user without
-          // re-fetching from the API (the cached idToken may be expired).
-          const cachedToken = getStoredToken(undefined, zone);
-          const cachedUser = cachedToken ? getStoredUser() : undefined;
-          if (cachedUser && cachedUser.id !== 'pending') {
-            console.log(
-              chalk.green(
-                `✔ Already logged in as ${cachedUser.firstName} ${cachedUser.lastName} <${cachedUser.email}>`,
-              ),
-            );
-            if (cachedUser.zone !== 'us') {
-              console.log(chalk.dim(`  Zone: ${cachedUser.zone}`));
-            }
-            process.exit(0);
-          }
-
-          const auth = await performAmplitudeAuth({ zone });
-          const user = await fetchAmplitudeUser(auth.idToken, auth.zone);
-          storeToken(
-            {
-              id: user.id,
-              firstName: user.firstName,
-              lastName: user.lastName,
-              email: user.email,
-              zone: auth.zone,
-            },
-            {
-              accessToken: auth.accessToken,
-              idToken: auth.idToken,
-              refreshToken: auth.refreshToken,
-              expiresAt: new Date(Date.now() + 3600 * 1000).toISOString(),
-            },
-          );
-          console.log(
-            chalk.green(
-              `✔ Logged in as ${user.firstName} ${user.lastName} <${user.email}>`,
-            ),
-          );
-          if (user.orgs.length > 0) {
-            console.log(
-              chalk.dim(`  Org: ${user.orgs.map((o) => o.name).join(', ')}`),
-            );
-          }
-          process.exit(0);
-        } catch (e) {
-          console.error(
-            chalk.red(
-              `Login failed: ${e instanceof Error ? e.message : String(e)}`,
-            ),
-          );
-          process.exit(1);
-        }
-      })();
-    },
-  )
-  .command(
-    'logout',
-    'Log out of your Amplitude account',
-
-    () => {},
-    (argv) => {
-      void (async () => {
-        const { getStoredUser, clearStoredCredentials } = await import(
-          './src/utils/ampli-settings.js'
-        );
-        const { clearApiKey } = await import('./src/utils/api-key-store.js');
-        const { clearCheckpoint } = await import(
-          './src/lib/session-checkpoint.js'
-        );
-        const installDir =
-          (argv.installDir as string | undefined) ?? process.cwd();
-        const user = getStoredUser();
-        try {
-          clearStoredCredentials();
-          clearApiKey(installDir);
-          clearCheckpoint(installDir);
-          if (user) {
-            console.log(chalk.green(`✔ Logged out ${user.email}`));
-          } else {
-            console.log(chalk.dim('No active session found.'));
-          }
-        } catch {
-          console.log(chalk.dim('No active session found.'));
-        }
-        process.exit(0);
-      })();
-    },
-  )
-  .command(
-    'whoami',
-    'Show the currently logged-in user',
-
-    () => {},
-    (_argv) => {
-      void (async () => {
-        const { getStoredUser, getStoredToken } = await import(
-          './src/utils/ampli-settings.js'
-        );
-        const user = getStoredUser();
-        const token = getStoredToken();
-        if (user && token && user.id !== 'pending') {
-          console.log(
-            `Logged in as ${chalk.bold(
-              user.firstName + ' ' + user.lastName,
-            )} <${user.email}>`,
-          );
-          if (user.zone !== 'us') console.log(chalk.dim(`Zone: ${user.zone}`));
-        } else {
-          console.log(
-            chalk.yellow(
-              `Not logged in. Run \`${CLI_INVOCATION} login\` to authenticate.`,
-            ),
-          );
-        }
-        process.exit(0);
-      })();
-    },
-  )
-  .command(
-    'feedback',
-    'Send product feedback to the Amplitude team',
-    (yargs) => {
-      return yargs.options({
-        message: {
-          alias: 'm',
-          describe: 'Feedback message',
-          type: 'string',
-        },
-      });
-    },
-    (argv) => {
-      void (async () => {
-        setUI(new LoggingUI());
-        const fromFlag =
-          typeof argv.message === 'string' ? argv.message.trim() : '';
-        const argvRest = (argv._ as string[]).slice(1).join(' ').trim();
-        const message = (fromFlag || argvRest).trim();
-        if (!message) {
-          getUI().log.error(
-            `Usage: ${CLI_INVOCATION} feedback <message>  or  feedback --message <message>`,
-          );
-          process.exit(1);
-          return;
-        }
-        try {
-          const { trackWizardFeedback } = await import(
-            './src/utils/track-wizard-feedback.js'
-          );
-          await trackWizardFeedback(message);
-          console.log(chalk.green('✔ Thanks — your feedback was sent.'));
-          process.exit(0);
-        } catch (e) {
-          console.error(
-            chalk.red(
-              `Feedback failed: ${e instanceof Error ? e.message : String(e)}`,
-            ),
-          );
-          process.exit(1);
-        }
-      })();
-    },
-  )
-  .command(
-    'slack',
-    'Connect Amplitude to Slack',
-    (y) => y,
-    (_argv) => {
-      void (async () => {
-        // Dynamic imports may land named exports on `.default` under tsx
-        // CJS/ESM interop. This helper normalises that.
-        const cjs = <T>(mod: T & { default?: T }): T =>
-          (mod.default ?? mod) as T;
-
-        try {
-          const { getStoredUser, getStoredToken } = cjs(
-            await import('./src/utils/ampli-settings.js'),
-          );
-          const { readAmpliConfig } = cjs(
-            await import('./src/lib/ampli-config.js'),
-          );
-          const { fetchSlackInstallUrl, fetchSlackConnectionStatus } = cjs(
-            await import('./src/lib/api.js'),
-          );
-          const { OUTBOUND_URLS } = cjs(await import('./src/lib/constants.js'));
-          const opn = (await import('opn')).default;
-
-          const storedUser = getStoredUser();
-          const zone = storedUser?.zone ?? 'us';
-          const storedToken = getStoredToken(storedUser?.id, zone);
-          // The App API validates access_tokens, not id_tokens.
-          const accessToken = storedToken?.accessToken;
-
-          // Read orgId from project-level ampli.json
-          const ampliConfig = readAmpliConfig(process.cwd());
-          const orgId = ampliConfig.ok ? ampliConfig.config.OrgId : undefined;
-
-          if (!accessToken || !orgId) {
-            setUI(new LoggingUI());
-            getUI().log.info(
-              'No Amplitude session found. Run `npx @amplitude/wizard` first to log in and set up your project.',
-            );
-            process.exit(1);
-          }
-
-          // Check if Slack is already connected before prompting install.
-          const isConnected = await fetchSlackConnectionStatus(
-            accessToken,
-            zone,
-            orgId,
-          );
-          if (isConnected) {
-            setUI(new LoggingUI());
-            getUI().log.info(
-              'Slack is already connected to your Amplitude workspace.',
-            );
-            process.exit(0);
-          }
-
-          const settingsUrl = OUTBOUND_URLS.slackSettings(zone, orgId);
-          let url = settingsUrl;
-
-          // Try to get the direct Slack OAuth URL from the App API.
-          const directUrl = await fetchSlackInstallUrl(
-            accessToken,
-            zone,
-            orgId,
-            settingsUrl,
-          );
-          if (directUrl) url = directUrl;
-
-          setUI(new LoggingUI());
-          getUI().log.info(`Opening Slack integration: ${url}`);
-          await opn(url, { wait: false });
-        } catch {
-          setUI(new LoggingUI());
-          const { getCloudUrlFromRegion } = cjs(
-            await import('./src/utils/urls.js'),
-          );
-          const opn = (await import('opn')).default;
-          const url = `${getCloudUrlFromRegion(
-            'us',
-          )}/analytics/settings/profile`;
-          getUI().log.info(
-            `Opening Amplitude Settings to connect Slack: ${url}`,
-          );
-          await opn(url, { wait: false });
-        }
-      })();
-    },
-  )
-  .command(
-    'region',
-    'Switch your data center region (US or EU)',
-    (y) => y,
-    (argv) => {
-      void (async () => {
-        try {
-          const { startTUI } = await import('./src/ui/tui/start-tui.js');
-          const { buildSession } = await import('./src/lib/wizard-session.js');
-          const { Flow } = await import('./src/ui/tui/router.js');
-          const { getStoredUser, getStoredToken, updateStoredUserZone } =
-            await import('./src/utils/ampli-settings.js');
-          const { getHostFromRegion } = await import('./src/utils/urls.js');
-
-          const session = buildSession({
-            debug:
-              typeof argv['debug'] === 'boolean' ? argv['debug'] : undefined,
-          });
-
-          // Show the "Switch data-center region" variant of RegionSelectScreen.
-          session.regionForced = true;
-
-          // Pre-populate credentials from ~/.ampli.json so the screen has context.
-          const storedUser = getStoredUser();
-          const zone = storedUser?.zone ?? 'us';
-          const storedToken = getStoredToken(storedUser?.id, zone);
-          if (storedToken) {
-            session.credentials = {
-              accessToken: storedToken.accessToken,
-              idToken: storedToken.idToken,
-              projectApiKey: '',
-              host: getHostFromRegion(zone),
-              appId: 0,
-            };
-          }
-
-          const tui = startTUI(WIZARD_VERSION, Flow.RegionSelect, session);
-
-          // Wait for the user to pick a region, then persist and exit.
-          const pickedRegion = await new Promise<string>((resolve) => {
-            const unsub = tui.store.subscribe(() => {
-              const s = tui.store.session;
-              if (s.region !== null && !s.regionForced) {
-                unsub();
-                resolve(s.region);
-              }
-            });
-          });
-
-          const updated = updateStoredUserZone(pickedRegion as 'us' | 'eu');
-          if (updated) {
-            console.log(
-              chalk.green(
-                `\n✔ Region updated to ${pickedRegion.toUpperCase()}`,
-              ),
-            );
-          } else {
-            console.log(
-              chalk.dim(
-                `\nRegion set to ${pickedRegion.toUpperCase()}. Run \`${CLI_INVOCATION} login\` to authenticate.`,
-              ),
-            );
-          }
-          process.exit(0);
-        } catch {
-          setUI(new LoggingUI());
-          getUI().log.error(
-            `Could not start region picker. Use --region with \`${CLI_INVOCATION} login\` to set your region.`,
-          );
-          process.exit(1);
-        }
-      })();
-    },
-  )
-  .command(
-    'detect',
-    'Detect the framework in the current project (outputs JSON)',
-    (yargs) => {
-      return yargs.options({
-        'install-dir': {
-          describe: 'project directory to inspect',
-          type: 'string',
-        },
-      });
-    },
-    (argv) => {
-      void (async () => {
-        const installDir = argv['install-dir'] ?? process.cwd();
-        const { resolveMode } = await import('./src/lib/mode-config.js');
-        const { jsonOutput } = resolveMode({
-          json: argv.json as boolean | undefined,
-          human: argv.human as boolean | undefined,
-          isTTY: Boolean(process.stdout.isTTY),
-        });
-        try {
-          const { runDetect } = await import('./src/lib/agent-ops.js');
-          const result = await runDetect(installDir);
-
-          if (jsonOutput) {
-            process.stdout.write(JSON.stringify(result) + '\n');
-          } else if (result.integration) {
-            console.log(
-              `${chalk.green('✔')} Detected ${chalk.bold(
-                result.frameworkName ?? result.integration,
-              )} (${result.integration})`,
-            );
-          } else {
-            console.log(
-              chalk.dim(
-                `No framework detected. Run \`${CLI_INVOCATION} --menu\` to pick one manually.`,
-              ),
-            );
-          }
-          process.exit(result.integration ? 0 : 1);
-        } catch (e) {
-          const message = e instanceof Error ? e.message : String(e);
-          if (jsonOutput) {
-            process.stdout.write(JSON.stringify({ error: message }) + '\n');
-          } else {
-            console.error(chalk.red(`Detection failed: ${message}`));
-          }
-          process.exit(ExitCode.GENERAL_ERROR);
-        }
-      })();
-    },
-  )
-  .command(
-    'status',
-    'Show project setup state: framework, SDK, API key, auth (JSON-friendly)',
-    (yargs) => {
-      return yargs.options({
-        'install-dir': {
-          describe: 'project directory to inspect',
-          type: 'string',
-        },
-      });
-    },
-    (argv) => {
-      void (async () => {
-        const installDir = argv['install-dir'] ?? process.cwd();
-        const { resolveMode } = await import('./src/lib/mode-config.js');
-        const { jsonOutput } = resolveMode({
-          json: argv.json as boolean | undefined,
-          human: argv.human as boolean | undefined,
-          isTTY: Boolean(process.stdout.isTTY),
-        });
-        try {
-          const { runStatus } = await import('./src/lib/agent-ops.js');
-          const result = await runStatus(installDir);
-
-          if (jsonOutput) {
-            process.stdout.write(JSON.stringify(result) + '\n');
-          } else {
-            const check = (v: boolean) =>
-              v ? chalk.green('✔') : chalk.dim('·');
-            console.log(
-              `${check(result.framework.integration !== null)} Framework: ${
-                result.framework.name ?? chalk.dim('none detected')
-              }`,
-            );
-            console.log(
-              `${check(
-                result.amplitudeInstalled.confidence !== 'none',
-              )} Amplitude SDK: ${
-                result.amplitudeInstalled.reason ?? chalk.dim('not installed')
-              }`,
-            );
-            console.log(
-              `${check(result.apiKey.configured)} API key: ${
-                result.apiKey.configured
-                  ? `stored in ${result.apiKey.source}`
-                  : chalk.dim('not set')
-              }`,
-            );
-            console.log(
-              `${check(result.auth.loggedIn)} Logged in: ${
-                result.auth.loggedIn
-                  ? `${result.auth.email} (${result.auth.zone})`
-                  : chalk.dim(`run \`${CLI_INVOCATION} login\``)
-              }`,
-            );
-          }
-          process.exit(0);
-        } catch (e) {
-          const message = e instanceof Error ? e.message : String(e);
-          if (jsonOutput) {
-            process.stdout.write(JSON.stringify({ error: message }) + '\n');
-          } else {
-            console.error(chalk.red(`Status failed: ${message}`));
-          }
-          process.exit(ExitCode.GENERAL_ERROR);
-        }
-      })();
-    },
-  )
-  .command('auth <command>', 'Manage authentication', (yargs) => {
-    return yargs
-      .command(
-        'status',
-        'Show current login state (JSON-friendly)',
-        () => {},
-        (argv) => {
-          void (async () => {
-            const { getAuthStatus } = await import('./src/lib/agent-ops.js');
-            const { resolveMode } = await import('./src/lib/mode-config.js');
-            const { jsonOutput } = resolveMode({
-              json: argv.json as boolean | undefined,
-              human: argv.human as boolean | undefined,
-              isTTY: Boolean(process.stdout.isTTY),
-            });
-            const result = getAuthStatus();
-
-            if (jsonOutput) {
-              process.stdout.write(JSON.stringify(result) + '\n');
-            } else if (result.loggedIn && result.user) {
-              console.log(
-                `${chalk.green('✔')} Logged in as ${chalk.bold(
-                  `${result.user.firstName} ${result.user.lastName}`,
-                )} <${result.user.email}>`,
-              );
-              console.log(chalk.dim(`  Zone: ${result.user.zone}`));
-              if (result.tokenExpiresAt) {
-                console.log(
-                  chalk.dim(`  Token expires: ${result.tokenExpiresAt}`),
-                );
-              }
-            } else {
-              console.log(
-                chalk.yellow(
-                  `Not logged in. Run \`${CLI_INVOCATION} login\` to authenticate.`,
-                ),
-              );
-            }
-            process.exit(result.loggedIn ? 0 : ExitCode.AUTH_REQUIRED);
-          })();
-        },
-      )
-      .command(
-        'token',
-        'Print the stored OAuth access token to stdout',
-        () => {},
-        (argv) => {
-          void (async () => {
-            const { getAuthToken } = await import('./src/lib/agent-ops.js');
-            const { resolveMode } = await import('./src/lib/mode-config.js');
-            const { jsonOutput } = resolveMode({
-              json: argv.json as boolean | undefined,
-              human: argv.human as boolean | undefined,
-              isTTY: Boolean(process.stdout.isTTY),
-            });
-            const result = getAuthToken();
-
-            if (!result.token) {
-              if (jsonOutput) {
-                process.stdout.write(
-                  JSON.stringify({
-                    error: 'not logged in',
-                    code: 'AUTH_REQUIRED',
-                  }) + '\n',
-                );
-              } else {
-                console.error(
-                  chalk.red(
-                    `Not logged in. Run \`${CLI_INVOCATION} login\` first.`,
-                  ),
-                );
-              }
-              process.exit(ExitCode.AUTH_REQUIRED);
-            }
-
-            if (jsonOutput) {
-              process.stdout.write(JSON.stringify(result) + '\n');
-            } else {
-              // Raw token on stdout so `$(amplitude-wizard auth token)` works
-              process.stdout.write(result.token + '\n');
-            }
-            process.exit(0);
-          })();
-        },
-      )
-      .demandCommand(1, 'You must specify a subcommand (status or token)')
-      .help();
-  })
-  .command('mcp <command>', 'Manage the Amplitude MCP server', (yargs) => {
-    return yargs
-      .command(
-        'add',
-        'Install the Amplitude MCP server into your editor',
-        (yargs) => {
-          return yargs.options({
-            local: {
-              default: false,
-              describe: 'use a local MCP server for development',
-              type: 'boolean',
-              hidden: !IS_WIZARD_DEV,
-            },
-          });
-        },
-        (argv) => {
-          const options = { ...argv };
-          void (async () => {
-            try {
-              const { startTUI } = await import('./src/ui/tui/start-tui.js');
-              const { buildSession } = await import(
-                './src/lib/wizard-session.js'
-              );
-
-              const { Flow } = await import('./src/ui/tui/router.js');
-              const tui = startTUI(WIZARD_VERSION, Flow.McpAdd);
-              const session = buildSession({
-                debug: options.debug,
-                localMcp: options.local,
-              });
-              tui.store.session = session;
-            } catch {
-              // TUI unavailable — fallback to logging
-              setUI(new LoggingUI());
-              const { addMCPServerToClientsStep } = await import(
-                './src/steps/add-mcp-server-to-clients/index.js'
-              );
-              await addMCPServerToClientsStep({
-                local: options.local,
-              });
-            }
-          })();
-        },
-      )
-      .command(
-        'remove',
-        'Remove the Amplitude MCP server from your editor',
-        (yargs) => {
-          return yargs.options({
-            local: {
-              default: false,
-              describe: 'remove a local MCP server',
-              type: 'boolean',
-              hidden: !IS_WIZARD_DEV,
-            },
-          });
-        },
-        (argv) => {
-          const options = { ...argv };
-          void (async () => {
-            try {
-              const { startTUI } = await import('./src/ui/tui/start-tui.js');
-              const { buildSession } = await import(
-                './src/lib/wizard-session.js'
-              );
-
-              const { Flow } = await import('./src/ui/tui/router.js');
-              const tui = startTUI(WIZARD_VERSION, Flow.McpRemove);
-              const session = buildSession({
-                debug: options.debug,
-                localMcp: options.local,
-              });
-              tui.store.session = session;
-            } catch {
-              // TUI unavailable — fallback to logging
-              setUI(new LoggingUI());
-              const { removeMCPServerFromClientsStep } = await import(
-                './src/steps/add-mcp-server-to-clients/index.js'
-              );
-              await removeMCPServerFromClientsStep({
-                local: options.local,
-              });
-            }
-          })();
-        },
-      )
-      .command(
-        'serve',
-        'Run the Amplitude wizard MCP server on stdio (for AI coding agents)',
-        () => {},
-        () => {
-          void (async () => {
-            try {
-              const { startAgentMcpServer } = await import(
-                './src/lib/wizard-mcp-server.js'
-              );
-              await startAgentMcpServer();
-            } catch (err) {
-              const msg = err instanceof Error ? err.message : String(err);
-              process.stderr.write(
-                `${CLI_INVOCATION} mcp serve: failed to start: ${msg}\n`,
-              );
-              process.exit(1);
-            }
-          })();
-        },
-      )
-      .demandCommand(1, 'You must specify a subcommand (add, remove, or serve)')
-      .help();
-  })
-  .command(
-    'manifest',
-    'Print a machine-readable description of the CLI (for AI agents)',
-    () => {},
-    () => {
-      void (async () => {
-        const { getAgentManifest } = await import(
-          './src/lib/agent-manifest.js'
-        );
-        process.stdout.write(
-          JSON.stringify(getAgentManifest(), null, 2) + '\n',
-        );
-        process.exit(0);
-      })();
-    },
-  )
+  .command(defaultCommand)
+  .command(loginCommand)
+  .command(logoutCommand)
+  .command(resetCommand)
+  .command(whoamiCommand)
+  .command(feedbackCommand)
+  .command(slackCommand)
+  .command(regionCommand)
+  .command(detectCommand)
+  .command(projectsCommand)
+  .command(planCommand)
+  .command(applyCommand)
+  .command(verifyCommand)
+  .command(statusCommand)
+  .command(authCommand)
+  .command(mcpCommand)
+  .command(manifestCommand)
   .example('$0', 'Run the interactive setup wizard')
   .example('$0 --ci --install-dir .', 'Run in CI mode (OAuth + auto-select)')
   .example(
@@ -2361,6 +715,24 @@ void yargs(hideBin(process.argv))
       `Feedback:  ${CLI_INVOCATION} feedback`,
     ].join('\n'),
   )
+  // Validate --app-id is numeric so a typo like `--app-id=foo` fails fast with
+  // a yargs-native error instead of becoming `0` downstream.
+  .check((argv) => {
+    const raw = argv['app-id'] as string | number | undefined;
+    if (raw === undefined || raw === null || raw === '') return true;
+    const n = Number(raw);
+    if (!Number.isFinite(n) || !Number.isInteger(n) || n <= 0) {
+      throw new Error(
+        `--app-id must be a positive integer (received: ${String(raw)})`,
+      );
+    }
+    return true;
+  })
+  // Reject unknown flags and subcommands. Catches typos like `--app-ids` or
+  // `--instal-dir` that would otherwise silently fall through. Middleware for
+  // consolidating credential resolution is paired with the bin.ts command-
+  // module split (see TODOs).
+  .strict()
   .recommendCommands()
   .help()
   .alias('help', 'h')

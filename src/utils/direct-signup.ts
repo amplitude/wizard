@@ -15,9 +15,14 @@ const REQUEST_TIMEOUT_MS = 10_000;
 const MAX_EXPIRES_IN_SECONDS = 86_400 * 365;
 
 // Discriminated union response schemas from the provisioning endpoint.
-const OAuthCodeSchema = z.object({
+// `dashboard_url` — optional magic-link URL (amplitude/javascript PR #108967).
+const OAuthProvisioningSchema = z.object({
   type: z.literal('oauth'),
   oauth: z.object({ code: z.string().min(1) }),
+  // `.nullish()` (no `min(1)`): a metadata field with strict validation
+  // would fail-closed the entire signup whenever the API returns an empty
+  // string or null. Treat empty as null at the read site.
+  dashboard_url: z.string().nullish(),
 });
 
 const RedirectSchema = z.object({
@@ -32,6 +37,21 @@ const ErrorSchema = z.object({
   type: z.literal('error'),
   error: z.object({ code: z.string(), message: z.string() }),
 });
+
+const NeedsInformationSchema = z
+  .object({
+    type: z.literal('needs_information'),
+    needs_information: z
+      .object({
+        schema: z
+          .object({
+            required: z.array(z.string()).min(1),
+          })
+          .passthrough(),
+      })
+      .passthrough(),
+  })
+  .passthrough();
 
 const TokenSchema = z.object({
   access_token: z.string(),
@@ -55,8 +75,17 @@ function provisioningUrl(zone: AmplitudeZone): string {
 
 export interface DirectSignupInput {
   email: string;
-  fullName: string;
+  fullName: string | null;
   zone: AmplitudeZone;
+}
+
+export interface DirectSignupOptions {
+  /**
+   * Cancel the in-flight HTTP requests. Forwarded to axios as the
+   * `signal` config. Used by the TUI to drop the request when
+   * SigningUpScreen unmounts (e.g. the user quits mid-POST).
+   */
+  signal?: AbortSignal;
 }
 
 export type DirectSignupResult =
@@ -69,9 +98,12 @@ export type DirectSignupResult =
         expiresAt: string;
         zone: AmplitudeZone;
       };
+      /** From `dashboard_url`; may contain secrets — never log or NDJSON. */
+      dashboardUrl: string | null;
     }
   | { kind: 'requires_redirect' }
-  | { kind: 'error'; message: string };
+  | { kind: 'needs_information'; requiredFields: string[] }
+  | { kind: 'error'; message: string; code?: string };
 
 /**
  * Attempts to create an Amplitude account and obtain tokens directly via the
@@ -80,6 +112,7 @@ export type DirectSignupResult =
  */
 export async function performDirectSignup(
   input: DirectSignupInput,
+  options: DirectSignupOptions = {},
 ): Promise<DirectSignupResult> {
   const { oAuthHost, oAuthClientId } = AMPLITUDE_ZONE_SETTINGS[input.zone];
   const url = provisioningUrl(input.zone);
@@ -99,12 +132,13 @@ export async function performDirectSignup(
         state,
         client_id: oAuthClientId,
         redirect_uri: `http://localhost:${OAUTH_PORT}/callback`,
-        full_name: input.fullName,
+        ...(input.fullName !== null ? { full_name: input.fullName } : {}),
       },
       {
         headers: { 'Content-Type': 'application/json' },
         timeout: REQUEST_TIMEOUT_MS,
         validateStatus: (s) => s < 500,
+        signal: options.signal,
       },
     );
   } catch (e) {
@@ -117,12 +151,24 @@ export async function performDirectSignup(
   const parsedRedirect = RedirectSchema.safeParse(response.data);
   if (parsedRedirect.success) return { kind: 'requires_redirect' };
 
-  const parsedError = ErrorSchema.safeParse(response.data);
-  if (parsedError.success) {
-    return { kind: 'error', message: parsedError.data.error.message };
+  const parsedNeedsInfo = NeedsInformationSchema.safeParse(response.data);
+  if (parsedNeedsInfo.success) {
+    return {
+      kind: 'needs_information',
+      requiredFields: parsedNeedsInfo.data.needs_information.schema.required,
+    };
   }
 
-  const parsedCode = OAuthCodeSchema.safeParse(response.data);
+  const parsedError = ErrorSchema.safeParse(response.data);
+  if (parsedError.success) {
+    return {
+      kind: 'error',
+      message: parsedError.data.error.message,
+      code: parsedError.data.error.code,
+    };
+  }
+
+  const parsedCode = OAuthProvisioningSchema.safeParse(response.data);
   if (!parsedCode.success) {
     if (response.status === 429) {
       log.warn('[direct-signup] provisioning rate limited');
@@ -137,12 +183,24 @@ export async function performDirectSignup(
         message: `Provisioning failed with HTTP ${response.status}`,
       };
     }
+    // Surface the discriminant if the server shipped one — makes future
+    // triage materially easier when a new response arm appears in prod
+    // before the wizard knows how to parse it. `type` is just a tag, no
+    // PII risk.
+    const responseType =
+      response.data && typeof response.data === 'object'
+        ? (response.data as { type?: unknown }).type
+        : undefined;
     log.error('[direct-signup] unexpected response shape', {
       status: response.status,
+      type: typeof responseType === 'string' ? responseType : undefined,
     });
     return {
       kind: 'error',
-      message: `Unexpected response (${response.status})`,
+      message:
+        typeof responseType === 'string'
+          ? `Unexpected response (${response.status}, type=${responseType})`
+          : `Unexpected response (${response.status})`,
     };
   }
 
@@ -161,6 +219,7 @@ export async function performDirectSignup(
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         timeout: REQUEST_TIMEOUT_MS,
         validateStatus: (s) => s < 500,
+        signal: options.signal,
       },
     );
   } catch (e) {
@@ -200,8 +259,16 @@ export async function performDirectSignup(
     };
   }
 
+  // Source `expiresAt` from id_token's exp claim (id_token TTL is the
+  // binding constraint for API calls). Falls back to `expires_in` and
+  // then to a 1-hour default if either is unusable. See
+  // `src/utils/jwt-exp.ts` for rationale.
+  const { resolveStoredExpiryMs } = await import('./jwt-exp.js');
   const expiresAt = new Date(
-    Date.now() + parsedTokens.data.expires_in * 1000,
+    resolveStoredExpiryMs({
+      idToken: parsedTokens.data.id_token,
+      expiresInSeconds: parsedTokens.data.expires_in,
+    }),
   ).toISOString();
   return {
     kind: 'success',
@@ -212,5 +279,9 @@ export async function performDirectSignup(
       expiresAt,
       zone: input.zone,
     },
+    // Coerce empty-string to null so downstream code (which displays the
+    // URL or short-circuits on missing) doesn't have to handle "" as a
+    // distinct third case.
+    dashboardUrl: parsedCode.data.dashboard_url || null,
   };
 }

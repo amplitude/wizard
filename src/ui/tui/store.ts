@@ -13,13 +13,17 @@
 import { atom, map } from 'nanostores';
 import { TaskStatus, type EventPlanDecision } from '../wizard-ui.js';
 import {
+  AuthOnboardingPath,
   type WizardSession,
   type OutroData,
   type DiscoveredFeature,
   type CloudRegion,
   type RetryState,
+  type PostAgentStep,
   buildSession,
+  toCredentialAppId,
 } from '../../lib/wizard-session.js';
+import type { SignupSuccessResult } from '../../utils/signup-or-auth.js';
 import { DEFAULT_AMPLITUDE_ZONE } from '../../lib/constants.js';
 import { resolveZone } from '../../lib/zone-resolution.js';
 import {
@@ -27,6 +31,7 @@ import {
   McpOutcome,
   SlackOutcome,
   RunPhase,
+  PostAgentStepStatus,
 } from './session-constants.js';
 import {
   WizardRouter,
@@ -36,6 +41,12 @@ import {
   Flow,
 } from './router.js';
 import { analytics, sessionPropertiesCompact } from '../../utils/analytics.js';
+import { clearApiKey } from '../../utils/api-key-store.js';
+import {
+  CANONICAL_STEPS,
+  matchCanonicalStep,
+} from '../../lib/canonical-tasks.js';
+import type { JourneyStepId, JourneyStatus } from '../../lib/journey-state.js';
 // Inlined to avoid tsx ESM resolution bug with dynamic import().
 const FLAG_LLM_ANALYTICS = 'wizard-llm-analytics';
 
@@ -47,8 +58,9 @@ export {
   RunPhase,
   McpOutcome,
   SlackOutcome,
+  PostAgentStepStatus,
 };
-export type { ScreenName, OutroData, WizardSession, RetryState };
+export type { ScreenName, OutroData, WizardSession, RetryState, PostAgentStep };
 
 export interface TaskItem {
   label: string;
@@ -61,6 +73,28 @@ export interface TaskItem {
 export interface PlannedEvent {
   name: string;
   description: string;
+}
+
+/**
+ * One row of the FileWritesPanel — bound to a single
+ * `recordFileChangePlanned` → `recordFileChangeApplied` pair from the
+ * inner agent. `path` is keyed on the absolute path the inner agent
+ * passed; relativization for display happens at render time so the
+ * panel renders correctly even if the same path comes through twice
+ * (Edit + verify pass).
+ */
+export interface FileWriteEntry {
+  /** Absolute path, as the inner agent's tool received it. */
+  path: string;
+  operation: 'create' | 'modify' | 'delete';
+  /** 'planned' once PreToolUse fires; flips to 'applied' or 'failed' on PostToolUse. */
+  status: 'planned' | 'applied' | 'failed';
+  /** Wall-clock ms when the planned event arrived. Drives the elapsed timer. */
+  startedAt: number;
+  /** Wall-clock ms when the applied/failed event arrived. */
+  completedAt?: number;
+  /** Byte size from the inner agent's tool input, when available (Write only). */
+  bytes?: number;
 }
 
 export type PendingPrompt =
@@ -83,6 +117,42 @@ export class WizardStore {
   private $statusMessages = atom<string[]>([]);
   private $tasks = atom<TaskItem[]>([]);
   private $eventPlan = atom<PlannedEvent[]>([]);
+  /**
+   * Live list of file writes the inner agent has issued during the run.
+   * Bounded to the most recent MAX_FILE_WRITES entries (FIFO eviction)
+   * so a runaway inner agent that touches hundreds of files doesn't blow
+   * up the TUI's render budget.
+   */
+  private $fileWrites = atom<FileWriteEntry[]>([]);
+  /**
+   * Monotonic counter of every file write initiated by the agent — incremented
+   * once per logical write when planned (PreToolUse) or, for synthesized
+   * entries only, when applied (PostToolUse without a prior planned event).
+   * Unlike `$fileWrites.length` (which caps at MAX_FILE_WRITES), this keeps
+   * climbing past the cap so coaching/heartbeat signals that key off it
+   * don't stall after the 50th write.
+   */
+  private $fileWritesTotal = atom(0);
+  /**
+   * Per-step journey status derived from deterministic tool-call signals
+   * (see `src/lib/journey-state.ts`). This is the source of truth for the
+   * canonical 5-step progress UI; `syncTodos` only updates each step's
+   * `activeForm` flavor text. Initialised on first `applyJourneyTransition`
+   * call — until then each step is treated as `pending`.
+   */
+  private $derivedJourney = atom<Partial<Record<JourneyStepId, JourneyStatus>>>(
+    {},
+  );
+  /**
+   * Latest non-empty `activeForm` the agent has emitted via `TodoWrite`,
+   * keyed by canonical step id. Refreshed every `syncTodos` call. The
+   * renderer prefers this over the canonical `defaultActiveForm` so the
+   * user sees the agent's current narration ("Installing project
+   * dependencies") on the active row.
+   */
+  private $journeyActiveForms = atom<Partial<Record<JourneyStepId, string>>>(
+    {},
+  );
   private $version = atom(0);
 
   /** True while the user is typing a slash command in the command bar. */
@@ -101,6 +171,15 @@ export class WizardStore {
   /** Last screen seen — used to detect screen transitions for analytics. */
   private _lastScreen: ScreenName | null = null;
 
+  /**
+   * Active timer for `setCommandFeedback`. Tracked on the instance so a
+   * second feedback call (e.g. `/feedback` after `/whoami`) can cancel
+   * the prior timer before scheduling its own — without the ref, the
+   * older long timer can wipe a fresh feedback message and the user sees
+   * the wrong text disappear.
+   */
+  private _feedbackTimer: ReturnType<typeof setTimeout> | null = null;
+
   /** Hooks run when transitioning onto a screen. */
   private _enterScreenHooks = new Map<ScreenName, (() => void)[]>();
 
@@ -117,10 +196,6 @@ export class WizardStore {
   readonly setupComplete: Promise<void> = new Promise((resolve) => {
     this._resolveSetup = resolve;
   });
-
-  /** Blocks agent execution until the settings-override overlay is dismissed. */
-  private _resolveSettingsOverride: (() => void) | null = null;
-  private _backupAndFixSettings: (() => boolean) | null = null;
 
   /** Pending confirmation or choice prompt from the agent. */
   private $pendingPrompt = atom<PendingPrompt | null>(null);
@@ -177,6 +252,14 @@ export class WizardStore {
     return this.$eventPlan.get();
   }
 
+  get fileWrites(): FileWriteEntry[] {
+    return this.$fileWrites.get();
+  }
+
+  get fileWritesTotal(): number {
+    return this.$fileWritesTotal.get();
+  }
+
   get pendingPrompt(): PendingPrompt | null {
     return this.$pendingPrompt.get();
   }
@@ -189,6 +272,24 @@ export class WizardStore {
   concludeIntro(): void {
     this.$session.setKey('introConcluded', true);
     this.emitChange();
+  }
+
+  /**
+   * Return to the welcome (Intro) screen. Used by Esc on RegionSelect and by
+   * create-account EmailCapture when the user backs out before entering an account.
+   * Does not clear region or framework — Continue from Intro re-resolves the
+   * same downstream gates.
+   */
+  rewindIntro(): void {
+    if (!this._reverting) {
+      this.router._setDirection('pop');
+    }
+    this.$session.setKey('introConcluded', false);
+    analytics.wizardCapture('back navigation', { to: 'intro' });
+    this.$version.set(this.$version.get() + 1);
+    if (!this._reverting) {
+      this._detectTransition();
+    }
   }
 
   /**
@@ -214,7 +315,57 @@ export class WizardStore {
     // unmounts inactive tabs).
     if (phase === RunPhase.Running && prevPhase !== RunPhase.Running) {
       this.$session.setKey('runStartedAt', Date.now());
+      // Pre-populate the canonical 5 tasks so the user sees "0 done · 5
+      // to go" from frame 1, not an empty list while the agent loads.
+      // The renderer derives rows from $derivedJourney + $journeyActiveForms;
+      // calling it on every Running entry is idempotent and preserves
+      // any progress already accumulated on a re-entry.
+      if (this.$tasks.get().length === 0) {
+        this.renderJourneyTasks();
+      }
     }
+    this.emitChange();
+  }
+
+  /**
+   * Seed the post-agent step queue once, before the first step starts.
+   * Idempotent: a second call replaces the queue, so callers should only
+   * invoke this at the post-agent boundary.
+   */
+  seedPostAgentSteps(steps: PostAgentStep[]): void {
+    this.$session.setKey('postAgentSteps', steps);
+    this.emitChange();
+  }
+
+  /**
+   * Patch a single post-agent step by id. No-op if the id isn't seeded.
+   * Callers transition `pending → in_progress → completed | skipped`;
+   * we stamp `startedAt` on the in_progress transition so the
+   * FinalizingPanel can compute per-step elapsed time without a separate
+   * timer.
+   */
+  setPostAgentStep(
+    id: string,
+    patch: { status: PostAgentStepStatus; reason?: string },
+  ): void {
+    const current = this.session.postAgentSteps;
+    const idx = current.findIndex((s) => s.id === id);
+    if (idx === -1) return;
+    const prev = current[idx];
+    const next: PostAgentStep = {
+      ...prev,
+      status: patch.status,
+      reason: patch.reason ?? prev.reason,
+    };
+    if (
+      patch.status === PostAgentStepStatus.InProgress &&
+      prev.status !== PostAgentStepStatus.InProgress
+    ) {
+      next.startedAt = Date.now();
+    }
+    const replaced = current.slice();
+    replaced[idx] = next;
+    this.$session.setKey('postAgentSteps', replaced);
     this.emitChange();
   }
 
@@ -232,11 +383,8 @@ export class WizardStore {
         email: session.userEmail,
         org_id: session.selectedOrgId ?? undefined,
         org_name: session.selectedOrgName ?? undefined,
-        workspace_id: session.selectedWorkspaceId ?? undefined,
-        workspace_name: session.selectedWorkspaceName ?? undefined,
-        // Canonical telemetry keys: `app_id` matches Python `app_id` and
-        // TS `appId`; `env_name` matches the Amplitude data-model shape
-        // (Org → Workspace → Environment → App).
+        project_id: session.selectedProjectId ?? undefined,
+        project_name: session.selectedProjectName ?? undefined,
         app_id: session.selectedAppId ?? credentials?.appId,
         env_name: session.selectedEnvName,
         region: zone,
@@ -247,6 +395,18 @@ export class WizardStore {
       'app id': credentials?.appId,
       region: zone,
     });
+    this.emitChange();
+  }
+
+  /**
+   * Update the cached user email used by `/whoami`. Required because nanostores'
+   * map-based storage replaces the top-level session object on every `setKey`,
+   * so closed-over `session` references in long-lived callbacks (e.g. the
+   * re-auth watcher in bin.ts) become stale and direct mutation would land on
+   * a discarded object.
+   */
+  setUserEmail(email: string | null): void {
+    this.$session.setKey('userEmail', email);
     this.emitChange();
   }
 
@@ -277,9 +437,157 @@ export class WizardStore {
     this.emitChange();
   }
 
+  /**
+   * Mirror the full per-framework detection table onto the session.
+   * Used by `/diagnostics` so users filing bug reports can see exactly
+   * which detector returned what — even for frameworks that didn't
+   * win. Set BEFORE `setDetectionComplete` so the screen never sees a
+   * stale `[]` after the spinner flips off.
+   */
+  setDetectionResults(results: WizardSession['detectionResults']): void {
+    this.$session.setKey('detectionResults', results);
+    this.emitChange();
+  }
+
   setDetectedFramework(label: string): void {
     this.$session.setKey('detectedFrameworkLabel', label);
     this.emitChange();
+  }
+
+  // ── Inline directory change ─────────────────────────────────────
+  //
+  // The IntroScreen's "Change directory" flow needs to do three things
+  // atomically:
+  //   1. Validate the new path is a real directory (caller's job).
+  //   2. Reset every detection-related session field so the spinner
+  //      reappears and the workspace-analysis warnings re-render.
+  //   3. Kick off `runFrameworkDetection` against the new directory,
+  //      cancelling any in-flight detection from the previous path.
+  //
+  // The detection runner itself lives in `lib/framework-detection.ts`
+  // — bin.ts wires it into the store at startup via
+  // `setFrameworkRedetector`. That keeps this file from depending on
+  // the framework registry (which would invert the import graph and
+  // break the test surface).
+
+  /**
+   * Re-detection callback registered by bin.ts. Returning `null` from
+   * `changeInstallDir` would cause it to no-op when the detector
+   * isn't wired up (e.g. tests, classic mode), which we want — the
+   * directory change still applies, we just skip the redetect.
+   */
+  private _redetect:
+    | ((installDir: string, signal: AbortSignal) => Promise<unknown>)
+    | null = null;
+
+  /** AbortController for the active detection run, if any. */
+  private _activeDetectionAbort: AbortController | null = null;
+
+  /**
+   * Register the framework re-detection callback. Called once by
+   * bin.ts during TUI bootstrap. Calling it more than once replaces
+   * the previous callback (used by tests).
+   */
+  setFrameworkRedetector(
+    redetect: (installDir: string, signal: AbortSignal) => Promise<unknown>,
+  ): void {
+    this._redetect = redetect;
+  }
+
+  /**
+   * Register an in-flight detection's AbortController so a subsequent
+   * `changeInstallDir` can cancel it. bin.ts calls this once at boot
+   * with the controller it created for the INITIAL detection — that
+   * way a user who picks "Change directory" while the first
+   * `Scanning…` spinner is still running cancels the initial run too,
+   * not just later re-runs.
+   *
+   * Without this hook the initial detection's terminal
+   * `setDetectionComplete()` could fire AFTER the directory swap has
+   * reset state, briefly flashing stale framework results from the
+   * old tree.
+   */
+  registerActiveDetection(controller: AbortController): void {
+    this._activeDetectionAbort = controller;
+  }
+
+  /**
+   * Swap the install directory and re-run framework detection.
+   *
+   * `newInstallDir` MUST be a resolved, existing absolute path —
+   * the caller (PathInput in IntroScreen) handles `~` expansion and
+   * validation so this method can stay pure-state-mutation.
+   *
+   * Effects:
+   *   - cancels any in-flight detection
+   *   - clears `frameworkConfig`, `integration`, `detectedFrameworkLabel`,
+   *     `frameworkContext`, `detectionResults`, `discoveredFeatures`
+   *   - flips `detectionComplete` back to false (spinner reappears)
+   *   - clears the checkpoint-restore flag — checkpoint was for the
+   *     OLD directory; resuming into a different tree would be wrong
+   *   - kicks off a new detection run against the new directory
+   */
+  changeInstallDir(newInstallDir: string): void {
+    // Cancel any active detection. The runner short-circuits on the
+    // signal so a stale run can't fire `setDetectionComplete()` after
+    // we've reset state for the new directory.
+    if (this._activeDetectionAbort) {
+      this._activeDetectionAbort.abort();
+    }
+
+    this.$session.setKey('installDir', newInstallDir);
+    this.$session.setKey('frameworkConfig', null);
+    this.$session.setKey('integration', null);
+    this.$session.setKey('detectedFrameworkLabel', null);
+    this.$session.setKey('frameworkContext', {});
+    // The answer-order array tracks which framework-setup question
+    // keys the user answered, in order, so back-navigation can pop the
+    // most recent one. Without this reset, stale keys from the OLD
+    // directory's gatherContext stay in the array and
+    // `popLastFrameworkContextAnswer` returns `true` for phantom pops
+    // (the keys it claims to remove no longer exist in
+    // `frameworkContext`), creating dead back-navigation steps.
+    this.$session.setKey('frameworkContextAnswerOrder', []);
+    this.$session.setKey('detectionResults', []);
+    this.$session.setKey('detectionComplete', false);
+    // Reset BOTH the discovered-features list AND every opt-in flag /
+    // queue derived from it. These are computed from the OLD project's
+    // package.json (Stripe, LLM SDK presence, etc.) and have zero
+    // meaning in the new tree — letting them carry over would cause
+    // the agent to set up irrelevant addons (e.g. LLM analytics for a
+    // Python AI repo we already navigated away from).
+    this.$session.setKey('discoveredFeatures', []);
+    this.$session.setKey('additionalFeatureQueue', []);
+    this.$session.setKey('llmOptIn', false);
+    this.$session.setKey('sessionReplayOptIn', false);
+    this.$session.setKey('engagementOptIn', false);
+    this.$session.setKey('optInFeaturesComplete', false);
+    // Checkpoint resume is invalid across directories — different tree
+    // means different ampli.json, different events.json, different
+    // framework. Treat the change as a "Start fresh".
+    this.$session.setKey('_restoredFromCheckpoint', false);
+
+    analytics.wizardCapture('install dir changed', {
+      // Don't capture the path itself — could be PII / contain
+      // employer-internal repo names. Capture only the SHAPE of the
+      // event so we know how often this exit hatch is used.
+      'has redetector': this._redetect !== null,
+    });
+
+    this.emitChange();
+
+    if (this._redetect) {
+      const controller = new AbortController();
+      this._activeDetectionAbort = controller;
+      const target = newInstallDir;
+      // Fire-and-forget: detection mirrors its results into the store
+      // as it goes, so callers don't await this. Errors are swallowed
+      // — detection failures fall back to the generic framework, and
+      // the runner already logs internally.
+      void this._redetect(target, controller.signal).catch(() => {
+        /* detection errors are non-fatal; the generic fallback handles them */
+      });
+    }
   }
 
   setLoginUrl(url: string | null): void {
@@ -289,11 +597,30 @@ export class WizardStore {
 
   setSignupEmail(email: string): void {
     this.$session.setKey('signupEmail', email);
+    analytics.wizardCapture('signup email captured', { 'has email': !!email });
     this.emitChange();
   }
 
   setSignupFullName(name: string): void {
     this.$session.setKey('signupFullName', name.trim());
+    analytics.wizardCapture('signup full name captured', {
+      'has name': !!name.trim(),
+    });
+    this.emitChange();
+  }
+
+  setSignupAuth(auth: SignupSuccessResult): void {
+    this.$session.setKey('signupAuth', auth);
+    this.emitChange();
+  }
+
+  setSignupRequiredFields(fields: string[]): void {
+    this.$session.setKey('signupRequiredFields', fields);
+    this.emitChange();
+  }
+
+  setSignupAbandoned(value: boolean): void {
+    this.$session.setKey('signupAbandoned', value);
     this.emitChange();
   }
 
@@ -302,28 +629,204 @@ export class WizardStore {
     this.$session.setKey('regionForced', false);
     analytics.wizardCapture('region selected', { region });
 
-    // Persist region to project-level ampli.json so next run uses the right zone.
-    // Only writes if OrgId/WorkspaceId already exist (otherwise writeAmpliConfig
-    // would create a partial config).
+    // Persist the chosen zone to project binding files (`project-binding.json`
+    // and mirrored `ampli.json`) so the next wizard run uses the right zone —
+    // even if the user exits before completing SUSI. When switching regions via
+    // /region, prior OrgId/ProjectId are invalid in the new zone; drop them so
+    // resolveCredentials doesn't silently steer back to a stale project.
+    //
+    // Only updates when a binding already exists; never creates one. Fresh
+    // projects have their zone persisted later by setOrgAndProject()
+    // once the full SUSI flow completes.
     const session = this.$session.get();
-    if (session.selectedOrgId && session.selectedWorkspaceId) {
-      void import('../../lib/ampli-config.js').then(({ writeAmpliConfig }) => {
-        writeAmpliConfig(session.installDir, {
-          OrgId: session.selectedOrgId!,
-          WorkspaceId: session.selectedWorkspaceId!,
-          Zone: region as 'us' | 'eu',
-        });
-      });
-    }
+    const typedZone = region as 'us' | 'eu';
+    void (async () => {
+      try {
+        const { readAmpliConfig, writeAmpliConfig } = await import(
+          '../../lib/ampli-config.js'
+        );
+        const prior = readAmpliConfig(session.installDir);
+        if (!prior.ok) return; // no existing binding — nothing to update
+        const next = { ...prior.config, Zone: typedZone };
+        if (session.selectedOrgId && session.selectedProjectId) {
+          next.OrgId = session.selectedOrgId;
+          next.ProjectId = session.selectedProjectId;
+        } else {
+          // Cleared by setRegionForced — IDs from the old zone are invalid.
+          delete next.OrgId;
+          delete next.ProjectId;
+        }
+        const persisted = writeAmpliConfig(session.installDir, next);
+        if (!persisted) {
+          this.setCommandFeedback(
+            "Region updated for this session, but couldn't persist to project binding files. Re-pick if it sticks to the old zone next run.",
+            6000,
+          );
+        }
+      } catch (err) {
+        // Non-fatal: project persistence is best-effort. On read-only
+        // filesystems or permission errors we'd leave the old Zone in place
+        // and users can still complete the current session.
+        analytics.captureException(
+          err instanceof Error ? err : new Error(String(err)),
+        );
+        this.setCommandFeedback(
+          "Region updated for this session, but couldn't persist project binding files. Re-pick if it sticks to the old zone next run.",
+          6000,
+        );
+      }
+    })();
 
     this.emitChange();
   }
 
-  /** Force the RegionSelect screen to re-appear (/region command). */
+  markEmailCaptureComplete(): void {
+    this.$session.setKey('emailCaptureComplete', true);
+    analytics.wizardCapture('email capture complete');
+    this.emitChange();
+  }
+
+  markSignupTokensObtained(): void {
+    this.$session.setKey('signupTokensObtained', true);
+    this.emitChange();
+  }
+
+  acceptTermsOfService(): void {
+    this.$session.setKey('tosAccepted', true);
+    analytics.wizardCapture('terms of service accepted');
+    this.emitChange();
+  }
+
+  resetEmailCapture(): void {
+    this.$session.setKey('emailCaptureComplete', false);
+    analytics.wizardCapture('back navigation', { to: 'email-capture' });
+    this.emitChange();
+  }
+
+  resetToS(): void {
+    this.$session.setKey('tosAccepted', null);
+    analytics.wizardCapture('back navigation', { to: 'tos' });
+    this.emitChange();
+  }
+
+  setAuthOnboardingPath(path: WizardSession['authOnboardingPath']): void {
+    this.$session.setKey('authOnboardingPath', path);
+    this.emitChange();
+  }
+
+  switchToLogin(): void {
+    this.$session.setKey('authOnboardingPath', AuthOnboardingPath.SignIn);
+    this.$session.setKey('signupEmail', null);
+    this.$session.setKey('signupFullName', null);
+    analytics.wizardCapture('signup switched to login', {
+      reason: 'existing user',
+    });
+    this.emitChange();
+  }
+
+  cancelWizard(reason: string): void {
+    this.setOutroData({
+      kind: 'cancel' as const,
+      message: reason,
+    });
+    this.emitChange();
+  }
+
+  /**
+   * Force the RegionSelect screen to re-appear (/region command).
+   *
+   * A mid-session region change is equivalent to logging out and logging back
+   * in against the other data center: OAuth tokens are zone-scoped, and every
+   * org/workspace/environment the user has picked lives in the old region.
+   * Clear all of that so the Auth screen reappears once a new region is
+   * picked, forcing a fresh login. OAuth tokens in the wizard session store
+   * are kept per-zone and will be silently reused if the user already signed
+   * into the target region previously.
+   */
   setRegionForced(): void {
     this.$session.setKey('regionForced', true);
-    // Reset data check so it re-runs after region changes
+
+    // Credentials and OAuth intermediates (all zone-scoped)
+    this.$session.setKey('credentials', null);
+    this.$session.setKey('pendingOrgs', null);
+    this.$session.setKey('pendingAuthIdToken', null);
+    this.$session.setKey('pendingAuthAccessToken', null);
+    this.$session.setKey('apiKeyNotice', null);
+
+    // User / org / workspace / project selection — all lived in the old zone
+    this.$session.setKey('userEmail', null);
+    this.$session.setKey('selectedOrgId', null);
+    this.$session.setKey('selectedOrgName', null);
+    this.$session.setKey('selectedProjectId', null);
+    this.$session.setKey('selectedProjectName', null);
+    this.$session.setKey('selectedAppId', null);
+    this.$session.setKey('selectedEnvName', null);
+
+    // Downstream flow state that depends on the old zone's data
     this.$session.setKey('projectHasData', null);
+    this.$session.setKey('activationLevel', null);
+    this.$session.setKey('activationOptionsComplete', false);
+    this.$session.setKey('dataIngestionConfirmed', false);
+    this.$session.setKey('signupMagicLinkUrl', null);
+    this.$session.setKey('mcpComplete', false);
+    this.$session.setKey('mcpOutcome', null);
+    this.$session.setKey('mcpInstalledClients', []);
+    this.$session.setKey('slackComplete', false);
+    this.$session.setKey('slackOutcome', null);
+
+    // Framework-detection + feature-discovery state lived against the old
+    // zone's project. Clearing these BEFORE we touch outroData/runPhase keeps
+    // the router from transiently resolving to a post-detection screen
+    // (e.g. FeatureOptIn / Setup) while runPhase is still mid-tear-down.
+    this.$session.setKey('integration', null);
+    this.$session.setKey('frameworkConfig', null);
+    this.$session.setKey('frameworkContext', {});
+    this.$session.setKey('discoveredFeatures', []);
+    this.$session.setKey('additionalFeatureQueue', []);
+    this.$session.setKey('additionalFeatureCurrent', null);
+    this.$session.setKey('additionalFeatureCompleted', []);
+    this.$session.setKey('optInFeaturesComplete', false);
+
+    // If the wizard had already reached Outro (success, error, or cancel)
+    // the outroData short-circuits router.resolve and would block the
+    // re-auth flow. A region switch is a hard reset — clear outroData so
+    // the user lands on RegionSelect → Auth → ... for the new zone.
+    this.$session.setKey('outroData', null);
+    this.$session.setKey('runPhase', RunPhase.Idle);
+
+    this.emitChange();
+  }
+
+  /**
+   * Reset session fields cleared by IntroScreen's "Start fresh" branch
+   * after a checkpoint restore.
+   *
+   * Previously the screen did `store.session = { ...store.session, ... }`
+   * — direct top-level reassignment goes through the `set session()`
+   * setter, which calls `$session.set()` + `emitChange()`. That works
+   * for `useSyncExternalStore` subscribers (everyone reads via
+   * `$version`), BUT it bypasses the per-key change events that
+   * nanostores `map.setKey()` emits. Any future code that subscribes
+   * via `listenKeys(['integration'])` etc. would silently miss the
+   * reset. Routing the same reset through individual `setKey` calls is
+   * the idiomatic store pattern and keeps the contract uniform across
+   * actions — every other reset (`setRegionForced`, etc.) does it this
+   * way already.
+   */
+  resetForFreshStart(): void {
+    this.$session.setKey('_restoredFromCheckpoint', false);
+    this.$session.setKey('introConcluded', false);
+    this.$session.setKey('detectionComplete', false);
+    this.$session.setKey('detectedFrameworkLabel', null);
+    this.$session.setKey('integration', null);
+    this.$session.setKey('frameworkConfig', null);
+    this.$session.setKey('frameworkContext', {});
+    this.$session.setKey('region', null);
+    this.$session.setKey('selectedOrgId', null);
+    this.$session.setKey('selectedOrgName', null);
+    this.$session.setKey('selectedProjectId', null);
+    this.$session.setKey('selectedProjectName', null);
+    this.$session.setKey('selectedEnvName', null);
     this.emitChange();
   }
 
@@ -437,10 +940,19 @@ export class WizardStore {
   }
 
   showLogoutOverlay(): void {
+    // Set the loggingOut flag SYNCHRONOUSLY before pushing the overlay so the
+    // bin.ts re-auth watcher can't race the overlay push and observe a state
+    // where credentials are null but currentScreen is not yet Overlay.Logout
+    // (which would trigger an unwanted runOAuthCycle and pop the browser).
+    this.$session.setKey('loggingOut', true);
     this.pushOverlay(Overlay.Logout);
   }
 
   hideLogoutOverlay(): void {
+    // Clearing loggingOut here covers the cancel path (user dismissed the
+    // confirm prompt). On the confirm path, process.exit(0) tears the
+    // process down before this matters.
+    this.$session.setKey('loggingOut', false);
     this.popOverlay();
   }
 
@@ -469,25 +981,33 @@ export class WizardStore {
   }
 
   /**
-   * Restore org/workspace/app session IDs that weren't populated at startup
+   * Restore org/project/app session IDs that weren't populated at startup
    * (e.g. because the fire-and-forget fetchAmplitudeUser failed due to expired token).
    * Only updates fields that are provided.
    */
   restoreSessionIds(fields: {
     orgId?: string;
     orgName?: string;
-    workspaceId?: string;
-    workspaceName?: string;
+    projectId?: string;
+    projectName?: string;
     appId?: string | null;
   }): void {
     if (fields.orgId !== undefined)
-      this.$session.setKey('selectedOrgId', fields.orgId);
+      // Mirror setOrgAndWorkspace: collapse '' -> null so isAuthenticated
+      // doesn't treat an empty org id as a real one.
+      this.$session.setKey('selectedOrgId', fields.orgId || null);
     if (fields.orgName !== undefined)
       this.$session.setKey('selectedOrgName', fields.orgName);
-    if (fields.workspaceId !== undefined)
-      this.$session.setKey('selectedWorkspaceId', fields.workspaceId);
-    if (fields.workspaceName !== undefined)
-      this.$session.setKey('selectedWorkspaceName', fields.workspaceName);
+    if (fields.projectId !== undefined)
+      // Mirror setOrgAndProject: collapse empty strings to null so an
+      // accidental '' from a caller is treated as "no project" rather than
+      // a real ID. No current caller passes empty (CreateProjectScreen
+      // omits projectId, DataIngestionCheckScreen reads from API
+      // responses), but keeping the guard consistent across both write
+      // paths prevents future regressions.
+      this.$session.setKey('selectedProjectId', fields.projectId || null);
+    if (fields.projectName !== undefined)
+      this.$session.setKey('selectedProjectName', fields.projectName);
     if (fields.appId !== undefined)
       this.$session.setKey('selectedAppId', fields.appId);
     this.emitChange();
@@ -505,9 +1025,14 @@ export class WizardStore {
 
   /** Show a transient feedback message in the command bar. Clears after ms. */
   setCommandFeedback(message: string, ms = 3000): void {
+    if (this._feedbackTimer !== null) {
+      clearTimeout(this._feedbackTimer);
+      this._feedbackTimer = null;
+    }
     this.$commandFeedback.set(message);
     this.$version.set(this.$version.get() + 1);
-    setTimeout(() => {
+    this._feedbackTimer = setTimeout(() => {
+      this._feedbackTimer = null;
       this.$commandFeedback.set(null);
       this.$version.set(this.$version.get() + 1);
     }, ms);
@@ -522,6 +1047,19 @@ export class WizardStore {
     this.$session.setKey('activationLevel', level);
     // Keep projectHasData in sync so existing routing still works
     this.$session.setKey('projectHasData', level === 'full' ? true : false);
+    this.emitChange();
+  }
+
+  /**
+   * Mark this session as having a complete prior install detected on
+   * disk — set when the Activation pre-flight finds all four local
+   * signals (SDK dep, source import, ampli.json scope, event plan).
+   * Pairs with `activationLevel = 'full'` to short-circuit Setup + Run
+   * while keeping DataIngestionCheck running so the user can verify
+   * events arrive after a re-deploy.
+   */
+  setLocalInstrumentationComplete(value: boolean): void {
+    this.$session.setKey('localInstrumentationComplete', value);
     this.emitChange();
   }
 
@@ -544,6 +1082,11 @@ export class WizardStore {
     this.emitChange();
   }
 
+  setSignupMagicLinkUrl(url: string | null): void {
+    this.$session.setKey('signupMagicLinkUrl', url);
+    this.emitChange();
+  }
+
   setActivationOptionsComplete(): void {
     this.$session.setKey('activationOptionsComplete', true);
     this.emitChange();
@@ -560,6 +1103,11 @@ export class WizardStore {
     cloudRegion: CloudRegion | null;
     orgs: WizardSession['pendingOrgs'];
   }): void {
+    // Wipe any cached project API key for this install dir before the
+    // AuthScreen resolution runs. Without this, a stale key from a prior
+    // run in a different org silently wins over the freshly-fetched env
+    // key in `data.orgs`, and the agent inlines the wrong key.
+    clearApiKey(this.session.installDir);
     this.$session.setKey('pendingAuthAccessToken', data.accessToken);
     this.$session.setKey('pendingAuthIdToken', data.idToken);
     this.$session.setKey('pendingOrgs', data.orgs);
@@ -586,7 +1134,7 @@ export class WizardStore {
    * @param suggestedName optional pre-filled name (e.g. from /create-project <name> or --project-name)
    */
   startCreateProject(
-    source: 'workspace' | 'project' | 'slash' | 'cli-flag',
+    source: 'project' | 'environment' | 'slash' | 'cli-flag',
     suggestedName?: string | null,
   ): void {
     this.$session.setKey('createProject', {
@@ -624,12 +1172,20 @@ export class WizardStore {
   }
 
   /**
-   * Called from AuthScreen when the user finishes org + workspace selection.
-   * Writes ampli.json and records org/workspace on the session.
+   * Called from AuthScreen when org + project selection changes.
+   * Records org/project on the session, and (when `persist` is true)
+   * writes the IDs to the project's ampli.json.
+   *
+   * Pass `persist: false` from synthesisers that only mirror existing state
+   * (e.g. the auto-resolve effect that reflects values already loaded from
+   * ampli.json) — those code paths shouldn't trigger fresh disk writes
+   * during render. User-driven flows (picker selection, "start over",
+   * "create project") leave `persist` at its default of `true` so the
+   * config file stays in sync with what the user picked.
    */
-  setOrgAndWorkspace(
+  setOrgAndProject(
     org: { id: string; name: string },
-    workspace: {
+    project: {
       id: string;
       name: string;
       environments?: Array<{
@@ -638,33 +1194,58 @@ export class WizardStore {
       }> | null;
     },
     installDir: string,
+    options: { persist?: boolean } = {},
   ): void {
-    this.$session.setKey('selectedOrgId', org.id);
-    this.$session.setKey('selectedOrgName', org.name);
-    this.$session.setKey('selectedWorkspaceId', workspace.id);
-    this.$session.setKey('selectedWorkspaceName', workspace.name);
+    const { persist = true } = options;
 
-    // Extract the Amplitude app ID from the lowest-rank environment.
-    const appId =
-      workspace.environments
-        ?.slice()
-        .sort((a, b) => a.rank - b.rank)
-        .find((e) => e.app?.id)?.app?.id ?? null;
+    // Callers (e.g. AuthScreen "Start Over", stale-org clear, create-project
+    // fallback) pass `{ id: '', name: '' }` to reset session state. Collapse
+    // empty IDs to null so `isAuthenticated` and downstream truthy checks
+    // treat them as "not selected" rather than as real values.
+    this.$session.setKey('selectedOrgId', org.id || null);
+    this.$session.setKey('selectedOrgName', org.name);
+    this.$session.setKey('selectedProjectId', project.id || null);
+    this.$session.setKey('selectedProjectName', project.name);
+
+    // Extract the Amplitude app ID (and api key, when present) from the
+    // lowest-rank environment.
+    const lowestEnv = project.environments
+      ?.slice()
+      .sort((a, b) => a.rank - b.rank)
+      .find((e) => e.app?.id);
+    const appId = lowestEnv?.app?.id ?? null;
+    const apiKey = lowestEnv?.app?.apiKey ?? null;
     this.$session.setKey('selectedAppId', appId);
 
-    // Write ampli.json to the project directory.
-    void import('../../lib/ampli-config.js').then(({ writeAmpliConfig }) => {
-      // readDisk: true — invoked from store mutation paths where the
-      // RegionSelect invariant isn't guaranteed (e.g. checkpoint restore).
-      const zone = resolveZone(this.$session.get(), DEFAULT_AMPLITUDE_ZONE, {
-        readDisk: true,
+    // Keep credentials.appId / projectApiKey in sync with the freshly
+    // picked project. Without this, /whoami and any other reader that
+    // looks at credentials.* keeps showing the appId that was bound at
+    // initial OAuth (the user's first/old project) — even after they
+    // switched projects mid-session.
+    const currentCreds = this.$session.get().credentials;
+    if (currentCreds) {
+      this.$session.setKey('credentials', {
+        ...currentCreds,
+        appId: toCredentialAppId(appId),
+        projectApiKey: apiKey ?? currentCreds.projectApiKey,
       });
-      writeAmpliConfig(installDir, {
-        OrgId: org.id,
-        WorkspaceId: workspace.id,
-        Zone: zone,
+    }
+
+    if (persist) {
+      // Write ampli.json to the project directory.
+      void import('../../lib/ampli-config.js').then(({ writeAmpliConfig }) => {
+        // readDisk: true — invoked from store mutation paths where the
+        // RegionSelect invariant isn't guaranteed (e.g. checkpoint restore).
+        const zone = resolveZone(this.$session.get(), DEFAULT_AMPLITUDE_ZONE, {
+          readDisk: true,
+        });
+        writeAmpliConfig(installDir, {
+          OrgId: org.id,
+          ProjectId: project.id,
+          Zone: zone,
+        });
       });
-    });
+    }
 
     this.emitChange();
   }
@@ -681,37 +1262,6 @@ export class WizardStore {
     this.emitChange();
   }
 
-  /**
-   * Push the settings-override overlay and return a promise that blocks
-   * until the user dismisses it via backupAndFixSettingsOverride().
-   */
-  showSettingsOverride(
-    keys: string[],
-    backupAndFix: () => boolean,
-  ): Promise<void> {
-    this.$session.setKey('settingsOverrideKeys', keys);
-    this._backupAndFixSettings = backupAndFix;
-    this.pushOverlay(Overlay.SettingsOverride);
-    return new Promise((resolve) => {
-      this._resolveSettingsOverride = resolve;
-    });
-  }
-
-  /**
-   * Back up .claude/settings.json. Dismisses the overlay on success.
-   */
-  backupAndFixSettingsOverride(): boolean {
-    const ok = this._backupAndFixSettings?.() ?? false;
-    if (ok) {
-      this.$session.setKey('settingsOverrideKeys', null);
-      this.popOverlay();
-      this._resolveSettingsOverride?.();
-      this._resolveSettingsOverride = null;
-      this._backupAndFixSettings = null;
-    }
-    return ok;
-  }
-
   addDiscoveredFeature(feature: DiscoveredFeature): void {
     if (!this.session.discoveredFeatures.includes(feature)) {
       this.$session.setKey('discoveredFeatures', [
@@ -723,12 +1273,72 @@ export class WizardStore {
   }
 
   /**
+   * Auto-enable every opt-in addon (Session Replay, Guides & Surveys,
+   * LLM when the feature flag is on) that's been discovered for the
+   * current integration. Routes through `enableFeature` so React
+   * subscribers get notified and per-feature analytics fire.
+   *
+   * No opt-in picker — the unified browser SDK ships with all three
+   * addons in one package. Quota / privacy concerns are surfaced via
+   * per-option inline comments in the agent-generated init code, which
+   * users can comment out individually — a clearer opt-out surface
+   * than a one-shot picker.
+   */
+  autoEnableInlineAddons(
+    source: 'auto-tui' | 'auto-ci' | 'auto-agent' = 'auto-tui',
+  ): void {
+    for (const feature of this.session.discoveredFeatures) {
+      let additional: AdditionalFeature | null = null;
+      if (feature === ('session_replay' as AdditionalFeature)) {
+        additional = AdditionalFeature.SessionReplay;
+      } else if (feature === ('llm' as AdditionalFeature)) {
+        additional = AdditionalFeature.LLM;
+      } else if (feature === ('engagement' as AdditionalFeature)) {
+        additional = AdditionalFeature.Engagement;
+      }
+      if (!additional) continue;
+      this.enableFeature(additional, source);
+    }
+    this.$session.setKey('optInFeaturesComplete', true);
+    this.emitChange();
+  }
+
+  /**
+   * Set the additional feature currently being processed by the stop hook.
+   * Used by the Run screen to render it as an in-progress task.
+   */
+  setCurrentFeature(feature: AdditionalFeature | null): void {
+    this.$session.setKey('additionalFeatureCurrent', feature);
+    this.emitChange();
+  }
+
+  /**
+   * Mark a feature as completed by the stop hook (clears `current`).
+   * Used by the Run screen to render it as a done task.
+   */
+  markFeatureComplete(feature: AdditionalFeature): void {
+    if (!this.session.additionalFeatureCompleted.includes(feature)) {
+      this.$session.setKey('additionalFeatureCompleted', [
+        ...this.session.additionalFeatureCompleted,
+        feature,
+      ]);
+    }
+    if (this.session.additionalFeatureCurrent === feature) {
+      this.$session.setKey('additionalFeatureCurrent', null);
+    }
+    this.emitChange();
+  }
+
+  /**
    * Enable an additional feature: enqueue it for the stop hook
    * and set any feature-specific session flags.
    * Respects Amplitude Experiment feature flags — if the corresponding
    * flag is off the feature is silently skipped.
    */
-  enableFeature(feature: AdditionalFeature): void {
+  enableFeature(
+    feature: AdditionalFeature,
+    source: 'picklist' | 'auto-tui' | 'auto-ci' | 'auto-agent' = 'picklist',
+  ): void {
     // Gate LLM analytics behind the wizard-llm-analytics feature flag
     if (feature === AdditionalFeature.LLM) {
       if (!analytics.isFeatureFlagEnabled(FLAG_LLM_ANALYTICS)) {
@@ -746,7 +1356,13 @@ export class WizardStore {
     if (feature === AdditionalFeature.LLM) {
       this.$session.setKey('llmOptIn', true);
     }
-    analytics.wizardCapture('feature enabled', { feature });
+    if (feature === AdditionalFeature.SessionReplay) {
+      this.$session.setKey('sessionReplayOptIn', true);
+    }
+    if (feature === AdditionalFeature.Engagement) {
+      this.$session.setKey('engagementOptIn', true);
+    }
+    analytics.wizardCapture('feature enabled', { feature, source });
     this.emitChange();
   }
 
@@ -821,9 +1437,268 @@ export class WizardStore {
     this.emitChange();
   }
 
-  setFrameworkContext(key: string, value: unknown): void {
+  /**
+   * One-shot signal that the OutroScreen has been dismissed by the user
+   * (keypress on cancel/error, picker action on success). Used by
+   * `wizardAbort` to wait for the Outro to render and be acknowledged
+   * before calling `process.exit` — without this, the process exits
+   * while Ink is still flushing the previous frame and the user never
+   * sees the OutroScreen at all on error paths.
+   *
+   * Resolves at most once. Subsequent calls to `signalOutroDismissed`
+   * are no-ops; subsequent awaiters get a fresh pending promise that
+   * will resolve on the next dismissal (in practice there's only ever
+   * one dismissal per process).
+   */
+  private _resolveOutroDismissed: (() => void) | null = null;
+  private _outroDismissedPromise: Promise<void> | null = null;
+
+  /** Returns a promise that resolves when the OutroScreen is dismissed. */
+  outroDismissed(): Promise<void> {
+    if (!this._outroDismissedPromise) {
+      this._outroDismissedPromise = new Promise<void>((resolve) => {
+        this._resolveOutroDismissed = resolve;
+      });
+    }
+    return this._outroDismissedPromise;
+  }
+
+  /** Mark the outro as dismissed. Idempotent. */
+  signalOutroDismissed(): void {
+    if (this._resolveOutroDismissed) {
+      this._resolveOutroDismissed();
+      this._resolveOutroDismissed = null;
+    } else if (!this._outroDismissedPromise) {
+      // Dismissal arrived before anyone awaited it — pre-resolve so the
+      // first awaiter gets a settled promise immediately.
+      this._outroDismissedPromise = Promise.resolve();
+    }
+  }
+
+  setFrameworkContext(key: string, value: unknown, autoDetected = false): void {
     const ctx = { ...this.$session.get().frameworkContext, [key]: value };
     this.$session.setKey('frameworkContext', ctx);
+    if (!autoDetected) {
+      // Only track user-answered keys so back-nav can distinguish them
+      // from auto-detected entries. popLastFrameworkContextAnswer returns
+      // false when no user answers remain, letting the router walk back
+      // past Setup transparently.
+      const order = this.$session.get().frameworkContextAnswerOrder;
+      const next = order.filter((k) => k !== key).concat(key);
+      this.$session.setKey('frameworkContextAnswerOrder', next);
+    }
+    this.emitChange();
+  }
+
+  /**
+   * Pop the most recently-answered framework setup question from
+   * `frameworkContext`. Used by SetupScreen and by back-navigation past
+   * FeatureOptIn. Returns `true` if an answer was popped.
+   */
+  popLastFrameworkContextAnswer(): boolean {
+    const session = this.$session.get();
+    const order = session.frameworkContextAnswerOrder;
+    if (order.length === 0) return false;
+    const lastKey = order[order.length - 1];
+    const { [lastKey]: _removed, ...rest } = session.frameworkContext;
+    void _removed;
+    this.$session.setKey('frameworkContext', rest);
+    this.$session.setKey('frameworkContextAnswerOrder', order.slice(0, -1));
+    // Setup is a pre-Run flow entry; if the user's stepping back into Setup
+    // from a post-run state (e.g. via /restart or repeat-run paths) we must
+    // not leave the router short-circuited past Run.
+    this.clearPostRunStateForBackNav();
+    this.emitChange();
+    return true;
+  }
+
+  // ── Back-navigation reverts ────────────────────────────────────
+  // Each helper here un-completes one flow entry. They're invoked via
+  // FlowEntry.revert callbacks from flows.ts during goBack().
+
+  /**
+   * Clear post-Run state so a back-nav into pre-Run territory doesn't
+   * leave the router short-circuited past the agent run / outro.
+   *
+   * Called by every reset helper that lands the user on a screen *before*
+   * the Run entry. Without this, after a back-nav the router would see
+   * `runPhase === Completed` and skip Run (and any post-run flow entries
+   * with completed isComplete predicates), routing the user straight to
+   * stale post-run state.
+   *
+   * `outroData` is also cleared because the OutroKind.Cancel branch in
+   * router.resolve() jumps directly to Outro regardless of pipeline order.
+   *
+   * No-op when there's nothing to clear, so calling it is safe whether or
+   * not the run actually started.
+   */
+  private clearPostRunStateForBackNav(): void {
+    this.$session.setKey('runPhase', RunPhase.Idle);
+    this.$session.setKey('runStartedAt', null);
+    this.$session.setKey('outroData', null);
+    this.$session.setKey('mcpComplete', false);
+    this.$session.setKey('mcpOutcome', null);
+    this.$session.setKey('mcpInstalledClients', []);
+    this.$session.setKey('slackComplete', false);
+    this.$session.setKey('slackOutcome', null);
+    this.$session.setKey('dataIngestionConfirmed', false);
+    this.$session.setKey('optInFeaturesComplete', false);
+    this.$session.setKey('additionalFeatureQueue', []);
+    this.$session.setKey('additionalFeatureCurrent', null);
+    this.$session.setKey('additionalFeatureCompleted', []);
+  }
+
+  /**
+   * Revert past the Auth step back to RegionSelect. Region affects the
+   * OAuth host, so we drop pending tokens, the cached org list, and any
+   * resolved credentials so the next pass actually re-authenticates.
+   */
+  resetAuthForRegionChange(): void {
+    this.$session.setKey('region', null);
+    this.$session.setKey('regionForced', true);
+    this.$session.setKey('credentials', null);
+    this.$session.setKey('pendingAuthAccessToken', null);
+    this.$session.setKey('pendingAuthIdToken', null);
+    this.$session.setKey('pendingOrgs', null);
+    this.$session.setKey('selectedOrgId', null);
+    this.$session.setKey('selectedOrgName', null);
+    this.$session.setKey('selectedProjectId', null);
+    this.$session.setKey('selectedProjectName', null);
+    this.$session.setKey('selectedAppId', null);
+    this.$session.setKey('selectedEnvName', null);
+    this.$session.setKey('projectHasData', null);
+    this.clearPostRunStateForBackNav();
+    analytics.wizardCapture('back navigation', { from: 'auth', to: 'region' });
+    this.emitChange();
+  }
+
+  /**
+   * Confirm the silently-resolved org/project on a returning run.
+   * Clears `requiresAccountConfirmation` so the Auth flow gate advances.
+   */
+  confirmAccount(): void {
+    this.$session.setKey('requiresAccountConfirmation', false);
+    analytics.wizardCapture('account confirmed', {
+      'from screen': 'auth',
+      'org id': this.session.selectedOrgId,
+      'project id': this.session.selectedProjectId,
+    });
+    this.emitChange();
+  }
+
+  /**
+   * Reject the silently-resolved org/project on a returning run and drop
+   * back to the SUSI picker. Drops the cached selection AND credentials
+   * so AuthScreen re-runs the OAuth-to-picker pipeline; the cached idToken
+   * is still used (no fresh browser round-trip required) but the user can
+   * pick a different org / project / environment this time.
+   */
+  rejectStoredAccount(): void {
+    this.$session.setKey('requiresAccountConfirmation', false);
+    this.$session.setKey('credentials', null);
+    this.$session.setKey('selectedOrgId', null);
+    this.$session.setKey('selectedOrgName', null);
+    this.$session.setKey('selectedProjectId', null);
+    this.$session.setKey('selectedProjectName', null);
+    this.$session.setKey('selectedAppId', null);
+    this.$session.setKey('selectedEnvName', null);
+    this.$session.setKey('projectHasData', null);
+    analytics.wizardCapture('account rejected', { 'from screen': 'auth' });
+    this.emitChange();
+  }
+
+  /**
+   * Wipe in-memory auth state after the user confirmed /logout (disk
+   * credentials are cleared by LogoutScreen itself). Routes through
+   * `setKey` so per-key listeners (`listenKeys`) fire — direct
+   * `store.session.X = null` assignments only notify version-bumped
+   * subscribers and silently miss key-scoped subscriptions.
+   */
+  clearAuthForLogout(): void {
+    this.$session.setKey('credentials', null);
+    this.$session.setKey('userEmail', null);
+    this.$session.setKey('selectedOrgId', null);
+    this.$session.setKey('selectedOrgName', null);
+    this.$session.setKey('selectedProjectId', null);
+    this.$session.setKey('selectedProjectName', null);
+    this.$session.setKey('selectedAppId', null);
+    this.$session.setKey('selectedEnvName', null);
+    this.$session.setKey('projectHasData', null);
+    this.emitChange();
+  }
+
+  /**
+   * Revert past the Auth step back into the org/workspace picker. Keeps
+   * credentials so we don't force a fresh OAuth round-trip — only the
+   * picked identity is cleared.
+   */
+  clearOrgAndProjectSelection(): void {
+    this.$session.setKey('selectedOrgId', null);
+    this.$session.setKey('selectedOrgName', null);
+    this.$session.setKey('selectedProjectId', null);
+    this.$session.setKey('selectedProjectName', null);
+    this.$session.setKey('selectedAppId', null);
+    this.$session.setKey('selectedEnvName', null);
+    this.$session.setKey('projectHasData', null);
+    this.clearPostRunStateForBackNav();
+    analytics.wizardCapture('back navigation', {
+      from: 'data-setup',
+      to: 'auth',
+    });
+    this.emitChange();
+  }
+
+  /** Re-run the activation check on the next visit to DataSetup. */
+  resetActivationCheck(): void {
+    this.$session.setKey('projectHasData', null);
+    this.$session.setKey('activationLevel', 'none');
+    this.$session.setKey('activationOptionsComplete', false);
+    this.$session.setKey('localInstrumentationComplete', false);
+    this.clearPostRunStateForBackNav();
+    analytics.wizardCapture('back navigation', { to: 'data-setup' });
+    this.emitChange();
+  }
+
+  /** Re-show the activation-options picker. */
+  resetActivationOptions(): void {
+    this.$session.setKey('activationOptionsComplete', false);
+    this.clearPostRunStateForBackNav();
+    analytics.wizardCapture('back navigation', { to: 'activation-options' });
+    this.emitChange();
+  }
+
+  /** Re-show the feature opt-in picklist. */
+  resetFeatureOptIn(): void {
+    // Note: clearPostRunStateForBackNav also clears optInFeaturesComplete,
+    // but we keep the explicit set above for clarity since this method's
+    // primary purpose is reverting that flag.
+    this.$session.setKey('optInFeaturesComplete', false);
+    this.clearPostRunStateForBackNav();
+    analytics.wizardCapture('back navigation', { to: 'feature-opt-in' });
+    this.emitChange();
+  }
+
+  /** Re-show the MCP install picker. */
+  resetMcp(): void {
+    this.$session.setKey('mcpComplete', false);
+    this.$session.setKey('mcpOutcome', null);
+    this.$session.setKey('mcpInstalledClients', []);
+    analytics.wizardCapture('back navigation', { to: 'mcp' });
+    this.emitChange();
+  }
+
+  /** Re-enter the wait-for-events screen. */
+  resetDataIngestion(): void {
+    this.$session.setKey('dataIngestionConfirmed', false);
+    analytics.wizardCapture('back navigation', { to: 'data-ingestion' });
+    this.emitChange();
+  }
+
+  /** Re-show the Slack setup prompt. */
+  resetSlack(): void {
+    this.$session.setKey('slackComplete', false);
+    this.$session.setKey('slackOutcome', null);
+    analytics.wizardCapture('back navigation', { to: 'slack' });
     this.emitChange();
   }
 
@@ -842,6 +1717,33 @@ export class WizardStore {
     return this.router.lastNavDirection;
   }
 
+  /** Whether the user can step back from the current screen. */
+  canGoBack(): boolean {
+    return this.router.canGoBack(this.session);
+  }
+
+  /**
+   * Step back to the previous decision. Returns true if a revert fired.
+   * No-ops (returns false) when the active screen is a back-stop, has no
+   * prior revertible step, or an overlay is currently active.
+   */
+  goBack(): boolean {
+    // Suppress direction/transition in emitChange during reverts so the
+    // single _detectTransition below fires with the correct 'pop' direction.
+    this._reverting = true;
+    const ok = this.router.goBack(this.session, this);
+    this._reverting = false;
+    if (!ok) return false;
+    // router already flipped direction to 'pop'. Bump version + run the
+    // transition hooks so React + analytics observe the move.
+    this.$version.set(this.$version.get() + 1);
+    this._detectTransition();
+    return true;
+  }
+
+  /** True while a revert callback is executing inside goBack(). */
+  private _reverting = false;
+
   // ── Change notification ─────────────────────────────────────────
 
   getVersion(): number {
@@ -853,9 +1755,13 @@ export class WizardStore {
    * The router re-resolves the active screen on next render.
    */
   emitChange(): void {
-    this.router._setDirection('push');
+    if (!this._reverting) {
+      this.router._setDirection('push');
+    }
     this.$version.set(this.$version.get() + 1);
-    this._detectTransition();
+    if (!this._reverting) {
+      this._detectTransition();
+    }
   }
 
   // ── Overlay navigation ──────────────────────────────────────────
@@ -941,24 +1847,194 @@ export class WizardStore {
     this.emitChange();
   }
 
+  /**
+   * Cap on how many file-write rows we retain before evicting the oldest.
+   * The inner agent occasionally touches dozens of files (skill installs,
+   * lint passes, multi-step refactors) — keeping all of them alive in
+   * the TUI would blow our render budget on small terminals. Recent
+   * writes are the user-relevant signal; keep the tail.
+   */
+  static readonly MAX_FILE_WRITES = 50;
+
+  /**
+   * Append (or restart) a file write row from a `recordFileChangePlanned`
+   * call. If the same absolute path is already in `'planned'` state, we
+   * collapse the duplicate (MultiEdit fans out per file but the agent's
+   * PreToolUse fires once per tool invocation — defensive).
+   */
+  recordFileChangePlanned(data: {
+    path: string;
+    operation: 'create' | 'modify' | 'delete';
+  }): void {
+    const now = Date.now();
+    const next: FileWriteEntry = {
+      path: data.path,
+      operation: data.operation,
+      status: 'planned',
+      startedAt: now,
+    };
+    const existing = this.$fileWrites.get();
+    // Collapse a back-to-back duplicate (same path, still planned). Otherwise
+    // append. Eviction at MAX_FILE_WRITES keeps the array bounded.
+    const dedupedTail =
+      existing.length > 0 &&
+      existing[existing.length - 1].path === data.path &&
+      existing[existing.length - 1].status === 'planned'
+        ? existing.slice(0, -1)
+        : existing;
+    const appended = [...dedupedTail, next];
+    const bounded =
+      appended.length > WizardStore.MAX_FILE_WRITES
+        ? appended.slice(appended.length - WizardStore.MAX_FILE_WRITES)
+        : appended;
+    this.$fileWrites.set(bounded);
+    this.$fileWritesTotal.set(this.$fileWritesTotal.get() + 1);
+    this.emitChange();
+  }
+
+  /**
+   * Mark the most recent matching planned row as applied. We match the
+   * most recent occurrence (in case the same file is rewritten later in
+   * the run). If no planned row exists (the planned event was lost or the
+   * applied event arrived first), append a synthesized row that's
+   * already-completed — better to surface the write than silently drop
+   * it.
+   */
+  recordFileChangeApplied(data: {
+    path: string;
+    operation: 'create' | 'modify' | 'delete';
+    bytes?: number;
+  }): void {
+    const now = Date.now();
+    const existing = this.$fileWrites.get();
+    for (let i = existing.length - 1; i >= 0; i--) {
+      if (existing[i].path === data.path && existing[i].status === 'planned') {
+        const updated = [...existing];
+        updated[i] = {
+          ...existing[i],
+          status: 'applied',
+          completedAt: now,
+          bytes: data.bytes,
+        };
+        this.$fileWrites.set(updated);
+        this.emitChange();
+        return;
+      }
+    }
+    // No matching planned row — synthesize a completed entry.
+    const synthesized: FileWriteEntry = {
+      path: data.path,
+      operation: data.operation,
+      status: 'applied',
+      startedAt: now,
+      completedAt: now,
+      bytes: data.bytes,
+    };
+    const appended = [...existing, synthesized];
+    const bounded =
+      appended.length > WizardStore.MAX_FILE_WRITES
+        ? appended.slice(appended.length - WizardStore.MAX_FILE_WRITES)
+        : appended;
+    this.$fileWrites.set(bounded);
+    this.$fileWritesTotal.set(this.$fileWritesTotal.get() + 1);
+    this.emitChange();
+  }
+
+  /**
+   * Apply a deterministic journey transition derived from a tool call
+   * (see `src/lib/journey-state.ts`). Status of the named step is set to
+   * the incoming value with a monotonic guard — once a step has reached
+   * `completed`, no later transition demotes it. Sequential-ordering
+   * cascade (a later step advancing implies all earlier ones are done)
+   * is applied at render time.
+   *
+   * This is the source of truth for the canonical 5-step UI status.
+   * `syncTodos` only refreshes per-step `activeForm` flavor text; it
+   * never writes status here.
+   */
+  applyJourneyTransition(stepId: JourneyStepId, status: JourneyStatus): void {
+    const prev = this.$derivedJourney.get();
+    const current = prev[stepId];
+    // Monotonic guard — once completed, can't regress to in_progress.
+    if (current === 'completed' && status !== 'completed') return;
+    if (current === status) return;
+    this.$derivedJourney.set({ ...prev, [stepId]: status });
+    this.renderJourneyTasks();
+    this.emitChange();
+  }
+
+  /**
+   * Refresh per-step `activeForm` text from the agent's `TodoWrite`
+   * output. Status is owned by `applyJourneyTransition`; this method
+   * never touches it. Incoming todos that don't exactly match a
+   * canonical label are dropped.
+   *
+   * Safe fallback: when no journey transition has fired yet (early in a
+   * run, or in tests that exercise syncTodos directly), the renderer
+   * still seeds the canonical 5 rows as `pending` so the user-visible
+   * list is never empty.
+   */
   syncTodos(
     todos: Array<{ content: string; status: string; activeForm?: string }>,
   ): void {
-    const incoming = todos.map((t) => ({
-      label: t.content,
-      activeForm: t.activeForm,
-      status: (t.status as TaskStatus) || TaskStatus.Pending,
-      done: (t.status as TaskStatus) === TaskStatus.Completed,
-    }));
-
-    const incomingLabels = new Set(incoming.map((t) => t.label));
-
-    const retained = this.$tasks
-      .get()
-      .filter((t) => t.done && !incomingLabels.has(t.label));
-
-    this.$tasks.set([...retained, ...incoming]);
+    const next: Partial<Record<JourneyStepId, string>> = {
+      ...this.$journeyActiveForms.get(),
+    };
+    for (const todo of todos) {
+      const idx = matchCanonicalStep(todo.content);
+      if (idx < 0) continue;
+      if (todo.activeForm && todo.activeForm.trim()) {
+        next[CANONICAL_STEPS[idx].id] = todo.activeForm;
+      }
+    }
+    this.$journeyActiveForms.set(next);
+    this.renderJourneyTasks();
     this.emitChange();
+  }
+
+  /**
+   * Re-render the canonical 5-row task list from the derived journey
+   * status + per-step activeForms. Sequential-ordering cascade applied
+   * here: when step N is in_progress or completed, every step before
+   * N rolls up to completed (the agent has demonstrably moved past
+   * them). Single-in-progress is implicit — the cascade walks earlier
+   * in_progress states up to completed.
+   */
+  private renderJourneyTasks(): void {
+    const derived = this.$derivedJourney.get();
+    const activeForms = this.$journeyActiveForms.get();
+
+    let frontier = -1;
+    for (let i = 0; i < CANONICAL_STEPS.length; i++) {
+      const status = derived[CANONICAL_STEPS[i].id];
+      if (status === 'in_progress' || status === 'completed') frontier = i;
+    }
+
+    const tasks: TaskItem[] = CANONICAL_STEPS.map((step, i) => {
+      let status: TaskStatus = TaskStatus.Pending;
+      const explicit = derived[step.id];
+      if (explicit === 'completed') {
+        status = TaskStatus.Completed;
+      } else if (explicit === 'in_progress') {
+        // Sequential cascade still applies — if a later step has been
+        // touched, this in_progress is stale (the agent moved on
+        // without explicitly completing this step). Promote to
+        // Completed so the user-visible list stays single-in_progress.
+        status = i < frontier ? TaskStatus.Completed : TaskStatus.InProgress;
+      } else if (i < frontier) {
+        // Sequential cascade — a later step has advanced, so this
+        // earlier step must be done by definition.
+        status = TaskStatus.Completed;
+      }
+      return {
+        label: step.label,
+        activeForm: activeForms[step.id] ?? step.defaultActiveForm,
+        status,
+        done: status === TaskStatus.Completed,
+      };
+    });
+
+    this.$tasks.set(tasks);
   }
 
   // ── React integration ───────────────────────────────────────────

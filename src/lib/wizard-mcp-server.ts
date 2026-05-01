@@ -21,13 +21,18 @@ import { z } from 'zod';
 import {
   runDetect,
   runStatus,
+  runPlan,
+  runVerify,
   getAuthStatus,
   getAuthToken,
   type DetectResult,
   type StatusResult,
   type AuthStatusResult,
   type AuthTokenResult,
+  type PlanResult,
+  type VerifyResult,
 } from './agent-ops.js';
+import { wrapMcpServerWithSentry } from './observability/index.js';
 
 const SERVER_NAME = 'amplitude-wizard';
 const SERVER_VERSION = '1.0.0';
@@ -113,6 +118,62 @@ export function registerWizardTools(server: WizardMcpToolRegistrar): void {
     },
   );
 
+  // -- plan_setup ---------------------------------------------------------
+  server.registerTool(
+    'plan_setup',
+    {
+      title: 'Plan an Amplitude setup',
+      description:
+        'Run the planning phase: detect the framework, build a structured ' +
+        'WizardPlan (framework, sdk, intended file changes), and persist it ' +
+        'to disk under a fresh planId. NO files are touched. The returned ' +
+        '`planId` can be passed to `apply` (CLI: `amplitude-wizard apply ' +
+        '--plan-id <id> --yes`) to actually execute the plan within 24h. ' +
+        'This tool is read-only and safe to call repeatedly — each call ' +
+        'creates a new plan.',
+      inputSchema: {
+        installDir: z
+          .string()
+          .optional()
+          .describe(
+            'Absolute path to the project to plan against. Defaults to the current working directory.',
+          ),
+      },
+    },
+    async (args: unknown) => {
+      const { installDir } = (args ?? {}) as { installDir?: string };
+      const result: PlanResult = await runPlan(installDir ?? process.cwd());
+      return jsonContent(result);
+    },
+  );
+
+  // -- verify_setup -------------------------------------------------------
+  server.registerTool(
+    'verify_setup',
+    {
+      title: 'Verify an Amplitude setup',
+      description:
+        'Cheap, no-network check that the project has the Amplitude SDK ' +
+        'installed, an API key configured, and a detectable framework. ' +
+        'Returns { outcome: "pass" | "fail", failures: [...] } with ' +
+        'structured reasons for any failures. Does NOT poll for ingestion; ' +
+        'use the CLI for that.',
+      inputSchema: {
+        installDir: z
+          .string()
+          .optional()
+          .describe(
+            'Absolute path to the project to verify. Defaults to the current working directory.',
+          ),
+      },
+    },
+    async (args: unknown) => {
+      const { installDir } = (args ?? {}) as { installDir?: string };
+      const result: VerifyResult = await runVerify(installDir ?? process.cwd());
+      return jsonContent(result);
+    },
+  );
+
   // -- get_auth_status ----------------------------------------------------
   server.registerTool(
     'get_auth_status',
@@ -169,10 +230,15 @@ export async function startAgentMcpServer(): Promise<void> {
     '@modelcontextprotocol/sdk/server/stdio.js'
   );
 
-  const server = new McpServer({
+  const rawServer = new McpServer({
     name: SERVER_NAME,
     version: SERVER_VERSION,
   });
+
+  // Wrap with Sentry auto-instrumentation BEFORE registering tools so every
+  // tool call gets a span automatically. Wrapping is a no-op when telemetry
+  // is disabled — returns the raw server unchanged.
+  const server = wrapMcpServerWithSentry(rawServer);
 
   registerWizardTools(server as unknown as WizardMcpToolRegistrar);
 
@@ -183,6 +249,9 @@ export async function startAgentMcpServer(): Promise<void> {
     if (shuttingDown) return;
     shuttingDown = true;
     try {
+      // Awaiting server.close() lets in-flight tool calls finish their
+      // current write before the transport tears down, instead of being
+      // truncated mid-response when the kernel signal lands.
       await server.close();
     } catch {
       /* ignore close errors during shutdown */
@@ -190,8 +259,26 @@ export async function startAgentMcpServer(): Promise<void> {
     process.exit(exitCode);
   };
 
-  process.on('SIGINT', () => void shutdown(0));
-  process.on('SIGTERM', () => void shutdown(0));
+  // Use awaited async handlers so any rejection inside shutdown surfaces
+  // as a logged failure rather than an unhandled-promise warning. The
+  // prior `void shutdown(0)` form discarded errors silently and could
+  // race the close() call against process.exit().
+  const handleSignal = (signal: NodeJS.Signals): void => {
+    void (async () => {
+      try {
+        await shutdown(0);
+      } catch (err) {
+        process.stderr.write(
+          `amplitude-wizard mcp serve: shutdown after ${signal} failed: ${
+            err instanceof Error ? err.message : String(err)
+          }\n`,
+        );
+        process.exit(1);
+      }
+    })();
+  };
+  process.on('SIGINT', () => handleSignal('SIGINT'));
+  process.on('SIGTERM', () => handleSignal('SIGTERM'));
 
   await server.connect(transport);
 

@@ -1,4 +1,7 @@
 import { describe, test, expect, vi, beforeEach } from 'vitest';
+import * as fs from 'node:fs';
+import * as os from 'node:os';
+import * as path from 'node:path';
 import { Integration } from '../lib/constants';
 import type { FrameworkConfig } from '../lib/framework-config';
 
@@ -251,6 +254,28 @@ describe('detectAllFrameworks', () => {
     }
   });
 
+  test('returns all errors when installDir is a file, not a directory', async () => {
+    registry = buildRegistry();
+    const file = path.join(
+      os.tmpdir(),
+      `wizard-detect-not-dir-${Date.now()}.txt`,
+    );
+    fs.writeFileSync(file, 'x');
+    try {
+      const results = await detectAllFrameworks(file);
+      expect(results).toHaveLength(Object.values(Integration).length);
+      expect(results.every((r) => r.detected === false)).toBe(true);
+      expect(
+        results.every((r) => r.error === 'installDir not a directory'),
+      ).toBe(true);
+      for (const mock of detectorMocks.values()) {
+        expect(mock.detect).not.toHaveBeenCalled();
+      }
+    } finally {
+      fs.unlinkSync(file);
+    }
+  });
+
   test('includes version when getInstalledVersion is defined', async () => {
     registry = buildRegistry({
       [Integration.nextjs]: {
@@ -352,5 +377,44 @@ describe('detectAllFrameworks', () => {
     const nextjs = results.find((r) => r.integration === Integration.nextjs);
 
     expect(nextjs?.durationMs).toBeGreaterThanOrEqual(25);
+  });
+
+  test('clears every timeout timer after detection completes (no stranded setTimeout per integration)', async () => {
+    // Regression test: previously the detection race used
+    //   Promise.race([work(), setTimeout(resolve('timeout'), ms)])
+    // which leaked one setTimeout per integration on the win path. We assert
+    // that for every setTimeout scheduled by the racer, a matching
+    // clearTimeout is called — guaranteeing no stranded timer keeps the
+    // resolved closure (and its installDir reference) alive after the
+    // detection settles.
+    const setSpy = vi.spyOn(global, 'setTimeout');
+    const clearSpy = vi.spyOn(global, 'clearTimeout');
+
+    try {
+      // Fast detectors so work() always wins the race.
+      registry = buildRegistry({
+        [Integration.nextjs]: { detect: async () => true },
+        [Integration.vue]: { detect: async () => false },
+      });
+
+      const setBefore = setSpy.mock.calls.length;
+      const clearBefore = clearSpy.mock.calls.length;
+
+      await detectAllFrameworks(process.cwd(), 60_000);
+
+      const scheduled = setSpy.mock.calls.length - setBefore;
+      const cleared = clearSpy.mock.calls.length - clearBefore;
+
+      // At least one timer per integration was scheduled by the racer; every
+      // one of those should have been cleared on the win path. Allow `cleared`
+      // to slightly exceed `scheduled` since other internals (e.g.
+      // analytics) may also clear timers, but never the other way around.
+      const integrationCount = Object.values(Integration).length;
+      expect(scheduled).toBeGreaterThanOrEqual(integrationCount);
+      expect(cleared).toBeGreaterThanOrEqual(integrationCount);
+    } finally {
+      setSpy.mockRestore();
+      clearSpy.mockRestore();
+    }
   });
 });

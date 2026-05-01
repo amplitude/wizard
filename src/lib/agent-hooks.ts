@@ -128,8 +128,39 @@ export const agentHooks: AgentHook[] = [
   },
 ];
 
+// Per-hook upper bounds (seconds). The SDK reads these via the
+// `HookCallbackMatcher.timeout` field; if a hook callback overruns, the
+// SDK aborts the wait and proceeds. Without a cap, a hung hook callback
+// would pin the agent until the outer message-stream stall timer fired
+// — currently 60s — which means losing the entire SDK turn for what was
+// usually a sub-second observer.
+//
+// Sizing principle:
+//   - Observer hooks (PostToolUse, SessionStart, UserPromptSubmit,
+//     PreCompact) are sub-second in the happy path; 5s is generous and
+//     catches pathological cases (slow disk, hung NDJSON pipe, hung
+//     telemetry call).
+//   - Stop runs at end-of-turn and end-of-run with model reflection
+//     work; production logs showed reflections regularly burning the
+//     full 30s budget and feeling "frozen" right at the moment of
+//     "we're done!". 8s is the empirical 95p for the queue-drain
+//     happy path.
+//
+// PreToolUse is intentionally NOT capped here. It runs the wizard's
+// safety scanner (`scanBashCommandForDestructive`); if a timeout
+// fired, the SDK would treat the call as "no decision" and let the
+// bash command through — a rare-but-possible safety bypass. Bad UX
+// (a hung scanner stalls 60s before the outer stall timer aborts the
+// whole turn) is the right trade vs. a safety regression. The
+// scanner is sync regex matching that should never take >100ms in
+// practice; if it ever does, the cost shows up as a stall and we
+// fix the scanner, not the timeout.
 const HOOK_TIMEOUTS: Partial<Record<HookEvent, number>> = {
-  Stop: 30,
+  PostToolUse: 5,
+  SessionStart: 5,
+  UserPromptSubmit: 5,
+  PreCompact: 5,
+  Stop: 8,
 };
 
 /**

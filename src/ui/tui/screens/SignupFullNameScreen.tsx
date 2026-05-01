@@ -1,3 +1,12 @@
+/**
+ * SignupFullNameScreen — Collect the user's full name when the signup
+ * server responds with needs_information(['full_name']).
+ *
+ * Validates non-empty input after trim and writes the trimmed value to
+ * `session.signupFullName` via `store.setSignupFullName`. The router
+ * then re-posts the signup request with the collected field.
+ */
+
 import { Box, Text } from 'ink';
 import { useState } from 'react';
 import { TextInput } from '@inkjs/ui';
@@ -5,11 +14,11 @@ import type { WizardStore } from '../store.js';
 import { useWizardStore } from '../hooks/useWizardStore.js';
 import { Colors, Icons } from '../styles.js';
 
-interface Props {
+interface SignupFullNameScreenProps {
   store: WizardStore;
 }
 
-export const SignupFullNameScreen = ({ store }: Props) => {
+export const SignupFullNameScreen = ({ store }: SignupFullNameScreenProps) => {
   useWizardStore(store);
 
   const [error, setError] = useState<string | null>(null);
@@ -28,13 +37,9 @@ export const SignupFullNameScreen = ({ store }: Props) => {
     <Box flexDirection="column" flexGrow={1}>
       <Box flexDirection="column" marginBottom={1}>
         <Text bold color={Colors.heading}>
-          What name should we use for your new Amplitude account?
-        </Text>
-        <Text color={Colors.muted}>
-          You can change this later in your account settings.
+          Enter your full name:
         </Text>
       </Box>
-
       <Box flexDirection="column" gap={1}>
         <TextInput placeholder="Jane Doe" onSubmit={handleSubmit} />
         {error && (

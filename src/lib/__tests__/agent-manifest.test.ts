@@ -39,12 +39,19 @@ describe('getAgentManifest', () => {
     expect(names).toContain('--ci');
   });
 
+  it('lists the capability-matrix flags (--yes, --auto-approve, --force)', () => {
+    const names = manifest.globalFlags.map((f) => f.name);
+    expect(names).toContain('--yes');
+    expect(names).toContain('--auto-approve');
+    expect(names).toContain('--force');
+  });
+
   it('surfaces --app-id as the single scope selector for agents', () => {
     const names = manifest.globalFlags.map((f) => f.name);
     expect(names).toContain('--app-id');
     // Canonical term: `app` / `app_id` across both monorepos.
-    // Legacy --project-id is a parseable alias but NOT advertised in the
-    // manifest, nor are --workspace-id / --org / --env — agents should
+    // Legacy --project-id / --workspace-id are parseable aliases but NOT
+    // advertised in the manifest, nor are --org / --env — agents should
     // select scope via --app-id alone.
     expect(names).not.toContain('--project-id');
     expect(names).not.toContain('--workspace-id');
@@ -53,11 +60,12 @@ describe('getAgentManifest', () => {
   });
 
   it('documents the Amplitude data-model hierarchy', () => {
-    // Canonical hierarchy from amplitude/amplitude (Python `orgs`/`app_id`)
-    // and amplitude/javascript (stargate `Org { workspaces → environments → app }`).
+    // User-facing hierarchy: "project" replaces legacy "workspace" term to
+    // match Amplitude's website. The backend still calls the project-level
+    // container a "workspace" internally (GraphQL `workspaces` field).
     expect(manifest.concepts.hierarchy).toEqual([
       'org',
-      'workspace',
+      'project',
       'app',
       'environment',
     ]);
@@ -95,6 +103,11 @@ describe('getAgentManifest', () => {
     expect(names).toContain('AMPLITUDE_WIZARD_ALLOW_NESTED');
   });
 
+  it('documents AMPLITUDE_WIZARD_MAX_TURNS env var', () => {
+    const names = manifest.env.map((e) => e.name);
+    expect(names).toContain('AMPLITUDE_WIZARD_MAX_TURNS');
+  });
+
   it('includes the new agent-native commands', () => {
     const names = manifest.commands.map((c) => c.command);
     expect(names).toContain('detect');
@@ -103,6 +116,19 @@ describe('getAgentManifest', () => {
     expect(names).toContain('auth token');
     expect(names).toContain('manifest');
     expect(names).toContain('mcp serve');
+  });
+
+  it('includes the plan / apply / verify subcommands', () => {
+    const names = manifest.commands.map((c) => c.command);
+    expect(names).toContain('plan');
+    expect(names).toContain('apply');
+    expect(names).toContain('verify');
+
+    // `apply` must declare --plan-id so agents know how to feed in
+    // the planId returned by `plan`.
+    const apply = manifest.commands.find((c) => c.command === 'apply');
+    const applyFlagNames = apply?.flags?.map((f) => f.name) ?? [];
+    expect(applyFlagNames).toContain('--plan-id');
   });
 
   it('is JSON-serializable (contract: stdout-writable)', () => {

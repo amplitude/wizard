@@ -13,6 +13,12 @@ describe('session-constants sync', () => {
     expect(tui.RunPhase).toStrictEqual(canonical.RunPhase);
   });
 
+  it('PostAgentStepStatus values match wizard-session', () => {
+    expect(tui.PostAgentStepStatus).toStrictEqual(
+      canonical.PostAgentStepStatus,
+    );
+  });
+
   it('McpOutcome values match wizard-session', () => {
     expect(tui.McpOutcome).toStrictEqual(canonical.McpOutcome);
   });
@@ -32,6 +38,24 @@ describe('session-constants sync', () => {
   it('ADDITIONAL_FEATURE_LABELS values match wizard-session', () => {
     expect(tui.ADDITIONAL_FEATURE_LABELS).toStrictEqual(
       canonical.ADDITIONAL_FEATURE_LABELS,
+    );
+  });
+
+  it('INLINE_FEATURES values match wizard-session', () => {
+    expect([...tui.INLINE_FEATURES].sort()).toStrictEqual(
+      [...canonical.INLINE_FEATURES].sort(),
+    );
+  });
+
+  it('TRAILING_FEATURES values match wizard-session', () => {
+    expect([...tui.TRAILING_FEATURES].sort()).toStrictEqual(
+      [...canonical.TRAILING_FEATURES].sort(),
+    );
+  });
+
+  it('OPT_IN_DISCOVERED_FEATURES values match wizard-session', () => {
+    expect([...tui.OPT_IN_DISCOVERED_FEATURES].sort()).toStrictEqual(
+      [...canonical.OPT_IN_DISCOVERED_FEATURES].sort(),
     );
   });
 });

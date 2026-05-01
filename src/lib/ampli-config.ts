@@ -1,18 +1,15 @@
 /**
- * Types and logic for the project-level ~/.ampli.json configuration file.
+ * Types and logic for the wizard's project-level Amplitude binding.
  *
- * The ampli CLI reads and writes this file (named "ampli.json") in the project
- * directory to track which Amplitude workspace, source, and branch a project is
- * connected to. The wizard creates or updates this file during setup.
- *
- * Types are modelled after the ampli CLI's Settings class
- * (ampli/src/settings/index.ts) and are intentionally kept compatible.
+ * The canonical on-disk location is `<installDir>/.amplitude/project-binding.json`.
+ * Legacy `ampli.json` in the project root remains readable (and is written
+ * during transition) for older workflows.
  *
  * UNIT-TESTABLE SURFACE (pure, no I/O):
  *   parseAmpliConfig, validateAmpliConfig, mergeAmpliConfig,
  *   isConfigured, isMinimllyConfigured
  *
- * I/O SURFACE (not unit-testable in isolation):
+ * I/O SURFACE:
  *   readAmpliConfig, writeAmpliConfig, ampliConfigExists
  */
 
@@ -20,6 +17,15 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { z } from 'zod';
 import type { AmplitudeZone } from './constants.js';
+import { atomicWriteJSON } from '../utils/atomic-write.js';
+import {
+  ensureDir,
+  getProjectBindingFile,
+  getProjectMetaDir,
+} from '../utils/storage-paths.js';
+import { createLogger } from './observability/logger.js';
+
+const log = createLogger('ampli-config');
 
 export const AMPLI_CONFIG_FILENAME = 'ampli.json';
 
@@ -32,7 +38,9 @@ export const AMPLI_CONFIG_FILENAME = 'ampli.json';
 export interface AmpliConfig {
   /** UUID of the Amplitude organization */
   OrgId?: string;
-  /** UUID of the Amplitude workspace */
+  /** UUID of the Amplitude project (formerly "workspace") */
+  ProjectId?: string;
+  /** @deprecated use ProjectId — kept for read-time back-compat migration */
   WorkspaceId?: string;
   /** UUID of the data source (tracking plan source) */
   SourceId?: string;
@@ -60,17 +68,42 @@ export interface AmpliConfig {
   SourceDirs?: string[];
   /** Named Amplitude SDK instances to generate */
   InstanceNames?: string[];
+  /**
+   * Numeric Amplitude app id (a.k.a. "Project ID" in the Amplitude UI).
+   * Stored as a string for forward compat with non-numeric ids and
+   * because JSON has no integer-vs-string distinction at this scale.
+   * Persisted by the wizard at the end of a successful run so a follow-up
+   * agent session can read it back without re-running env selection —
+   * the source of truth for "which Amplitude app does this codebase
+   * write events into."
+   */
+  AppId?: string;
+  /** Display name for `AppId`. Diagnostic only — `AppId` is the join key. */
+  AppName?: string;
+  /** Amplitude environment label that `AppId` resolved against (Production/Dev/etc). */
+  EnvName?: string;
+  /** Last dashboard URL the wizard created during this codebase's setup. */
+  DashboardUrl?: string;
+  /** Convenience id parsed from `DashboardUrl`. */
+  DashboardId?: string;
 }
 
 export type AmpliConfigParseResult =
   | { ok: true; config: AmpliConfig }
-  | { ok: false; error: 'not_found' | 'invalid_json' | 'merge_conflicts' };
+  | {
+      ok: false;
+      error: 'not_found' | 'read_error' | 'invalid_json' | 'merge_conflicts';
+    };
 
 // ── Pure logic (unit-testable) ────────────────────────────────────────────────
 
 const AmpliConfigSchema = z
   .object({
     OrgId: z.string().optional(),
+    ProjectId: z.string().optional(),
+    // Kept readable for back-compat with ampli.json files written before the
+    // workspace → project rename. parseAmpliConfig migrates it to ProjectId
+    // at the read boundary; everything downstream only sees ProjectId.
     WorkspaceId: z.string().optional(),
     SourceId: z.string().optional(),
     Branch: z.string().optional(),
@@ -85,12 +118,24 @@ const AmpliConfigSchema = z
     OmitApiKeys: z.boolean().optional(),
     SourceDirs: z.array(z.string()).optional(),
     InstanceNames: z.array(z.string()).optional(),
+    AppId: z.string().optional(),
+    AppName: z.string().optional(),
+    EnvName: z.string().optional(),
+    DashboardUrl: z.string().optional(),
+    DashboardId: z.string().optional(),
   })
   .passthrough();
 
 /**
  * Parse a raw JSON string into an AmpliConfig.
  * Returns a typed result rather than throwing.
+ *
+ * Read-time migration: if a legacy `WorkspaceId` field is present and the new
+ * `ProjectId` is absent, the value is copied to `ProjectId` and `WorkspaceId`
+ * is dropped from the returned object. When both are present, `ProjectId`
+ * wins. This keeps the rest of the codebase unaware of the legacy key;
+ * `writeAmpliConfig` only ever emits `ProjectId`, so files auto-migrate on
+ * the user's next save.
  */
 export function parseAmpliConfig(raw: string): AmpliConfigParseResult {
   if (hasMergeConflicts(raw)) {
@@ -101,7 +146,12 @@ export function parseAmpliConfig(raw: string): AmpliConfigParseResult {
     if (!result.success) {
       return { ok: false, error: 'invalid_json' };
     }
-    return { ok: true, config: result.data as AmpliConfig };
+    const config = { ...result.data } as AmpliConfig;
+    if (config.WorkspaceId && !config.ProjectId) {
+      config.ProjectId = config.WorkspaceId;
+    }
+    delete config.WorkspaceId;
+    return { ok: true, config };
   } catch {
     return { ok: false, error: 'invalid_json' };
   }
@@ -117,10 +167,10 @@ export function isMinimallyConfigured(config: AmpliConfig): boolean {
 
 /**
  * Returns true when the config is considered fully configured: it has an org,
- * a workspace, and a source linked.
+ * a project, and a source linked.
  */
 export function isConfigured(config: AmpliConfig): boolean {
-  return Boolean(config.OrgId && config.WorkspaceId && config.SourceId);
+  return Boolean(config.OrgId && config.ProjectId && config.SourceId);
 }
 
 /**
@@ -169,50 +219,153 @@ export function ampliConfigPath(dir: string): string {
  * Returns true if ampli.json exists in the given directory.
  */
 export function ampliConfigExists(dir: string): boolean {
-  return fs.existsSync(ampliConfigPath(dir));
+  return (
+    fs.existsSync(getProjectBindingFile(dir)) ||
+    fs.existsSync(ampliConfigPath(dir))
+  );
 }
 
 /**
- * Read and parse ampli.json from the given directory.
+ * Read and parse a single binding JSON file.
  * Returns a typed result; never throws.
  */
-export function readAmpliConfig(dir: string): AmpliConfigParseResult {
-  const filePath = ampliConfigPath(dir);
+function readAmpliConfigFile(filePath: string): AmpliConfigParseResult {
   let raw: string;
   try {
     raw = fs.readFileSync(filePath, 'utf-8');
-  } catch {
-    return { ok: false, error: 'not_found' };
+  } catch (err) {
+    const code = (err as NodeJS.ErrnoException).code;
+    if (code === 'ENOENT') {
+      return { ok: false, error: 'not_found' };
+    }
+    log.debug('readAmpliConfigFile: read failed', {
+      path: filePath,
+      'error message': err instanceof Error ? err.message : String(err),
+    });
+    return { ok: false, error: 'read_error' };
   }
   return parseAmpliConfig(raw);
 }
 
 /**
- * Write an AmpliConfig object to ampli.json in the given directory.
- * Creates the directory if it does not exist.
+ * Read project binding from `.amplitude/project-binding.json`, falling back to
+ * legacy root `ampli.json`, merging when both exist (binding overrides).
  */
-export function writeAmpliConfig(dir: string, config: AmpliConfig): void {
-  fs.mkdirSync(dir, { recursive: true });
-  fs.writeFileSync(
-    ampliConfigPath(dir),
-    JSON.stringify(config, null, 2),
-    'utf-8',
-  );
+export function readAmpliConfig(dir: string): AmpliConfigParseResult {
+  const bindingPath = getProjectBindingFile(dir);
+  const legacyPath = ampliConfigPath(dir);
+  const bindingResult = readAmpliConfigFile(bindingPath);
+  const legacyResult = readAmpliConfigFile(legacyPath);
+
+  let merged: AmpliConfig | undefined;
+
+  if (legacyResult.ok) {
+    merged = legacyResult.config;
+  }
+  if (bindingResult.ok) {
+    merged = merged
+      ? mergeAmpliConfig(merged, bindingResult.config)
+      : bindingResult.config;
+  }
+
+  if (merged !== undefined) {
+    if (
+      legacyResult.ok &&
+      !bindingResult.ok &&
+      bindingResult.error === 'not_found'
+    ) {
+      try {
+        ensureDir(getProjectMetaDir(dir));
+        atomicWriteJSON(bindingPath, merged, 0o644);
+      } catch (err) {
+        log.debug('readAmpliConfig: could not migrate binding file forward', {
+          'error message': err instanceof Error ? err.message : String(err),
+        });
+      }
+    }
+    return { ok: true, config: merged };
+  }
+
+  if (
+    !bindingResult.ok &&
+    bindingResult.error === 'not_found' &&
+    !legacyResult.ok &&
+    legacyResult.error === 'not_found'
+  ) {
+    return { ok: false, error: 'not_found' };
+  }
+  if (!legacyResult.ok && legacyResult.error !== 'not_found') {
+    return legacyResult;
+  }
+  if (!bindingResult.ok && bindingResult.error !== 'not_found') {
+    return bindingResult;
+  }
+  return { ok: false, error: 'not_found' };
 }
 
 /**
- * Remove org/workspace/zone bindings from a project's ampli.json. Called on
+ * Write an AmpliConfig to the canonical binding path and mirror to legacy
+ * `ampli.json` for transition compatibility.
+ *
+ * @returns true if at least one destination was written successfully.
+ */
+export function writeAmpliConfig(dir: string, config: AmpliConfig): boolean {
+  const bindingPath = getProjectBindingFile(dir);
+  let anyOk = false;
+  try {
+    ensureDir(getProjectMetaDir(dir));
+    atomicWriteJSON(bindingPath, config, 0o644);
+    anyOk = true;
+  } catch (err) {
+    log.warn('writeAmpliConfig: canonical binding write failed', {
+      'error message': err instanceof Error ? err.message : String(err),
+    });
+  }
+  try {
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(
+      ampliConfigPath(dir),
+      JSON.stringify(config, null, 2),
+      'utf-8',
+    );
+    anyOk = true;
+  } catch (err) {
+    log.warn('writeAmpliConfig: legacy ampli.json write failed', {
+      'error message': err instanceof Error ? err.message : String(err),
+    });
+  }
+  return anyOk;
+}
+
+/**
+ * Remove org/project/zone bindings from a project's ampli.json. Called on
  * logout so a subsequent login doesn't auto-select the previous user's org
- * and workspace. Tracking-plan fields (SourceId, Branch, Version, etc.) are
+ * and project. Tracking-plan fields (SourceId, Branch, Version, etc.) are
  * preserved — they're not auth state. No-op if ampli.json is missing or
  * malformed.
+ *
+ * Also deletes the legacy `WorkspaceId` field as a belt-and-suspenders
+ * cleanup — parseAmpliConfig normalizes it away, but if the raw file still
+ * carries it (e.g. someone edited it by hand), we strip it here too.
  */
 export function clearAuthFieldsInAmpliConfig(dir: string): void {
   const result = readAmpliConfig(dir);
   if (!result.ok) return;
   const next: AmpliConfig = { ...result.config };
   delete next.OrgId;
+  delete next.ProjectId;
   delete next.WorkspaceId;
   delete next.Zone;
+  // The setup_complete fields below are also auth-scoped — they bind
+  // the project to a specific Amplitude app/env that only exists in
+  // the previously authenticated org. On logout, drop them so the
+  // next sign-in starts from a clean scope. Tracking-plan fields
+  // (SourceId, Branch, Version) survive — they belong to the project,
+  // not the user.
+  delete next.AppId;
+  delete next.AppName;
+  delete next.EnvName;
+  delete next.DashboardUrl;
+  delete next.DashboardId;
   writeAmpliConfig(dir, next);
 }

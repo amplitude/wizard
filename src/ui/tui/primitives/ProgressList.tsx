@@ -51,13 +51,21 @@ export const ProgressList = ({ items, title }: ProgressListProps) => {
             : item.label;
 
         return (
-          <Text key={i}>
-            <Text color={color}>{icon}</Text>
-            <Text color={item.status === 'pending' ? Colors.muted : undefined}>
-              {' '}
-              {label}
-            </Text>
-          </Text>
+          // Icon and label live in separate boxes so wrapped label lines
+          // hang-indent under the first label character instead of resetting
+          // to column 0 (which broke the visual hierarchy on long labels).
+          <Box key={i} flexDirection="row">
+            <Box flexShrink={0}>
+              <Text color={color}>{icon} </Text>
+            </Box>
+            <Box flexGrow={1} flexShrink={1}>
+              <Text
+                color={item.status === 'pending' ? Colors.muted : undefined}
+              >
+                {label}
+              </Text>
+            </Box>
+          </Box>
         );
       })}
       {total > 0 && (

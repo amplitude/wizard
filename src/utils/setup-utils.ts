@@ -18,22 +18,39 @@ import {
   DEFAULT_HOST_URL,
   DEFAULT_AMPLITUDE_ZONE,
   OUTBOUND_URLS,
+  type AmplitudeZone,
 } from '../lib/constants';
 import { analytics } from './analytics';
 import { getUI } from '../ui';
 import { performAmplitudeAuth } from './oauth';
+import { resolveStoredExpiryMs } from './jwt-exp';
 import { fetchAmplitudeUser, type AmplitudeOrg } from '../lib/api';
+import { type AppId, toCredentialAppId } from '../lib/wizard-session';
 import { storeToken } from './ampli-settings';
 import { detectRegionFromToken } from './urls';
+import {
+  probeOtherZoneForOrgs,
+  buildNoOrgsMessage,
+  NoOrgsError,
+} from './zone-probe';
 import { fulfillsVersionRange } from './semver';
 import { wizardAbort } from './wizard-abort';
+import {
+  ensureDir,
+  getInstallationErrorLogFile,
+  getRunDir,
+} from './storage-paths';
+// Re-exported below for backward compatibility — detection cold paths should
+// import directly from `./package-json-light` instead.
+import { tryGetPackageJson as tryGetPackageJsonLight } from './package-json-light';
 
 interface ProjectData {
   projectApiKey: string;
   accessToken: string;
   host: string;
   distinctId: string;
-  appId: number;
+  /** Branded `AppId` once known; `0` when the env hasn't been picked yet. */
+  appId: AppId | 0;
   cloudRegion: CloudRegion;
 }
 
@@ -157,26 +174,58 @@ export async function installPackage({
       )} with ${chalk.bold(pkgManager.label)}.`,
     );
 
+    // Captured by the exec callback below; read in the catch arm to surface
+    // the path in the user-facing error message. Typed as a wide union so
+    // TypeScript doesn't narrow it to the initializer once a static-analysis
+    // pass concludes the closure can't mutate it.
+    const installErrorState: { logPath: string | null } = { logPath: null };
     try {
+      // SECURITY: use execFile (no shell). The package name is wizard-derived
+      // (not user-supplied) but we still build the argv from a tokenised list
+      // so a future regression — e.g. a manifest field that ever lands in
+      // `installCommand` — can't introduce shell injection. installCommand is
+      // a multi-word string like "bun add" / "yarn add", so split on
+      // whitespace to derive [executable, ...subcommandArgs].
+      const [installExe, ...installArgs] = pkgManager.installCommand
+        .trim()
+        .split(/\s+/);
+      const flagArgs = pkgManager.flags ? pkgManager.flags.split(/\s+/) : [];
+      const forceArgs =
+        forceInstall && pkgManager.forceInstallFlag
+          ? pkgManager.forceInstallFlag.split(/\s+/)
+          : [];
+      const legacyArgs = legacyPeerDepsFlag
+        ? legacyPeerDepsFlag.split(/\s+/)
+        : [];
+
       await new Promise<void>((resolve, reject) => {
-        childProcess.exec(
-          `${pkgManager.installCommand} ${packageName} ${pkgManager.flags} ${
-            forceInstall ? pkgManager.forceInstallFlag : ''
-          } ${legacyPeerDepsFlag}`.trim(),
+        childProcess.execFile(
+          installExe,
+          [
+            ...installArgs,
+            packageName,
+            ...flagArgs,
+            ...forceArgs,
+            ...legacyArgs,
+          ],
           { cwd: installDir },
-          (err, stdout, stderr) => {
+          (err: Error | null, stdout, stderr) => {
             if (err) {
-              fs.writeFileSync(
-                join(
-                  process.cwd(),
-                  `amplitude-wizard-installation-error-${Date.now()}.log`,
-                ),
-                JSON.stringify({
-                  stdout,
-                  stderr,
-                }),
-                { encoding: 'utf8' },
-              );
+              // Land the error log under `~/.amplitude/wizard/runs/<hash>/`
+              // so it (a) doesn't litter the user's project root and (b)
+              // gets picked up by `/diagnostics --bundle`. Falls back to
+              // the installation dir if the cache root mkdir fails.
+              ensureDir(getRunDir(installDir));
+              const logPath = getInstallationErrorLogFile(installDir);
+              try {
+                fs.writeFileSync(logPath, JSON.stringify({ stdout, stderr }), {
+                  encoding: 'utf8',
+                });
+                installErrorState.logPath = logPath;
+              } catch {
+                // Best-effort — the underlying npm error is what really
+                // matters; logging is supplementary.
+              }
 
               reject(err);
             } else {
@@ -187,12 +236,13 @@ export async function installPackage({
       });
     } catch (e) {
       sdkInstallSpinner.stop('Installation failed.');
+      const logHint = installErrorState.logPath
+        ? `The wizard has saved the install error to:\n  ${installErrorState.logPath}\n\nIf you think this issue is caused by the Amplitude wizard, create an issue on GitHub and include the log file's content:\n${OUTBOUND_URLS.githubIssues}`
+        : `If you think this issue is caused by the Amplitude wizard, create an issue on GitHub:\n${OUTBOUND_URLS.githubIssues}`;
       getUI().log.error(
         `${chalk.red(
           'Encountered the following error during installation:',
-        )}\n\n${e}\n\n${chalk.dim(
-          `The wizard has created a \`amplitude-wizard-installation-error-*.log\` file. If you think this issue is caused by the Amplitude wizard, create an issue on GitHub and include the log file's content:\n${OUTBOUND_URLS.githubIssues}`,
-        )}`,
+        )}\n\n${e}\n\n${chalk.dim(logHint)}`,
       );
       await abort();
     }
@@ -251,20 +301,15 @@ export async function getPackageDotJson({
 /**
  * Try to get package.json, returning null if it doesn't exist.
  * Use this for detection purposes where missing package.json is expected (e.g., Python projects).
+ *
+ * Re-exported from `./package-json-light` so that callers who import this
+ * symbol from `setup-utils` keep working, while framework `detect()` paths
+ * can import it from the light module to avoid pulling the rest of
+ * `setup-utils` (chalk, OAuth, analytics, …) into the cold-start graph.
  */
-export async function tryGetPackageJson({
-  installDir,
-}: Pick<WizardOptions, 'installDir'>): Promise<PackageDotJson | null> {
-  try {
-    const packageJsonFileContents = await fs.promises.readFile(
-      join(installDir, 'package.json'),
-      'utf8',
-    );
-    return JSON.parse(packageJsonFileContents) as PackageDotJson;
-  } catch {
-    return null;
-  }
-}
+export const tryGetPackageJson: (
+  options: Pick<WizardOptions, 'installDir'>,
+) => Promise<PackageDotJson | null> = tryGetPackageJsonLight;
 
 export async function updatePackageDotJson(
   packageDotJson: PackageDotJson,
@@ -321,8 +366,8 @@ export function isUsingTypeScript({
 
 /**
  * Best-effort credentials for `--ci` when `--api-key` / AMPLITUDE_WIZARD_API_KEY
- * is not set: project-local key (.env.local / keychain), then OAuth id token from
- * ~/.ampli.json plus org/workspace from ampli.json (same resolution as interactive bootstrap).
+ * is not set: locally stored key (.env.local / per-user cache), then OAuth id token from
+ * ~/.ampli.json plus org/project from ampli.json (same resolution as interactive bootstrap).
  */
 export async function tryResolveCredentialsForCi(installDir: string): Promise<{
   host: string;
@@ -361,15 +406,15 @@ export async function tryResolveCredentialsForCi(installDir: string): Promise<{
     return null;
   }
 
-  const workspaceId = projectConfig.ok
-    ? projectConfig.config.WorkspaceId
+  const projectId = projectConfig.ok
+    ? projectConfig.config.ProjectId
     : undefined;
 
   const projectApiKey = await getAPIKey({
     installDir,
     idToken: storedToken.idToken,
     zone,
-    workspaceId,
+    projectId,
   });
 
   if (!projectApiKey) {
@@ -394,14 +439,18 @@ export async function tryResolveCredentialsForCi(installDir: string): Promise<{
  * authenticates and picks the right Amplitude account for this project.
  */
 export async function getOrAskForProjectData(
-  _options: Pick<WizardOptions, 'signup' | 'ci' | 'apiKey' | 'appId'> & {
+  _options: Pick<
+    WizardOptions,
+    'authOnboardingPath' | 'ci' | 'apiKey' | 'appId'
+  > & {
     installDir?: string;
   },
 ): Promise<{
   host: string;
   projectApiKey: string;
   accessToken: string;
-  appId: number;
+  /** Branded `AppId` once known; `0` when the env hasn't been picked yet. */
+  appId: AppId | 0;
   cloudRegion: CloudRegion;
 }> {
   // If an API key is provided (via --api-key flag, any mode), bypass OAuth entirely.
@@ -413,7 +462,7 @@ export async function getOrAskForProjectData(
       host: DEFAULT_HOST_URL,
       projectApiKey: _options.apiKey,
       accessToken: _options.apiKey,
-      appId: _options.appId ?? 0,
+      appId: toCredentialAppId(_options.appId),
       cloudRegion: 'us',
     };
   }
@@ -439,14 +488,14 @@ export async function getOrAskForProjectData(
           host: resolved.host,
           projectApiKey: resolved.projectApiKey,
           accessToken: resolved.accessToken,
-          appId: _options.appId ?? 0,
+          appId: toCredentialAppId(_options.appId),
           cloudRegion: resolved.cloudRegion,
         };
       }
 
       getUI().log.error(
         chalk.red(
-          'CI mode could not resolve a project API key. Pass --api-key or AMPLITUDE_WIZARD_API_KEY, store a key in the project (.env.local / keychain), or ensure ~/.ampli.json has a valid OAuth session (and ampli.json includes WorkspaceId if needed).',
+          'CI mode could not resolve a project API key. Pass --api-key or AMPLITUDE_WIZARD_API_KEY, store a key in the project (.env.local) or run the wizard interactively once to populate the per-user cache, or ensure the wizard OAuth session store (~/.amplitude/wizard/oauth-session.json, or legacy ~/.ampli.json) has a valid session (and project binding includes ProjectId if needed).',
         ),
       );
       await wizardAbort({
@@ -494,7 +543,17 @@ async function askForWizardLogin(
   const auth = await performAmplitudeAuth({
     zone: DEFAULT_AMPLITUDE_ZONE,
     forceFresh: opts.forceFresh,
+    installDir: opts.installDir ?? process.cwd(),
   });
+
+  // Wipe any cached project API key for this install dir — a stale key
+  // from a prior login in a different org would otherwise win over the
+  // freshly-resolved env key in step 4 below (`readApiKeyWithSource` in
+  // `askForAmplitudeApiKey` returns first).
+  if (opts.installDir) {
+    const { clearApiKey } = await import('./api-key-store.js');
+    clearApiKey(opts.installDir);
+  }
 
   // ── 2. Detect actual cloud region (EU users auth via US endpoint but
   //       their data lives on EU servers — detectRegionFromToken probes both) ──
@@ -537,22 +596,42 @@ async function askForWizardLogin(
         accessToken: auth.accessToken,
         idToken: auth.idToken,
         refreshToken: auth.refreshToken,
-        expiresAt: new Date(Date.now() + 3600 * 1000).toISOString(),
+        // Stored `expiresAt` tracks id_token TTL (binding constraint
+        // for API calls) — see `src/utils/jwt-exp.ts`.
+        expiresAt: new Date(
+          resolveStoredExpiryMs({ idToken: auth.idToken }),
+        ).toISOString(),
       },
     );
 
     // ── 4. Org resolution (flowchart: sign-in → determine destination org) ──
     if (userInfo.orgs.length === 0) {
-      // New user who hasn't created an org yet — direct them to the browser
+      // Before we surface a dead-end "no orgs" error, probe the OTHER zone.
+      // If the user's org is on the opposite data center, the data API on
+      // the current zone will return 0 orgs even though the user is signed
+      // in fine. Without this branch the wizard would tell the user "your
+      // account has no organizations" — factually wrong when they just
+      // happen to have picked (or defaulted to) the wrong region.
+      //
+      // We never silently switch — region is a user-consented setting, not
+      // something we should change behind their back. Instead we throw a
+      // typed error so the TUI / outro can render an actionable recovery
+      // hint with a one-key region switch.
+      const probe = await probeOtherZoneForOrgs(cloudRegion);
+      const message = buildNoOrgsMessage(cloudRegion, probe);
       getUI().log.error(
         `${chalk.red('No Amplitude organization found.')}\n\n` +
-          chalk.dim(
-            'Your account has no organizations. Please complete signup at ' +
-              chalk.cyan('https://app.amplitude.com') +
-              ' and create an organization, then re-run the wizard.',
-          ),
+          chalk.dim(message),
       );
-      await abort();
+      // Wrap the new-style typed error and rethrow so abort() can carry the
+      // metadata. Falling through to abort() preserves the existing exit
+      // contract (rejected promise, exit code) for callers.
+      throw new NoOrgsError(
+        message,
+        cloudRegion as AmplitudeZone,
+        probe.otherZone,
+        probe.otherOrgCount,
+      );
     } else if (userInfo.orgs.length === 1) {
       selectedOrg = userInfo.orgs[0];
     } else {
@@ -578,29 +657,29 @@ async function askForWizardLogin(
     analytics.wizardCapture('wizard link opened');
   }
 
-  // ── 4b. Workspace selection ───────────────────────────────────────
-  type Workspace = AmplitudeOrg['workspaces'][number];
-  let selectedWorkspace: Workspace | undefined;
+  // ── 4b. Project selection ─────────────────────────────────────────
+  type Project = AmplitudeOrg['projects'][number];
+  let selectedProject: Project | undefined;
   if (selectedOrg) {
-    if (selectedOrg.workspaces.length === 1) {
-      selectedWorkspace = selectedOrg.workspaces[0];
-    } else if (selectedOrg.workspaces.length > 1) {
+    if (selectedOrg.projects.length === 1) {
+      selectedProject = selectedOrg.projects[0];
+    } else if (selectedOrg.projects.length > 1) {
       const { select } = await import('@inquirer/prompts');
-      selectedWorkspace = await select<Workspace>({
-        message: `Select a workspace in ${selectedOrg.name}:`,
-        choices: selectedOrg.workspaces.map((ws) => ({
-          name: ws.name,
-          value: ws,
+      selectedProject = await select<Project>({
+        message: `Select a project in ${selectedOrg.name}:`,
+        choices: selectedOrg.projects.map((project) => ({
+          name: project.name,
+          value: project,
         })),
       });
     }
 
     // Write ~/.ampli.json so future runs recognise this project
-    if (opts.installDir && selectedWorkspace) {
+    if (opts.installDir && selectedProject) {
       const { writeAmpliConfig } = await import('../lib/ampli-config.js');
       writeAmpliConfig(opts.installDir, {
         OrgId: selectedOrg.id,
-        WorkspaceId: selectedWorkspace.id,
+        ProjectId: selectedProject.id,
         Zone: cloudRegion as import('../lib/constants.js').AmplitudeZone,
       });
     }
@@ -608,14 +687,14 @@ async function askForWizardLogin(
 
   // ── 5. Get the Amplitude project API key ─────────────────────────
   // The Data API returns apiKey on the Environment → App type, so we
-  // can grab it directly from the workspace data we already fetched.
+  // can grab it directly from the project data we already fetched.
   // Falls back to manual prompt if not found.
   let projectApiKey: string | undefined;
   let selectedAppId: string | null = null;
 
-  if (selectedWorkspace) {
+  if (selectedProject) {
     // Get environments that have an app with an API key, sorted by rank (lowest = primary)
-    const envsWithKey = (selectedWorkspace.environments ?? [])
+    const envsWithKey = (selectedProject.environments ?? [])
       .filter((env) => env.app?.apiKey)
       .sort((a, b) => a.rank - b.rank);
 
@@ -654,8 +733,8 @@ async function askForWizardLogin(
       const source = persistApiKey(projectApiKey, opts.installDir);
       getUI().log.success(
         chalk.dim(
-          source === 'keychain'
-            ? 'API key saved to system keychain'
+          source === 'cache'
+            ? 'API key saved'
             : 'API key saved to .env.local (added to .gitignore)',
         ),
       );
@@ -672,7 +751,7 @@ async function askForWizardLogin(
     projectApiKey,
     host: DEFAULT_HOST_URL,
     distinctId: userInfo?.id ?? 'unknown',
-    appId: selectedAppId ? Number(selectedAppId) || 0 : 0,
+    appId: toCredentialAppId(selectedAppId),
     cloudRegion,
   };
 }
@@ -688,8 +767,8 @@ async function askForAmplitudeApiKey(installDir?: string): Promise<string> {
     if (result) {
       getUI().log.success(
         chalk.dim(
-          result.source === 'keychain'
-            ? 'Using saved Amplitude API key from system keychain'
+          result.source === 'cache'
+            ? 'Using saved Amplitude API key'
             : 'Using saved Amplitude API key from .env.local',
         ),
       );
@@ -720,8 +799,8 @@ async function askForAmplitudeApiKey(installDir?: string): Promise<string> {
     const source = persistApiKey(trimmed, installDir);
     getUI().log.success(
       chalk.dim(
-        source === 'keychain'
-          ? 'API key saved to system keychain'
+        source === 'cache'
+          ? 'API key saved'
           : 'API key saved to .env.local (added to .gitignore)',
       ),
     );

@@ -91,7 +91,7 @@ All three modes share the same persistence infrastructure. State is layered by s
 
 ### Session checkpointing (`src/lib/session-checkpoint.ts`)
 
-Saves a sanitized wizard state snapshot to `$TMPDIR/amplitude-wizard-checkpoint.json` on key state transitions. On restart, loads it to skip already-completed setup steps (intro, region, org selection, framework detection) while still re-running the agent.
+Saves a sanitized wizard state snapshot to `~/.amplitude/wizard/runs/<sha256(installDir)>/checkpoint.json` on key state transitions. On restart, loads it to skip already-completed setup steps (intro, region, org selection, framework detection) while still re-running the agent. Per-project scoping lets two parallel runs in different directories crash-recover independently.
 
 **Invariants:**
 - Never contains credentials, tokens, or API keys
@@ -106,7 +106,7 @@ Silently refreshes OAuth access tokens using stored refresh tokens. Proactively 
 
 ### Atomic writes (`src/utils/atomic-write.ts`)
 
-All file persistence uses `atomicWriteJSON()`: write to PID-suffixed temp file, then `renameSync` to target. If the process crashes mid-write, the original file is untouched.
+Security- and recovery-sensitive JSON (tokens, checkpoints, plans, agent state snapshots, update-check cache, benchmark exports, `.amplitude/` metadata where opted in, etc.) uses `atomicWriteJSON()`: write to a PID-suffixed temp file in the same directory, then `renameSync` to the target so a crash mid-write leaves the previous file untouched. Append-only logs, directory creation, and a few intentional non-atomic paths (notably some env-file flows) are excluded by design.
 
 ### Config scoping
 

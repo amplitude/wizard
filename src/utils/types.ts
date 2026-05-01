@@ -1,3 +1,17 @@
+/**
+ * Internal agent model tier. The default (`'standard'`) is the wizard's
+ * production model and the only tier that should appear in user-facing
+ * documentation. See `docs/internal/agent-mode-flag.md` for the model
+ * mapping and the reason this enum is intentionally not advertised.
+ */
+export type WizardMode = 'fast' | 'standard' | 'thorough';
+
+export const WIZARD_MODES: readonly WizardMode[] = [
+  'fast',
+  'standard',
+  'thorough',
+] as const;
+
 export type AmplitudeProjectData = Record<string, unknown>;
 
 export type PreselectedProject = {
@@ -32,9 +46,10 @@ export type WizardOptions = {
   default: boolean;
 
   /**
-   * Whether to create a new Amplitude account during setup.
+   * Sign in to an existing Amplitude account vs create a new one during onboarding
+   * (`--auth-onboarding`, or the Intro picker in TUI).
    */
-  signup: boolean;
+  authOnboardingPath: 'sign_in' | 'create_account';
 
   /**
    * Whether to use the local MCP server at http://localhost:8787/mcp
@@ -66,9 +81,15 @@ export type WizardOptions = {
   /**
    * Whether to run in benchmark mode with per-phase token tracking.
    * When enabled, the wizard runs each workflow phase as a separate agent call
-   * and writes detailed usage data to /tmp/amplitude-wizard-benchmark.json.
+   * and writes detailed usage data to amplitude-wizard-benchmark.json in the OS temp dir.
    */
   benchmark: boolean;
+
+  /**
+   * Internal model tier — see `docs/internal/agent-mode-flag.md`.
+   * Optional; omitted call sites inherit the schema default.
+   */
+  mode?: WizardMode;
 };
 
 export interface Feature {

@@ -19,6 +19,22 @@ type PythonContext = {
   packageManager?: PythonPackageManager;
 };
 
+// Glob ignores for Python detection. CRITICAL: must include `node_modules`,
+// `dist`, and `build` — without them, scanning a Node.js monorepo for
+// `**/pyproject.toml` walks every transitive dep's package.json siblings
+// and turns a sub-100ms detection into a 6+ second one. See
+// commit history on this file for the regression we're fixing.
+const IGNORE_PATTERNS = [
+  '**/node_modules/**',
+  '**/dist/**',
+  '**/build/**',
+  '**/venv/**',
+  '**/.venv/**',
+  '**/env/**',
+  '**/.env/**',
+  '**/__pycache__/**',
+];
+
 export const PYTHON_AGENT_CONFIG: FrameworkConfig<PythonContext> = {
   metadata: {
     name: 'Python Language',
@@ -55,7 +71,7 @@ export const PYTHON_AGENT_CONFIG: FrameworkConfig<PythonContext> = {
         ],
         {
           cwd: installDir,
-          ignore: ['**/venv/**', '**/.venv/**', '**/env/**', '**/.env/**'],
+          ignore: IGNORE_PATTERNS,
         },
       );
 
@@ -67,7 +83,7 @@ export const PYTHON_AGENT_CONFIG: FrameworkConfig<PythonContext> = {
       // Check for Django
       const managePyMatches = await fg('**/manage.py', {
         cwd: installDir,
-        ignore: ['**/venv/**', '**/.venv/**', '**/env/**', '**/.env/**'],
+        ignore: IGNORE_PATTERNS,
       });
 
       for (const match of managePyMatches) {
@@ -109,13 +125,7 @@ export const PYTHON_AGENT_CONFIG: FrameworkConfig<PythonContext> = {
         ['**/app.py', '**/wsgi.py', '**/application.py', '**/__init__.py'],
         {
           cwd: installDir,
-          ignore: [
-            '**/venv/**',
-            '**/.venv/**',
-            '**/env/**',
-            '**/.env/**',
-            '**/__pycache__/**',
-          ],
+          ignore: IGNORE_PATTERNS,
         },
       );
 
@@ -190,7 +200,7 @@ export const PYTHON_AGENT_CONFIG: FrameworkConfig<PythonContext> = {
         `Installed the Amplitude Python package using ${packageManagerName}`,
         `Created Amplitude initialization using instance-based API (Amplitude class)`,
         `Configured exception autocapture and graceful shutdown`,
-        `Added example code for events, feature flags, and error capture (without PII)`,
+        `Added example code for events and user identification (without PII)`,
       ];
     },
     getOutroNextSteps: () => [

@@ -1,0 +1,13 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`CreateProjectScreen snapshots > renders the idle prompt with org-context line and Enter/Esc helper 1`] = `
+"Create a new Amplitude project
+in Acme Corp
+
+Project name
+Letters, numbers, and spaces. You can rename it later in Amplitude.
+
+My new project
+
+· Press Enter to create, Esc to go back."
+`;

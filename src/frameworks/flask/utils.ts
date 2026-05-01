@@ -13,7 +13,7 @@ export enum FlaskProjectType {
   BLUEPRINT = 'blueprint', // Large app with blueprints
 }
 
-const IGNORE_PATTERNS = [
+export const IGNORE_PATTERNS = [
   '**/node_modules/**',
   '**/dist/**',
   '**/build/**',

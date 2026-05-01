@@ -1,8 +1,8 @@
 import { DefaultMCPClient } from '../MCPClient';
-import * as fs from 'fs';
 import * as path from 'path';
 import * as os from 'os';
 import { DefaultMCPClientConfig } from '../defaults';
+import type { CloudRegion } from '../../../utils/types';
 import { z } from 'zod';
 
 export const ClaudeMCPConfig = DefaultMCPClientConfig;
@@ -16,21 +16,10 @@ export class ClaudeMCPClient extends DefaultMCPClient {
     super();
   }
 
-  isClientSupported(): Promise<boolean> {
-    // Claude Desktop's user-data dir is created on first launch.
-    if (process.platform === 'darwin') {
-      return Promise.resolve(
-        fs.existsSync(
-          path.join(os.homedir(), 'Library', 'Application Support', 'Claude'),
-        ),
-      );
-    }
-    if (process.platform === 'win32') {
-      const appData = process.env.APPDATA;
-      if (!appData) return Promise.resolve(false);
-      return Promise.resolve(fs.existsSync(path.join(appData, 'Claude')));
-    }
-    return Promise.resolve(false);
+  async isClientSupported(): Promise<boolean> {
+    return Promise.resolve(
+      process.platform === 'darwin' || process.platform === 'win32',
+    );
   }
 
   async getConfigPath(): Promise<string> {
@@ -67,6 +56,7 @@ export class ClaudeMCPClient extends DefaultMCPClient {
     apiKey?: string,
     selectedFeatures?: string[],
     local?: boolean,
+    zone: CloudRegion = 'us',
   ): Promise<{ success: boolean }> {
     // Claude Desktop config uses stdio transport, so we need mcp-remote
     // to bridge to the remote streamable-http server. Use 'streamable-http'
@@ -76,6 +66,7 @@ export class ClaudeMCPClient extends DefaultMCPClient {
       'streamable-http',
       selectedFeatures,
       local,
+      zone,
     );
   }
 }

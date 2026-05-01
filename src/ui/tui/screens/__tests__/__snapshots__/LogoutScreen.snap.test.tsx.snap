@@ -1,0 +1,10 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`LogoutScreen snapshots > renders the initial confirm prompt 1`] = `
+"Log Out
+
+ Clear stored Amplitude credentials (wizard session + project binding)?
+
+    Log out
+    Cancel"
+`;

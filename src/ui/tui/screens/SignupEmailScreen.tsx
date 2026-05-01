@@ -1,3 +1,12 @@
+/**
+ * SignupEmailScreen — Collect the email for a new direct-signup account.
+ *
+ * Shown when `--signup` is passed without `--email`. Validates input
+ * against the shared EMAIL_REGEX and writes the trimmed value to
+ * `session.signupEmail` via `store.setSignupEmail`. The router then
+ * advances to `SigningUpScreen` which POSTs the signup request.
+ */
+
 import { Box, Text } from 'ink';
 import { useState } from 'react';
 import { TextInput } from '@inkjs/ui';
@@ -6,11 +15,11 @@ import { useWizardStore } from '../hooks/useWizardStore.js';
 import { Colors, Icons } from '../styles.js';
 import { EMAIL_REGEX } from '../../../lib/constants.js';
 
-interface Props {
+interface SignupEmailScreenProps {
   store: WizardStore;
 }
 
-export const SignupEmailScreen = ({ store }: Props) => {
+export const SignupEmailScreen = ({ store }: SignupEmailScreenProps) => {
   useWizardStore(store);
 
   const [error, setError] = useState<string | null>(null);
@@ -29,13 +38,9 @@ export const SignupEmailScreen = ({ store }: Props) => {
     <Box flexDirection="column" flexGrow={1}>
       <Box flexDirection="column" marginBottom={1}>
         <Text bold color={Colors.heading}>
-          What email should we use for your new Amplitude account?
-        </Text>
-        <Text color={Colors.muted}>
-          We'll send a verification link here after setup.
+          Enter the email for your new account:
         </Text>
       </Box>
-
       <Box flexDirection="column" gap={1}>
         <TextInput placeholder="you@company.com" onSubmit={handleSubmit} />
         {error && (

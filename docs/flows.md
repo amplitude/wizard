@@ -1,5 +1,48 @@
 # CLI Flows
 
+## Back navigation
+
+Pressing **Esc** on a decision-point screen steps the user back to the
+previous decision so they can change their answer. Implemented declaratively
+via `FlowEntry.revert` callbacks in `src/ui/tui/flows.ts` — each entry that
+supports back-nav describes how to un-complete itself, and the router walks
+backwards to find the most recent revertible entry.
+
+Entries without a `revert` act as a **back-stop wall**:
+
+- **Run** — the agent has executed; backing past it would re-run instrumentation.
+- **Intro** — first screen; nothing to back to.
+
+Entries whose `revert` returns `false` are transparent — the router walks
+through them. Setup uses this to walk past when there are no user-answered
+questions to pop; CreateProject uses this so back-nav from DataSetup lands
+on Auth (not the create-project form).
+
+Per-screen Esc behavior:
+
+| Screen                | Esc action                                                    |
+| --------------------- | ------------------------------------------------------------- |
+| Auth                  | Back → ToS (if create-account path), else RegionSelect         |
+| ToS                   | Back → EmailCapture (clears ToS acceptance)                    |
+| EmailCapture          | Back → RegionSelect (clears captured email)                    |
+| DataSetup             | Back → Auth (clears org/workspace selection)                  |
+| ActivationOptions     | Back → DataSetup (re-runs activation check)                   |
+| Setup                 | Pops one answered question; if none, walks back further       |
+| Slack                 | Back → DataIngestionCheck or Mcp                              |
+| DataIngestionCheck    | Back → Mcp; **Enter** or **q** skip verification (with confirm if no events yet); **x** exits to resume later |
+| CreateProject         | Cancel (existing) — also functions as back to Auth            |
+| FeatureOptIn          | Skip (confirms with no features selected — Esc=skip is the    |
+|                       | one screen that breaks the convention; hint bar makes it      |
+|                       | explicit)                                                     |
+| Intro                 | Cancel wizard (existing)                                      |
+| Outro                 | Close report dialog (existing)                                |
+| RegionSelect / Mcp    | No-op (no revertible step before them)                        |
+
+The `[Esc] Back` hint appears in `KeyHintBar` only when back is actually
+available, so it never lies about what the keystroke will do.
+
+---
+
 ## Slash commands
 
 The CLI keeps a persistent prompt open at all times (like Claude). Slash
@@ -16,7 +59,7 @@ actions.
 | `/whoami`    | Show current user, org, and project                               |
 | `/mcp`       | Install or remove the Amplitude MCP server                        |
 | `/slack`     | Set up Amplitude Slack integration                                |
-| `/feedback`  | Send product feedback                                             |
+| `/feedback`  | Send product feedback (optionally with opt-in system diagnostics) |
 | `/test`      | Run a prompt-skill demo (confirm + choose)                        |
 | `/snake`     | Play Snake                                                        |
 | `/exit`      | Exit the wizard                                                   |
@@ -43,7 +86,10 @@ flowchart TD
     CMD --> WIZARD["wizard (default)"]
     CMD --> AGENT["wizard --agent<br/>(structured JSON output for automation)"]
 
-    FEEDBACK --> FEEDBACK_SEND["Send feedback via Node SDK"]
+    FEEDBACK --> FEEDBACK_CONSENT{"Include diagnostic info?<br/>(consent prompt)"}
+    FEEDBACK_CONSENT -->|yes| FEEDBACK_COLLECT["Collect diagnostics<br/>(system, codebase, session)"]
+    FEEDBACK_COLLECT --> FEEDBACK_SEND["Send feedback + diagnostics via Node SDK"]
+    FEEDBACK_CONSENT -->|no| FEEDBACK_SEND_BARE["Send feedback via Node SDK"]
 
     AGENT --> AGENT_UI["AgentUI — non-interactive, JSON-line output<br/>structured exit codes (0/1/2/3/4/10/130)"]
     AGENT_UI --> AGENT_RUN["SDK installation agent run"]
@@ -80,14 +126,20 @@ flowchart TD
 title: Wizard flow
 ---
 flowchart TD
-    INTRO["IntroScreen<br/>(shows detected framework — detection runs before TUI starts;<br/>falls back to generic if undetected · user confirms or exits)<br/>If a crash-recovery checkpoint exists for this project,<br/>the user is prompted to resume or start fresh"]
+    INTRO["IntroScreen<br/>(shows detected framework — detection runs before TUI starts;<br/>falls back to generic if undetected)<br/>One menu: Continue — sign in vs Continue — create account, then framework/region/directory/cancel<br/>(non-interactive: --auth-onboarding sign-in or create-account)<br/>If a crash-recovery checkpoint exists for this project,<br/>the user is prompted to resume or start fresh"]
     INTRO --> REGION_SELECT
 
     REGION_SELECT["RegionSelect: US or EU?<br/>(Enter = US default · skipped for returning users)"]
-    REGION_SELECT --> AUTH
+    REGION_SELECT --> CREATE_ACCOUNT_PATH
+
+    CREATE_ACCOUNT_PATH{Create new Amplitude account?<br/>(Intro picker or CLI --auth-onboarding create-account)}
+    CREATE_ACCOUNT_PATH -->|no — sign in to existing| AUTH
+    CREATE_ACCOUNT_PATH -->|yes — new account| EMAIL_CAPTURE["EmailCaptureScreen<br/>(collect user email · pre-filled from --email when passed on the CLI)"]
+    EMAIL_CAPTURE --> TOS["ToSScreen<br/>(require explicit ToS acceptance)"]
+    TOS --> AUTH
 
     subgraph AUTH ["Auth / Account Setup (AuthScreen)"]
-        SUSI["See: SUSI flow<br/>(OAuth → org → workspace → API key)"]
+        SUSI["See: SUSI flow<br/>(OAuth → org → project → API key)"]
     end
 
     AUTH --> DATA_SETUP["DataSetupScreen<br/>(activation check — sets activationLevel: none / partial / full)"]
@@ -101,9 +153,14 @@ flowchart TD
     ACTIVATION_OPTIONS -->|exit| OUTRO
 
     SETUP_Q{Unresolved setup questions?}
-    SETUP_Q -->|no| RUN
+    SETUP_Q -->|no| FEATURE_OPTIN
     SETUP_Q -->|yes| SETUP["SetupScreen<br/>(per-framework questions)"]
-    SETUP --> RUN
+    SETUP --> FEATURE_OPTIN
+
+    FEATURE_OPTIN{Opt-in features discovered?}
+    FEATURE_OPTIN -->|none, or CI/agent mode| RUN
+    FEATURE_OPTIN -->|one or more| OPTIN_SCREEN["FeatureOptInScreen<br/>(multi-select picklist · all on by default · ESC skips)"]
+    OPTIN_SCREEN --> RUN
 
     SLASH_REGION["/region slash command"] -. available any time .-> REGION_SELECT
 
@@ -111,10 +168,10 @@ flowchart TD
         RUN["RunScreen"] --> AGENT["Claude agent runs"]
         AGENT --> SDK_INSTALL["1. Install SDK + add initialization code"]
         SDK_INSTALL --> INSTRUMENT["2. Instrument events from approved plan"]
-        INSTRUMENT --> FEATURES{Features discovered?}
-        FEATURES -->|Stripe| STRIPE_TIP["Show Stripe tip"] --> OUTCOME
-        FEATURES -->|LLM| LLM_TIP["Show LLM tip"] --> OUTCOME
-        FEATURES -->|none| OUTCOME
+        INSTRUMENT --> ADDITIONAL["3. Drain additional feature queue<br/>(LLM, Session Replay shown as tasks)"]
+        ADDITIONAL --> FEATURES{Stripe detected?}
+        FEATURES -->|yes| STRIPE_TIP["Show Stripe doc-link tip"] --> OUTCOME
+        FEATURES -->|no| OUTCOME
         AGENT --> OUTCOME{Outcome?}
         OUTCOME -->|success| POST["Upload env vars to hosting"]
         OUTCOME -->|error| ERR["Set error state"]
@@ -122,14 +179,18 @@ flowchart TD
 
     POST --> MCP_SCREEN["McpScreen<br/>(install MCP server · skipped on error)"]
     ERR --> OUTRO["See: Outro flow"]
-    MCP_SCREEN --> DATA_INGESTION["DataIngestionCheckScreen<br/>(polls MCP first, then activation API every 30s · full users pass immediately · user can exit and resume later)<br/>BrailleSpinner + coaching tips while waiting · celebration with event preview on success<br/>press Enter to continue"]
+    MCP_SCREEN --> DATA_INGESTION["DataIngestionCheckScreen<br/>(polls MCP first, then activation API every 30s · full users pass immediately)<br/>Enter or q skips verification (confirm if no events yet) · x exits to resume later<br/>BrailleSpinner + coaching tips while waiting · celebration with event preview on success"]
     DATA_INGESTION --> CHECKLIST["ChecklistScreen<br/>(first chart · first dashboard · taxonomy @todo)<br/>dashboard unlocks after chart · user can skip any item"]
     CHECKLIST --> SLACK_SCREEN["SlackScreen<br/>(connect Slack — skipped on error)"]
     SLACK_SCREEN --> OUTRO
 
     SUSI -. overlay .-> OUTAGE["OutageScreen"]
-    RUN -. overlay, before agent starts .-> SETTINGS_OVR["SettingsOverrideScreen"]
 ```
+
+> The `SettingsOverrideScreen` overlay was removed. The wizard now scopes
+> its gateway env to `.claude/settings.local.json` (machine-local,
+> gitignored) so the user's checked-in `.claude/settings.json` is never
+> touched. See `src/lib/claude-settings-scope.ts`.
 
 ---
 
@@ -165,6 +226,13 @@ flowchart TD
 The SUSI flow runs inside `AuthScreen`. Authentication happens via Amplitude
 OAuth (browser redirect). No email is entered in the wizard itself.
 
+> **Terminology.** User-facing copy says "project" (matching the Amplitude
+> website). The backend GraphQL API still uses `workspaces` as the field name,
+> so adapter code maps `workspaces` → `projects` at the TS boundary
+> (`AmplitudeOrg.projects`). Environment selection is a separate, distinct step
+> from project selection — the env picker reads "Select an environment", not
+> "Select a project".
+
 ```mermaid
 ---
 title: SUSI flow
@@ -174,14 +242,14 @@ flowchart TD
     OAUTH_WAIT --> OAUTH_DONE["OAuth completes — region auto-detected from token"]
 
     OAUTH_DONE --> ORG_COUNT{How many orgs?}
-    ORG_COUNT -->|1| WORKSPACE_COUNT
-    ORG_COUNT -->|many| ORG_PICKER["Picker: select org"] --> WORKSPACE_COUNT
+    ORG_COUNT -->|1| PROJECT_COUNT
+    ORG_COUNT -->|many| ORG_PICKER["Picker: select org"] --> PROJECT_COUNT
 
-    WORKSPACE_COUNT{How many workspaces?}
-    WORKSPACE_COUNT -->|1| WRITE_AMPLI
-    WORKSPACE_COUNT -->|many| WS_PICKER["Picker: select workspace"] --> WRITE_AMPLI
+    PROJECT_COUNT{How many projects?}
+    PROJECT_COUNT -->|1| WRITE_AMPLI
+    PROJECT_COUNT -->|many| WS_PICKER["Picker: select project"] --> WRITE_AMPLI
 
-    WRITE_AMPLI["Write ~/.ampli.json<br/>(OrgId, WorkspaceId, Zone)"]
+    WRITE_AMPLI["Write ~/.ampli.json<br/>(OrgId, ProjectId, Zone)<br/>(legacy files with WorkspaceId are auto-migrated on read)"]
 
     WRITE_AMPLI --> KEY_CHECK{Saved API key?<br/>keychain or .env.local}
     KEY_CHECK -->|yes| AUTO_KEY["Auto-advance — no prompt"]
@@ -197,7 +265,9 @@ flowchart TD
 ## Data Setup flow
 
 > **Partially implemented.** `DataSetupScreen` sets `activationLevel` (none /
-> partial / full). `DataIngestionCheckScreen` polls until events arrive.
+> partial / full). `DataIngestionCheckScreen` polls for events; the user can
+> skip verification (Enter or q, with a confirm step when nothing has been
+> observed yet) or exit to resume later (x).
 > `ChecklistScreen` offers first chart and first dashboard via browser
 > deep-links. Taxonomy agent and direct GraphQL chart/dashboard creation are
 > planned. See `features/05-data-setup-flow.feature` for the full target

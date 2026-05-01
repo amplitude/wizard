@@ -25,7 +25,7 @@ Feature: Data Setup flow
 
   Scenario: User exits from DataIngestionCheck
     Given I am on the DataIngestionCheck screen
-    When I press "q" to exit
+    When I press "x" to exit
     Then I should be taken to the Outro with a cancel state
 
   # Agent mode — data ingestion is polled automatically after SDK installation.

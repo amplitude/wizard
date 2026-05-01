@@ -10,6 +10,9 @@ vi.mock('../direct-signup.js', () => ({
 vi.mock('../ampli-settings.js', () => ({
   replaceStoredUser: vi.fn(),
 }));
+vi.mock('../clear-stale-project-state.js', () => ({
+  clearStaleProjectState: vi.fn(),
+}));
 vi.mock('../../lib/api.js', () => ({
   fetchAmplitudeUser: vi.fn(),
 }));
@@ -26,7 +29,7 @@ const provisionedOrgs = [
   {
     id: 'org-1',
     name: 'Org',
-    workspaces: [
+    projects: [
       {
         id: 'ws-1',
         name: 'Default',
@@ -41,7 +44,7 @@ const provisionedOrgs = [
 describe('performSignupOrAuth', () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it('returns null when email is missing', async () => {
+  it('returns error when email is missing', async () => {
     const { performDirectSignup } = await import('../direct-signup.js');
     const { analytics } = await import('../analytics');
 
@@ -49,35 +52,18 @@ describe('performSignupOrAuth', () => {
       email: null,
       fullName: 'Ada Lovelace',
       zone: 'us',
+      installDir: '/tmp/wizard-test',
     });
 
     expect(performDirectSignup).not.toHaveBeenCalled();
-    expect(result).toBeNull();
+    expect(result).toEqual({ kind: 'error' });
     expect(analytics.wizardCapture).not.toHaveBeenCalledWith(
       AGENTIC_SIGNUP_ATTEMPTED_EVENT,
       expect.anything(),
     );
   });
 
-  it('returns null when fullName is missing', async () => {
-    const { performDirectSignup } = await import('../direct-signup.js');
-    const { analytics } = await import('../analytics');
-
-    const result = await performSignupOrAuth({
-      email: 'ada@example.com',
-      fullName: null,
-      zone: 'us',
-    });
-
-    expect(performDirectSignup).not.toHaveBeenCalled();
-    expect(result).toBeNull();
-    expect(analytics.wizardCapture).not.toHaveBeenCalledWith(
-      AGENTIC_SIGNUP_ATTEMPTED_EVENT,
-      expect.anything(),
-    );
-  });
-
-  it('returns null when direct signup returns requires_redirect', async () => {
+  it('returns requires_redirect when direct signup returns requires_redirect', async () => {
     const { performDirectSignup } = await import('../direct-signup.js');
     vi.mocked(performDirectSignup).mockResolvedValue({
       kind: 'requires_redirect',
@@ -87,10 +73,11 @@ describe('performSignupOrAuth', () => {
       email: 'ada@example.com',
       fullName: 'Ada Lovelace',
       zone: 'us',
+      installDir: '/tmp/wizard-test',
     });
 
     expect(performDirectSignup).toHaveBeenCalledOnce();
-    expect(result).toBeNull();
+    expect(result).toEqual({ kind: 'requires_redirect' });
   });
 
   it('emits agentic signup attempted with status=requires_redirect on redirect path', async () => {
@@ -104,6 +91,7 @@ describe('performSignupOrAuth', () => {
       email: 'ada@example.com',
       fullName: 'Ada Lovelace',
       zone: 'us',
+      installDir: '/tmp/wizard-test',
     });
 
     expect(analytics.wizardCapture).toHaveBeenCalledWith(
@@ -112,7 +100,7 @@ describe('performSignupOrAuth', () => {
     );
   });
 
-  it('returns null when direct signup returns error', async () => {
+  it('returns error when direct signup returns error', async () => {
     const { performDirectSignup } = await import('../direct-signup.js');
     vi.mocked(performDirectSignup).mockResolvedValue({
       kind: 'error',
@@ -123,9 +111,10 @@ describe('performSignupOrAuth', () => {
       email: 'ada@example.com',
       fullName: 'Ada Lovelace',
       zone: 'us',
+      installDir: '/tmp/wizard-test',
     });
 
-    expect(result).toBeNull();
+    expect(result).toEqual({ kind: 'error' });
   });
 
   it('emits agentic signup attempted with status=signup_error on error kind', async () => {
@@ -140,6 +129,7 @@ describe('performSignupOrAuth', () => {
       email: 'ada@example.com',
       fullName: 'Ada Lovelace',
       zone: 'us',
+      installDir: '/tmp/wizard-test',
     });
 
     expect(analytics.wizardCapture).toHaveBeenCalledWith(
@@ -157,6 +147,7 @@ describe('performSignupOrAuth', () => {
       email: 'ada@example.com',
       fullName: 'Ada Lovelace',
       zone: 'us',
+      installDir: '/tmp/wizard-test',
     });
 
     expect(analytics.wizardCapture).toHaveBeenCalledWith(
@@ -191,11 +182,50 @@ describe('performSignupOrAuth', () => {
       email: 'ada@example.com',
       fullName: 'Ada Lovelace',
       zone: 'us',
+      installDir: '/tmp/wizard-test',
     });
 
-    expect(result).not.toBeNull();
-    expect(result).toMatchObject({ accessToken: 'direct-access' });
+    expect(result.kind).toBe('success');
+    if (result.kind === 'success') {
+      expect(result.accessToken).toBe('direct-access');
+      expect(result.dashboardUrl).toBeNull();
+    }
     expect(replaceStoredUser).toHaveBeenCalledOnce();
+  });
+
+  it('forwards dashboardUrl from performDirectSignup on success', async () => {
+    const { performDirectSignup } = await import('../direct-signup.js');
+    const magic = 'https://app.amplitude.com/magic?x=1';
+    vi.mocked(performDirectSignup).mockResolvedValue({
+      kind: 'success',
+      tokens: {
+        accessToken: 'a',
+        idToken: 'i',
+        refreshToken: 'r',
+        expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+        zone: 'us',
+      },
+      dashboardUrl: magic,
+    });
+    const { fetchAmplitudeUser } = await import('../../lib/api.js');
+    vi.mocked(fetchAmplitudeUser).mockResolvedValue({
+      id: 'user-123',
+      firstName: 'Ada',
+      lastName: 'Lovelace',
+      email: 'ada@example.com',
+      orgs: provisionedOrgs,
+    });
+
+    const result = await performSignupOrAuth({
+      email: 'ada@example.com',
+      fullName: 'Ada Lovelace',
+      zone: 'us',
+    });
+
+    expect(result.kind).toBe('success');
+    if (result.kind === 'success') {
+      expect(result.dashboardUrl).toBe(magic);
+    }
   });
 
   it('emits agentic signup attempted with status=success on the success path', async () => {
@@ -224,6 +254,7 @@ describe('performSignupOrAuth', () => {
       email: 'ada@example.com',
       fullName: 'Ada Lovelace',
       zone: 'us',
+      installDir: '/tmp/wizard-test',
     });
 
     expect(analytics.wizardCapture).toHaveBeenCalledWith(
@@ -263,6 +294,7 @@ describe('performSignupOrAuth', () => {
       email: 'ada@example.com',
       fullName: 'Ada Lovelace',
       zone: 'us',
+      installDir: '/tmp/wizard-test',
     });
 
     expect(replaceStoredUser).toHaveBeenCalledWith(
@@ -275,6 +307,109 @@ describe('performSignupOrAuth', () => {
       }),
       expect.anything(),
     );
+  });
+
+  it('wipes pre-existing per-project state before persisting the new account on success', async () => {
+    const { performDirectSignup } = await import('../direct-signup.js');
+    vi.mocked(performDirectSignup).mockResolvedValue({
+      kind: 'success',
+      tokens: {
+        accessToken: 'a',
+        idToken: 'i',
+        refreshToken: 'r',
+        expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+        zone: 'us',
+      },
+    });
+    const { fetchAmplitudeUser } = await import('../../lib/api.js');
+    vi.mocked(fetchAmplitudeUser).mockResolvedValue({
+      id: 'user-123',
+      firstName: 'Ada',
+      lastName: 'Lovelace',
+      email: 'ada@example.com',
+      orgs: provisionedOrgs,
+    });
+    const { replaceStoredUser } = await import('../ampli-settings.js');
+    const { clearStaleProjectState } = await import(
+      '../clear-stale-project-state.js'
+    );
+
+    await performSignupOrAuth({
+      email: 'ada@example.com',
+      fullName: 'Ada Lovelace',
+      zone: 'us',
+      installDir: '/tmp/wizard-test-fresh',
+    });
+
+    expect(clearStaleProjectState).toHaveBeenCalledWith(
+      '/tmp/wizard-test-fresh',
+    );
+    // Wipe must run BEFORE replaceStoredUser so that a partial-state crash
+    // between them fails closed (no key) rather than open (old key).
+    const wipeOrder = vi.mocked(clearStaleProjectState).mock
+      .invocationCallOrder[0];
+    const persistOrder =
+      vi.mocked(replaceStoredUser).mock.invocationCallOrder[0];
+    expect(wipeOrder).toBeLessThan(persistOrder);
+  });
+
+  it('does NOT wipe project state on requires_redirect', async () => {
+    const { performDirectSignup } = await import('../direct-signup.js');
+    vi.mocked(performDirectSignup).mockResolvedValue({
+      kind: 'requires_redirect',
+    });
+    const { clearStaleProjectState } = await import(
+      '../clear-stale-project-state.js'
+    );
+
+    await performSignupOrAuth({
+      email: 'ada@example.com',
+      fullName: 'Ada Lovelace',
+      zone: 'us',
+      installDir: '/tmp/wizard-test',
+    });
+
+    expect(clearStaleProjectState).not.toHaveBeenCalled();
+  });
+
+  it('does NOT wipe project state on needs_information', async () => {
+    const { performDirectSignup } = await import('../direct-signup.js');
+    vi.mocked(performDirectSignup).mockResolvedValue({
+      kind: 'needs_information',
+      requiredFields: ['full_name'],
+    });
+    const { clearStaleProjectState } = await import(
+      '../clear-stale-project-state.js'
+    );
+
+    await performSignupOrAuth({
+      email: 'ada@example.com',
+      fullName: null,
+      zone: 'us',
+      installDir: '/tmp/wizard-test',
+    });
+
+    expect(clearStaleProjectState).not.toHaveBeenCalled();
+  });
+
+  it('does NOT wipe project state on error kind', async () => {
+    const { performDirectSignup } = await import('../direct-signup.js');
+    vi.mocked(performDirectSignup).mockResolvedValue({
+      kind: 'error',
+      message: 'boom',
+    });
+    const { clearStaleProjectState } = await import(
+      '../clear-stale-project-state.js'
+    );
+
+    await performSignupOrAuth({
+      email: 'ada@example.com',
+      fullName: 'Ada Lovelace',
+      zone: 'us',
+      installDir: '/tmp/wizard-test',
+    });
+
+    expect(clearStaleProjectState).not.toHaveBeenCalled();
   });
 
   it('normalizes extra whitespace in fullName before splitting', async () => {
@@ -303,6 +438,7 @@ describe('performSignupOrAuth', () => {
       email: 'ada@example.com',
       fullName: '  Ada   Lovelace  ',
       zone: 'us',
+      installDir: '/tmp/wizard-test',
     });
 
     expect(replaceStoredUser).toHaveBeenCalledWith(
@@ -337,6 +473,7 @@ describe('performSignupOrAuth', () => {
         email: 'ada@example.com',
         fullName: 'Ada Lovelace',
         zone: 'us',
+        installDir: '/tmp/wizard-test',
       });
       await vi.runAllTimersAsync();
       const result = await pending;
@@ -345,7 +482,10 @@ describe('performSignupOrAuth', () => {
         expect.objectContaining({ id: 'pending' }),
         expect.anything(),
       );
-      expect(result).toMatchObject({ accessToken: 'direct-access' });
+      expect(result.kind).toBe('success');
+      if (result.kind === 'success') {
+        expect(result.accessToken).toBe('direct-access');
+      }
     } finally {
       vi.useRealTimers();
     }
@@ -373,6 +513,7 @@ describe('performSignupOrAuth', () => {
         email: 'ada@example.com',
         fullName: 'Ada Lovelace',
         zone: 'us',
+        installDir: '/tmp/wizard-test',
       });
       await vi.runAllTimersAsync();
       await pending;
@@ -422,7 +563,7 @@ describe('performSignupOrAuth', () => {
             {
               id: 'org-1',
               name: 'Org',
-              workspaces: [{ id: 'ws-1', name: 'Default', environments: [] }],
+              projects: [{ id: 'ws-1', name: 'Default', environments: [] }],
             },
           ],
         })
@@ -438,6 +579,7 @@ describe('performSignupOrAuth', () => {
         email: 'a@b.com',
         fullName: 'A B',
         zone: 'us',
+        installDir: '/tmp/wizard-test',
       });
       await vi.runAllTimersAsync();
       await pending;
@@ -446,5 +588,62 @@ describe('performSignupOrAuth', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+});
+
+describe('performSignupOrAuth — needs_information arm', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('returns { kind: "needs_information", requiredFields } and tracks telemetry', async () => {
+    const { performDirectSignup } = await import('../direct-signup.js');
+    vi.mocked(performDirectSignup).mockResolvedValueOnce({
+      kind: 'needs_information',
+      requiredFields: ['full_name'],
+    });
+    const { analytics } = await import('../analytics');
+
+    const result = await performSignupOrAuth({
+      email: 'new@acme.com',
+      fullName: null,
+      zone: 'us',
+      installDir: '/tmp/wizard-test',
+    });
+
+    expect(result).toEqual({
+      kind: 'needs_information',
+      requiredFields: ['full_name'],
+    });
+    expect(analytics.wizardCapture).toHaveBeenCalledWith(
+      AGENTIC_SIGNUP_ATTEMPTED_EVENT,
+      expect.objectContaining({ status: 'needs_information', zone: 'us' }),
+    );
+  });
+});
+
+describe('performSignupOrAuth — missing fullName no longer short-circuits', () => {
+  beforeEach(() => vi.clearAllMocks());
+
+  it('passes null fullName through to performDirectSignup', async () => {
+    const { performDirectSignup } = await import('../direct-signup.js');
+    vi.mocked(performDirectSignup).mockResolvedValueOnce({
+      kind: 'needs_information',
+      requiredFields: ['full_name'],
+    });
+
+    await performSignupOrAuth({
+      email: 'new@acme.com',
+      fullName: null,
+      zone: 'us',
+      installDir: '/tmp/wizard-test',
+    });
+
+    expect(performDirectSignup).toHaveBeenCalledWith(
+      {
+        email: 'new@acme.com',
+        fullName: null,
+        zone: 'us',
+      },
+      expect.anything(),
+    );
   });
 });

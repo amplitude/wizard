@@ -16,14 +16,39 @@ import { Box, Text } from 'ink';
 import type { WizardStore } from './store.js';
 import { createScreens, createServices } from './screen-registry.js';
 import { CommandModeContext } from './context/CommandModeContext.js';
+import { ContentAreaContext } from './context/ContentAreaContext.js';
 import { ConsoleView } from './components/ConsoleView.js';
+import { CtrlCHandler } from './components/CtrlCHandler.js';
 import { HeaderBar } from './components/HeaderBar.js';
 import { JourneyStepper } from './components/JourneyStepper.js';
 import { useStdoutDimensions } from './hooks/useStdoutDimensions.js';
 import { useWizardStore } from './hooks/useWizardStore.js';
 import { DissolveTransition } from './primitives/index.js';
 import { ScreenErrorBoundary } from './primitives/index.js';
+import { Screen } from './router.js';
 import { Colors, Layout } from './styles.js';
+
+/**
+ * Screens that should animate together as a single visual step.
+ *
+ * `DissolveTransition` fires its wipe animation whenever `transitionKey`
+ * changes. Screens in the same group resolve to the same key, which
+ * suppresses the animation between them — the content swaps instantly
+ * while the surrounding chrome and perceived "step" stays stable.
+ *
+ * Used for the signup ceremony, where the router advances through
+ * SignupEmail → SigningUp → SignupFullName → SigningUp without any
+ * meaningful step change from the user's perspective. Each screen
+ * renders a layout that continues the visual context of the previous
+ * one (see `SigningUpScreen.tsx` — mimics the preceding input screen),
+ * so without the wipe, the three components look like one screen
+ * updating in place.
+ */
+const TRANSITION_GROUPS: Partial<Record<string, string>> = {
+  [Screen.SignupEmail]: 'signup',
+  [Screen.SigningUp]: 'signup',
+  [Screen.SignupFullName]: 'signup',
+};
 
 /** Height reserved for stepper + header + separators + hint bar + input. */
 const CHROME_HEIGHT = 8;
@@ -52,11 +77,19 @@ export const App = ({ store }: AppProps) => {
   const contentAreaWidth = Math.max(10, width - Layout.paddingX * 2);
   const direction = store.lastNavDirection === 'pop' ? 'right' : 'left';
   const activeScreen: ReactNode = screens[store.currentScreen] ?? null;
+  // Screens in the same transition group share a key so DissolveTransition
+  // doesn't animate between them (see TRANSITION_GROUPS docstring above).
+  const transitionKey =
+    TRANSITION_GROUPS[store.currentScreen] ?? store.currentScreen;
 
   const separator = Layout.separatorChar.repeat(Math.max(0, width - 2));
 
   return (
     <CommandModeContext.Provider value={store.commandMode}>
+      {/* Always-on Ctrl+C interceptor. Uses Ink's useInput so it gets
+          the key event in raw mode. Drives graceful-exit flow directly
+          (banner → save checkpoint → flush analytics → exit). */}
+      <CtrlCHandler store={store} />
       <Box
         flexDirection="column"
         height={rows}
@@ -72,7 +105,7 @@ export const App = ({ store }: AppProps) => {
           <HeaderBar
             width={width}
             orgName={store.session.selectedOrgName}
-            workspaceName={store.session.selectedWorkspaceName}
+            projectName={store.session.selectedProjectName}
             envName={store.session.selectedEnvName}
           />
 
@@ -90,19 +123,23 @@ export const App = ({ store }: AppProps) => {
             paddingX={Layout.paddingX}
             overflow="hidden"
           >
-            <DissolveTransition
-              transitionKey={store.currentScreen}
-              width={contentAreaWidth}
-              height={contentHeight}
-              direction={direction}
+            <ContentAreaContext.Provider
+              value={{ height: contentHeight, width: contentAreaWidth }}
             >
-              <ScreenErrorBoundary
-                store={store}
-                retryToken={store.screenErrorRetry}
+              <DissolveTransition
+                transitionKey={transitionKey}
+                width={contentAreaWidth}
+                height={contentHeight}
+                direction={direction}
               >
-                {activeScreen}
-              </ScreenErrorBoundary>
-            </DissolveTransition>
+                <ScreenErrorBoundary
+                  store={store}
+                  retryToken={store.screenErrorRetry}
+                >
+                  {activeScreen}
+                </ScreenErrorBoundary>
+              </DissolveTransition>
+            </ContentAreaContext.Provider>
           </Box>
         </ConsoleView>
       </Box>

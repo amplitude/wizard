@@ -2,16 +2,64 @@
  * PickerMenu — Single and multi select.
  * Single mode: custom renderer with small triangle indicator.
  * Multi mode: checkbox glyphs with space to toggle.
+ *
+ * Pagination uses Ink's `measureElement` to compute the actual rendered
+ * header height, so chrome rows are derived from real layout (accounting
+ * for PromptLabel text wrapping on narrow terminals) instead of a fixed
+ * constant. The hardcoded constant is retained as a first-frame fallback.
  */
 
-import { Box, Text } from 'ink';
-import { useState, useRef } from 'react';
+import { Box, Text, measureElement, type DOMElement } from 'ink';
+import { useState, useRef, useEffect } from 'react';
 import { Icons, Colors } from '../styles.js';
 import { PromptLabel } from './PromptLabel.js';
 import { useScreenInput } from '../hooks/useScreenInput.js';
 import { useStdoutDimensions } from '../hooks/useStdoutDimensions.js';
 
-const PICKER_CHROME_ROWS = 16;
+/**
+ * First-frame fallback chrome size, used before `measureElement` has run.
+ * After the initial layout pass we replace this with the measured header
+ * height plus a small allowance for scroll indicators and bottom padding.
+ */
+const PICKER_CHROME_ROWS_FALLBACK = 16;
+
+/** Minimum number of visible options on extremely short terminals. */
+const MIN_VISIBLE_ROWS = 5;
+
+/**
+ * Reserve rows beyond the measured header for: optional "↑ N more" /
+ * "↓ N more" indicators (up to 2) plus a one-row safety buffer for the
+ * keyboard hint bar / cursor below the picker.
+ */
+const CHROME_FOOTER_RESERVE_ROWS = 3;
+
+/**
+ * When a parent passes an explicit row budget, reserve space for chrome
+ * rendered outside the option list:
+ *  - 1 row: PromptLabel header (always rendered, even with no message —
+ *    it outputs a single space character so it occupies one row).
+ *  - 2 rows: optional "↑ N more" / "↓ N more" scroll indicators above and
+ *    below the visible window when the list is paginated.
+ *
+ * Without this reserve, total rendered height would be
+ *   1 (header) + 2 (indicators) + (availableRows − 2) options = availableRows + 1
+ * and the parent's `overflow="hidden"` would clip the bottom indicator.
+ */
+const CONSTRAINED_CHROME_RESERVE_ROWS = 3;
+
+/**
+ * Pure helper — translate total rows + reserved chrome rows into the
+ * number of option rows that fit. Extracted for unit testing.
+ */
+export function computeVisibleCount(
+  totalRows: number,
+  totalOptionRows: number,
+  chromeRows: number,
+): number {
+  const available = totalRows - chromeRows;
+  const fits = Math.max(MIN_VISIBLE_ROWS, available);
+  return Math.min(totalOptionRows, fits);
+}
 
 interface PickerOption<T> {
   label: string;
@@ -25,6 +73,12 @@ interface PickerMenuProps<T> {
   mode?: 'single' | 'multi';
   centered?: boolean;
   columns?: 1 | 2 | 3 | 4;
+  /**
+   * Rows available for the option list inside a constrained parent region.
+   * Currently honoured only by single-mode pickers — multi-mode does not
+   * paginate, so this prop is ignored when `mode === 'multi'`.
+   */
+  availableRows?: number;
   /** In multi mode, values to start selected. Ignored in single mode. */
   defaultSelected?: T[];
   onSelect: (value: T | T[]) => void;
@@ -36,6 +90,7 @@ export const PickerMenu = <T,>({
   mode = 'single',
   centered = false,
   columns = 1,
+  availableRows,
   defaultSelected,
   onSelect,
 }: PickerMenuProps<T>) => {
@@ -58,6 +113,7 @@ export const PickerMenu = <T,>({
       options={options}
       centered={centered}
       columns={columns}
+      availableRows={availableRows}
       onSelect={onSelect}
     />
   );
@@ -104,22 +160,42 @@ const SinglePickerMenu = <T,>({
   options,
   centered = false,
   columns = 1,
+  availableRows,
   onSelect,
 }: {
   message?: string;
   options: PickerOption<T>[];
   centered?: boolean;
   columns?: number;
+  availableRows?: number;
   onSelect: (value: T | T[]) => void;
 }) => {
   const [focused, setFocused] = useState(0);
   const [, termRows] = useStdoutDimensions();
   const scrollRef = useRef(0);
+  const headerRef = useRef<DOMElement>(null);
+  const [measuredHeader, setMeasuredHeader] = useState<number | null>(null);
   const rowsPerCol = Math.ceil(options.length / columns);
+  const visibleRowsBudget =
+    availableRows ?? Math.max(MIN_VISIBLE_ROWS, termRows);
 
+  useEffect(() => {
+    if (!headerRef.current) return;
+    const { height } = measureElement(headerRef.current);
+    if (height > 0 && height !== measuredHeader) {
+      setMeasuredHeader(height);
+    }
+  });
+
+  const chromeRows =
+    availableRows !== undefined
+      ? CONSTRAINED_CHROME_RESERVE_ROWS
+      : measuredHeader !== null
+      ? measuredHeader + CHROME_FOOTER_RESERVE_ROWS
+      : PICKER_CHROME_ROWS_FALLBACK;
   const maxVisible =
     columns === 1
-      ? Math.min(rowsPerCol, Math.max(5, termRows - PICKER_CHROME_ROWS))
+      ? computeVisibleCount(visibleRowsBudget, rowsPerCol, chromeRows)
       : rowsPerCol;
   const needsScroll = rowsPerCol > maxVisible;
 
@@ -138,7 +214,6 @@ const SinglePickerMenu = <T,>({
     const col = Math.floor(focused / rowsPerCol);
     const row = focused % rowsPerCol;
 
-    // Number keys 1–9 select options 0–8; 0 selects option 9
     const digit = parseInt(input, 10);
     if (!isNaN(digit) && !key.ctrl && !key.meta) {
       const idx = digit === 0 ? 9 : digit - 1;
@@ -191,7 +266,9 @@ const SinglePickerMenu = <T,>({
 
     return (
       <Box flexDirection="column" alignItems={align}>
-        <PromptLabel message={message} />
+        <Box ref={headerRef} flexDirection="column">
+          <PromptLabel message={message} />
+        </Box>
         {hasAbove && (
           <Text color={Colors.muted}>
             {'  \u2191 '}
@@ -216,7 +293,6 @@ const SinglePickerMenu = <T,>({
     );
   }
 
-  // Multi-column / short-list: render all items in column-first grid
   const columnArrays: PickerOption<T>[][] = [];
   for (let c = 0; c < columns; c++) {
     columnArrays.push(
@@ -226,7 +302,9 @@ const SinglePickerMenu = <T,>({
 
   return (
     <Box flexDirection="column" alignItems={align}>
-      <PromptLabel message={message} />
+      <Box ref={headerRef} flexDirection="column">
+        <PromptLabel message={message} />
+      </Box>
       <Box flexDirection="row" gap={4}>
         {columnArrays.map((colOpts, colIdx) => (
           <Box key={colIdx} flexDirection="column">
@@ -276,7 +354,6 @@ const MultiPickerMenu = <T,>({
     const col = Math.floor(focused / rows);
     const row = focused % rows;
 
-    // Number keys 1–9 toggle options 0–8; 0 toggles option 9
     const digit = parseInt(input, 10);
     if (!isNaN(digit) && !key.ctrl && !key.meta) {
       const idx = digit === 0 ? 9 : digit - 1;
@@ -330,21 +407,13 @@ const MultiPickerMenu = <T,>({
       });
     }
     if (key.return) {
-      // Numeric sort — default Array.prototype.sort is lexicographic and
-      // would put index 10 before index 2.
       const values = [...selected]
         .sort((a, b) => a - b)
         .map((i) => options[i].value);
       if (values.length === 0 && !defaultSelected?.length) {
-        // Nothing was ever pre-selected and user pressed Enter without
-        // toggling anything — treat that as "use the focused row" so the
-        // picker always submits something. (This was the original behavior.)
         const focusedOpt = options[focused];
         if (focusedOpt) onSelect([focusedOpt.value]);
       } else {
-        // If the caller pre-selected items, an empty set means the user
-        // deliberately unchecked everything — pass [] so the caller can
-        // treat it as "skip" or whatever they want.
         onSelect(values);
       }
     }

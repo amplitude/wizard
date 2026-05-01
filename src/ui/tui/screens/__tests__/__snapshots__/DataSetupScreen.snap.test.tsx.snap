@@ -1,0 +1,9 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`DataSetupScreen snapshots > renders the loading state with heading + spinner + helper line 1`] = `
+"Checking project setup
+
+⠋ Analyzing your Amplitude project…
+
+Looking for existing SDK installation and event data"
+`;

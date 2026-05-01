@@ -22,6 +22,72 @@ Feature: Wizard flow
     Then the US region should be stored in my session
     And I should go through the SUSI flow
 
+  Scenario: Signup flow requires email capture before ToS
+    Given I have no credentials stored in "~/.ampli.json"
+    When the wizard launches with "--auth-onboarding create-account"
+    And I continue past the intro
+    And I select the "US" region
+    Then I should be on the EmailCaptureScreen
+    When I enter my email address
+    Then I should be on the ToSScreen
+
+  Scenario: Signup flow requires explicit ToS acceptance
+    Given I have no credentials stored in "~/.ampli.json"
+    When the wizard launches with "--auth-onboarding create-account"
+    And I continue past the intro
+    And I select the "US" region
+    And I enter my email address
+    Then I should be on the ToSScreen
+    When I accept the Terms of Service
+    Then I should go through the SUSI flow
+
+  Scenario: Signup flow can be cancelled from ToS screen
+    Given I have no credentials stored in "~/.ampli.json"
+    When the wizard launches with "--auth-onboarding create-account"
+    And I continue past the intro
+    And I select the "US" region
+    And I enter my email address
+    And I am on the ToSScreen
+    When I decline the Terms of Service
+    Then I should be taken to the Outro with a cancel state
+
+  Scenario: Email is pre-filled from --signup-email flag
+    Given I have no credentials stored in "~/.ampli.json"
+    When the wizard launches with "--auth-onboarding create-account --email test@example.com"
+    And I continue past the intro
+    And I select the "US" region
+    Then I should be on the EmailCaptureScreen
+    And the email field should be pre-filled with "test@example.com"
+
+  Scenario: Existing customer email detected during signup offers login option
+    Given I have no credentials stored in "~/.ampli.json"
+    When the wizard launches with "--auth-onboarding create-account"
+    And I continue past the intro
+    And I select the "US" region
+    And I enter an email that belongs to an existing customer
+    Then I should see the "Account already exists" message
+    And I should be offered options to log in or use a different email
+
+  Scenario: Existing customer chooses to log in instead
+    Given I have no credentials stored in "~/.ampli.json"
+    When the wizard launches with "--auth-onboarding create-account"
+    And I continue past the intro
+    And I select the "US" region
+    And I enter an email that belongs to an existing customer
+    And I choose to "Log in with existing account"
+    Then the signup flow should switch to regular auth
+    And I should go through the login flow
+
+  Scenario: Existing customer chooses to use a different email
+    Given I have no credentials stored in "~/.ampli.json"
+    When the wizard launches with "--auth-onboarding create-account"
+    And I continue past the intro
+    And I select the "US" region
+    And I enter an email that belongs to an existing customer
+    And I choose to "Use a different email"
+    Then I should be back at email entry
+    And I can enter a new email address
+
   Scenario: After SUSI completes — wizard advances to Data Setup then Agent Run
     Given I have no credentials stored in "~/.ampli.json"
     When the wizard launches
@@ -50,12 +116,20 @@ Feature: Wizard flow
     And I select the "US" region
     Then I should proceed to the Data Setup flow
 
-  Scenario: /region slash command re-triggers region selection and data setup
+  Scenario: /region slash command re-triggers region selection and re-auth
     Given the wizard is active
     When I enter the slash command "/region"
     Then I should be taken back to region selection
     When I select the "EU" region
-    Then the data check should re-run for the new region
+    Then the wizard should prompt me to log in again
+
+  Scenario: "Change region" on the intro re-triggers region selection and re-auth
+    Given I have valid credentials stored in "~/.ampli.json"
+    When the wizard launches
+    And I pick "Change region" on the intro
+    Then I should be taken back to region selection
+    When I select the "EU" region
+    Then the wizard should prompt me to log in again
 
   Scenario: Returning user with credentials and existing data — goes to MCP then Slack
     Given I have valid credentials stored in "~/.ampli.json"
@@ -94,7 +168,7 @@ Feature: Wizard flow
 
   Scenario: User exits DataIngestionCheck and returns later
     Given I am on the DataIngestionCheck screen
-    When I press "q" to exit
+    When I press "x" to exit
     Then I should be taken to the Outro with a cancel state
 
   Scenario: Run screen is shown before the agent starts
@@ -143,20 +217,3 @@ Feature: Wizard flow
     Then the OutageScreen overlay should appear
     And I should be able to continue anyway or exit
 
-  Scenario: Settings override overlay appears
-    Given the wizard is active
-    And the settings file blocks the agent
-    When the agent is about to start
-    Then the SettingsOverrideScreen overlay should appear
-    And I should be able to back up and patch the settings to continue
-
-  Scenario: Two overlays stack and dismiss in order
-    Given the wizard is active
-    When an Anthropic service outage is detected
-    And the settings file blocks the agent
-    And the agent is about to start
-    Then the SettingsOverrideScreen overlay should appear
-    When the overlay is dismissed
-    Then the OutageScreen overlay should appear
-    When the overlay is dismissed
-    Then I should be on the RunScreen
