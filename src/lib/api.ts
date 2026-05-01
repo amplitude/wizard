@@ -487,7 +487,7 @@ export async function createAmplitudeApp(
 // ── Create dashboard (wizard proxy) ───────────────────────────────────────
 
 /**
- * Error codes returned by Thunder `POST /dashboards` on the wizard proxy.
+ * Error codes returned by App API `POST /dashboards` on the wizard proxy.
  * Mirrors `WizardDashboardErrorCode` in `wizard-proxy/create-dashboard.ts`.
  */
 export type CreateDashboardErrorCode =
