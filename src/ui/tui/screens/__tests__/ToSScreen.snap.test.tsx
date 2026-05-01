@@ -1,9 +1,11 @@
 /**
  * ToSScreen — Terms of Service acceptance shown during the --signup flow.
  *
- * Static screen with no async effects. Single state to snapshot — the
- * picker layout is what matters; behavior (accept/decline → store
- * mutator) is covered by the screen's prop wiring at runtime.
+ * Snapshots pin the rendered layout (heading, legal links, picker order,
+ * key-hint bar). Behavior is covered separately in
+ * `ToSScreen.behavior.test.tsx` because that file mocks PickerMenu —
+ * keeping the two concerns in separate files lets the snapshot render
+ * the real picker.
  */
 
 import React from 'react';
