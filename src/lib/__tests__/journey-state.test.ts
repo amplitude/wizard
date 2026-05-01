@@ -158,6 +158,17 @@ describe('classifyToolEvent', () => {
         ).toEqual({ stepId: 'wire', status: 'in_progress' });
       }
     });
+
+    it('does not complete wire on write-tool Post — wiring spans many files', () => {
+      expect(
+        classifyToolEvent({
+          phase: 'post',
+          toolName: 'Edit',
+          toolInput: { file_path: '/p/src/foo.ts' },
+          prevDerived: { plan: 'completed', wire: 'in_progress' },
+        }),
+      ).toBeNull();
+    });
   });
 
   describe('dashboard', () => {
