@@ -114,7 +114,7 @@ OAuth flow, analytics tracking, env var handling, API key storage, debug logging
 If a callsite is inside the TUI or runs during a wizard session, prefer `observability/logger.ts`. Bare `console.log` in production source paths is an anti-pattern.
 
 Key additions:
-- `atomic-write.ts` — crash-safe JSON writes via temp-file + rename. Used by session checkpointing and config persistence.
+- `atomic-write.ts` — crash-safe JSON writes via temp-file + rename. Used for credentials, checkpoints, plans, agent recovery snapshots, update-check cache, benchmark JSON, canonical project metadata under `.amplitude/`, and other opted-in JSON persistence — not every byte the process writes (logs append, mkdir, editor installs, etc.).
 - `token-refresh.ts` — silent OAuth token refresh using stored refresh tokens. Proactively refreshes 5 minutes before expiry, falls back to full browser auth on failure.
 - `storage-paths.ts` — single source of truth for every path the wizard reads or writes. Per-user cache at `~/.amplitude/wizard/`, per-project metadata at `<installDir>/.amplitude/`. Override the cache root with `AMPLITUDE_WIZARD_CACHE_DIR` (used by tests).
 - `storage-migration.ts` — one-shot migration from the old `$TMPDIR/amplitude-wizard-*` + project-root dotfile layout. Idempotent, runs at startup. Drop after one release.
@@ -137,7 +137,7 @@ The `/diagnostics` slash command prints the full layout for the current project 
 
 **Security invariants:**
 - Credential files use `0o600` permissions (owner read/write only)
-- All file writes use `atomicWriteJSON()` (temp-file + rename) to prevent corruption on crash
+- Security- and recovery-sensitive JSON uses `atomicWriteJSON()` (temp-file + rename) so a crash mid-write leaves the prior file intact. Append-only logs (`log.txt` / `log.ndjson`), directory creation, streamed or editor-facing writes, and intentional exceptions (e.g. `.env.local` handling per platform/editor constraints) are outside that contract.
 - Checkpoint files never contain tokens, API keys, or access tokens
 - Config scoping validates org ID against live data to prevent cross-project leakage
 - Zone priority: CLI flag > env var > stored config (prevents env var pollution across projects)

@@ -493,10 +493,10 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
   const oauthWaiting = pendingOrgs === null && !manualFallbackOpen;
   // After email capture + ToS, "authentication" sounds like we're still
   // waiting on the user; the real wait is browser OAuth completing.
-  const oauthWaitHeadline = session.signup
+  const oauthWaitHeadline = session.accountCreationFlow
     ? 'Complete sign-in in your browser'
     : 'Signing you in';
-  const oauthWaitPreparingLine = session.signup
+  const oauthWaitPreparingLine = session.accountCreationFlow
     ? 'Opening your Amplitude sign-in page'
     : 'Preparing your sign-in link';
   const { tier: oauthCoachingTier } = useTimedCoaching({
@@ -699,7 +699,7 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
               {Icons.ellipsis}
             </Text>
           </Box>
-          {session.signup && (
+          {session.accountCreationFlow && (
             <Box marginTop={1}>
               <Text color={Colors.body}>
                 Please sign up or log in from the browser to continue.

@@ -50,7 +50,7 @@ describe('AuthScreen — browser-fallback coaching', () => {
     const store = makeStoreForSnapshot({
       introConcluded: true,
       region: 'us',
-      signup: true,
+      accountCreationFlow: true,
       emailCaptureComplete: true,
       tosAccepted: true,
       loginUrl: 'https://app.amplitude.com/oauth?x=y',
@@ -81,7 +81,7 @@ describe('AuthScreen — browser-fallback coaching', () => {
     const store = makeStoreForSnapshot({
       introConcluded: true,
       region: 'us',
-      signup: true,
+      accountCreationFlow: true,
       emailCaptureComplete: true,
       tosAccepted: true,
       loginUrl: null,

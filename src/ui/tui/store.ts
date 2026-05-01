@@ -689,7 +689,7 @@ export class WizardStore {
   }
 
   switchToLogin(): void {
-    this.$session.setKey('signup', false);
+    this.$session.setKey('accountCreationFlow', false);
     this.$session.setKey('signupEmail', null);
     this.$session.setKey('signupFullName', null);
     analytics.wizardCapture('signup switched to login', {

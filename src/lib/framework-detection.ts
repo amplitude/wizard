@@ -132,7 +132,7 @@ export async function runFrameworkDetection(
             debug: store.session.debug,
             forceInstall: store.session.forceInstall,
             default: false,
-            signup: store.session.signup,
+            accountCreationFlow: store.session.accountCreationFlow,
             localMcp: store.session.localMcp,
             ci: store.session.ci,
             menu: store.session.menu,

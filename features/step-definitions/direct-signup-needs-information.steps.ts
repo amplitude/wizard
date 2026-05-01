@@ -48,7 +48,7 @@ After(function () {
 Given(
   'the wizard is started with --signup and no email or full name',
   function () {
-    session.signup = true;
+    session.accountCreationFlow = true;
     session.signupEmail = null;
     session.signupFullName = null;
   },
@@ -57,7 +57,7 @@ Given(
 Given(
   'the wizard is started with --signup and email {string}',
   function (email: string) {
-    session.signup = true;
+    session.accountCreationFlow = true;
     session.signupEmail = email;
     session.signupFullName = null;
   },
@@ -66,7 +66,7 @@ Given(
 Given(
   'the wizard is started with --signup, email {string}, and full name {string}',
   function (email: string, fullName: string) {
-    session.signup = true;
+    session.accountCreationFlow = true;
     session.signupEmail = email;
     session.signupFullName = fullName;
   },

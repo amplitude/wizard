@@ -345,7 +345,11 @@ export interface WizardSession {
   installDir: string;
   ci: boolean;
   agent: boolean;
-  signup: boolean;
+  /**
+   * User is creating a new Amplitude account (`--signup` / TUI), including
+   * pre-provisioning steps — not "account creation finished."
+   */
+  accountCreationFlow: boolean;
   signupEmail: string | null;
   signupFullName: string | null;
   /**
@@ -893,7 +897,12 @@ export function buildSession(args: {
   forceInstall?: boolean;
   installDir?: string;
   ci?: boolean;
+  /**
+   * @deprecated Prefer `accountCreationFlow`. Both merge into the internal
+   * CLI parse field before validation.
+   */
   signup?: boolean;
+  accountCreationFlow?: boolean;
   localMcp?: boolean;
   apiKey?: string;
   menu?: boolean;
@@ -923,8 +932,12 @@ export function buildSession(args: {
    */
   region?: AmplitudeZone;
 }): WizardSession {
+  const mergedSignupCliFlag = args.accountCreationFlow ?? args.signup ?? false;
   // Validate CLI args via Zod — warn on bad input but fall back to defaults
-  const parsed = CliArgsSchema.safeParse(args);
+  const parsed = CliArgsSchema.safeParse({
+    ...args,
+    signup: mergedSignupCliFlag,
+  });
   if (!parsed.success) {
     console.warn(
       `[wizard] Invalid CLI args (falling back to defaults): ${parsed.error.issues
@@ -943,7 +956,9 @@ export function buildSession(args: {
     installDir: resolveInstallDir(validated.installDir),
     ci: validated.ci ?? false,
     agent: false,
-    signup: validated.signup ?? false,
+    accountCreationFlow: parsed.success
+      ? parsed.data.signup ?? false
+      : Boolean(args.accountCreationFlow ?? args.signup),
     // On parse failure we intentionally reject raw args for the signup
     // fields — otherwise a malformed email would skip zod's .email() check
     // via the fallback and reach the signup endpoint. Null here means the

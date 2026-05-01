@@ -857,6 +857,7 @@ describe('cleanupWizardArtifacts', () => {
       'add-analytics-instrumentation',
       'amplitude-chart-dashboard-plan',
       'amplitude-quickstart-taxonomy-agent',
+      'wizard-prompt-supplement',
     ];
     for (const name of keep) {
       const dir = path.join(tmpDir, '.claude', 'skills', name);

@@ -15,7 +15,10 @@ import path from 'path';
 import { z } from 'zod';
 
 import { callAmplitudeMcp } from '../lib/mcp-with-fallback';
-import { parseEventPlanContent } from '../lib/event-plan-parser';
+import {
+  parseEventPlanContent,
+  readLocalEventPlan,
+} from '../lib/event-plan-parser.js';
 import { getMcpUrlFromZone } from '../utils/urls';
 import { resolveZone } from '../lib/zone-resolution';
 import { DEFAULT_AMPLITUDE_ZONE } from '../lib/constants';
@@ -27,8 +30,8 @@ import { getDashboardFile } from '../utils/storage-paths';
 import type { WizardSession } from '../lib/wizard-session';
 import type { Integration } from '../lib/constants';
 
-const EVENTS_FILE = '.amplitude-events.json';
-const DASHBOARD_FILE = '.amplitude-dashboard.json';
+/** Legacy dashboard dotfile — read-only fallback for older runs. */
+const LEGACY_DASHBOARD_FILE = '.amplitude-dashboard.json';
 // Tightened from 90s → 30s. With the in-loop `record_dashboard` tool, the
 // agent is the primary path for dashboard creation; this step is now a
 // genuine fallback for the rare case where the agent failed to create or
@@ -88,15 +91,18 @@ export async function createDashboardStep(
   const ui = getUI();
   ui.setPostAgentStep(STEP_ID, { status: 'in_progress' });
 
-  const eventsPath = path.join(session.installDir, EVENTS_FILE);
-  const legacyDashboardPath = path.join(session.installDir, DASHBOARD_FILE);
+  const legacyDashboardPath = path.join(
+    session.installDir,
+    LEGACY_DASHBOARD_FILE,
+  );
   const canonicalDashboardPath = getDashboardFile(session.installDir);
 
-  // 1. Read the instrumentation manifest the agent just wrote.
-  const events = readEventsFile(eventsPath);
+  // 1. Read the instrumentation manifest (canonical `.amplitude/events.json`,
+  //    then legacy `.amplitude-events.json` when present).
+  const events = readEventsForDashboard(session.installDir);
   if (!events) {
     logToFile(
-      `[createDashboard] skipping — no valid ${EVENTS_FILE} at ${eventsPath}`,
+      `[createDashboard] skipping — no valid event plan under .amplitude/ (or legacy dotfile)`,
     );
     analytics.wizardCapture('dashboard skipped', {
       integration,
@@ -109,20 +115,12 @@ export async function createDashboardStep(
     return;
   }
 
-  // 1b. If the in-loop agent already created the dashboard (the post-PR-XXX
-  //     happy path: agent calls Amplitude MCP `create_dashboard` and then
-  //     wizard-tools `record_dashboard`, which writes BOTH the canonical
-  //     `<installDir>/.amplitude/dashboard.json` AND the legacy
-  //     `<installDir>/.amplitude-dashboard.json`), short-circuit. This is
-  //     now the dominant path — the fallback below should only fire on
-  //     buggy / aborted agent runs.
+  // 1b. If the in-loop agent already created the dashboard (agent calls
+  //     Amplitude MCP `create_dashboard` then wizard-tools `record_dashboard`,
+  //     which writes `<installDir>/.amplitude/dashboard.json`), short-circuit.
   //
-  //     Read order: canonical FIRST. The agent's `record_dashboard` writes
-  //     the canonical path atomically; reading there avoids a window where
-  //     only the legacy mirror has landed (and is theoretically safer if a
-  //     future skill release stops writing the legacy mirror). Fall back to
-  //     legacy for back-compat with older skills that wrote the file
-  //     themselves via plain Edit/Write.
+  //     Read order: canonical FIRST, then legacy `.amplitude-dashboard.json`
+  //     for older runs only.
   const existing =
     readExistingDashboardFile(canonicalDashboardPath) ??
     readExistingDashboardFile(legacyDashboardPath);
@@ -219,24 +217,8 @@ export async function createDashboardStep(
       return;
     }
 
-    // Persist the wizard-visible artifact so OutroScreen can link to it.
-    // Legacy mirror at the project root (older readers) and canonical
-    // `<installDir>/.amplitude/dashboard.json` (`/diagnostics`, repeat-run
-    // plan recovery, skill packs). Best-effort — failures here must not
-    // fail the wizard; the user's project is already configured.
-    try {
-      fs.writeFileSync(
-        legacyDashboardPath,
-        JSON.stringify(result, null, 2),
-        'utf8',
-      );
-    } catch (err) {
-      logToFile(
-        `[createDashboard] failed to write ${DASHBOARD_FILE}: ${
-          err instanceof Error ? err.message : String(err)
-        }`,
-      );
-    }
+    // Persist canonical `<installDir>/.amplitude/dashboard.json` so
+    // OutroScreen, `/diagnostics`, and repeat runs see the URL. Best-effort.
     persistDashboard(session.installDir, result);
 
     session.checklistDashboardUrl = result.dashboardUrl;
@@ -257,7 +239,8 @@ export async function createDashboardStep(
 }
 
 /**
- * Try to load an already-written `.amplitude-dashboard.json`. Returns the
+ * Try to load an already-written dashboard JSON (canonical or legacy path).
+ * Returns the
  * parsed result if present and valid, null otherwise (missing file,
  * unreadable, malformed JSON, fails schema validation, or empty
  * dashboardUrl). Failures fall through to the agent fallback path.
@@ -314,25 +297,19 @@ function readEventsFromContent(content: string): EventsFile | null {
   return { events: filtered };
 }
 
-function readEventsFile(eventsPath: string): EventsFile | null {
-  if (!fs.existsSync(eventsPath)) return null;
-  try {
-    const content = fs.readFileSync(eventsPath, 'utf8');
-    const events = readEventsFromContent(content);
-    if (!events) {
-      logToFile(
-        `[createDashboard] ${eventsPath} parsed but had no usable events`,
-      );
-    }
-    return events;
-  } catch (err) {
+function readEventsForDashboard(installDir: string): EventsFile | null {
+  const raw = readLocalEventPlan(installDir);
+  if (raw.length === 0) return null;
+  const filtered = raw
+    .filter((e) => e.name.trim().length > 0)
+    .map((e) => ({ ...e, name: e.name.trim() }));
+  if (filtered.length === 0) {
     logToFile(
-      `[createDashboard] ${eventsPath} is invalid: ${
-        err instanceof Error ? err.message : String(err)
-      }`,
+      `[createDashboard] event plan under ${installDir} had no usable events`,
     );
     return null;
   }
+  return { events: filtered };
 }
 
 async function runCreateDashboard(args: {

@@ -316,7 +316,7 @@ function sessionToOptions(session: WizardSession): WizardOptions {
     debug: session.debug,
     forceInstall: session.forceInstall,
     default: false,
-    signup: session.signup,
+    accountCreationFlow: session.accountCreationFlow,
     localMcp: session.localMcp,
     ci: session.ci,
     menu: session.menu,
@@ -700,7 +700,7 @@ async function runAgentWizardBody(
   // Only fall back to getOrAskForProjectData for CI mode or non-TUI fallback.
   if (!session.credentials) {
     const authResult = await getOrAskForProjectData({
-      signup: session.signup,
+      accountCreationFlow: session.accountCreationFlow,
       ci: session.ci,
       apiKey: session.apiKey,
       appId: session.appId,
@@ -1272,7 +1272,7 @@ async function runAgentWizardBody(
   }
 
   // Build outro data and store it for OutroScreen
-  const continueUrl = session.signup
+  const continueUrl = session.accountCreationFlow
     ? session.signupMagicLinkUrl ?? OUTBOUND_URLS.products(cloudRegion)
     : undefined;
 
@@ -1604,6 +1604,8 @@ function buildIntegrationPrompt(
   return `You are setting up Amplitude analytics in this ${
     config.metadata.name
   } project. The wizard has pre-staged the skills you'll need into \`.claude/skills/\` — load them with the Skill tool by ID instead of calling load_skill_menu / install_skill.
+
+Early in the run (before env wiring and again before confirm_event_plan), load \`.claude/skills/wizard-prompt-supplement/SKILL.md\` via the Skill tool and \`Read\` the reference files it lists for your phase — they hold long-form contracts intentionally kept out of the static commandments (API keys, event-plan shape, setup report, lint scoping rationale, and browser SDK init tables when applicable).
 
 Project context:
 ${appIdGuidance}
