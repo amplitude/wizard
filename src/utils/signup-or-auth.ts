@@ -1,6 +1,7 @@
 import type { AmplitudeAuthResult } from './oauth.js';
 import { performDirectSignup } from './direct-signup.js';
 import { replaceStoredUser, type StoredUser } from './ampli-settings.js';
+import { clearStaleProjectState } from './clear-stale-project-state.js';
 import { fetchAmplitudeUser, type AmplitudeUserInfo } from '../lib/api.js';
 import { createLogger } from '../lib/observability/logger.js';
 import type { AmplitudeZone } from '../lib/constants.js';
@@ -124,6 +125,14 @@ export interface SignupOrAuthInput {
   email: string | null;
   fullName: string | null;
   zone: AmplitudeZone;
+  /**
+   * Project directory the wizard is running against. Used on successful
+   * signup to wipe pre-existing per-project state (keychain API key,
+   * .env.local, project ampli.json bindings, session checkpoint) so the
+   * new account doesn't inherit the prior account's data — see
+   * {@link clearStaleProjectState}.
+   */
+  installDir: string;
 }
 
 export interface SignupOrAuthOptions {
@@ -298,6 +307,14 @@ export async function performSignupOrAuth(
     tosAcceptedAt: new Date().toISOString(),
   };
 
+  // Wipe pre-existing per-project state BEFORE persisting the new account.
+  // Mirrors `replaceStoredUser`'s wipe-then-write pattern across the
+  // install-dir-keyed surfaces (keychain, .env.local, project ampli.json,
+  // session checkpoint) that `replaceStoredUser` does not touch. Without
+  // this, downstream `getAPIKey` short-circuits on the prior account's
+  // cached key and silently routes the new account's events into the wrong
+  // tenancy. See MCP-196.
+  clearStaleProjectState(input.installDir);
   // Persist BEFORE telemetry: a disk/permission failure must propagate to
   // the outer catch so `wrapper_exception` is the sole event — emitting
   // success or user_fetch_failed first would double-count the attempt.

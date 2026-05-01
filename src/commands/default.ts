@@ -776,9 +776,15 @@ export const defaultCommand: CommandModule = {
                     email: s.signupEmail,
                     fullName: s.signupFullName,
                     zone,
+                    installDir: s.installDir,
                   });
-                  if (signupResult !== null) {
-                    auth = signupResult;
+                  if (signupResult.kind === 'success') {
+                    auth = {
+                      idToken: signupResult.idToken,
+                      accessToken: signupResult.accessToken,
+                      refreshToken: signupResult.refreshToken,
+                      zone: signupResult.zone,
+                    };
                     signupUserInfo = signupResult.userInfo;
                     signupTokensObtained = true;
                     tui.store.setSignupMagicLinkUrl(

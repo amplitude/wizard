@@ -696,6 +696,7 @@ export const runDirectSignupIfRequested = async (
       email: session.signupEmail,
       fullName: session.signupFullName,
       zone,
+      installDir: session.installDir,
     });
   } catch (err) {
     // Only the wrapper itself threw — emit wrapper_exception and bail.
