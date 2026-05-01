@@ -14,6 +14,7 @@ import AdmZip from 'adm-zip';
 import { z } from 'zod';
 import { logToFile } from '../utils/debug';
 import { atomicWriteJSON } from '../utils/atomic-write';
+import { readLocalEventPlan } from './event-plan-parser.js';
 import {
   ensureDir,
   getDashboardFile,
@@ -483,26 +484,19 @@ export const PREVIOUS_SETUP_REPORT_FILENAME =
  * single source of truth for what to add to the user's .gitignore.
  *
  * The list is broader than what `cleanupWizardArtifacts` removes on exit:
- * several entries are kept on disk on purpose (legacy mirrors useful for
- * context-hub skill compatibility, the user-facing setup report, the
- * canonical `.amplitude/` metadata dir) but should still never end up in
- * source control.
+ * several entries are kept on disk on purpose (the user-facing setup report,
+ * the canonical `.amplitude/` metadata dir, optional legacy dotfiles from
+ * older runs) but should still never end up in source control.
  *
  * Notes on each entry:
  *   - `.amplitude/` — per-project metadata dir holding `events.json` (the
  *     approved event plan, kept across runs for re-instrumentation) and
  *     `dashboard.json` (the URL of the dashboard the agent created). Useful
  *     to keep on disk but never belongs in source control.
- *   - `.amplitude-events.json` / `.amplitude-dashboard.json` — legacy
- *     mirrors. The wizard tool dual-writes events here so bundled
- *     context-hub integration skills (which still read the legacy path)
- *     keep working; the agent's conclude-phase skill writes the
- *     dashboard mirror itself. Both are intentionally PRESERVED across
- *     runs (re-instrumentation needs them, and the canonical mirrors
- *     under `.amplitude/` already cover the same data) — they're listed
- *     here only to keep them out of `git add .`. Drop these entries
- *     once context-hub ships an updated skill set that reads/writes the
- *     canonical `.amplitude/` paths.
+ *   - `.amplitude-events.json` / `.amplitude-dashboard.json` — legacy paths
+ *     from older wizard or skill versions. The wizard writes only under
+ *     `.amplitude/` now but still reads these when present; keep them
+ *     gitignored so stray copies never get committed.
  *   - `amplitude-setup-report.previous.md` — wizard-managed archive of the
  *     prior run's setup report. The CURRENT report
  *     (`amplitude-setup-report.md`) is intentionally NOT gitignored —
@@ -688,14 +682,10 @@ export function restoreSetupReportIfMissing(installDir: string): void {
  *     record of the user's confirmed event plan and is reused across
  *     runs for re-instrumentation. Both are gitignored via the
  *     `.amplitude/` pattern so they can't pollute commits.
- *   - `<installDir>/.amplitude-events.json` and `.amplitude-dashboard.json` —
- *     legacy mirrors. The wizard dual-writes events here for bundled
- *     context-hub integration skills that still read the legacy path,
- *     and the agent's conclude-phase skill writes the dashboard mirror
- *     itself. Both are listed in `WIZARD_GITIGNORE_PATTERNS` so they
- *     can't pollute commits, and intentionally NOT deleted — preserving
- *     them across runs avoids resurfacing an empty-disk state to the
- *     skills mid-run and keeps re-instrumentation cheap.
+ *   - Legacy `<installDir>/.amplitude-events.json` and
+ *     `.amplitude-dashboard.json` when they already exist — the wizard no
+ *     longer writes these paths but does not delete them; readers prefer
+ *     `.amplitude/` and fall back to legacy for migration.
  *   - `<installDir>/amplitude-setup-report.md` — user-facing summary the
  *     OutroScreen points at. Kept on disk so the user can read it after
  *     exit; the next run overwrites it.
@@ -1010,17 +1000,13 @@ export function normalizeEventName(raw: string): string {
  * Write the canonical event plan to `<workingDirectory>/.amplitude/events.json`
  * using the shape the wizard UI expects: `[{name, description}]`.
  *
- * Also mirror the file to the legacy `<workingDirectory>/.amplitude-events.json`
- * for backwards compatibility with bundled integration skills that still
- * instruct the agent to read the legacy path. Both files are gitignored
- * (`.amplitude/` covers the canonical path; the legacy dotfile is listed
- * explicitly in WIZARD_GITIGNORE_PATTERNS) and intentionally preserved
- * across runs for re-instrumentation. Drop the mirror once context-hub
- * ships an updated skill set that reads the canonical path.
+ * Does not write the legacy root `.amplitude-events.json` — readers use
+ * {@link readLocalEventPlan} which prefers the canonical file and still
+ * honors a pre-existing legacy dotfile from older runs.
  *
  * The agent is instructed (via commandments + integration skills) not to
- * write either file itself — the wizard tool is the single writer so the
- * shape can't drift. Exported for testing.
+ * write the canonical file itself — the wizard tool is the single writer so
+ * the shape cannot drift. Exported for testing.
  *
  * The `.amplitude/` directory is created lazily on first write and is
  * gitignored as a single line.
@@ -1043,27 +1029,7 @@ export function persistEventPlan(
       );
       return false;
     }
-    // Write order matters for the mtime tiebreaker in
-    // `pickFreshestExisting([canonical, legacy])` (see storage-paths.ts).
-    // On filesystems with 1-second mtime granularity (older HFS+, ext4
-    // without nanosec inode timestamps) both writes land in the same
-    // second and both files share an mtime; the watcher walks the
-    // candidates in order and the strict `>` compare keeps the FIRST
-    // arg as the winner on tie. On modern filesystems with sub-second
-    // precision the LAST write wins outright. We want canonical to
-    // win in both cases, so write legacy FIRST and canonical LAST.
     ensureDir(getProjectMetaDir(workingDirectory), 0o755);
-    // Legacy mirror — bundled integration skills (owned by context-hub)
-    // still instruct the agent to read this path. Once context-hub ships
-    // an updated skill set pointing at `.amplitude/events.json` we can
-    // drop this mirror and its gitignore entry.
-    const legacyPlanPath = path.join(
-      workingDirectory,
-      '.amplitude-events.json',
-    );
-    atomicWriteJSON(legacyPlanPath, events);
-    // Canonical location — preserved across runs, gitignored as `.amplitude/`.
-    // Written last so its mtime is freshest on every filesystem.
     atomicWriteJSON(getEventsFile(workingDirectory), events);
     return true;
   } catch (err) {
@@ -1075,13 +1041,8 @@ export function persistEventPlan(
 }
 
 /**
- * Mirror the dashboard payload to the canonical
- * `<workingDirectory>/.amplitude/dashboard.json`. Bundled integration skills
- * instruct the agent to write only the legacy `.amplitude-dashboard.json`;
- * this function copies the content to the canonical path so downstream
- * consumers (and a future context-hub release that drops the legacy path)
- * have a stable location to read from. Both files are gitignored and
- * preserved across runs.
+ * Write the dashboard payload to the canonical
+ * `<workingDirectory>/.amplitude/dashboard.json`.
  *
  * Called from the dashboard file-watcher in `agent-interface.ts` whenever a
  * valid dashboard file is detected. Idempotent and silent on errors.
@@ -1132,37 +1093,14 @@ export interface FallbackReportContext {
 }
 
 /**
- * Read the canonical event plan from `.amplitude-events.json` if present.
- * Returns an empty array on any failure — the fallback writer is best-effort
- * and a missing / malformed events file just means the report has no events
- * table, not that the report should be skipped.
+ * Read the persisted event plan (canonical `.amplitude/events.json`, then
+ * legacy `.amplitude-events.json` by mtime). Returns an empty array on any
+ * failure — the fallback writer is best-effort.
  */
 function readPersistedEventPlan(
   installDir: string,
 ): Array<{ name: string; description: string }> {
-  try {
-    const planPath = path.join(installDir, '.amplitude-events.json');
-    if (!fs.existsSync(planPath)) return [];
-    const raw = fs.readFileSync(planPath, 'utf8');
-    const parsed = JSON.parse(raw) as unknown;
-    if (!Array.isArray(parsed)) return [];
-    return parsed
-      .filter(
-        (e): e is { name: string; description: string } =>
-          typeof e === 'object' &&
-          e !== null &&
-          typeof (e as { name?: unknown }).name === 'string' &&
-          typeof (e as { description?: unknown }).description === 'string',
-      )
-      .map((e) => ({ name: e.name, description: e.description }));
-  } catch (err) {
-    logToFile(
-      `readPersistedEventPlan: ${
-        err instanceof Error ? err.message : String(err)
-      }`,
-    );
-    return [];
-  }
+  return readLocalEventPlan(installDir);
 }
 
 /**
@@ -1207,7 +1145,7 @@ export function buildFallbackReport(ctx: FallbackReportContext): string {
     lines.push('## Instrumented events');
     lines.push('');
     lines.push(
-      '_No event plan was persisted. If this is unexpected, re-run the wizard or check `.amplitude-events.json` in your project root._',
+      '_No event plan was persisted. If this is unexpected, re-run the wizard or check `.amplitude/events.json` (or legacy `.amplitude-events.json`) in your project._',
     );
     lines.push('');
   }
@@ -1714,7 +1652,7 @@ Returns: "approved", "skipped", or "feedback: <user message>"`,
       } else {
         text = decision.decision; // 'approved' or 'skipped'
       }
-      // Persist the canonical event plan to .amplitude-events.json so the
+      // Persist the canonical event plan to `.amplitude/events.json` so the
       // watcher and return-run loader see the same {name, description} shape
       // regardless of what the agent would otherwise emit. Only write on
       // approved to avoid overwriting a prior good plan with a rejected one.
@@ -1811,10 +1749,8 @@ Returns: "approved", "skipped", or "feedback: <user message>"`,
   // Persists a dashboard the agent just created via the Amplitude MCP. This
   // is the explicit hand-off from the in-loop agent (which does the actual
   // chart/dashboard MCP calls during the "Build your starter dashboard" task) to the
-  // wizard's outro and post-agent step. Writes BOTH:
-  //   - canonical `.amplitude/dashboard.json` (via persistDashboard)
-  //   - legacy `.amplitude-dashboard.json` at the project root, for back-compat
-  //     with `createDashboardStep`'s readExistingDashboardFile path
+  // wizard's outro and post-agent step. Writes
+  // `<installDir>/.amplitude/dashboard.json` (via persistDashboard).
   //
   // When this tool fires, `createDashboardStep` finds the file on its next
   // pass and short-circuits to its reuse path — no 90s MCP+sub-agent fallback,
@@ -1865,32 +1801,12 @@ Returns: "ok" on successful persistence, an error string otherwise. Idempotent �
       if (args.dashboardId) payload.dashboardId = args.dashboardId;
       if (args.charts) payload.charts = args.charts;
 
-      // 1. Canonical: <installDir>/.amplitude/dashboard.json (atomic).
       const persistedCanonical = persistDashboard(workingDirectory, payload);
-      // 2. Legacy mirror: <installDir>/.amplitude-dashboard.json.
-      //    `createDashboardStep.readExistingDashboardFile` reads this path
-      //    today; the post-agent step will also gain a canonical-path read,
-      //    but the mirror keeps older skills/readers working.
-      let persistedLegacy = false;
-      try {
-        const legacyPath = path.join(
-          workingDirectory,
-          '.amplitude-dashboard.json',
-        );
-        atomicWriteJSON(legacyPath, payload);
-        persistedLegacy = true;
-      } catch (err) {
-        logToFile(
-          `record_dashboard: legacy mirror write failed: ${
-            err instanceof Error ? err.message : String(err)
-          }`,
-        );
-      }
 
       logToFile(
         `record_dashboard: url=${args.dashboardUrl} charts=${
           args.charts?.length ?? 0
-        } canonical=${persistedCanonical} legacy=${persistedLegacy}`,
+        } canonical=${persistedCanonical}`,
       );
 
       // Surface the dashboard URL on the session immediately so the outro
@@ -1908,7 +1824,7 @@ Returns: "ok" on successful persistence, an error string otherwise. Idempotent �
         );
       }
 
-      if (!persistedCanonical && !persistedLegacy) {
+      if (!persistedCanonical) {
         return {
           content: [
             {

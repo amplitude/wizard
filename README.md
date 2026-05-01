@@ -208,6 +208,9 @@ full glossary.
 | `AMPLITUDE_WIZARD_TOKEN` | Alias for `AMPLITUDE_TOKEN` |
 | `AMPLITUDE_WIZARD_AGENT=1` | Force agent mode (NDJSON, auto-approve) |
 | `AMPLITUDE_WIZARD_MAX_TURNS` | Override the inner agent's per-run turn cap (default 200) |
+| `DATA_INGESTION_TIMEOUT_MS` | Override max wait (ms) for `--agent` ingestion polling after install; when unset, CI uses 10m and interactive agent uses 20m (see `src/lib/data-ingestion-agent-poll.ts`) |
+| `AMPLITUDE_WIZARD_DEBUG_CAN_USE_TOOL=1` | Log each inner-agent `canUseTool` gate decision to the wizard log file (with payload redaction) |
+| `AMPLITUDE_WIZARD_CAN_USE_TOOL_LOG_SAMPLE` | If set to a positive integer N, log every Nth `canUseTool` call without enabling full debug |
 
 **NDJSON schema.** Every event emitted in `--agent` mode carries a `v:1`
 version tag and a typed envelope. The stream includes inner-agent

@@ -74,7 +74,7 @@ export const VUE_AGENT_CONFIG: FrameworkConfig<VueContext> = {
       if (packageJson) {
         // Nuxt projects have both 'vue' and 'nuxt' — don't claim them
         if (hasPackageInstalled('nuxt', packageJson)) return false;
-        // VitePress / VuePress ship `vue` but are docs sites, not Vue SPAs
+        // VitePress, VuePress, Slidev, etc. ship `vue` but are not product SPAs
         if (isVuePoweredDocsSite(packageJson)) return false;
         return hasPackageInstalled('vue', packageJson);
       }

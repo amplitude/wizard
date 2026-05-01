@@ -75,17 +75,17 @@ Write tools (Edit / Write) — DO parallelize when each call targets a DIFFERENT
 
 Do NOT add a sixth — internal steps (env var writes, Content Security Policy edits, build verification, setup report, doc fetches) roll into the appropriate parent (CSP and env vars into "Install Amplitude"; setup report into "Build your starter dashboard"; build verification into "Wire up event tracking"). Engineering phases from the integration skill (1.0-begin / 1.1-edit / 1.2-revise / 1.3-conclude) are internal — they do not appear here. The denominator MUST stay 5 — the wizard renders "X / 5 tasks complete" regardless of what your list says.`,
 
-  `After installing the SDK and adding init code, but BEFORE writing any track() calls, you MUST call confirm_event_plan. Naming rules, plan sizing, funnel/async/symmetry/identify, autocapture overlap, and .amplitude/events.json ownership — read \`.claude/skills/wizard-prompt-supplement/references/confirm-event-plan-contract.md\` before the call. Invariants: confirm_event_plan owns the initial write of .amplitude/events.json (mirrored to legacy .amplitude-events.json); canonical shape [{name, description}]; do not pre-write a conflicting shape; if skipped, do not instrument.`,
+  `After installing the SDK and adding init code, but BEFORE writing any track() calls, you MUST call confirm_event_plan. Naming rules, plan sizing, funnel/async/symmetry/identify, autocapture overlap, and .amplitude/events.json ownership — read \`.claude/skills/wizard-prompt-supplement/references/confirm-event-plan-contract.md\` before the call. Invariants: confirm_event_plan owns the initial write of \`.amplitude/events.json\` only (canonical under \`.amplitude/\`; do not create or overwrite legacy root \`.amplitude-events.json\` / \`.amplitude-dashboard.json\`); canonical shape [{name, description}]; do not pre-write a conflicting shape; if skipped, do not instrument.`,
 
-  'Post-instrumentation `.amplitude-events.json` array shape, dashboard creation, and `record_dashboard` — read `.claude/skills/wizard-prompt-supplement/references/post-instrumentation-events-and-dashboard.md`.',
+  'Post-instrumentation `.amplitude/events.json` (under `.amplitude/`) array shape, dashboard creation, and `record_dashboard` — read `.claude/skills/wizard-prompt-supplement/references/post-instrumentation-events-and-dashboard.md`.',
 
   'Setup report format and `<wizard-report>` tags — read `.claude/skills/wizard-prompt-supplement/references/setup-report-requirements.md`. You MUST write `amplitude-setup-report.md` at the project root before the run ends.',
 
   'Prefer `report_status` (wizard-tools MCP) for progress updates and fatal errors. Use `kind="status"` for in-progress updates (appears in the spinner). Use `kind="error"` for fatal halts (codes: `MCP_MISSING`, `RESOURCE_MISSING`). Legacy `[STATUS]` / `[ERROR-MCP-MISSING]` / `[ERROR-RESOURCE-MISSING]` text markers from older bundled skills are still recognized for back-compat; new code should use `report_status`.',
 
   `Do NOT delete or "clean up" wizard-managed paths during the agent run. Owned by wizard lifecycle hooks:
-  - \`.amplitude/\` and everything under it (\`events.json\`, \`dashboard.json\`, \`product-map.json\`, …)
-  - \`.amplitude-events.json\` and \`.amplitude-dashboard.json\` (legacy, kept for migration)
+  - \`.amplitude/\` and everything under it (\`events.json\`, \`dashboard.json\`, \`product-map.json\`, …) — the wizard writes project metadata only here
+  - Legacy root \`.amplitude-events.json\` / \`.amplitude-dashboard.json\` — do not create or rewrite; leave existing files from older runs alone (reads may still use them during migration)
   - \`amplitude-setup-report.md\` (wizard archives previous runs itself)
   - \`.claude/skills/\` (wizard pre-stages and cleans these post-run)
 
