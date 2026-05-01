@@ -20,6 +20,7 @@ The static `commandments` block in the wizard stays intentionally short. **This 
 | Env vars, `.env`, client vs server keys | `references/api-keys-and-env.md` |
 | Before `confirm_event_plan`, event naming, plan sizing, autocapture overlap | `references/confirm-event-plan-contract.md` |
 | After `track()` calls, before dashboard | `references/post-instrumentation-events-and-dashboard.md` |
+| After SDK init — grounded `POST /dashboards` hints (autocapture, display name, SDK version) | `references/wizard-dashboard-request-context.md` |
 | `amplitude-setup-report.md` | `references/setup-report-requirements.md` |
 | Browser / unified SDK init defaults (browser-targeting frameworks only) | `references/browser-sdk-init-defaults.md` |
 | Why end-of-run lint must stay file-scoped | `references/lint-scoping.md` |

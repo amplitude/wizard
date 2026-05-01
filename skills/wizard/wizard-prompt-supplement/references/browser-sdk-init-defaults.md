@@ -83,3 +83,9 @@ These options are ONLY valid for the browser / unified SDK. Do NOT pass autocapt
 - Backend SDKs in other languages (Python, Java, Go, Ruby, .NET) — server-side, no autocapture surface.
 
 When in doubt, consult the per-SDK README. Inventing an option name (or copying browser keys onto a non-browser SDK) causes runtime errors or silent no-ops. See https://amplitude.com/docs/sdks/client-side-vs-server-side for which SDK applies where.
+
+---
+
+## After init — `.amplitude/wizard-context.json`
+
+Once autocapture (or its deliberate absence) matches the init you shipped, write **`.amplitude/wizard-context.json`** so the wizard-proxy dashboard RPC uses the **same** boolean — see `references/wizard-dashboard-request-context.md` for `autocaptureEnabled`, optional `productDisplayName`, and `sdkVersion`.

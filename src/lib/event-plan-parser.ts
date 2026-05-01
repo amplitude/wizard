@@ -21,6 +21,10 @@ import * as path from 'node:path';
 import { z } from 'zod';
 import { getEventsFile } from '../utils/storage-paths.js';
 import { logToFile } from '../utils/debug.js';
+import {
+  isWizardDashboardEventCategory,
+  type WizardDashboardEventCategory,
+} from './wizard-dashboard-contract.js';
 
 // The agent doesn't always use the same field casing in .amplitude-events.json
 // — observed in the wild: name, event, eventName, event_name (and the same
@@ -38,6 +42,8 @@ const eventPlanSchema = z.array(
     event_description: z.string().optional(),
     eventDescription: z.string().optional(),
     eventDescriptionAndReasoning: z.string().optional(),
+    /** Wizard-proxy dashboard planner — must match Thunder enum when set. */
+    category: z.string().optional(),
   }),
 );
 
@@ -58,9 +64,15 @@ const eventPlanSchema = z.array(
  *
  * Also unwraps a `{ events: [...] }` wrapper some skills produce.
  */
+export type ParsedEventPlanEntry = {
+  name: string;
+  description: string;
+  category?: WizardDashboardEventCategory;
+};
+
 export function parseEventPlanContent(
   content: string,
-): Array<{ name: string; description: string }> | null {
+): ParsedEventPlanEntry[] | null {
   let parsed: unknown;
   try {
     parsed = JSON.parse(content);
@@ -81,15 +93,23 @@ export function parseEventPlanContent(
 
   const result = eventPlanSchema.safeParse(parsed);
   if (!result.success) return null;
-  return result.data.map((e) => ({
-    name: e.name ?? e.event ?? e.eventName ?? e.event_name ?? '',
-    description:
-      e.description ??
-      e.event_description ??
-      e.eventDescription ??
-      e.eventDescriptionAndReasoning ??
-      '',
-  }));
+  return result.data.map((e) => {
+    const rawCategory =
+      typeof e.category === 'string' ? e.category.trim() : undefined;
+    const category = isWizardDashboardEventCategory(rawCategory)
+      ? rawCategory
+      : undefined;
+    return {
+      name: e.name ?? e.event ?? e.eventName ?? e.event_name ?? '',
+      description:
+        e.description ??
+        e.event_description ??
+        e.eventDescription ??
+        e.eventDescriptionAndReasoning ??
+        '',
+      ...(category ? { category } : {}),
+    };
+  });
 }
 
 /**
@@ -109,9 +129,7 @@ export function parseEventPlanContent(
  * Used by the Event Verification screen to render the planned tracking
  * list inline so users can see what they need to trigger.
  */
-export function readLocalEventPlan(
-  installDir: string,
-): Array<{ name: string; description: string }> {
+export function readLocalEventPlan(installDir: string): ParsedEventPlanEntry[] {
   const candidates = [
     getEventsFile(installDir),
     path.join(installDir, '.amplitude-events.json'),

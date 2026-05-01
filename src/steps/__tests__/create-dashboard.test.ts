@@ -4,26 +4,26 @@
  * 1. The events-file reader delegates to parseEventPlanContent (the canonical
  *    parser) so it tolerates every field-name variant the agent emits in the
  *    wild — `name`, `event`, `eventName`, `event_name`.
- * 2. The fallback JSON extractor handles nested braces (the dashboard result
- *    embeds a `charts` array of objects).
  */
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import fs from 'fs';
 import os from 'os';
 import path from 'path';
-import {
-  __test__,
-  createDashboardStep,
-  describeAgentToolUse,
-} from '../create-dashboard';
+import { ApiError } from '../../lib/api.js';
+import { Integration } from '../../lib/constants.js';
+import { __test__, createDashboardStep } from '../create-dashboard.js';
 
-const { readEventsFromContent, parseAgentOutput, extractJsonContaining } =
-  __test__;
+const { readEventsFromContent } = __test__;
 
-vi.mock('../../lib/mcp-with-fallback', () => ({
-  callAmplitudeMcp: vi.fn(),
-}));
+vi.mock('../../lib/api.js', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../../lib/api.js')>();
+  return {
+    ...actual,
+    createWizardDashboard: vi.fn(),
+  };
+});
+
 vi.mock('../../lib/wizard-tools', () => ({
   persistDashboard: vi.fn(() => true),
 }));
@@ -36,6 +36,7 @@ vi.mock('../../ui', () => {
     pushStatus: vi.fn(),
     setDashboardUrl: vi.fn(),
     setPostAgentStep: vi.fn(),
+    applyJourneyTransition: vi.fn(),
     spinner: vi.fn(() => ({
       start: vi.fn(),
       stop: vi.fn(),
@@ -45,11 +46,14 @@ vi.mock('../../ui', () => {
   return { getUI: () => ui, __ui: ui };
 });
 
-import { callAmplitudeMcp } from '../../lib/mcp-with-fallback';
+import { createWizardDashboard } from '../../lib/api.js';
 import { persistDashboard } from '../../lib/wizard-tools';
 import { analytics } from '../../utils/analytics';
 
 import * as uiModule from '../../ui';
+
+const mockedCreateWizardDashboard =
+  createWizardDashboard as unknown as ReturnType<typeof vi.fn>;
 
 describe('readEventsFromContent', () => {
   it('accepts canonical `name` key with bare top-level array', () => {
@@ -84,8 +88,6 @@ describe('readEventsFromContent', () => {
   });
 
   it('accepts `event_name` (snake_case) key — observed in the wild', () => {
-    // Regression: the previous create-dashboard parser missed this variant
-    // even though the canonical event-plan-parser handles it.
     const out = readEventsFromContent(
       JSON.stringify([{ event_name: 'External Resource Opened' }]),
     );
@@ -153,96 +155,25 @@ describe('readEventsFromContent', () => {
   });
 });
 
-describe('extractJsonContaining', () => {
-  it('extracts a flat object', () => {
-    const text = 'prefix {"dashboardUrl":"https://x.com/d/1"} suffix';
-    expect(extractJsonContaining(text, '"dashboardUrl"')).toBe(
-      '{"dashboardUrl":"https://x.com/d/1"}',
-    );
-  });
-
-  it('extracts an object containing a nested charts array', () => {
-    const json =
-      '{"dashboardUrl":"https://x.com/d/1","charts":[{"id":"c1","title":"Funnel"}]}';
-    const text = `noise before ${json} noise after`;
-    expect(extractJsonContaining(text, '"dashboardUrl"')).toBe(json);
-  });
-
-  it('handles deeply nested objects', () => {
-    const json =
-      '{"dashboardUrl":"https://x.com","meta":{"nested":{"deep":true}},"charts":[{"id":"1"}]}';
-    expect(extractJsonContaining(json, '"dashboardUrl"')).toBe(json);
-  });
-
-  it('ignores braces inside string literals', () => {
-    const json = '{"dashboardUrl":"https://x.com","note":"has { and } in it"}';
-    expect(extractJsonContaining(json, '"dashboardUrl"')).toBe(json);
-  });
-
-  it('handles escaped quotes inside strings', () => {
-    const json =
-      '{"dashboardUrl":"https://x.com","note":"quote: \\" and brace }"}';
-    expect(extractJsonContaining(json, '"dashboardUrl"')).toBe(json);
-  });
-
-  it('returns null when the needle is absent', () => {
-    expect(
-      extractJsonContaining('{"other":"value"}', '"dashboardUrl"'),
-    ).toBeNull();
-  });
-
-  it('skips a leading object that lacks the needle and finds a later one', () => {
-    const text =
-      '{"unrelated":"x"} then {"dashboardUrl":"https://x.com","charts":[{"id":"1"}]}';
-    expect(extractJsonContaining(text, '"dashboardUrl"')).toBe(
-      '{"dashboardUrl":"https://x.com","charts":[{"id":"1"}]}',
-    );
-  });
-});
-
-describe('parseAgentOutput', () => {
-  it('parses the happy path with markers', () => {
-    const text = `Planning complete. <<<WIZARD_DASHBOARD_RESULT>>>{"dashboardUrl":"https://app.amplitude.com/1/dashboard/abc","dashboardId":"abc","charts":[{"id":"c1","title":"Funnel","type":"funnel"}]}<<<END>>> trailing noise`;
-    const result = parseAgentOutput(text);
-    expect(result).not.toBeNull();
-    expect(result?.dashboardUrl).toBe(
-      'https://app.amplitude.com/1/dashboard/abc',
-    );
-    expect(result?.charts).toHaveLength(1);
-  });
-
-  it('falls back to balanced JSON extraction when markers are missing', () => {
-    const text = `I forgot the markers but here's the result: {"dashboardUrl":"https://app.amplitude.com/1/dashboard/abc","charts":[{"id":"c1","title":"Funnel"}]}`;
-    const result = parseAgentOutput(text);
-    expect(result).not.toBeNull();
-    expect(result?.dashboardUrl).toBe(
-      'https://app.amplitude.com/1/dashboard/abc',
-    );
-    expect(result?.charts).toHaveLength(1);
-  });
-
-  it('returns null when no dashboardUrl is present', () => {
-    expect(parseAgentOutput('nothing useful here')).toBeNull();
-  });
-
-  it('returns null when the URL is not a valid URL', () => {
-    const text = `<<<WIZARD_DASHBOARD_RESULT>>>{"dashboardUrl":"not-a-url"}<<<END>>>`;
-    expect(parseAgentOutput(text)).toBeNull();
-  });
-});
-
-// ── createDashboardStep — defensive skip when agent already created one ─────
-
-describe('createDashboardStep — agent already created dashboard', () => {
+describe('createDashboardStep', () => {
   let installDir: string;
 
-  const mockedCallAmplitudeMcp = callAmplitudeMcp as any;
+  const mockedPersistDashboard = persistDashboard as unknown as ReturnType<
+    typeof vi.fn
+  >;
 
-  const mockedPersistDashboard = persistDashboard as any;
+  const mockedWizardCapture = analytics.wizardCapture as unknown as ReturnType<
+    typeof vi.fn
+  >;
 
-  const mockedWizardCapture = analytics.wizardCapture as any;
-
-  const ui = (uiModule as any).__ui;
+  const ui = (
+    uiModule as unknown as {
+      __ui: {
+        applyJourneyTransition: ReturnType<typeof vi.fn>;
+        log: { warn: ReturnType<typeof vi.fn> };
+      };
+    }
+  ).__ui;
 
   beforeEach(() => {
     installDir = fs.mkdtempSync(path.join(os.tmpdir(), 'wizard-dashboard-'));
@@ -257,14 +188,26 @@ describe('createDashboardStep — agent already created dashboard', () => {
     fs.rmSync(installDir, { recursive: true, force: true });
   });
 
-  function makeSession(): {
-    installDir: string;
-    checklistDashboardUrl?: string;
-  } {
-    return { installDir };
+  function baseSession(
+    overrides: Partial<{
+      selectedOrgId: string | null;
+      selectedAppId: string | null;
+      selectedProjectName: string | null;
+    }> = {},
+  ): Record<string, unknown> {
+    return {
+      installDir,
+      selectedOrgId: overrides.selectedOrgId ?? '123',
+      selectedAppId: overrides.selectedAppId ?? '456',
+      selectedProjectName:
+        overrides.selectedProjectName !== undefined
+          ? overrides.selectedProjectName
+          : 'My App',
+      ...overrides,
+    };
   }
 
-  it('reuses an already-written .amplitude-dashboard.json without calling the agent', async () => {
+  it('reuses legacy `.amplitude-dashboard.json` without calling the API', async () => {
     const dashboard = {
       dashboardUrl:
         'https://app.amplitude.com/analytics/amplitude/dashboard/y3qux0l8',
@@ -275,35 +218,29 @@ describe('createDashboardStep — agent already created dashboard', () => {
       path.join(installDir, '.amplitude-dashboard.json'),
       JSON.stringify(dashboard),
     );
-    const session = makeSession();
 
     await createDashboardStep({
-      session: session as any,
+      session: baseSession() as never,
       accessToken: 'token',
-
-      integration: 'nextjs-pages-router' as any,
+      integration: Integration.nextjs,
     });
 
-    expect(mockedCallAmplitudeMcp).not.toHaveBeenCalled();
-    expect(session.checklistDashboardUrl).toBe(dashboard.dashboardUrl);
-    expect(ui.setDashboardUrl).toHaveBeenCalledWith(dashboard.dashboardUrl);
-    expect(ui.spinner).not.toHaveBeenCalled();
+    expect(mockedCreateWizardDashboard).not.toHaveBeenCalled();
     expect(mockedPersistDashboard).toHaveBeenCalledWith(installDir, dashboard);
     expect(mockedWizardCapture).toHaveBeenCalledWith(
       'dashboard created',
       expect.objectContaining({
-        source: 'agent',
+        source: 'cached',
         'chart count': 1,
       }),
     );
+    expect(ui.applyJourneyTransition).toHaveBeenCalledWith(
+      'dashboard',
+      'completed',
+    );
   });
 
-  it('reuses .amplitude/dashboard.json (canonical path written by record_dashboard) without calling the agent', async () => {
-    // The post-record_dashboard happy path: agent called the wizard-tools
-    // `record_dashboard` MCP tool, which wrote BOTH paths atomically. This
-    // test pins the canonical path is read FIRST so a future change that
-    // dropped the legacy mirror wouldn't silently regress to the slow
-    // post-agent fallback.
+  it('reuses canonical `.amplitude/dashboard.json` without calling the API', async () => {
     const dashboard = {
       dashboardUrl:
         'https://app.amplitude.com/analytics/amplitude/dashboard/canonical-id',
@@ -315,226 +252,251 @@ describe('createDashboardStep — agent already created dashboard', () => {
       path.join(installDir, '.amplitude', 'dashboard.json'),
       JSON.stringify(dashboard),
     );
-    const session = makeSession();
 
     await createDashboardStep({
-      session: session as any,
+      session: baseSession() as never,
       accessToken: 'token',
-      integration: 'nextjs-pages-router' as any,
+      integration: Integration.nextjs,
     });
 
-    expect(mockedCallAmplitudeMcp).not.toHaveBeenCalled();
-    expect(session.checklistDashboardUrl).toBe(dashboard.dashboardUrl);
-    expect(ui.setDashboardUrl).toHaveBeenCalledWith(dashboard.dashboardUrl);
-    expect(ui.spinner).not.toHaveBeenCalled();
+    expect(mockedCreateWizardDashboard).not.toHaveBeenCalled();
     expect(mockedWizardCapture).toHaveBeenCalledWith(
       'dashboard created',
-      expect.objectContaining({ source: 'agent' }),
+      expect.objectContaining({ source: 'cached' }),
     );
   });
 
-  it('does NOT set dashboardFallbackPhase when the reuse path fires', async () => {
-    // Agent already created the dashboard via record_dashboard. The 6th
-    // synthetic task in RunScreen should never appear — the fallback never
-    // ran. This is the headline UX guarantee of the in-loop record_dashboard
-    // path: a healthy run shows exactly five tasks, never six.
-    fs.mkdirSync(path.join(installDir, '.amplitude'), { recursive: true });
-    fs.writeFileSync(
-      path.join(installDir, '.amplitude', 'dashboard.json'),
-      JSON.stringify({ dashboardUrl: 'https://x/y/z' }),
+  it('skips API when org/app are missing', async () => {
+    await createDashboardStep({
+      session: baseSession({
+        selectedOrgId: null,
+        selectedAppId: '456',
+      }) as never,
+      accessToken: 'token',
+      integration: Integration.nextjs,
+    });
+
+    expect(mockedCreateWizardDashboard).not.toHaveBeenCalled();
+    expect(mockedWizardCapture).toHaveBeenCalledWith(
+      'dashboard skipped',
+      expect.objectContaining({ reason: 'missing org or app' }),
     );
-    const session: any = makeSession();
-
-    await createDashboardStep({
-      session,
-      accessToken: 'token',
-      integration: 'nextjs-pages-router' as any,
-    });
-
-    // Phase stays null end-to-end on the reuse path.
-    expect(session.dashboardFallbackPhase ?? null).toBeNull();
   });
 
-  it('sets dashboardFallbackPhase=in_progress before the agent fallback fires, then completed after', async () => {
-    // No pre-existing dashboard file → fallback runs. We assert the phase
-    // transitions through in_progress (so RunScreen can render the 6th
-    // task) and ends at completed (so the 6th task drops cleanly).
-    let phaseDuringFallback: string | null | undefined = 'NOT_OBSERVED';
-    mockedCallAmplitudeMcp.mockImplementation(async (opts: any) => {
-      phaseDuringFallback = opts && (session as any).dashboardFallbackPhase;
-      return null; // simulate a soft-skip
-    });
-    const session: any = makeSession();
-
-    await createDashboardStep({
-      session,
-      accessToken: 'token',
-      integration: 'nextjs-pages-router' as any,
-    });
-
-    expect(phaseDuringFallback).toBe('in_progress');
-    expect(session.dashboardFallbackPhase).toBe('completed');
-  });
-
-  it('sets dashboardFallbackPhase=completed even when runCreateDashboard throws', async () => {
-    // Contract: the fallback step "never throws" and must always clear
-    // its phase, otherwise the synthetic 6th task would pin forever and
-    // leak into the outro screen.
-    mockedCallAmplitudeMcp.mockImplementation(async () => {
-      throw new Error('synthetic SDK module load failure');
-    });
-    const session: any = makeSession();
-
-    await createDashboardStep({
-      session,
-      accessToken: 'token',
-      integration: 'nextjs-pages-router' as any,
-    });
-
-    expect(session.dashboardFallbackPhase).toBe('completed');
-  });
-
-  it('prefers canonical .amplitude/dashboard.json when both files exist', async () => {
-    // If both exist with different URLs (mid-migration / partial write),
-    // canonical wins. record_dashboard writes both atomically, but a
-    // future skill that switches to canonical-only must not regress.
-    const canonical = {
-      dashboardUrl: 'https://app.amplitude.com/.../dashboard/canonical-wins',
-      dashboardId: 'canonical-wins',
+  it('calls createWizardDashboard and persists the result on success', async () => {
+    const apiResult = {
+      dashboardUrl: 'https://app.amplitude.com/org/1/dashboard/abc',
+      dashboardId: 'abc',
+      charts: [{ id: 'c1', title: 'Funnel', type: 'FUNNELS' }],
     };
-    const legacyOlder = {
-      dashboardUrl: 'https://app.amplitude.com/.../dashboard/stale-legacy',
-      dashboardId: 'stale-legacy',
-    };
-    fs.mkdirSync(path.join(installDir, '.amplitude'), { recursive: true });
-    fs.writeFileSync(
-      path.join(installDir, '.amplitude', 'dashboard.json'),
-      JSON.stringify(canonical),
-    );
-    fs.writeFileSync(
-      path.join(installDir, '.amplitude-dashboard.json'),
-      JSON.stringify(legacyOlder),
-    );
-    const session = makeSession();
+    mockedCreateWizardDashboard.mockResolvedValue(apiResult);
 
+    const session = baseSession() as never;
     await createDashboardStep({
-      session: session as any,
+      session,
       accessToken: 'token',
-      integration: 'nextjs-pages-router' as any,
+      integration: Integration.nextjs,
     });
 
-    expect(session.checklistDashboardUrl).toBe(canonical.dashboardUrl);
-    expect(mockedCallAmplitudeMcp).not.toHaveBeenCalled();
+    expect(mockedCreateWizardDashboard).toHaveBeenCalledTimes(1);
+    expect(mockedPersistDashboard).toHaveBeenCalledWith(installDir, apiResult);
+    expect(session.checklistDashboardUrl).toBe(apiResult.dashboardUrl);
+    expect(mockedWizardCapture).toHaveBeenCalledWith(
+      'dashboard created',
+      expect.objectContaining({
+        source: 'wizard-proxy',
+        'chart count': 1,
+      }),
+    );
+    expect(ui.applyJourneyTransition).toHaveBeenCalledWith(
+      'dashboard',
+      'in_progress',
+    );
+    expect(ui.applyJourneyTransition).toHaveBeenCalledWith(
+      'dashboard',
+      'completed',
+    );
   });
 
-  it('falls through to agent fallback when .amplitude-dashboard.json is malformed', async () => {
+  it('surfaces failure when createWizardDashboard throws ApiError', async () => {
+    mockedCreateWizardDashboard.mockRejectedValue(
+      new ApiError('nope', 403, 'https://x/dashboards', 'FORBIDDEN'),
+    );
+
+    await createDashboardStep({
+      session: baseSession() as never,
+      accessToken: 'token',
+      integration: Integration.nextjs,
+    });
+
+    expect(mockedWizardCapture).toHaveBeenCalledWith(
+      'dashboard failed',
+      expect.objectContaining({ reason: 'FORBIDDEN' }),
+    );
+    expect(ui.applyJourneyTransition).toHaveBeenCalledWith(
+      'dashboard',
+      'completed',
+    );
+  });
+
+  it('falls through to API when legacy dashboard JSON is malformed', async () => {
     fs.writeFileSync(
       path.join(installDir, '.amplitude-dashboard.json'),
       '{ not json',
     );
-    mockedCallAmplitudeMcp.mockResolvedValue(null);
-    const session = makeSession();
-
-    await createDashboardStep({
-      session: session as any,
-      accessToken: 'token',
-
-      integration: 'nextjs-pages-router' as any,
+    mockedCreateWizardDashboard.mockResolvedValue({
+      dashboardUrl: 'https://app.amplitude.com/org/1/dashboard/abc',
+      dashboardId: 'abc',
+      charts: [],
     });
 
-    expect(mockedCallAmplitudeMcp).toHaveBeenCalledTimes(1);
-    expect(ui.spinner).toHaveBeenCalled();
+    await createDashboardStep({
+      session: baseSession() as never,
+      accessToken: 'token',
+      integration: Integration.nextjs,
+    });
+
+    expect(mockedCreateWizardDashboard).toHaveBeenCalledTimes(1);
   });
 
-  it('falls through to agent fallback when dashboardUrl is missing', async () => {
+  it('always clears dashboardFallbackPhase after the REST path', async () => {
+    mockedCreateWizardDashboard.mockResolvedValue({
+      dashboardUrl: 'https://app.amplitude.com/org/1/dashboard/abc',
+      dashboardId: 'abc',
+      charts: [],
+    });
+    const session = baseSession() as Record<string, unknown>;
+
+    await createDashboardStep({
+      session: session as never,
+      accessToken: 'token',
+      integration: Integration.nextjs,
+    });
+
+    expect(session.dashboardFallbackPhase).toBe('completed');
+  });
+
+  it('forwards per-event category to createWizardDashboard', async () => {
+    fs.unlinkSync(path.join(installDir, '.amplitude-events.json'));
+    fs.mkdirSync(path.join(installDir, '.amplitude'), { recursive: true });
     fs.writeFileSync(
-      path.join(installDir, '.amplitude-dashboard.json'),
-      JSON.stringify({ charts: [] }),
+      path.join(installDir, '.amplitude', 'events.json'),
+      JSON.stringify([
+        {
+          name: 'Hello API Called',
+          description: 'test',
+          category: 'ENGAGEMENT',
+        },
+      ]),
     );
-    mockedCallAmplitudeMcp.mockResolvedValue(null);
-    const session = makeSession();
+    mockedCreateWizardDashboard.mockResolvedValue({
+      dashboardUrl: 'https://app.amplitude.com/org/1/dashboard/abc',
+      dashboardId: 'abc',
+      charts: [],
+    });
 
     await createDashboardStep({
-      session: session as any,
+      session: baseSession() as never,
       accessToken: 'token',
-
-      integration: 'nextjs-pages-router' as any,
+      integration: Integration.nextjs,
     });
 
-    expect(mockedCallAmplitudeMcp).toHaveBeenCalledTimes(1);
-  });
-});
-
-describe('describeAgentToolUse', () => {
-  // Translates inner-agent tool calls into status pill copy. The fallback
-  // runs invisibly without these — users would stare at "Creating charts and
-  // dashboard in Amplitude…" for the entire 90s budget. Read-only probes
-  // (list_*, search_*, get_*) deliberately return null so we don't churn
-  // the pill on agent browsing.
-  it('describes Amplitude MCP chart create with title', () => {
-    expect(
-      describeAgentToolUse('mcp__amplitude__create_chart', {
-        title: 'Funnel — Page Viewed → Sign Up',
+    expect(mockedCreateWizardDashboard).toHaveBeenCalledWith(
+      'token',
+      expect.anything(),
+      expect.objectContaining({
+        events: [
+          expect.objectContaining({
+            name: 'Hello API Called',
+            category: 'ENGAGEMENT',
+          }),
+        ],
       }),
-    ).toBe('Creating chart in Amplitude: Funnel — Page Viewed → Sign Up…');
-  });
-
-  it('describes Amplitude MCP dashboard create', () => {
-    expect(
-      describeAgentToolUse('mcp__amplitude__create_dashboard', {
-        title: 'Foo Analytics',
-      }),
-    ).toBe('Assembling your dashboard in Amplitude: Foo Analytics…');
-  });
-
-  it('describes chart create without title', () => {
-    expect(describeAgentToolUse('mcp__amplitude__create_chart', {})).toBe(
-      'Creating chart in Amplitude…',
+      expect.anything(),
     );
   });
 
-  it('falls back to `name` field when `title` is missing', () => {
-    expect(
-      describeAgentToolUse('mcp__amplitude__create_chart', {
-        name: 'My Chart',
-      }),
-    ).toBe('Creating chart in Amplitude: My Chart…');
-  });
-
-  it('caps long titles to 60 chars and collapses whitespace', () => {
-    const long = 'a'.repeat(120);
-    const out = describeAgentToolUse('mcp__amplitude__create_chart', {
-      title: long,
+  it('uses wizard-context.json for autocaptureEnabled when present', async () => {
+    fs.mkdirSync(path.join(installDir, '.amplitude'), { recursive: true });
+    fs.writeFileSync(
+      path.join(installDir, '.amplitude', 'wizard-context.json'),
+      JSON.stringify({ autocaptureEnabled: false }),
+    );
+    mockedCreateWizardDashboard.mockResolvedValue({
+      dashboardUrl: 'https://app.amplitude.com/org/1/dashboard/abc',
+      dashboardId: 'abc',
+      charts: [],
     });
-    expect(out).toBe(`Creating chart in Amplitude: ${'a'.repeat(60)}…`);
 
-    expect(
-      describeAgentToolUse('mcp__amplitude__create_chart', {
-        title: 'multi\n\tline   title',
-      }),
-    ).toBe('Creating chart in Amplitude: multi line title…');
-  });
+    await createDashboardStep({
+      session: baseSession() as never,
+      accessToken: 'token',
+      integration: Integration.nextjs,
+    });
 
-  it('skips read-only / unknown tools (no pill churn on noise)', () => {
-    expect(describeAgentToolUse('mcp__amplitude__list_charts', {})).toBeNull();
-    expect(
-      describeAgentToolUse('mcp__amplitude__search_events', {}),
-    ).toBeNull();
-    expect(describeAgentToolUse('Bash', { command: 'ls' })).toBeNull();
-  });
-
-  it('handles non-MCP tool names without crashing', () => {
-    expect(describeAgentToolUse('create_chart', { title: 'X' })).toBe(
-      'Creating chart in Amplitude: X…',
+    expect(mockedCreateWizardDashboard).toHaveBeenCalledWith(
+      'token',
+      expect.anything(),
+      expect.objectContaining({ autocaptureEnabled: false }),
+      expect.anything(),
     );
   });
 
-  it('treats non-string title fields as missing', () => {
-    expect(
-      describeAgentToolUse('mcp__amplitude__create_chart', { title: 42 }),
-    ).toBe('Creating chart in Amplitude…');
-    expect(describeAgentToolUse('mcp__amplitude__create_chart', null)).toBe(
-      'Creating chart in Amplitude…',
+  it('uses wizard-context productDisplayName and sdkVersion on the payload', async () => {
+    fs.mkdirSync(path.join(installDir, '.amplitude'), { recursive: true });
+    fs.writeFileSync(
+      path.join(installDir, '.amplitude', 'wizard-context.json'),
+      JSON.stringify({
+        productDisplayName: 'Billing Portal',
+        sdkVersion: '2.36.2',
+      }),
+    );
+    mockedCreateWizardDashboard.mockResolvedValue({
+      dashboardUrl: 'https://app.amplitude.com/org/1/dashboard/abc',
+      dashboardId: 'abc',
+      charts: [],
+    });
+
+    await createDashboardStep({
+      session: baseSession({ selectedProjectName: null }) as never,
+      accessToken: 'token',
+      integration: Integration.nextjs,
+    });
+
+    expect(mockedCreateWizardDashboard).toHaveBeenCalledWith(
+      'token',
+      expect.anything(),
+      expect.objectContaining({
+        product: expect.objectContaining({
+          name: 'Billing Portal',
+          framework: Integration.nextjs,
+          sdkVersion: '2.36.2',
+        }),
+      }),
+      expect.anything(),
+    );
+    expect(ui.log.warn).not.toHaveBeenCalled();
+  });
+
+  it('warns when product label falls back to folder name only', async () => {
+    mockedCreateWizardDashboard.mockResolvedValue({
+      dashboardUrl: 'https://app.amplitude.com/org/1/dashboard/abc',
+      dashboardId: 'abc',
+      charts: [],
+    });
+
+    await createDashboardStep({
+      session: baseSession({ selectedProjectName: null }) as never,
+      accessToken: 'token',
+      integration: Integration.nextjs,
+    });
+
+    expect(ui.log.warn).toHaveBeenCalledWith(
+      expect.stringContaining('folder name'),
+    );
+    const [, , payload] = mockedCreateWizardDashboard.mock.calls[0];
+    expect((payload as { product: { name: string } }).product.name).toBe(
+      path.basename(installDir),
     );
   });
 });

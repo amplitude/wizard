@@ -1,7 +1,11 @@
 # Post-instrumentation events manifest and dashboard
 
-After all event and identity instrumentation is complete, write **`.amplitude-events.json`** at the project root.
+After all event and identity instrumentation is complete, persist the plan on disk. Prefer the canonical **`.amplitude/events.json`** (wizard mirrors to legacy **`.amplitude-events.json`** where needed).
 
-**Shape:** a top-level JSON array — `[ { "name": "<exact event name>", "description": "<short description>", "file": "<path where instrumented>" } ]`. Use the key `name` (matching the event_type you passed to `track()`) — not `event`, `event_type`, or `eventName`. Do NOT wrap the array in an object (e.g. `{ "events": [...] }`); the wizard's parsers expect a top-level array.
+**Shape:** top-level JSON array — `[ { "name": "<exact event name>", "description": "<short description>", "file": "<path where instrumented>", "category": "ACTIVATION" } ]`. Use **`name`** (matching the `track()` string). Optional **`category`** for the dashboard RPC must be one of `SIGNUP` \| `ACTIVATION` \| `ENGAGEMENT` \| `CONVERSION` \| `OTHER` — see `confirm-event-plan-contract.md`. Do NOT wrap in `{ "events": [...] }` unless your toolchain already unwraps it.
 
-After writing this file you proceed to dashboard creation as STEP 5 (see the per-run instructions). Create 4–6 charts and a dashboard via the Amplitude MCP, then call the wizard-tools **`record_dashboard`** tool with the dashboard URL — that tool persists the result so the wizard outro links to it and the post-agent fallback step short-circuits. **Do NOT skip `record_dashboard`:** a dashboard the wizard never sees is a dashboard the user never sees.
+Write **`.amplitude/wizard-context.json`** after SDK init so **`autocaptureEnabled`** (and optionally **`productDisplayName`** / **`sdkVersion`**) match reality — see `wizard-dashboard-request-context.md`.
+
+After writing this file you proceed to **STEP 5 documentation** (see the per-run instructions). Load `amplitude-chart-dashboard-plan` only to describe what the wizard's automated starter dashboard will contain in your setup report.
+
+**Do not** call the Amplitude MCP `create_chart`, `create_dashboard`, or the wizard-tools `record_dashboard` tool for the starter dashboard — the wizard creates it server-side immediately after this agent run finishes.

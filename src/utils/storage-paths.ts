@@ -219,6 +219,15 @@ export function getDashboardFile(installDir: string): string {
 }
 
 /**
+ * Optional machine-readable hints for the wizard-proxy dashboard RPC
+ * (`POST /dashboards`): grounded autocapture flag, display name, SDK version.
+ * Written by the agent after SDK init / taxonomy — see wizard supplement refs.
+ */
+export function getWizardContextFile(installDir: string): string {
+  return join(getProjectMetaDir(installDir), 'wizard-context.json');
+}
+
+/**
  * Canonical wizard project binding (org, project, source, zone, app id, etc.).
  * Legacy `ampli.json` in the project root is still read/written during transition.
  */

@@ -6,7 +6,7 @@ The integration skill's `basic-integration-1.3-conclude.md` reference has the ca
 
 - Integration summary (SDK installed, framework, init location)
 - Events instrumented (table: event name, description, file path)
-- Dashboard link (the URL you just passed to `record_dashboard`)
+- Dashboard link (from the wizard after the run — the starter dashboard is created server-side; include the URL once it appears in the flow / product, not from `record_dashboard`)
 - Env var setup notes (what was set, what user needs for prod)
 - Next steps
 

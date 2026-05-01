@@ -1749,21 +1749,18 @@ Returns: "approved", "skipped", or "feedback: <user message>"`,
   );
 
   // -- record_dashboard -----------------------------------------------------
-  // Persists a dashboard the agent just created via the Amplitude MCP. This
-  // is the explicit hand-off from the in-loop agent (which does the actual
-  // chart/dashboard MCP calls during the "Build your starter dashboard" task) to the
-  // wizard's outro and post-agent step. Writes
-  // `<installDir>/.amplitude/dashboard.json` (via persistDashboard).
+  // Legacy hook: persists a dashboard URL the agent obtained out-of-band (e.g.
+  // manual MCP experimentation). Normal wizard runs create dashboards via the
+  // wizard-proxy REST endpoint in `createDashboardStep` instead.
   //
   // When this tool fires, `createDashboardStep` finds the file on its next
-  // pass and short-circuits to its reuse path — no 90s MCP+sub-agent fallback,
-  // no "Creating charts and dashboard in Amplitude…" spinner hang.
+  // pass and short-circuits to its reuse path.
   const recordDashboard = tool(
     'record_dashboard',
-    `Record an Amplitude dashboard you just created via the Amplitude MCP server.
-Call this tool IMMEDIATELY after \`create_dashboard\` returns successfully — it persists the URL and chart metadata so the wizard's outro can link to it and the post-agent fallback step can short-circuit.
-Required: dashboardUrl. Optional but recommended: dashboardId, charts (id/title/type per chart).
-Returns: "ok" on successful persistence, an error string otherwise. Idempotent — safe to call again with updated values.`,
+    `Persist a dashboard URL + chart metadata to the project — rarely needed.
+The Amplitude Wizard normally creates the starter dashboard automatically after this agent run (wizard-proxy REST). Only call this if you intentionally created a dashboard yourself and need the outro to link to it.
+Required: dashboardUrl. Optional: dashboardId, charts (id/title/type per chart).
+Returns: "ok" on successful persistence, an error string otherwise.`,
     {
       dashboardUrl: z
         .string()

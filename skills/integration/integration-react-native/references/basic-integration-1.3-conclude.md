@@ -19,23 +19,17 @@ If you can clearly identify the deployment platform, add a note to the report wi
 
 ## Dashboard
 
-Now create the starter Amplitude dashboard. Load
-`.claude/skills/amplitude-chart-dashboard-plan/SKILL.md` via the Skill tool
-and follow it exactly. The flow is:
+Load `.claude/skills/amplitude-chart-dashboard-plan/SKILL.md` via the Skill tool
+and follow it for **documentation only** — summarize what the wizard's automated
+starter dashboard will contain (funnels, retention, autocapture coverage) in your
+setup report.
 
-1. Plan 4–6 charts grounded in the events you instrumented (the skill walks
-   you through funnel / volume / retention / autocapture coverage).
-2. Call the Amplitude MCP's `create_chart` for each chart, then
-   `create_dashboard` with the chart IDs.
-3. Call the wizard-tools `record_dashboard` MCP tool with the dashboard URL
-   (and IDs / chart metadata when available). This is the hand-off back to
-   the wizard — it persists the URL for the outro and short-circuits the
-   wizard's slow post-agent fallback. Skipping `record_dashboard` is the
-   single most common bug; the user sees a 30s "Creating charts and
-   dashboard…" spinner because the wizard had to redo the work itself.
+**Do not** call the Amplitude MCP `create_chart`, `create_dashboard`, or the
+wizard-tools `record_dashboard` tool. The Amplitude Wizard creates the starter
+dashboard server-side after this agent run finishes.
 
-Mark the "Build your starter dashboard" todo completed only after `record_dashboard`
-returns `"ok"`.
+Mark the "Build your starter dashboard" todo completed once you have documented
+the expected dashboard layout in the setup report (per the chart-dashboard-plan skill).
 
 ---
 
