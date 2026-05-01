@@ -2024,7 +2024,7 @@ const DEFAULT_WIZARD_OPTIONS: WizardOptions = {
   forceInstall: false,
   installDir: process.cwd(),
   default: false,
-  signup: false,
+  accountCreationFlow: false,
   localMcp: false,
   ci: false,
   menu: false,

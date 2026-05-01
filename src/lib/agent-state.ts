@@ -10,12 +10,13 @@
  * without a cyclic import through agent-interface.
  */
 
-import { writeFileSync, readFileSync, existsSync, unlinkSync } from 'node:fs';
+import { readFileSync, existsSync, unlinkSync } from 'node:fs';
 import { dirname } from 'node:path';
 
 import { z } from 'zod';
 import { getRunId } from './observability';
 import { logToFile } from '../utils/debug';
+import { atomicWriteJSON } from '../utils/atomic-write.js';
 import { ensureDir, getStateFile } from '../utils/storage-paths';
 
 const SerializedAgentStateSchema = z.object({
@@ -127,9 +128,7 @@ export class AgentState {
       // Make sure `<cacheRoot>/state/` exists; the cache root may not have
       // been created yet on a cold run.
       ensureDir(dirname(path));
-      writeFileSync(path, JSON.stringify(this.snapshot(), null, 2), {
-        mode: 0o600,
-      });
+      atomicWriteJSON(path, this.snapshot(), 0o600);
       logToFile(`PreCompact: persisted agent state → ${path}`);
       return path;
     } catch (err) {

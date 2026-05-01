@@ -74,7 +74,7 @@ export async function runWizard(
       forceInstall: finalArgs.forceInstall,
       installDir: resolveInstallDir(finalArgs.installDir),
       ci: finalArgs.ci,
-      signup: finalArgs.signup,
+      accountCreationFlow: finalArgs.signup,
       signupEmail: finalArgs.signupEmail,
       signupFullName: finalArgs.signupFullName,
       localMcp: finalArgs.localMcp,
@@ -101,7 +101,7 @@ export async function runWizard(
   analytics.wizardCapture('session started', {
     integration,
     ci: session.ci ?? false,
-    signup: session.signup ?? false,
+    'account creation flow': session.accountCreationFlow ?? false,
   });
 
   // Non-interactive modes (CI / agent) auto-enable every discovered
@@ -130,7 +130,7 @@ export async function runWizard(
         debug: session.debug,
         forceInstall: session.forceInstall,
         default: false,
-        signup: session.signup,
+        accountCreationFlow: session.accountCreationFlow,
         localMcp: session.localMcp,
         ci: session.ci,
         menu: session.menu,
@@ -292,7 +292,7 @@ export async function detectAllFrameworks(
                 debug: false,
                 forceInstall: false,
                 default: false,
-                signup: false,
+                accountCreationFlow: false,
                 localMcp: false,
                 ci: false,
                 menu: false,

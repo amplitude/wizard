@@ -12,7 +12,6 @@ vi.mock('../lib/wizard-session', () => ({
     forceInstall: false,
     installDir: process.cwd(),
     ci: false,
-    signup: false,
     localMcp: false,
     menu: false,
     setupConfirmed: false,
@@ -25,6 +24,9 @@ vi.mock('../lib/wizard-session', () => ({
     outroData: null,
     frameworkConfig: null,
     ...args,
+    accountCreationFlow: Boolean(
+      args.accountCreationFlow ?? args.signup ?? false,
+    ),
   }),
 }));
 vi.mock('../ui', () => ({
