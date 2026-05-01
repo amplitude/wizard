@@ -1,8 +1,8 @@
 import { describe, it, expect, vi } from 'vitest';
 
 // Stub disk-backed zone signals so tests don't pick up the developer's
-// real ~/.ampli.json. The Wizard flow's RegionSelect gate calls
-// `tryResolveZone(s)`, which reads ampli.json + stored user as Tier 2/3.
+// real auth / ampli config. The Wizard flow's RegionSelect gate calls
+// `tryResolveZone(s)`, which reads ampli config + stored user as Tier 2/3.
 // Without these mocks, a `region: null` session in tests would still
 // resolve to a non-null zone via disk, skipping RegionSelect.
 vi.mock('../../../utils/ampli-settings.js', () => ({
