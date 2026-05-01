@@ -72,6 +72,7 @@ export const SlackScreen = ({
 
   const [phase, setPhase] = useState<Phase>(Phase.Prompt);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const unmountedRef = useRef(false);
 
   // Esc → goBack when there is no ConfirmationInput (those wire Esc via
   // escCancelOrRouterBack so we never double-fire). Opening / Verifying are
@@ -88,9 +89,11 @@ export const SlackScreen = ({
       (phase === Phase.Opening || phase === Phase.Verifying),
   });
 
-  // Clear any pending timer on unmount
+  // Clear any pending timer on unmount and flag as unmounted so late-resolving
+  // async work won't schedule new timers or call markDone.
   useEffect(() => {
     return () => {
+      unmountedRef.current = true;
       if (timerRef.current !== null) clearTimeout(timerRef.current);
     };
   }, []);
@@ -117,12 +120,12 @@ export const SlackScreen = ({
     if (accessToken && orgId) {
       void fetchSlackConnectionStatus(accessToken, region, orgId).then(
         (isConnected) => {
-          if (cancelled) return;
+          if (cancelled || unmountedRef.current) return;
           logToFile(`[SlackScreen] slackConnectionStatus=${isConnected}`);
           if (isConnected) {
             setPhase(Phase.Done);
             timerRef.current = setTimeout(() => {
-              if (!cancelled) {
+              if (!cancelled && !unmountedRef.current) {
                 markDone(
                   store,
                   SlackOutcome.Configured,
@@ -158,6 +161,7 @@ export const SlackScreen = ({
 
     // Try the direct Slack OAuth URL first; fall back to settings page.
     const open = (url: string) => {
+      if (unmountedRef.current) return;
       setOpenedUrl(url);
       logToFile(
         `[SlackScreen] opening ${
@@ -213,6 +217,7 @@ export const SlackScreen = ({
     setPhase(Phase.Verifying);
     void fetchSlackConnectionStatus(accessToken, region, orgId).then(
       (isConnected) => {
+        if (unmountedRef.current) return;
         logToFile(
           `[SlackScreen] post-confirm slackConnectionStatus=${isConnected}`,
         );
@@ -224,9 +229,6 @@ export const SlackScreen = ({
             1500,
           );
         } else {
-          // Either confirmed false or status fetch errored — both mean we
-          // can't celebrate yet. Tell the user honestly and let them retry
-          // or skip.
           setPhase(Phase.NotConnected);
         }
       },
