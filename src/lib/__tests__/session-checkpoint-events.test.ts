@@ -168,6 +168,20 @@ describe('checkpoint NDJSON emissions', () => {
     expect(arg.phase).toBe('unknown');
   });
 
+  it('saveCheckpoint writes the file with 0o600 permissions (security invariant)', () => {
+    if (process.platform === 'win32') {
+      return; // POSIX permission bits don't apply on Windows.
+    }
+    saveCheckpoint(makeSession(installDir), 'screen_run');
+    const mode = fs.statSync(getCheckpointFile(installDir)).mode & 0o777;
+    // Checkpoints don't currently carry tokens or API keys, but they DO
+    // carry the resolved Amplitude scope (region, org id, project id,
+    // env name) — which is sensitive and shouldn't land in any other
+    // user's mode bits. CLAUDE.md "Security invariants" pins this at
+    // 0o600. Treat any drift as a security regression.
+    expect(mode).toBe(0o600);
+  });
+
   it('saveCheckpoint never throws when the UI emit blows up', () => {
     setUI({
       ...prevUI,
