@@ -391,15 +391,13 @@ describe('persistEventPlan', () => {
     expect(JSON.parse(raw)).toEqual(events);
   });
 
-  it('also mirrors to the legacy .amplitude-events.json for skill backwards compat', () => {
+  it('does not create legacy .amplitude-events.json at project root', () => {
     const events = [{ name: 'x', description: 'y' }];
     persistEventPlan(tmpDir, events);
-    const raw = fs.readFileSync(legacy(tmpDir), 'utf8');
-    expect(JSON.parse(raw)).toEqual(events);
+    expect(fs.existsSync(legacy(tmpDir))).toBe(false);
   });
 
-  it('overwrites a pre-existing non-canonical file (e.g. snake_case event_name)', () => {
-    // Simulate what the agent wrote directly, in the wrong shape.
+  it('updates canonical only and leaves a pre-existing legacy dotfile unchanged', () => {
     fs.writeFileSync(
       legacy(tmpDir),
       JSON.stringify([
@@ -416,14 +414,12 @@ describe('persistEventPlan', () => {
     const parsedCanonical = JSON.parse(
       fs.readFileSync(canonical(tmpDir), 'utf8'),
     );
-    const parsedLegacy = JSON.parse(fs.readFileSync(legacy(tmpDir), 'utf8'));
     expect(parsedCanonical).toEqual([
       { name: 'canonical', description: 'fixed' },
     ]);
-    expect(parsedLegacy).toEqual([{ name: 'canonical', description: 'fixed' }]);
-    // Structural check: canonical shape only, no legacy fields.
-    expect(parsedLegacy[0].event_name).toBeUndefined();
-    expect(parsedLegacy[0].file_path).toBeUndefined();
+    const parsedLegacy = JSON.parse(fs.readFileSync(legacy(tmpDir), 'utf8'));
+    expect(parsedLegacy[0].event_name).toBe('External Resource Opened');
+    expect(parsedLegacy[0].file_path).toBe('src/app/page.tsx');
   });
 
   it('returns false when the working directory does not exist', () => {
@@ -433,10 +429,10 @@ describe('persistEventPlan', () => {
     ).toBe(false);
   });
 
-  it('writes an empty array when given no events (idempotent clear)', () => {
+  it('writes an empty array to canonical when given no events', () => {
     expect(persistEventPlan(tmpDir, [])).toBe(true);
     expect(JSON.parse(fs.readFileSync(canonical(tmpDir), 'utf8'))).toEqual([]);
-    expect(JSON.parse(fs.readFileSync(legacy(tmpDir), 'utf8'))).toEqual([]);
+    expect(fs.existsSync(legacy(tmpDir))).toBe(false);
   });
 });
 
@@ -527,9 +523,8 @@ describe('ensureWizardArtifactsIgnored', () => {
     expect(content).toContain('# Amplitude wizard');
     // Canonical `.amplitude/` covers events.json + dashboard.json.
     expect(content).toContain('.amplitude/');
-    // Legacy mirrors must also be ignored: bundled context-hub skills
-    // still write `.amplitude-events.json` and `.amplitude-dashboard.json`
-    // during runs, and a `git add .` mid-run would otherwise stage them.
+    // Legacy dotfiles stay gitignored for older runs / external tools that
+    // may still create them; the wizard writes only under `.amplitude/`.
     expect(content).toContain('.amplitude-events.json');
     expect(content).toContain('.amplitude-dashboard.json');
     // PR 316 design: the CURRENT user-facing setup report
@@ -955,7 +950,7 @@ describe('buildFallbackReport', () => {
     expect(md).toContain('generated automatically');
   });
 
-  it('renders an events table when .amplitude-events.json is present', () => {
+  it('renders an events table when the canonical event plan is present', () => {
     persistEventPlan(tmpDir, [
       { name: 'User Signed Up', description: 'Fires after successful signup' },
       { name: 'Checkout Started', description: 'Fires when cart is opened' },
