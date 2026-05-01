@@ -967,7 +967,7 @@ describe('WizardRouter', () => {
   // ── 8. Signup flow states ─────────────────────────────────────────
 
   describe('signup flow states', () => {
-    it('--signup (accountCreationFlow), no email → SignupEmail', () => {
+    it('--signup (accountCreationFlow), no email → SignupFullName first', () => {
       const router = new WizardRouter();
       const session = sessionWith({
         introConcluded: true,
@@ -981,10 +981,10 @@ describe('WizardRouter', () => {
         signupAuth: null,
         signupAbandoned: false,
       });
-      expect(router.resolve(session)).toBe(Screen.SignupEmail);
+      expect(router.resolve(session)).toBe(Screen.SignupFullName);
     });
 
-    it('--signup (accountCreationFlow), email set, nothing required → SigningUp', () => {
+    it('--signup (accountCreationFlow), email set, name missing → SignupFullName', () => {
       const router = new WizardRouter();
       const session = sessionWith({
         introConcluded: true,
@@ -998,7 +998,7 @@ describe('WizardRouter', () => {
         signupAuth: null,
         signupAbandoned: false,
       });
-      expect(router.resolve(session)).toBe(Screen.SigningUp);
+      expect(router.resolve(session)).toBe(Screen.SignupFullName);
     });
 
     it('--signup (accountCreationFlow), requiredFields=[full_name], no name → SignupFullName', () => {

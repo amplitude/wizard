@@ -103,6 +103,11 @@ When(
     // Mirrors what SigningUpScreen does on a needs_information response
     // with a known, unmet field: store.setSignupRequiredFields([...]).
     session.signupRequiredFields = [field];
+    // fieldPresentOnSession treats an existing signupFullName as satisfied;
+    // clear it so the router returns to SignupFullName like a fresh ask.
+    if (field === 'full_name') {
+      session.signupFullName = null;
+    }
   },
 );
 
@@ -180,5 +185,6 @@ function applySuccess(): void {
     refreshToken: 'refresh-token',
     zone: 'us',
     userInfo: null,
+    dashboardUrl: null,
   };
 }

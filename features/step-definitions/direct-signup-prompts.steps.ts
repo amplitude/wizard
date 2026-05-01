@@ -61,6 +61,7 @@ Given(
       signup: true,
       signupEmail: 'test@example.com',
       signupFullName: 'Test User',
+      acceptTos: true,
     });
   },
 );
@@ -80,6 +81,10 @@ When('the user enters their full name', function () {
 When('the user enters their email', function () {
   // Simulate what SignupEmailScreen writes to the session on submit.
   session.signupEmail = 'test@example.com';
+});
+
+When('the user accepts the Terms of Service for direct signup', function () {
+  session.tosAccepted = true;
 });
 
 // ── Then ──────────────────────────────────────────────────────────────────
@@ -105,6 +110,22 @@ Then('the router should resolve to the Auth screen', function () {
     router.resolve(session),
     Screen.Auth,
     `Expected Auth screen but got ${router.resolve(session)}`,
+  );
+});
+
+Then('the router should resolve to the ToS screen', function () {
+  assert.strictEqual(
+    router.resolve(session),
+    Screen.ToS,
+    `Expected ToS screen but got ${router.resolve(session)}`,
+  );
+});
+
+Then('the router should resolve to the SigningUp screen', function () {
+  assert.strictEqual(
+    router.resolve(session),
+    Screen.SigningUp,
+    `Expected SigningUp screen but got ${router.resolve(session)}`,
   );
 });
 

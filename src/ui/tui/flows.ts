@@ -166,10 +166,14 @@ export const FLOWS: Record<Flow, FlowEntry[]> = {
         store.resetAuthForRegionChange();
       },
     },
-    // 2a. Email capture — create-account path only, before ToS.
+    // 2a. Email capture — Intro menu create-account path only (not `--signup`,
+    //     which uses SignupFullName / SignupEmail below).
     {
       screen: Screen.EmailCapture,
-      show: (s) => isCreateAccountOnboarding(s) && !s.emailCaptureComplete,
+      show: (s) =>
+        isCreateAccountOnboarding(s) &&
+        !s.accountCreationFlow &&
+        !s.emailCaptureComplete,
       isComplete: (s) =>
         !isCreateAccountOnboarding(s) || s.emailCaptureComplete,
       revert: (store) => {
@@ -177,13 +181,17 @@ export const FLOWS: Record<Flow, FlowEntry[]> = {
         store.resetEmailCapture();
       },
     },
-    // 2b. Terms of Service — create-account path after email capture.
+    // 2b. Terms of Service — after EmailCapture on the menu path, or once
+    //     `--signup` has collected both email + full name on the session.
     {
       screen: Screen.ToS,
       show: (s) =>
         isCreateAccountOnboarding(s) &&
-        s.emailCaptureComplete &&
-        s.tosAccepted !== true,
+        s.tosAccepted !== true &&
+        (s.emailCaptureComplete ||
+          (s.accountCreationFlow &&
+            s.signupFullName !== null &&
+            s.signupEmail !== null)),
       isComplete: (s) =>
         !isCreateAccountOnboarding(s) || s.tosAccepted === true,
       revert: (store) => {
@@ -191,18 +199,38 @@ export const FLOWS: Record<Flow, FlowEntry[]> = {
         store.resetToS();
       },
     },
-    // 2b. Email collection for direct signup. Shown only when --signup is set
-    //     and --email was not passed.
+    // 2c. Full-name collection for `--signup`: before email so the TUI matches
+    //     the direct-signup prompt order. Also handles `needs_information`
+    //     retries when the server asks for `full_name`.
+    {
+      screen: Screen.SignupFullName,
+      show: (s) =>
+        s.accountCreationFlow &&
+        !s.signupAbandoned &&
+        s.signupFullName === null &&
+        (s.signupRequiredFields.length === 0 ||
+          s.signupRequiredFields.includes('full_name')),
+      isComplete: (s) => !s.accountCreationFlow || s.signupFullName !== null,
+      revert: (store) => {
+        if (!store.session.accountCreationFlow) return false;
+        return false;
+      },
+    },
+    // 2d. Email collection for `--signup` after full name is on the session.
     {
       screen: Screen.SignupEmail,
-      show: (s) => s.accountCreationFlow && s.signupEmail === null,
+      show: (s) =>
+        s.accountCreationFlow &&
+        !s.signupAbandoned &&
+        s.signupEmail === null &&
+        s.signupFullName !== null,
       isComplete: (s) => !s.accountCreationFlow || s.signupEmail !== null,
       revert: (store) => {
         if (!store.session.accountCreationFlow) return false;
         return false;
       },
     },
-    // 2c. Signup POST firing point. Mounts whenever we have an email,
+    // 2e. Signup POST firing point. Mounts whenever we have an email,
     //     a region (so we know which provisioning host to hit), no
     //     tokens yet, haven't abandoned, and every field the server has
     //     asked for so far is present on the session. The region check
@@ -224,23 +252,6 @@ export const FLOWS: Record<Flow, FlowEntry[]> = {
         s.signupAuth !== null ||
         s.signupAbandoned ||
         !allRequiredFieldsCollected(s),
-      revert: (store) => {
-        if (!store.session.accountCreationFlow) return false;
-        return false;
-      },
-    },
-    // 2d. Full-name collection. Shown only when the server's last response
-    //     listed 'full_name' as required AND we don't already have it.
-    {
-      screen: Screen.SignupFullName,
-      show: (s) =>
-        s.accountCreationFlow &&
-        s.signupRequiredFields.includes('full_name') &&
-        s.signupFullName === null,
-      isComplete: (s) =>
-        !s.accountCreationFlow ||
-        !s.signupRequiredFields.includes('full_name') ||
-        s.signupFullName !== null,
       revert: (store) => {
         if (!store.session.accountCreationFlow) return false;
         return false;

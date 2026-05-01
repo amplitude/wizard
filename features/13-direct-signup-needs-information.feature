@@ -9,8 +9,8 @@ Feature: --signup with server-driven field collection
   # the TUI or mock HTTP — that layer is covered by router/unit tests. The
   # BDD here asserts the four user-journey shapes the flow must support:
   #
-  # 1. --signup only: email screen → signing-up → name screen → signing-up
-  # 2. --signup --email: signing-up → name screen → signing-up
+  # 1. --signup only: name → email → signing-up → (needs full_name) → name → signing-up
+  # 2. --signup --email: name → signing-up → (needs full_name) → name → signing-up
   # 3. --signup + both fields: straight to signing-up (no collection screens)
   # 4. requires_redirect: signing-up → abandoned → Auth
   #
@@ -24,6 +24,9 @@ Feature: --signup with server-driven field collection
     Given the wizard is started with --signup and no email or full name
     And the intro is concluded and region is "us"
     When the router resolves
+    Then it should land on the SignupFullName screen
+    When the user submits the full name "Jane Doe"
+    And the router resolves
     Then it should land on the SignupEmail screen
     When the user submits the email "jane@example.com"
     And the router resolves
@@ -42,6 +45,9 @@ Feature: --signup with server-driven field collection
     Given the wizard is started with --signup and email "jane@example.com"
     And the intro is concluded and region is "us"
     When the router resolves
+    Then it should land on the SignupFullName screen
+    When the user submits the full name "Jane Doe"
+    And the router resolves
     Then it should land on the SigningUp screen
     When the first signup POST returns needs_information for "full_name"
     And the router resolves
@@ -68,6 +74,9 @@ Feature: --signup with server-driven field collection
     Given the wizard is started with --signup and email "existing@acme.com"
     And the intro is concluded and region is "us"
     When the router resolves
+    Then it should land on the SignupFullName screen
+    When the user submits the full name "Existing User"
+    And the router resolves
     Then it should land on the SigningUp screen
     When the first signup POST returns requires_redirect
     Then session.signupAbandoned becomes true
