@@ -10,15 +10,15 @@ import { describe, it, expect, vi } from 'vitest';
 import fc from 'fast-check';
 
 // Stub disk-backed zone signals so property tests don't pick up the
-// developer's real ~/.ampli.json. The Wizard flow's RegionSelect gate
-// uses `tryResolveZone`, which reads ampli.json + stored user as Tier
+// developer's real auth / project binding. The Wizard flow's RegionSelect gate
+// uses `tryResolveZone`, which reads project binding + stored user as Tier
 // 2/3 — without these mocks, sessions with `region: null` would still
 // resolve to a non-null zone via disk and skip RegionSelect.
 vi.mock('../../../utils/ampli-settings.js', () => ({
   getStoredUser: vi.fn(() => undefined),
 }));
-vi.mock('../../../lib/ampli-config.js', () => ({
-  readAmpliConfig: vi.fn(() => ({ ok: false, error: 'not_found' })),
+vi.mock('../../../lib/project-binding.js', () => ({
+  readProjectBinding: vi.fn(() => ({ ok: false, error: 'not_found' })),
 }));
 
 import { WizardRouter, Screen, Overlay, Flow } from '../router.js';
