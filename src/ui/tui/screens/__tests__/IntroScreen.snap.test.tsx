@@ -216,9 +216,9 @@ describe('IntroScreen — welcome-back panel', () => {
     // contradicts the welcome-back header.
     expect(frame).toContain("You're signed in as kelson@amplitude.com");
     expect(frame).toContain('Continue — workspace setup');
-    expect(frame).toContain('Create a new Amplitude account');
     expect(frame).not.toContain('Sign in to an existing Amplitude account');
-    expect(frame).not.toContain('new Amplitude organization');
+    expect(frame).not.toContain('Create a new Amplitude account');
+    expect(frame).not.toContain('Continue — create a new account');
     // Marketing tagline must NOT appear for returning users — that's
     // the whole point of this branch.
     expect(frame).not.toContain('AI-powered analytics setup in minutes');
@@ -327,6 +327,6 @@ describe('IntroScreen — welcome-back panel', () => {
     // Signed in but first run in this directory — same menu as welcome-back.
     expect(frame).toContain("You're signed in as kelson@amplitude.com");
     expect(frame).toContain('Continue — workspace setup');
-    expect(frame).toContain('Create a new Amplitude account');
+    expect(frame).not.toContain('Continue — create a new account');
   });
 });

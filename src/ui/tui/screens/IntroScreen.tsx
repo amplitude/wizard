@@ -388,20 +388,21 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
           />
         )}
 
-      {/* Single picker: sign-in vs create-account (same session field as
-          `--auth-onboarding` in CI/agent) plus escape hatches. Two menus
-          would both bind useInput and steal each other's keystrokes. */}
+      {/* Single picker: signed-in users only continue (create-account is
+          hidden — use logout + cold start for a different Amplitude identity).
+          Unsigned: sign-in vs create-account (`--auth-onboarding` in CI).
+          One menu so we do not stack two PickerMenus (shared useInput). */}
       {showContinue && !changingDirectory && (
         <Box marginTop={compact ? 0 : 1}>
           <PickerMenu
             message={
               session.userEmail
                 ? narrow
-                  ? 'Signed in — continue, or new account (other email)'
-                  : `You're signed in as ${session.userEmail}. Continue to workspace setup. Use the second option only if you need a new Amplitude account with a different email—skip it when this login is enough.`
+                  ? 'Signed in — continue'
+                  : `You're signed in as ${session.userEmail}. Continue to workspace setup.`
                 : narrow
-                ? 'Sign in or create account'
-                : 'Sign in to an existing Amplitude account, or create a new one'
+                  ? 'Sign in or create account'
+                  : 'Sign in to an existing Amplitude account, or create a new one'
             }
             options={[
               {
@@ -410,8 +411,8 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
                     ? 'Continue'
                     : 'Continue — workspace setup'
                   : narrow
-                  ? 'Continue — sign in'
-                  : 'Continue — sign in to Amplitude',
+                    ? 'Continue — sign in'
+                    : 'Continue — sign in to Amplitude',
                 value: 'continue_signin',
                 ...(!narrow
                   ? {
@@ -421,23 +422,17 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
                     }
                   : {}),
               },
-              {
-                label: session.userEmail
-                  ? narrow
-                    ? 'New account (other email)'
-                    : 'Create a new Amplitude account'
-                  : narrow
-                  ? 'Continue — new account'
-                  : 'Continue — create a new account',
-                value: 'continue_create',
-                ...(!narrow
-                  ? {
-                      hint: session.userEmail
-                        ? 'different email; rare'
-                        : 'new organization',
-                    }
-                  : {}),
-              },
+              ...(!session.userEmail
+                ? [
+                    {
+                      label: narrow
+                        ? 'Continue — new account'
+                        : 'Continue — create a new account',
+                      value: 'continue_create' as const,
+                      ...(!narrow ? { hint: 'new organization' as const } : {}),
+                    },
+                  ]
+                : []),
               {
                 label: 'Change framework',
                 value: 'framework',
