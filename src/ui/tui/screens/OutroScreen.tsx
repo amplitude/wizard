@@ -187,7 +187,7 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
       // every error, hiding real failures from CI; (2) skip the
       // analytics shutdown wizardAbort runs after cancel.
       store.signalOutroDismissed();
-      // BUT — several screens (DataIngestionCheckScreen `q`, IntroScreen
+      // BUT — several screens (DataIngestionCheckScreen `x`, IntroScreen
       // resume-cancel, SetupScreen back-out, ActivationOptionsScreen
       // 'exit') navigate to the cancel/error outro via `setOutroData`
       // without going through wizardAbort. In that path nobody is

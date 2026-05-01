@@ -54,6 +54,7 @@ import { DataIngestionCheckScreen } from '../DataIngestionCheckScreen.js';
 import { makeStoreForSnapshot } from '../../__tests__/snapshot-utils.js';
 import { waitForFrame } from '../../__tests__/ink-stdin.js';
 import { Integration } from '../../../../lib/constants.js';
+import { OutroKind } from '../../session-constants.js';
 
 // eslint-disable-next-line no-control-regex
 const ANSI_CSI = /\x1b\[[0-9;]*[A-Za-z]/g;
@@ -269,6 +270,55 @@ describe('DataIngestionCheckScreen — tracking plan + skip guard', () => {
     unmount();
   });
 
+  it('confirms verification when skip-confirm is acknowledged with Enter (second press)', async () => {
+    fetchProjectActivationStatusMock.mockRejectedValue(new Error('boom'));
+    fetchProjectEventTypesMock.mockResolvedValue([]);
+
+    const store = makeStore(installDir);
+    const setDataIngestionConfirmedSpy = vi.spyOn(
+      store,
+      'setDataIngestionConfirmed',
+    );
+    const { stdin, unmount } = render(
+      <DataIngestionCheckScreen store={store} />,
+    );
+
+    await settle(150);
+
+    stdin.write('\r');
+    await settle();
+    expect(setDataIngestionConfirmedSpy).not.toHaveBeenCalled();
+
+    stdin.write('\r');
+    await settle();
+    expect(setDataIngestionConfirmedSpy).toHaveBeenCalledTimes(1);
+
+    unmount();
+  });
+
+  it('confirms verification when skip-confirm is acknowledged with q (second press)', async () => {
+    const store = makeStore(installDir);
+    const setDataIngestionConfirmedSpy = vi.spyOn(
+      store,
+      'setDataIngestionConfirmed',
+    );
+    const { stdin, unmount } = render(
+      <DataIngestionCheckScreen store={store} />,
+    );
+
+    await settle(150);
+
+    stdin.write('q');
+    await settle();
+    expect(setDataIngestionConfirmedSpy).not.toHaveBeenCalled();
+
+    stdin.write('q');
+    await settle();
+    expect(setDataIngestionConfirmedSpy).toHaveBeenCalledTimes(1);
+
+    unmount();
+  });
+
   it('skips the guard when cataloged events provide a fallback signal', async () => {
     fetchProjectActivationStatusMock.mockRejectedValue(new Error('boom'));
     // Catalog returns names — that's the user's positive signal that
@@ -291,6 +341,52 @@ describe('DataIngestionCheckScreen — tracking plan + skip guard', () => {
     await settle();
 
     expect(setDataIngestionConfirmedSpy).toHaveBeenCalledTimes(1);
+
+    unmount();
+  });
+
+  it('shows skip-confirm when q is pressed while still listening (healthy API path)', async () => {
+    const store = makeStore(installDir);
+    const { lastFrame, stdin, unmount } = render(
+      <DataIngestionCheckScreen store={store} />,
+    );
+
+    await settle(150);
+
+    const setDataIngestionConfirmedSpy = vi.spyOn(
+      store,
+      'setDataIngestionConfirmed',
+    );
+    stdin.write('q');
+    await settle();
+
+    expect(setDataIngestionConfirmedSpy).not.toHaveBeenCalled();
+    const frame = stripAnsi(lastFrame() ?? '');
+    expect(frame).toContain('No events detected yet');
+    expect(frame).toContain('Continue without verifying');
+
+    stdin.write('y');
+    await settle();
+    expect(setDataIngestionConfirmedSpy).toHaveBeenCalledTimes(1);
+
+    unmount();
+  });
+
+  it('exits with cancel outro when x is pressed', async () => {
+    const store = makeStore(installDir);
+    const setOutroSpy = vi.spyOn(store, 'setOutroData');
+    const { stdin, unmount } = render(
+      <DataIngestionCheckScreen store={store} />,
+    );
+
+    await settle(150);
+
+    stdin.write('x');
+    await settle();
+
+    expect(setOutroSpy).toHaveBeenCalledTimes(1);
+    const call = setOutroSpy.mock.calls[0]?.[0];
+    expect(call?.kind).toBe(OutroKind.Cancel);
 
     unmount();
   });
