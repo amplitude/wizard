@@ -47,4 +47,23 @@ describe('JAVASCRIPT_WEB_AGENT_CONFIG.detection.detect', () => {
     );
     expect(detected).toBe(true);
   });
+
+  it('matches Slidev when vue is only there for the deck stack', async () => {
+    fs.writeFileSync(
+      path.join(tmpDir, 'package.json'),
+      JSON.stringify({
+        devDependencies: {
+          vue: '^3.5.0',
+          slidev: '^52.0.0',
+          vite: '^6.0.0',
+        },
+      }),
+    );
+    fs.writeFileSync(path.join(tmpDir, 'package-lock.json'), '');
+
+    const detected = await JAVASCRIPT_WEB_AGENT_CONFIG.detection.detect(
+      makeOptions(tmpDir),
+    );
+    expect(detected).toBe(true);
+  });
 });

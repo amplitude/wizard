@@ -8,6 +8,8 @@ export type JavaScriptContext = {
   packageManagerName?: string;
   hasTypeScript?: boolean;
   hasBundler?: string;
+  /** VitePress, VuePress, Slidev, etc. — Vue is present for tooling, not a product SPA */
+  vuePoweredDocsSite?: boolean;
 };
 
 const INDEX_HTML_MAX_DEPTH = 6;
