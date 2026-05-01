@@ -504,6 +504,11 @@ async function runAgentFallbackInner(
     const response = query({
       prompt: agentPrompt,
       options: {
+        // Model tier: omit explicit `model` so the SDK/gateway picks the same
+        // Sonnet-class default as a normal Claude Code run. This path only
+        // drives Amplitude MCP writes (charts/dashboard); it must stay capable
+        // enough for tool JSON — routing `--mode fast` from the main wizard
+        // here would regress dashboard fallback quality.
         claudeCodePath: cliPath,
         permissionMode: 'bypassPermissions',
         allowedTools: [],

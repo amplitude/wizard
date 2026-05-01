@@ -32,6 +32,7 @@ import {
   AUTH_RETRY_LIMIT,
   selectModel,
   isStallNonProgressMessage,
+  redactToolLogPayload,
 } from '../agent-interface';
 import { AgentState } from '../agent-state';
 import type { WizardOptions } from '../../utils/types';
@@ -3300,6 +3301,41 @@ describe('createPostToolUseHook', () => {
       // tooling like the cleanup writer).
       expect(state.snapshot().modifiedFiles).toContain('/project/leaky.ts');
     });
+  });
+});
+
+describe('redactToolLogPayload', () => {
+  it('returns short strings unchanged', () => {
+    expect(redactToolLogPayload('hello')).toBe('hello');
+  });
+
+  it('truncates very long strings', () => {
+    const s = 'x'.repeat(5000);
+    const out = redactToolLogPayload(s) as {
+      _truncated?: boolean;
+      length?: number;
+      preview?: string;
+    };
+    expect(out._truncated).toBe(true);
+    expect(out.length).toBe(5000);
+    expect(out.preview?.length).toBeLessThanOrEqual(2400 + 1);
+  });
+
+  it('truncates large JSON objects while listing keys', () => {
+    const big = { a: 'z'.repeat(3000), b: 2 };
+    const out = redactToolLogPayload(big) as {
+      _truncated?: boolean;
+      keys?: string[];
+      preview?: string;
+    };
+    expect(out._truncated).toBe(true);
+    expect(out.keys).toEqual(['a', 'b']);
+    expect(out.preview).toContain('…');
+  });
+
+  it('passes through small objects unchanged', () => {
+    const o = { foo: 1 };
+    expect(redactToolLogPayload(o)).toBe(o);
   });
 });
 
