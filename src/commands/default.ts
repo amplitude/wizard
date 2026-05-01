@@ -1,5 +1,4 @@
 import type { CommandModule } from 'yargs';
-import { resolve } from 'path';
 import {
   getUI,
   setUI,
@@ -593,18 +592,11 @@ export const defaultCommand: CommandModule = {
           // Import from the lightweight parser module (not agent-interface)
           // so we don't pull in the Claude Agent SDK / UI singleton here.
           try {
-            const fs = await import('fs');
-            const { parseEventPlanContent } = await import(
+            const { readLocalEventPlan } = await import(
               '../lib/event-plan-parser.js'
             );
-            const evtPath = resolve(
-              session.installDir,
-              '.amplitude-events.json',
-            );
-            const events = parseEventPlanContent(
-              fs.readFileSync(evtPath, 'utf-8'),
-            );
-            if (events && events.length > 0) {
+            const events = readLocalEventPlan(session.installDir);
+            if (events.length > 0) {
               tui.store.setEventPlan(
                 events.filter((e) => e.name.trim().length > 0),
               );
@@ -763,7 +755,7 @@ export const defaultCommand: CommandModule = {
               );
               const s = tui.store.session;
               if (
-                s.signup &&
+                s.accountCreationFlow &&
                 s.signupEmail &&
                 s.signupFullName &&
                 !s.signupTokensObtained

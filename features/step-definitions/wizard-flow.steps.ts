@@ -189,7 +189,7 @@ When('the wizard launches', function () {
 When('the wizard launches with {string}', function (flags: string) {
   // Parse flags and apply them to the session
   if (flags.includes('--signup')) {
-    session.signup = true;
+    session.accountCreationFlow = true;
   }
   if (flags.includes('--signup-email')) {
     const match = flags.match(/--signup-email\s+(\S+)/);
@@ -691,7 +691,7 @@ Then(
 When('I choose to {string}', function (choice: string) {
   if (choice === 'Log in with existing account') {
     // Switch from signup to login flow
-    session.signup = false;
+    session.accountCreationFlow = false;
     session.signupEmail = null;
     session.signupFullName = null;
     session.emailCaptureComplete = true;
@@ -706,9 +706,9 @@ When('I choose to {string}', function (choice: string) {
 
 Then('the signup flow should switch to regular auth', function () {
   assert.strictEqual(
-    session.signup,
+    session.accountCreationFlow,
     false,
-    'Expected signup to be false after switching to login',
+    'Expected accountCreationFlow to be false after switching to login',
   );
   assert.strictEqual(
     session.emailCaptureComplete,
@@ -719,7 +719,11 @@ Then('the signup flow should switch to regular auth', function () {
 
 Then('I should go through the login flow', function () {
   // After switching from signup to login, the user should proceed through Auth
-  assert.strictEqual(session.signup, false, 'Expected signup to be false');
+  assert.strictEqual(
+    session.accountCreationFlow,
+    false,
+    'Expected accountCreationFlow to be false',
+  );
 });
 
 Then('I should be back at email entry', function () {

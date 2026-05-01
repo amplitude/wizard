@@ -316,7 +316,7 @@ function sessionToOptions(session: WizardSession): WizardOptions {
     debug: session.debug,
     forceInstall: session.forceInstall,
     default: false,
-    signup: session.signup,
+    accountCreationFlow: session.accountCreationFlow,
     localMcp: session.localMcp,
     ci: session.ci,
     menu: session.menu,
@@ -700,7 +700,7 @@ async function runAgentWizardBody(
   // Only fall back to getOrAskForProjectData for CI mode or non-TUI fallback.
   if (!session.credentials) {
     const authResult = await getOrAskForProjectData({
-      signup: session.signup,
+      accountCreationFlow: session.accountCreationFlow,
       ci: session.ci,
       apiKey: session.apiKey,
       appId: session.appId,
@@ -1272,7 +1272,7 @@ async function runAgentWizardBody(
   }
 
   // Build outro data and store it for OutroScreen
-  const continueUrl = session.signup
+  const continueUrl = session.accountCreationFlow
     ? session.signupMagicLinkUrl ?? OUTBOUND_URLS.products(cloudRegion)
     : undefined;
 

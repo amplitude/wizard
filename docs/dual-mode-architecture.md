@@ -106,7 +106,7 @@ Silently refreshes OAuth access tokens using stored refresh tokens. Proactively 
 
 ### Atomic writes (`src/utils/atomic-write.ts`)
 
-All file persistence uses `atomicWriteJSON()`: write to PID-suffixed temp file, then `renameSync` to target. If the process crashes mid-write, the original file is untouched.
+Security- and recovery-sensitive JSON (tokens, checkpoints, plans, agent state snapshots, update-check cache, benchmark exports, `.amplitude/` metadata where opted in, etc.) uses `atomicWriteJSON()`: write to a PID-suffixed temp file in the same directory, then `renameSync` to the target so a crash mid-write leaves the previous file untouched. Append-only logs, directory creation, and a few intentional non-atomic paths (notably some env-file flows) are excluded by design.
 
 ### Config scoping
 

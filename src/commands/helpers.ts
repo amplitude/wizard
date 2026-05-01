@@ -9,6 +9,7 @@ import { ExitCode } from '../lib/exit-codes';
 import { analytics } from '../utils/analytics';
 import type { AmplitudeZone } from '../lib/constants';
 import { TERMS_OF_SERVICE_URL } from '../lib/constants.js';
+import { accountCreationProvisioningInputsReady } from '../lib/account-creation-flow.js';
 import { setProjectLogFile } from '../lib/observability';
 import { runMigrationShim } from '../utils/storage-migration';
 import { CLI_INVOCATION } from './context';
@@ -71,7 +72,7 @@ export const buildSessionFromOptions = async (
     forceInstall: options.forceInstall as boolean | undefined,
     installDir: options.installDir as string | undefined,
     ci: overrides?.ci ?? false,
-    signup: options.signup as boolean | undefined,
+    accountCreationFlow: options.signup as boolean | undefined,
     localMcp: options.localMcp as boolean | undefined,
     apiKey: options.apiKey as string | undefined,
     menu: options.menu as boolean | undefined,
@@ -533,7 +534,7 @@ export function gateAgentSignupArguments(
   session: import('../lib/wizard-session').WizardSession,
   agentUI: AgentUI,
 ): boolean {
-  if (!session.signup || !session.agent) return true;
+  if (!session.accountCreationFlow || !session.agent) return true;
 
   type MissingFlag = {
     flag: string;
@@ -600,7 +601,7 @@ export function gateCiSignupAcceptToS(
 ): boolean {
   if (
     !session.ci ||
-    !session.signup ||
+    !session.accountCreationFlow ||
     !session.signupEmail ||
     !session.signupFullName ||
     session.region == null
@@ -641,14 +642,14 @@ export function isAuthTaskGateReady(
   if (!session.introConcluded) return false;
   if (session.region === null) return false;
   if (session.regionForced) return false;
-  if (session.signup && session.tosAccepted !== true) return false;
+  if (session.accountCreationFlow && session.tosAccepted !== true) return false;
   return true;
 }
 
 /**
  * Run the direct-signup wrapper for agent / CI / classic modes.
  *
- * No-op when `session.signup` / `signupEmail` / `signupFullName` aren't all
+ * No-op when account-creation provisioning inputs aren't all
  * set. On a non-null result, optionally runs `onSuccess` (classic uses this
  * to populate `session.credentials` via `resolveCredentials`). On null or
  * thrown errors, logs a human message that points at the mode's fallback
@@ -659,7 +660,7 @@ export const runDirectSignupIfRequested = async (
   fallbackLabel: string,
   onSuccess?: () => Promise<void>,
 ): Promise<void> => {
-  if (!session.signup || !session.signupEmail || !session.signupFullName) {
+  if (!accountCreationProvisioningInputsReady(session)) {
     return;
   }
   const { performSignupOrAuth, trackSignupAttempt } = await import(

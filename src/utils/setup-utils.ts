@@ -439,7 +439,10 @@ export async function tryResolveCredentialsForCi(installDir: string): Promise<{
  * authenticates and picks the right Amplitude account for this project.
  */
 export async function getOrAskForProjectData(
-  _options: Pick<WizardOptions, 'signup' | 'ci' | 'apiKey' | 'appId'> & {
+  _options: Pick<
+    WizardOptions,
+    'accountCreationFlow' | 'ci' | 'apiKey' | 'appId'
+  > & {
     installDir?: string;
   },
 ): Promise<{
