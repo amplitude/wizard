@@ -175,7 +175,9 @@ export const FLOWS: Record<Flow, FlowEntry[]> = {
         !s.accountCreationFlow &&
         !s.emailCaptureComplete,
       isComplete: (s) =>
-        !isCreateAccountOnboarding(s) || s.emailCaptureComplete,
+        !isCreateAccountOnboarding(s) ||
+        s.emailCaptureComplete ||
+        s.accountCreationFlow,
       revert: (store) => {
         if (!isCreateAccountOnboarding(store.session)) return false;
         store.resetEmailCapture();
