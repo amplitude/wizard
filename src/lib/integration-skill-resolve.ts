@@ -51,11 +51,13 @@ export function filterIntegrationSkillIdsForIntegration(
   if (byEnum.length > 0) return [...byEnum].sort((a, b) => a.localeCompare(b));
 
   // `Integration.reactRouter` serializes as `react-router`, but bundled ids
-  // use `integration-react-*` / `integration-tanstack-start`.
+  // use `integration-react-react-router-*` / `integration-react-tanstack-router-*`
+  // / `integration-tanstack-start`.
   if (integration === 'react-router') {
     const rr = diskIds.filter(
       (id) =>
-        id.startsWith('integration-react-') ||
+        id.startsWith('integration-react-react-router-') ||
+        id.startsWith('integration-react-tanstack-router-') ||
         id === 'integration-tanstack-start',
     );
     if (rr.length > 0) return [...rr].sort((a, b) => a.localeCompare(b));
