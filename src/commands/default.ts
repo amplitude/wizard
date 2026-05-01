@@ -738,10 +738,12 @@ export const defaultCommand: CommandModule = {
               );
 
               // Try direct signup first when create-account + email + fullName are provided
-              // and the feature flag is enabled. performSignupOrAuth returns null when
-              // any of those gates are missing, or when the server returns a non-success
-              // response — in which case we fall through to the existing OAuth flow
-              // (TUI has a browser; this fallback is valid).
+              // and we have not already persisted tokens during EmailCapture.
+              //
+              // With `--signup`, SigningUpScreen runs performSignupOrAuth first and writes
+              // `session.signupAuth` on success (see isAuthTaskGateReady). The auth task must
+              // hydrate from that result — not POST again — or the duplicate signup hits
+              // requires_redirect and spuriously opens OAuth after a successful headless signup.
               //
               // On signup success, the wrapper already fetched the real user
               // profile (with provisioning retry) and persisted tokens to
@@ -769,40 +771,58 @@ export const defaultCommand: CommandModule = {
                 s.signupFullName &&
                 !s.signupTokensObtained
               ) {
-                const { performSignupOrAuth } = await import(
-                  '../utils/signup-or-auth.js'
-                );
-                try {
-                  const signupResult = await performSignupOrAuth({
-                    email: s.signupEmail,
-                    fullName: s.signupFullName,
-                    zone,
-                    installDir: s.installDir,
-                  });
-                  if (signupResult.kind === 'success') {
-                    auth = {
-                      idToken: signupResult.idToken,
-                      accessToken: signupResult.accessToken,
-                      refreshToken: signupResult.refreshToken,
-                      zone: signupResult.zone,
-                    };
-                    signupUserInfo = signupResult.userInfo;
-                    signupTokensObtained = true;
-                    tui.store.setSignupMagicLinkUrl(
-                      signupResult.dashboardUrl ?? null,
-                    );
-                    getUI().log.info(
-                      'Direct signup succeeded; using newly created account.',
-                    );
-                  }
-                } catch (err) {
-                  trackSignupAttempt({ status: 'wrapper_exception', zone });
-                  getUI().log.warn(
-                    `Direct signup errored: ${
-                      err instanceof Error ? err.message : String(err)
-                    }. Falling back to OAuth.`,
+                if (s.signupAuth !== null) {
+                  const signupResult = s.signupAuth;
+                  auth = {
+                    idToken: signupResult.idToken,
+                    accessToken: signupResult.accessToken,
+                    refreshToken: signupResult.refreshToken,
+                    zone: signupResult.zone,
+                  };
+                  signupUserInfo = signupResult.userInfo;
+                  signupTokensObtained = true;
+                  tui.store.setSignupMagicLinkUrl(
+                    signupResult.dashboardUrl ?? null,
                   );
-                  auth = null;
+                  getUI().log.info(
+                    'Direct signup succeeded; using newly created account.',
+                  );
+                } else if (!s.signupAbandoned) {
+                  const { performSignupOrAuth } = await import(
+                    '../utils/signup-or-auth.js'
+                  );
+                  try {
+                    const signupResult = await performSignupOrAuth({
+                      email: s.signupEmail,
+                      fullName: s.signupFullName,
+                      zone,
+                      installDir: s.installDir,
+                    });
+                    if (signupResult.kind === 'success') {
+                      auth = {
+                        idToken: signupResult.idToken,
+                        accessToken: signupResult.accessToken,
+                        refreshToken: signupResult.refreshToken,
+                        zone: signupResult.zone,
+                      };
+                      signupUserInfo = signupResult.userInfo;
+                      signupTokensObtained = true;
+                      tui.store.setSignupMagicLinkUrl(
+                        signupResult.dashboardUrl ?? null,
+                      );
+                      getUI().log.info(
+                        'Direct signup succeeded; using newly created account.',
+                      );
+                    }
+                  } catch (err) {
+                    trackSignupAttempt({ status: 'wrapper_exception', zone });
+                    getUI().log.warn(
+                      `Direct signup errored: ${
+                        err instanceof Error ? err.message : String(err)
+                      }. Falling back to OAuth.`,
+                    );
+                    auth = null;
+                  }
                 }
               } else if (s.signupTokensObtained) {
                 // EmailCaptureScreen already called replaceStoredUser + set
