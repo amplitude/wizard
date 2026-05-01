@@ -868,6 +868,17 @@ export function isRunning(session: WizardSession): session is RunningSession {
 }
 
 /**
+ * True when this run follows the **create a new Amplitude account** path
+ * (`--signup` or equivalent TUI branch), as opposed to signing in with an
+ * existing account.
+ */
+export function isCreateAccountOnboarding(
+  session: Pick<WizardSession, 'signup'>,
+): boolean {
+  return session.signup;
+}
+
+/**
  * Build a WizardSession from CLI args, pre-populating whatever is known.
  */
 export function buildSession(args: {
