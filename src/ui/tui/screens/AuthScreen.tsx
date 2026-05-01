@@ -2,7 +2,7 @@
  * AuthScreen — Multi-step authentication and account setup (SUSI flow).
  *
  * Steps:
- *   1. OAuth waiting — spinner + login URL while browser auth happens
+ *   1. Browser sign-in wait — spinner + login URL until OAuth completes
  *   2. Org selection — picker if the user belongs to multiple orgs
  *   3. Project selection — picker if the org has multiple projects
  *   4. Environment selection — picker if the project has multiple environments
@@ -491,6 +491,14 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
   //     60s threshold was longer than the user reported putting up with
   //     before quitting and re-running.
   const oauthWaiting = pendingOrgs === null && !manualFallbackOpen;
+  // After email capture + ToS, "authentication" sounds like we're still
+  // waiting on the user; the real wait is browser OAuth completing.
+  const oauthWaitHeadline = session.signup
+    ? 'Complete sign-in in your browser'
+    : 'Signing you in';
+  const oauthWaitPreparingLine = session.signup
+    ? 'Opening your Amplitude sign-in page'
+    : 'Preparing your sign-in link';
   const { tier: oauthCoachingTier } = useTimedCoaching({
     thresholds: [15],
     progressSignal: oauthWaiting ? 'waiting' : 'resolved',
@@ -687,7 +695,8 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
           <Box gap={1}>
             <BrailleSpinner color={Colors.accent} />
             <Text color={Colors.body}>
-              Waiting for authentication{Icons.ellipsis}
+              {oauthWaitHeadline}
+              {Icons.ellipsis}
             </Text>
           </Box>
           <Box marginTop={1} flexDirection="column">
@@ -702,8 +711,8 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
               </>
             ) : (
               <Text color={Colors.muted}>
-                Preparing your sign-in link{Icons.ellipsis} (this normally
-                takes a few seconds)
+                {oauthWaitPreparingLine}
+                {Icons.ellipsis} (this normally takes a few seconds)
               </Text>
             )}
           </Box>

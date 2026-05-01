@@ -5,7 +5,7 @@
  * environment → key entry). Each branch is gated on session.pendingOrgs +
  * counts. Snapshotting the rendered text catches regressions in:
  *
- *   - The "Waiting for authentication" copy + login URL fallback
+ *   - The OAuth wait headline + login URL fallback
  *   - The org / project / environment picker headings
  *   - The "Create new project…" + "Start over" picker actions
  *   - The manual API key entry path with apiKeyNotice surfaced
@@ -32,7 +32,7 @@ describe('AuthScreen snapshots', () => {
       pendingOrgs: null,
     });
     const { frame } = renderSnapshot(<AuthScreen store={store} />, store);
-    expect(frame).toContain('Waiting for authentication');
+    expect(frame).toContain('Signing you in');
     expect(frame).toContain('https://app.amplitude.com/oauth');
     expect(frame).toContain("If the browser didn't open");
     expect(frame).toMatchSnapshot();
