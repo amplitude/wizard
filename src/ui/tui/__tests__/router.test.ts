@@ -967,12 +967,12 @@ describe('WizardRouter', () => {
   // ── 8. Signup flow states ─────────────────────────────────────────
 
   describe('signup flow states', () => {
-    it('signup=true, no email → SignupEmail', () => {
+    it('--signup (accountCreationFlow), no email → SignupEmail', () => {
       const router = new WizardRouter();
       const session = sessionWith({
         introConcluded: true,
         region: 'us',
-        signup: true,
+        accountCreationFlow: true,
         emailCaptureComplete: true,
         tosAccepted: true,
         signupEmail: null,
@@ -984,12 +984,12 @@ describe('WizardRouter', () => {
       expect(router.resolve(session)).toBe(Screen.SignupEmail);
     });
 
-    it('signup=true, email set, nothing required → SigningUp', () => {
+    it('--signup (accountCreationFlow), email set, nothing required → SigningUp', () => {
       const router = new WizardRouter();
       const session = sessionWith({
         introConcluded: true,
         region: 'us',
-        signup: true,
+        accountCreationFlow: true,
         emailCaptureComplete: true,
         tosAccepted: true,
         signupEmail: 'x@y.com',
@@ -1001,12 +1001,12 @@ describe('WizardRouter', () => {
       expect(router.resolve(session)).toBe(Screen.SigningUp);
     });
 
-    it('signup=true, requiredFields=[full_name], no name → SignupFullName', () => {
+    it('--signup (accountCreationFlow), requiredFields=[full_name], no name → SignupFullName', () => {
       const router = new WizardRouter();
       const session = sessionWith({
         introConcluded: true,
         region: 'us',
-        signup: true,
+        accountCreationFlow: true,
         emailCaptureComplete: true,
         tosAccepted: true,
         signupEmail: 'x@y.com',
@@ -1018,12 +1018,12 @@ describe('WizardRouter', () => {
       expect(router.resolve(session)).toBe(Screen.SignupFullName);
     });
 
-    it('signup=true, requirements satisfied after name → SigningUp (retry)', () => {
+    it('--signup (accountCreationFlow), requirements satisfied after name → SigningUp (retry)', () => {
       const router = new WizardRouter();
       const session = sessionWith({
         introConcluded: true,
         region: 'us',
-        signup: true,
+        accountCreationFlow: true,
         emailCaptureComplete: true,
         tosAccepted: true,
         signupEmail: 'x@y.com',
@@ -1035,12 +1035,12 @@ describe('WizardRouter', () => {
       expect(router.resolve(session)).toBe(Screen.SigningUp);
     });
 
-    it('signup=true, signupAuth set → Auth (bin.ts consumes tokens)', () => {
+    it('--signup (accountCreationFlow), signupAuth set → Auth (bin.ts consumes tokens)', () => {
       const router = new WizardRouter();
       const session = sessionWith({
         introConcluded: true,
         region: 'us',
-        signup: true,
+        accountCreationFlow: true,
         emailCaptureComplete: true,
         tosAccepted: true,
         signupEmail: 'x@y.com',
@@ -1060,12 +1060,12 @@ describe('WizardRouter', () => {
       expect(router.resolve(session)).toBe(Screen.Auth);
     });
 
-    it('signup=true, abandoned → Auth (fallback)', () => {
+    it('--signup (accountCreationFlow), abandoned → Auth (fallback)', () => {
       const router = new WizardRouter();
       const session = sessionWith({
         introConcluded: true,
         region: 'us',
-        signup: true,
+        accountCreationFlow: true,
         emailCaptureComplete: true,
         tosAccepted: true,
         signupEmail: 'x@y.com',
@@ -1077,12 +1077,12 @@ describe('WizardRouter', () => {
       expect(router.resolve(session)).toBe(Screen.Auth);
     });
 
-    it('signup=true, unknown required field → Auth (unknown-field guard)', () => {
+    it('--signup (accountCreationFlow), unknown required field → Auth (unknown-field guard)', () => {
       const router = new WizardRouter();
       const session = sessionWith({
         introConcluded: true,
         region: 'us',
-        signup: true,
+        accountCreationFlow: true,
         emailCaptureComplete: true,
         tosAccepted: true,
         signupEmail: 'x@y.com',
