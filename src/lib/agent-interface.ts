@@ -2745,6 +2745,11 @@ export async function runAgent(
       if (looksLikeStreamEventLine(line)) return;
       spinner.message(line);
       getUI().pushStatus(line);
+      // Mirror the throttled status pill into the per-project log so the TUI
+      // Logs tab stays useful during long tool calls. Stream deltas never hit
+      // handleSDKMessage, so without this the file can look idle while Progress
+      // shows the model's voice (users assume logging is broken).
+      logToFile('stream status:', truncateLogMessage(line, 512));
     };
     const enqueueStreamDelta = (delta: string): void => {
       if (!delta) return;

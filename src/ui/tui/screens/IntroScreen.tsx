@@ -321,6 +321,7 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
               : ''
           }
           region={session.region}
+          hideRegionRow={Boolean(welcomeBack && !compact && session.region)}
           detecting={detecting}
         />
       )}
@@ -387,32 +388,51 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
           />
         )}
 
-      {/* Single picker: sign-in vs create-account (same session field as
-          `--auth-onboarding` in CI/agent) plus escape hatches. Two menus
-          would both bind useInput and steal each other's keystrokes. */}
+      {/* Single picker: signed-in users only continue (create-account is
+          hidden — use logout + cold start for a different Amplitude identity).
+          Unsigned: sign-in vs create-account (`--auth-onboarding` in CI).
+          One menu so we do not stack two PickerMenus (shared useInput). */}
       {showContinue && !changingDirectory && (
         <Box marginTop={compact ? 0 : 1}>
           <PickerMenu
             message={
-              narrow
-                ? 'Sign in or create account'
-                : 'Sign in to an existing Amplitude account, or create a new one'
+              session.userEmail
+                ? narrow
+                  ? 'Signed in — continue'
+                  : `You're signed in as ${session.userEmail}. Continue to workspace setup.`
+                : narrow
+                  ? 'Sign in or create account'
+                  : 'Sign in to an existing Amplitude account, or create a new one'
             }
             options={[
               {
-                label: narrow
-                  ? 'Continue — sign in'
-                  : 'Continue — sign in to Amplitude',
+                label: session.userEmail
+                  ? narrow
+                    ? 'Continue'
+                    : 'Continue — workspace setup'
+                  : narrow
+                    ? 'Continue — sign in'
+                    : 'Continue — sign in to Amplitude',
                 value: 'continue_signin',
-                ...(!narrow ? { hint: 'existing account' } : {}),
+                ...(!narrow
+                  ? {
+                      hint: session.userEmail
+                        ? 'same login'
+                        : 'existing account',
+                    }
+                  : {}),
               },
-              {
-                label: narrow
-                  ? 'Continue — new account'
-                  : 'Continue — create a new account',
-                value: 'continue_create',
-                ...(!narrow ? { hint: 'new organization' } : {}),
-              },
+              ...(!session.userEmail
+                ? [
+                    {
+                      label: narrow
+                        ? 'Continue — new account'
+                        : 'Continue — create a new account',
+                      value: 'continue_create' as const,
+                      ...(!narrow ? { hint: 'new organization' as const } : {}),
+                    },
+                  ]
+                : []),
               {
                 label: 'Change framework',
                 value: 'framework',
@@ -447,7 +467,10 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
                 'is monorepo': workspace.isMonorepo,
               };
 
-              if (choice === 'continue_signin' || choice === 'continue_create') {
+              if (
+                choice === 'continue_signin' ||
+                choice === 'continue_create'
+              ) {
                 const path =
                   choice === 'continue_create'
                     ? AuthOnboardingPath.CreateAccount
@@ -585,6 +608,8 @@ interface TargetSummaryProps {
   frameworkBeta: boolean;
   frameworkSuffix: string;
   region: string | null;
+  /** When true, omit the Region row (already shown on the welcome-back line). */
+  hideRegionRow?: boolean;
   detecting: boolean;
 }
 
@@ -596,6 +621,7 @@ const TargetSummary = ({
   frameworkBeta,
   frameworkSuffix,
   region,
+  hideRegionRow = false,
   detecting,
 }: TargetSummaryProps) => {
   return (
@@ -621,7 +647,7 @@ const TargetSummary = ({
         </Box>
       )}
 
-      {region && (
+      {region && !hideRegionRow && (
         <Box>
           <Text color={Colors.muted}>{padLabel('Region')}</Text>
           <Text color={Colors.body}>{region.toUpperCase()}</Text>
