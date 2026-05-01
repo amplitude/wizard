@@ -1,5 +1,23 @@
 # Changelog
 
+## [1.14.0](https://github.com/amplitude/wizard/compare/wizard-v1.13.3...wizard-v1.14.0) (2026-05-01)
+
+
+### Features
+
+* handle existing customer email during signup (BA-67) ([#353](https://github.com/amplitude/wizard/issues/353)) ([d03b8f8](https://github.com/amplitude/wizard/commit/d03b8f8e89a28c32c36dae42263956c4f187e487))
+* register planned events via wizard-proxy HTTP (BA-47) ([#405](https://github.com/amplitude/wizard/issues/405)) ([6a0c130](https://github.com/amplitude/wizard/commit/6a0c130cdb550a622d6312d579b7f449271e7a81))
+* **signup:** use provisioning dashboard_url for magic link UX ([#478](https://github.com/amplitude/wizard/issues/478)) ([9aedd04](https://github.com/amplitude/wizard/commit/9aedd0458dbe057788b9ae919d061493787c6892))
+
+
+### Bug Fixes
+
+* **auth:** bound refreshAccessToken with a 10s timeout ([#489](https://github.com/amplitude/wizard/issues/489)) ([d0c6abd](https://github.com/amplitude/wizard/commit/d0c6abd094e50eb826d01ac5281d9a249f9051cd))
+* clarify OAuth wait copy after signup email capture ([#491](https://github.com/amplitude/wizard/issues/491)) ([228c2f5](https://github.com/amplitude/wizard/commit/228c2f5ea17987d7d198c84694b018e09d8b3b13))
+* reuse stored tokens after email-capture signup ([#493](https://github.com/amplitude/wizard/issues/493)) ([007db2e](https://github.com/amplitude/wizard/commit/007db2e09c3d0bd99db6813735ac4e2a667afe76))
+* **signup:** gate TUI auth task on ToS acceptance ([#490](https://github.com/amplitude/wizard/issues/490)) ([bceaba9](https://github.com/amplitude/wizard/commit/bceaba97154fd27130787666bfd886279ca51335))
+* **tui:** pre-fire RunPhase.Running on Run screen entry ([#487](https://github.com/amplitude/wizard/issues/487)) ([947d3ac](https://github.com/amplitude/wizard/commit/947d3ac42ebf684032bc092a541db5ee1398b125))
+
 ## [1.13.3](https://github.com/amplitude/wizard/compare/wizard-v1.13.2...wizard-v1.13.3) (2026-04-30)
 
 
