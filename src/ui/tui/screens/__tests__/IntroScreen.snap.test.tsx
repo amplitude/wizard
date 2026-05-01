@@ -212,6 +212,11 @@ describe('IntroScreen — welcome-back panel', () => {
     expect(frame).toContain('Acme Analytics · US');
     expect(frame).toContain('3 events instrumented');
     expect(frame).toContain('hours ago');
+    // Signed-in users must not see first-run "sign in" menu copy — it
+    // contradicts the welcome-back header.
+    expect(frame).toContain("You're signed in as kelson@amplitude.com");
+    expect(frame).toContain('Continue — workspace setup');
+    expect(frame).not.toContain('Sign in to an existing Amplitude account');
     // Marketing tagline must NOT appear for returning users — that's
     // the whole point of this branch.
     expect(frame).not.toContain('AI-powered analytics setup in minutes');
@@ -298,6 +303,7 @@ describe('IntroScreen — welcome-back panel', () => {
     const { frame } = renderSnapshot(<IntroScreen store={store} />, store);
     expect(frame).toContain('AI-powered analytics setup in minutes');
     expect(frame).not.toContain('Welcome back');
+    expect(frame).toContain('Continue — sign in');
   });
 
   it('keeps the marketing tagline when ampli.json is absent', () => {
@@ -316,5 +322,8 @@ describe('IntroScreen — welcome-back panel', () => {
     const { frame } = renderSnapshot(<IntroScreen store={store} />, store);
     expect(frame).toContain('AI-powered analytics setup in minutes');
     expect(frame).not.toContain('Welcome back');
+    // Signed in but first run in this directory — same menu as welcome-back.
+    expect(frame).toContain("You're signed in as kelson@amplitude.com");
+    expect(frame).toContain('Continue — workspace setup');
   });
 });
