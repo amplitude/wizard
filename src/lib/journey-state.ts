@@ -10,9 +10,10 @@
  * with a deterministic derivation: each step transitions on a specific
  * tool call (or pattern of tool calls) the agent must make to do its
  * job. PRs #474 (structured `fileWrites` instead of regex over
- * `statusMessages`), #479 (`record_dashboard` as a legacy dashboard hand-off),
- * and #480 (`tool_use` observation) established this pattern; the dashboard
- * row is now driven by the post-agent REST step plus optional `record_dashboard`.
+ * `statusMessages`), #479 (`record_dashboard` as the dashboard
+ * completion signal), and #480 (`tool_use` observation drives the
+ * dashboard pill) established this pattern; this module finishes it
+ * for the journey stepper.
  *
  * The function is pure — no I/O, no store reference. Wire-up happens
  * in `agent-interface.ts` (`PreToolUse` / `PostToolUse` hook
@@ -53,8 +54,10 @@ export interface ClassifyToolEventInput {
 
 /**
  * Strip the standard MCP server prefix (`mcp__<server>__`) so callers can
- * pattern-match on the bare tool name (e.g. `mcp__amplitude__create_chart`
- * exposes `create_chart`). Returns the input unchanged when no prefix matches.
+ * pattern-match on the bare tool name. Mirrors `create-dashboard.ts`'s
+ * `describeAgentToolUse` helper — a tool named
+ * `mcp__amplitude__create_chart` exposes `create_chart`. Returns the input
+ * unchanged when no prefix matches.
  */
 function bareToolName(name: string): string {
   const match = name.match(/^mcp__[a-z0-9_-]+__(.+)$/i);
@@ -125,10 +128,13 @@ function readStringField(value: unknown, key: string): string | undefined {
  *      the call returning means the agent finished the planning step;
  *      the user's verdict on the plan is orthogonal).
  *   4. **wire** — any Edit/Write tool firing AFTER plan has completed.
- *      Pre → in_progress; Post (after the write finishes) → completed once
- *      wire was in_progress.
- *   5. **dashboard** — completed by the post-agent REST dashboard step
- *      (`createDashboardStep`) or, for legacy runs, `record_dashboard` Post.
+ *      Pre → in_progress. There is no completion signal on write-tool Post
+ *      (historically, the first Post flipped the pill to "done" while
+ *      multi-file instrumentation continued). The store's sequential cascade
+ *      in `renderJourneyTasks` rolls wire up to `completed` when step 5 starts.
+ *   5. **dashboard** — Amplitude MCP `create_chart` / `create_dashboard` /
+ *      `update_chart` / `update_dashboard` tools (in_progress) and
+ *      `mcp__wizard-tools__record_dashboard` (Post → completed).
  *
  * Ordering is sequential — when step N's trigger fires, the renderer
  * marks steps 1..N-1 completed automatically. So we only need to emit
@@ -141,7 +147,8 @@ export function classifyToolEvent(
   const { phase, toolName, toolInput, prevDerived } = input;
   const bare = bareToolName(toolName);
 
-  // ── Step 5: dashboard (legacy manual hand-off only) ──
+  // ── Step 5: dashboard ──
+  // Most-specific signal: record_dashboard PostToolUse → completed.
   if (
     phase === 'post' &&
     bare === 'record_dashboard' &&
@@ -149,10 +156,18 @@ export function classifyToolEvent(
   ) {
     return { stepId: 'dashboard', status: 'completed' };
   }
+  // Any Amplitude MCP write call → dashboard in_progress.
+  // record_dashboard PreToolUse also lands here (we mark in_progress on
+  // the call attempt; PostToolUse upgrades it to completed above).
   if (
     phase === 'pre' &&
-    bare === 'record_dashboard' &&
-    isWizardTool(toolName, bare)
+    (bare === 'create_chart' ||
+      bare === 'create_dashboard' ||
+      bare === 'update_chart' ||
+      bare === 'update_dashboard' ||
+      bare === 'add_chart_to_dashboard' ||
+      bare === 'attach_chart_to_dashboard' ||
+      (bare === 'record_dashboard' && isWizardTool(toolName, bare)))
   ) {
     return { stepId: 'dashboard', status: 'in_progress' };
   }
@@ -191,14 +206,6 @@ export function classifyToolEvent(
     prevDerived?.dashboard !== 'completed'
   ) {
     return { stepId: 'wire', status: 'in_progress' };
-  }
-
-  if (
-    phase === 'post' &&
-    WRITE_TOOLS.has(toolName) &&
-    prevDerived?.wire === 'in_progress'
-  ) {
-    return { stepId: 'wire', status: 'completed' };
   }
 
   return null;

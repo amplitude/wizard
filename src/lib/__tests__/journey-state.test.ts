@@ -159,7 +159,7 @@ describe('classifyToolEvent', () => {
       }
     });
 
-    it('flags write-tool Post as wire completed after wire was in_progress', () => {
+    it('does not complete wire on write-tool Post — wiring spans many files', () => {
       expect(
         classifyToolEvent({
           phase: 'post',
@@ -167,11 +167,31 @@ describe('classifyToolEvent', () => {
           toolInput: { file_path: '/p/src/foo.ts' },
           prevDerived: { plan: 'completed', wire: 'in_progress' },
         }),
-      ).toEqual({ stepId: 'wire', status: 'completed' });
+      ).toBeNull();
     });
   });
 
   describe('dashboard', () => {
+    it('flags Amplitude MCP create_chart as dashboard in_progress', () => {
+      expect(
+        classifyToolEvent({
+          phase: 'pre',
+          toolName: 'mcp__amplitude__create_chart',
+          toolInput: { title: 'Funnel' },
+        }),
+      ).toEqual({ stepId: 'dashboard', status: 'in_progress' });
+    });
+
+    it('flags Amplitude MCP create_dashboard as dashboard in_progress', () => {
+      expect(
+        classifyToolEvent({
+          phase: 'pre',
+          toolName: 'mcp__amplitude__create_dashboard',
+          toolInput: { title: 'Activation' },
+        }),
+      ).toEqual({ stepId: 'dashboard', status: 'in_progress' });
+    });
+
     it('flags record_dashboard Pre as dashboard in_progress', () => {
       expect(
         classifyToolEvent({
@@ -193,24 +213,9 @@ describe('classifyToolEvent', () => {
       ).toEqual({ stepId: 'dashboard', status: 'completed' });
     });
 
-    it('does not flag Amplitude MCP chart/dashboard writes for journey status', () => {
-      expect(
-        classifyToolEvent({
-          phase: 'pre',
-          toolName: 'mcp__amplitude__create_chart',
-          toolInput: { title: 'Funnel' },
-        }),
-      ).toBeNull();
-      expect(
-        classifyToolEvent({
-          phase: 'pre',
-          toolName: 'mcp__amplitude__create_dashboard',
-          toolInput: {},
-        }),
-      ).toBeNull();
-    });
-
     it('ignores read-only Amplitude MCP probes', () => {
+      // list_*, search_*, get_* are agent browsing — not load-bearing
+      // signals for the dashboard step.
       expect(
         classifyToolEvent({
           phase: 'pre',
