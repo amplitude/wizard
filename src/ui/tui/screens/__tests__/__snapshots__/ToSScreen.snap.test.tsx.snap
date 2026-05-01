@@ -1,0 +1,17 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`ToSScreen snapshots > renders the heading, both legal links, and the accept/decline picker 1`] = `
+"Terms of Service
+By continuing, you agree to Amplitude's terms
+
+Please review and accept our Terms of Service and Privacy Policy to continue:
+
+→ Terms: https://amplitude.com/terms
+→ Privacy: https://amplitude.com/privacy
+
+
+▸ [1] I accept the Terms of Service and Privacy Policy
+  [2] I do not accept
+
+· This is required to create an Amplitude account"
+`;
