@@ -15,6 +15,12 @@ interface ConfirmationInputProps {
   message: string;
   onConfirm: () => void;
   onCancel: () => void;
+  /**
+   * Escape key handler. When omitted, Escape behaves like selecting the
+   * cancel option (calls `onCancel`). Use this when cancel-on-Enter should
+   * differ from Escape (e.g. skip vs router back).
+   */
+  onEscape?: () => void;
   confirmLabel?: string;
   cancelLabel?: string;
   /**
@@ -58,6 +64,7 @@ export const ConfirmationInput = ({
   message,
   onConfirm,
   onCancel,
+  onEscape,
   confirmLabel = 'Continue [Enter]',
   cancelLabel = 'Cancel [Esc]',
   idPrefix = 'confirmation-input',
@@ -84,7 +91,7 @@ export const ConfirmationInput = ({
       // Re-acquire focus so the component stays interactive if onCancel
       // doesn't unmount it.
       focus(confirmId);
-      onCancel();
+      (onEscape ?? onCancel)();
     }
   });
 
