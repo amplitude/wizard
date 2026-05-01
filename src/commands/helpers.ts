@@ -620,6 +620,32 @@ export function gateCiSignupAcceptToS(
 }
 
 /**
+ * Whether the TUI auth task should release its wait and proceed to OAuth.
+ *
+ * The auth task runs concurrently with the screens, so we need a single
+ * predicate that holds it until the foreground flow is ready for auth:
+ *   - Intro is dismissed  (so the logo / welcome stays visible)
+ *   - Region is picked    (so the OAuth URL targets the right zone)
+ *   - regionForced is off (so /region mid-session doesn't race the new pick)
+ *   - With --signup, ToS is accepted (so the browser doesn't open before
+ *     EmailCapture / ToS finish — tosAccepted=true implies email capture
+ *     is complete since ToS only renders after EmailCapture)
+ *
+ * Pure function, exported for unit testing — the original inline closure
+ * silently regressed when its individual conditions drifted and there was
+ * no test asserting the combined contract.
+ */
+export function isAuthTaskGateReady(
+  session: import('../lib/wizard-session').WizardSession,
+): boolean {
+  if (!session.introConcluded) return false;
+  if (session.region === null) return false;
+  if (session.regionForced) return false;
+  if (session.signup && session.tosAccepted !== true) return false;
+  return true;
+}
+
+/**
  * Run the direct-signup wrapper for agent / CI / classic modes.
  *
  * No-op when `session.signup` / `signupEmail` / `signupFullName` aren't all
