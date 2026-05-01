@@ -15,10 +15,12 @@
  * `activeEventNames` from the MCP `get_events` response — same "live arrival"
  * feedback the data-setup phase showed during instrumentation.
  *
- * Skip guard: when the activation API is unavailable and zero events have
- * been observed, hitting Enter no longer silently confirms — instead it
- * surfaces a "No events detected — continue anyway? [y]es / [Esc] keep
- * waiting" prompt so the user can't accidentally bypass verification.
+ * Skip guard: when zero events have been observed (whether the activation
+ * API is healthy or unavailable), pressing Enter or q surfaces a two-step
+ * "Continue without verifying? [y] / [Esc] keep waiting" prompt so the user
+ * cannot accidentally bypass verification. With partial evidence (MCP
+ * observed names or catalog fallback), Enter or q confirms immediately.
+ * x exits the wizard to resume later (cancel outro).
  */
 
 import { Box, Text } from 'ink';
@@ -54,8 +56,9 @@ const MAX_EVENTS_SHOWN = 8;
 const CELEBRATION_DELAY_MS = 3_000;
 
 // Stable identities so useScreenHints' effect doesn't re-fire every render.
-const SKIP_HINT: readonly KeyHint[] = Object.freeze([
-  { key: 'q', label: 'Skip for now' },
+const VERIFY_EXTRA_HINTS: readonly KeyHint[] = Object.freeze([
+  { key: 'Enter / q', label: 'Skip verification' },
+  { key: 'x', label: 'Exit and resume later' },
 ]);
 const NO_HINTS: readonly KeyHint[] = Object.freeze([]);
 
@@ -607,7 +610,7 @@ export const DataIngestionCheckScreen = ({
       // in a 15s timeout so a hanging data-api request can't leave the user
       // staring at "Checking your event catalog…" forever — on timeout we
       // treat the catalog as empty, which still unblocks the screen
-      // (Enter/q hints render the moment apiUnavailable=true).
+      // (Enter/q skip + x exit hints render once apiUnavailable=true).
       if (currentSession.selectedOrgId && currentSession.selectedProjectId) {
         withTimeout(
           fetchProjectEventTypes(
@@ -716,17 +719,14 @@ export const DataIngestionCheckScreen = ({
     };
   }, [session.integration, session.installDir]);
 
-  // Esc → step back to MCP install. q → "I'll come back later" exit.
-  // Both are hidden during the celebration phase: at that point the user
-  // wants to advance forward, not rewind past a successful run, and an
-  // accidental Esc should not undo the agent's work.
-  // While the skip-confirm prompt is up, the prompt's own Esc handler
-  // (below) dismisses the overlay; useEscapeBack would otherwise *also*
-  // fire and call store.goBack(), undoing the agent's work despite the
-  // visible "[Esc] Keep waiting" hint promising the opposite.
+  // Esc → step back to MCP install. Enter/q → skip verification (with guard
+  // when there is no evidence). x → cancel outro / exit to resume later.
+  // Hidden during celebration so accidental Esc does not undo the run.
+  // While the skip-confirm prompt is up, Esc dismisses only the prompt;
+  // useEscapeBack is disabled so it does not also call store.goBack().
   useEscapeBack(store, {
     enabled: !celebrating && !awaitingSkipConfirm,
-    extraHints: celebrating ? NO_HINTS : SKIP_HINT,
+    extraHints: celebrating || awaitingSkipConfirm ? NO_HINTS : VERIFY_EXTRA_HINTS,
   });
 
   useScreenInput((_char, key) => {
@@ -739,25 +739,28 @@ export const DataIngestionCheckScreen = ({
     }
 
     // Enter-guard: if the user is staring at the skip-confirm prompt,
-    // 'y' confirms the skip, anything else cancels it. This is the
-    // second-Enter step Cassie's feedback called for — without it,
-    // hitting Enter when no events were detected silently confirmed
-    // verification, which was easy to do by accident.
+    // the same keys that opened it (Enter, q) plus y confirm the skip;
+    // anything else dismisses it. Re-pressing Enter/q must not toggle the
+    // prompt off — users expect the trigger key to confirm.
     if (awaitingSkipConfirm) {
-      if (_char === 'y' || _char === 'Y') {
+      if (
+        _char === 'y' ||
+        _char === 'Y' ||
+        _char === 'q' ||
+        _char === 'Q' ||
+        key.return
+      ) {
         if (pollingRef.current !== null) clearInterval(pollingRef.current);
         store.setDataIngestionConfirmed();
         return;
       }
-      // Any other key (incl. Esc, Enter, n) dismisses the prompt.
+      // Any other key (e.g. Esc, n) dismisses the prompt.
       setAwaitingSkipConfirm(false);
       return;
     }
 
-    // q → "I'll come back later" exit. Esc is owned by useEscapeBack
-    // above (back-nav), keeping the Esc=back convention consistent across
-    // the wizard.
-    if (_char === 'q') {
+    // x → exit wizard and resume later (cancel outro).
+    if (_char === 'x' || _char === 'X') {
       if (pollingRef.current !== null) clearInterval(pollingRef.current);
       store.setOutroData({
         kind: OutroKind.Cancel,
@@ -766,18 +769,18 @@ export const DataIngestionCheckScreen = ({
       });
       return;
     }
-    // Manual confirmation when API is unavailable.
-    //
-    // Two-step guard against accidental skip: if zero events have been
-    // observed AND we don't have a cataloged-events fallback to fall
-    // back on, surface a confirmation prompt instead of silently
-    // advancing. If the user has actually triggered events (observed >
-    // 0) or the catalog produced names, treat Enter as the deliberate
-    // "I'm done" confirmation since they can SEE what was verified.
-    if (apiUnavailable && key.return) {
-      const hasAnyEvidence =
-        observedEventNames.size > 0 ||
-        (eventTypes !== null && eventTypes.length > 0);
+
+    const hasAnyEvidence =
+      observedEventNames.size > 0 ||
+      (eventTypes !== null && eventTypes.length > 0);
+
+    const wantsSkipVerification =
+      key.return || _char === 'q' || _char === 'Q';
+
+    // Enter or q: advance past verification, with the same two-step guard
+    // whether the activation API is up (listening) or unavailable (catalog
+    // fallback path).
+    if (wantsSkipVerification) {
       if (!hasAnyEvidence) {
         setAwaitingSkipConfirm(true);
         return;
@@ -1113,22 +1116,22 @@ export const DataIngestionCheckScreen = ({
           skip-confirm prompt is up so the user sees one set of
           instructions, not two competing hint rows. */}
       {!awaitingSkipConfirm && (
-        <Box marginTop={2} gap={2}>
-          {apiUnavailable && (
-            <Box>
-              <Text color={Colors.muted}>[</Text>
-              <Text color={Colors.body} bold>
-                Enter
-              </Text>
-              <Text color={Colors.muted}>
-                ] {eventTypes && eventTypes.length > 0 ? 'Continue' : 'Confirm'}
-              </Text>
-            </Box>
-          )}
-          <Box>
+        <Box marginTop={2} gap={2} flexDirection="row" flexWrap="wrap">
+          <Box gap={0}>
             <Text color={Colors.muted}>[</Text>
             <Text color={Colors.body} bold>
+              Enter
+            </Text>
+            <Text color={Colors.muted}>] or [</Text>
+            <Text color={Colors.body} bold>
               q
+            </Text>
+            <Text color={Colors.muted}>] Skip verification</Text>
+          </Box>
+          <Box gap={0}>
+            <Text color={Colors.muted}>[</Text>
+            <Text color={Colors.body} bold>
+              x
             </Text>
             <Text color={Colors.muted}>] Exit and resume later</Text>
           </Box>

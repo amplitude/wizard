@@ -10,7 +10,7 @@ function makeOptions(installDir: string) {
     debug: false,
     forceInstall: false,
     default: false,
-    signup: false,
+    authOnboardingPath: 'sign_in',
     localMcp: false,
     ci: false,
     menu: false,
@@ -53,6 +53,57 @@ describe('VUE_AGENT_CONFIG.detection.detect', () => {
       makeOptions(tmpDir),
     );
     expect(detected).toBe(false);
+  });
+
+  it('ignores VitePress docs sites even when vue is present', async () => {
+    fs.writeFileSync(
+      path.join(tmpDir, 'package.json'),
+      JSON.stringify({
+        devDependencies: {
+          vue: '^3.5.0',
+          vitepress: '^1.6.0',
+          vite: '^6.0.0',
+        },
+      }),
+    );
+    fs.writeFileSync(path.join(tmpDir, 'pnpm-lock.yaml'), '');
+
+    const detected = await VUE_AGENT_CONFIG.detection.detect(
+      makeOptions(tmpDir),
+    );
+    expect(detected).toBe(false);
+  });
+
+  it('ignores Slidev decks even when vue is present', async () => {
+    fs.writeFileSync(
+      path.join(tmpDir, 'package.json'),
+      JSON.stringify({
+        devDependencies: {
+          vue: '^3.5.0',
+          slidev: '^52.0.0',
+          vite: '^6.0.0',
+        },
+      }),
+    );
+
+    const detected = await VUE_AGENT_CONFIG.detection.detect(
+      makeOptions(tmpDir),
+    );
+    expect(detected).toBe(false);
+  });
+
+  it('detects vue when it only appears in optionalDependencies', async () => {
+    fs.writeFileSync(
+      path.join(tmpDir, 'package.json'),
+      JSON.stringify({
+        optionalDependencies: { vue: '^3.5.0' },
+      }),
+    );
+
+    const detected = await VUE_AGENT_CONFIG.detection.detect(
+      makeOptions(tmpDir),
+    );
+    expect(detected).toBe(true);
   });
 
   it('falls back to .vue file sniff when package.json is missing', async () => {

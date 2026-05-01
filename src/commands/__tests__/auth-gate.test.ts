@@ -38,35 +38,51 @@ describe('isAuthTaskGateReady', () => {
     );
   });
 
-  // Regression for the `--signup` flag: the auth task used to fire as
-  // soon as Region was picked, popping the OAuth browser before the
-  // user could fill EmailCapture / accept ToS. The whole point of the
-  // signup flow is to gate auth on those screens.
-  it('blocks --signup runs until ToS is accepted', () => {
+  // Regression for the create-account onboarding path: the auth task used
+  // to fire as soon as Region was picked, popping the OAuth browser before
+  // the user could fill EmailCapture / accept ToS.
+  it('blocks create-account runs until ToS is accepted', () => {
     expect(
       isAuthTaskGateReady(
         s({
           introConcluded: true,
           region: 'us',
-          accountCreationFlow: true,
+          authOnboardingPath: 'create_account',
           tosAccepted: null,
         }),
       ),
     ).toBe(false);
   });
 
-  it('blocks --signup runs that have only completed email capture', () => {
+  it('blocks create-account runs that have only completed email capture', () => {
     expect(
       isAuthTaskGateReady(
         s({
           introConcluded: true,
           region: 'us',
-          accountCreationFlow: true,
+          authOnboardingPath: 'create_account',
           emailCaptureComplete: true,
           tosAccepted: false,
         }),
       ),
     ).toBe(false);
+  });
+
+  it('releases create-account onboarding once ToS is accepted (no --signup)', () => {
+    expect(
+      isAuthTaskGateReady(
+        s({
+          introConcluded: true,
+          region: 'us',
+          authOnboardingPath: 'create_account',
+          emailCaptureComplete: true,
+          tosAccepted: true,
+          accountCreationFlow: false,
+          signupAuth: null,
+          signupAbandoned: false,
+        }),
+      ),
+    ).toBe(true);
   });
 
   it('blocks --signup after ToS until SigningUpScreen settles (no auth yet)', () => {
@@ -75,9 +91,10 @@ describe('isAuthTaskGateReady', () => {
         s({
           introConcluded: true,
           region: 'us',
-          accountCreationFlow: true,
+          authOnboardingPath: 'create_account',
           emailCaptureComplete: true,
           tosAccepted: true,
+          accountCreationFlow: true,
           signupAuth: null,
           signupAbandoned: false,
         }),

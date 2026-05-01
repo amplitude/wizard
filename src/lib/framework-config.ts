@@ -104,14 +104,16 @@ export interface FrameworkMetadata<
   /**
    * Optional resolver that returns the bundled integration skill ID for this
    * framework given its gathered context. Lets the runner pre-stage the skill
-   * before the agent launches so the agent doesn't have to call
-   * load_skill_menu / install_skill at runtime.
+   * before the agent launches so the agent can load it from `.claude/skills/`
+   * with the Skill tool (wizard-tools `load_skill_menu` / `install_skill` are
+   * disabled in current builds).
    *
    * If omitted, the runner falls back to a default `integration-${integration}`
    * lookup against the bundled skills directory.
    *
    * Return null if no bundled skill is available for this framework + context
-   * combination — the runner will leave skill discovery to the agent.
+   * combination — the runner leaves integration entry to on-disk discovery in
+   * the agent prompt (`Glob` under `.claude/skills/integration-*`).
    */
   getIntegrationSkillId?: (context: TContext) => string | null;
 }

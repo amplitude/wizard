@@ -1,8 +1,8 @@
 import { describe, it, expect, vi } from 'vitest';
 
 // Stub disk-backed zone signals so tests don't pick up the developer's
-// real ~/.ampli.json. The Wizard flow's RegionSelect gate calls
-// `tryResolveZone(s)`, which reads ampli.json + stored user as Tier 2/3.
+// real auth / ampli config. The Wizard flow's RegionSelect gate calls
+// `tryResolveZone(s)`, which reads ampli config + stored user as Tier 2/3.
 // Without these mocks, a `region: null` session in tests would still
 // resolve to a non-null zone via disk, skipping RegionSelect.
 vi.mock('../../../utils/ampli-settings.js', () => ({
@@ -816,6 +816,7 @@ describe('WizardRouter', () => {
       resetSlack: () => mutate({ slackComplete: false, slackOutcome: null }),
       resetEmailCapture: () => mutate({ emailCaptureComplete: false }),
       resetToS: () => mutate({ tosAccepted: null }),
+      rewindIntro: () => mutate({ introConcluded: false }),
       cancelCreateProject: () =>
         mutate({
           createProject: { pending: false, source: null, suggestedName: null },
@@ -844,11 +845,16 @@ describe('WizardRouter', () => {
       expect(router.canGoBack(fresh())).toBe(false);
     });
 
-    it('reports canGoBack=false on RegionSelect (Intro is non-revertible)', () => {
+    it('reports canGoBack=true on RegionSelect (Esc returns to Welcome)', () => {
       const router = new WizardRouter();
       const session = sessionWith({ introConcluded: true });
-      // Active = RegionSelect, walking back hits Intro which has no revert -> wall
-      expect(router.canGoBack(session)).toBe(false);
+      expect(router.resolve(session)).toBe(Screen.RegionSelect);
+      expect(router.canGoBack(session)).toBe(true);
+
+      const { stub, ref } = makeStubStore(session);
+      expect(router.goBack(ref.session, stub as never)).toBe(true);
+      expect(ref.session.introConcluded).toBe(false);
+      expect(new WizardRouter().resolve(ref.session)).toBe(Screen.Intro);
     });
 
     it('canGoBack from Auth -> reverts past RegionSelect', () => {

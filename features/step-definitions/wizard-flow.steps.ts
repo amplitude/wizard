@@ -6,6 +6,7 @@ import * as path from 'node:path';
 import { WizardRouter } from '../../src/ui/tui/router.js';
 import { Screen, Flow } from '../../src/ui/tui/flows.js';
 import {
+  AuthOnboardingPath,
   buildSession,
   RunPhase,
   OutroKind,
@@ -188,14 +189,16 @@ When('the wizard launches', function () {
 
 When('the wizard launches with {string}', function (flags: string) {
   // Parse flags and apply them to the session
-  if (flags.includes('--signup')) {
-    session.accountCreationFlow = true;
+  if (
+    /--auth-onboarding\s+create-account/.test(flags) ||
+    flags.includes('--signup')
+  ) {
+    session.authOnboardingPath = AuthOnboardingPath.CreateAccount;
   }
-  if (flags.includes('--signup-email')) {
-    const match = flags.match(/--signup-email\s+(\S+)/);
-    if (match) {
-      session.signupEmail = match[1];
-    }
+  const emailMatch =
+    flags.match(/--email\s+(\S+)/) ?? flags.match(/--signup-email\s+(\S+)/);
+  if (emailMatch) {
+    session.signupEmail = emailMatch[1];
   }
   // Check if valid credentials are stored (same as above)
   const sharedConfigPath = (this as Record<string, unknown>).tempConfigPath as
@@ -571,7 +574,7 @@ Then('I should be taken to the Outro with a cancel state', function () {
 });
 
 When('I press {string} to exit', function (_key: string) {
-  // Simulates the user pressing q/Esc on the DataIngestionCheck screen
+  // Simulates the user pressing x on the DataIngestionCheck screen (cancel outro)
   session.outroData = {
     kind: OutroKind.Cancel,
     message: 'Come back once your app is running and sending events.',
@@ -691,7 +694,7 @@ Then(
 When('I choose to {string}', function (choice: string) {
   if (choice === 'Log in with existing account') {
     // Switch from signup to login flow
-    session.accountCreationFlow = false;
+    session.authOnboardingPath = AuthOnboardingPath.SignIn;
     session.signupEmail = null;
     session.signupFullName = null;
     session.emailCaptureComplete = true;
@@ -706,9 +709,9 @@ When('I choose to {string}', function (choice: string) {
 
 Then('the signup flow should switch to regular auth', function () {
   assert.strictEqual(
-    session.accountCreationFlow,
-    false,
-    'Expected accountCreationFlow to be false after switching to login',
+    session.authOnboardingPath,
+    AuthOnboardingPath.SignIn,
+    'Expected authOnboardingPath to be sign_in after switching to login',
   );
   assert.strictEqual(
     session.emailCaptureComplete,
@@ -720,9 +723,9 @@ Then('the signup flow should switch to regular auth', function () {
 Then('I should go through the login flow', function () {
   // After switching from signup to login, the user should proceed through Auth
   assert.strictEqual(
-    session.accountCreationFlow,
-    false,
-    'Expected accountCreationFlow to be false',
+    session.authOnboardingPath,
+    AuthOnboardingPath.SignIn,
+    'Expected authOnboardingPath to be sign_in',
   );
 });
 

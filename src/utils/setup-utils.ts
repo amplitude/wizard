@@ -441,7 +441,7 @@ export async function tryResolveCredentialsForCi(installDir: string): Promise<{
 export async function getOrAskForProjectData(
   _options: Pick<
     WizardOptions,
-    'accountCreationFlow' | 'ci' | 'apiKey' | 'appId'
+    'authOnboardingPath' | 'ci' | 'apiKey' | 'appId'
   > & {
     installDir?: string;
   },
@@ -495,7 +495,7 @@ export async function getOrAskForProjectData(
 
       getUI().log.error(
         chalk.red(
-          'CI mode could not resolve a project API key. Pass --api-key or AMPLITUDE_WIZARD_API_KEY, store a key in the project (.env.local) or run the wizard interactively once to populate the per-user cache, or ensure ~/.ampli.json has a valid OAuth session (and ampli.json includes ProjectId if needed).',
+          'CI mode could not resolve a project API key. Pass --api-key or AMPLITUDE_WIZARD_API_KEY, store a key in the project (.env.local) or run the wizard interactively once to populate the per-user cache, or ensure the wizard OAuth session store (~/.amplitude/wizard/oauth-session.json, or legacy ~/.ampli.json) has a valid session (and project binding includes ProjectId if needed).',
         ),
       );
       await wizardAbort({

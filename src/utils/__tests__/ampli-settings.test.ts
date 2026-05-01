@@ -32,6 +32,7 @@ import {
 
 const mockReadFileSync = vi.mocked(fs.readFileSync);
 const mockWriteFileSync = vi.mocked(fs.writeFileSync);
+const mockExistsSync = vi.mocked(fs.existsSync);
 
 // ── in-memory fs ───────────────────────────────────────────────────────────
 // readFileSync and writeFileSync are wired to the same store so that
@@ -46,6 +47,7 @@ beforeEach(() => {
   mockWriteFileSync.mockImplementation((_path, data) => {
     fsStore = data as string;
   });
+  mockExistsSync.mockReturnValue(false);
 });
 
 function setupConfig(data: Record<string, unknown>) {

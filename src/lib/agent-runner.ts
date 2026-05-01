@@ -10,6 +10,7 @@ import {
   ADDITIONAL_FEATURE_PROMPTS,
   ADDITIONAL_FEATURE_LABELS,
   INLINE_FEATURES,
+  isCreateAccountOnboarding,
 } from './wizard-session';
 import {
   tryGetPackageJson,
@@ -35,6 +36,11 @@ import * as fsSync from 'fs';
 import path from 'path';
 import { saveCheckpoint } from './session-checkpoint.js';
 import { getEventsFile } from '../utils/storage-paths.js';
+import {
+  resolveDataIngestionMaxWaitMs,
+  nextDataIngestionPollWaitMs,
+  DATA_INGESTION_POLL_BACKOFF_START_MS,
+} from './data-ingestion-agent-poll.js';
 import { enableDebugLogs, logToFile } from '../utils/debug';
 import { getLogFilePath } from './observability/index.js';
 import { createObservabilityMiddleware } from './middleware/observability';
@@ -310,7 +316,7 @@ function sessionToOptions(session: WizardSession): WizardOptions {
     debug: session.debug,
     forceInstall: session.forceInstall,
     default: false,
-    accountCreationFlow: session.accountCreationFlow,
+    authOnboardingPath: session.authOnboardingPath,
     localMcp: session.localMcp,
     ci: session.ci,
     menu: session.menu,
@@ -694,7 +700,7 @@ async function runAgentWizardBody(
   // Only fall back to getOrAskForProjectData for CI mode or non-TUI fallback.
   if (!session.credentials) {
     const authResult = await getOrAskForProjectData({
-      accountCreationFlow: session.accountCreationFlow,
+      authOnboardingPath: session.authOnboardingPath,
       ci: session.ci,
       apiKey: session.apiKey,
       appId: session.appId,
@@ -727,7 +733,7 @@ async function runAgentWizardBody(
   } = session.credentials;
   // The TUI's AuthScreen may have stored the id_token instead of the
   // OAuth access token (the field names were swapped historically).
-  // Always prefer the real OAuth access token from ~/.ampli.json for Hydra auth.
+  // Always prefer the real OAuth access token from the wizard session store for Hydra auth.
   let accessToken = await refreshTokenIfStale(rawAccessToken, 'pre-run');
   // Mirror the freshest token onto the session so SlackScreen / OutroScreen
   // and any other late screen that reads `session.credentials.accessToken`
@@ -762,11 +768,14 @@ async function runAgentWizardBody(
   // Pre-stage all bundled skills the agent will need into the user's
   // .claude/skills/ directory. The taxonomy / instrumentation / dashboard
   // skills are constants; the integration skill is resolved per framework
-  // (with a sensible default fallback). When a skill is pre-staged we drop
-  // the corresponding load_skill_menu / install_skill steps from the prompt.
+  // (with a sensible default fallback). When staging succeeds the prompt pins
+  // that id; otherwise a deterministic on-disk resolver picks at most one
+  // `integration-*` match so the model never chooses among several Glob hits.
   const { preStageSkills, bundledSkillExists } = await import(
     './wizard-tools.js'
   );
+  const { listIntegrationSkillIdsOnDisk, resolveIntegrationSkillId } =
+    await import('./integration-skill-resolve.js');
   const integrationSkillId = config.metadata.getIntegrationSkillId
     ? config.metadata.getIntegrationSkillId(frameworkContext)
     : (() => {
@@ -777,6 +786,24 @@ async function runAgentWizardBody(
     session.installDir,
     integrationSkillId,
   );
+
+  let integrationSkillIdForPrompt: string | null =
+    integrationStaged && integrationSkillId ? integrationSkillId : null;
+  if (!integrationSkillIdForPrompt) {
+    const diskIds = listIntegrationSkillIdsOnDisk(session.installDir);
+    const resolved = resolveIntegrationSkillId({
+      integration: config.metadata.integration,
+      primaryBundledId: integrationSkillId,
+      frameworkContext,
+      candidateSkillIds: diskIds,
+    });
+    if (resolved?.source === 'lexicographic_tiebreak') {
+      logToFile(
+        `[runAgentWizard] integration skill lexicographic tie-break: picked "${resolved.skillId}" (scoped pool had multiple matches; consider tightening framework hints).`,
+      );
+    }
+    integrationSkillIdForPrompt = resolved?.skillId ?? null;
+  }
 
   const integrationPrompt =
     buildIntegrationPrompt(
@@ -791,7 +818,7 @@ async function runAgentWizardBody(
       },
       frameworkContext,
       skipAmplitudeMcp,
-      integrationStaged ? integrationSkillId : null,
+      integrationSkillIdForPrompt,
     ) + buildInlineFeatureSection(session.additionalFeatureQueue);
 
   // Initialize and run agent
@@ -1229,33 +1256,37 @@ async function runAgentWizardBody(
   // Commit the instrumented event plan to the Amplitude tracking plan as
   // planned events so the names show up in the Data tab immediately — even
   // before any track() call fires in the user's app.
-  const plannedEventsSummary = await commitPlannedEventsStep(
-    agentResult.plannedEvents ?? [],
-    accessToken,
-    appId,
-    session,
-    cloudRegion,
-  );
-
-  // Post-agent dashboard creation — bounded by its own timeout so a slow
-  // Amplitude MCP response can't hang the whole run. Gracefully degrades:
-  // agent success is not affected by dashboard-step failure.
-  try {
-    const { createDashboardStep } = await import(
-      '../steps/create-dashboard.js'
-    );
-    await createDashboardStep({
-      session,
+  // Commit planned events (tracking plan API) and dashboard fallback run on
+  // independent I/O — overlap them to shorten the post-agent gap. Each step
+  // owns its own `setPostAgentStep` lifecycle and session mutations on
+  // disjoint fields (`commit` → API / `create-dashboard` → local artifacts).
+  const [plannedEventsSummary] = await Promise.all([
+    commitPlannedEventsStep(
+      agentResult.plannedEvents ?? [],
       accessToken,
-      integration: config.metadata.integration,
-    });
-  } catch (err) {
-    logToFile(
-      `[agent-runner] createDashboardStep threw: ${
-        err instanceof Error ? err.message : String(err)
-      }`,
-    );
-  }
+      appId,
+      session,
+      cloudRegion,
+    ),
+    (async (): Promise<void> => {
+      try {
+        const { createDashboardStep } = await import(
+          '../steps/create-dashboard.js'
+        );
+        await createDashboardStep({
+          session,
+          accessToken,
+          integration: config.metadata.integration,
+        });
+      } catch (err) {
+        logToFile(
+          `[agent-runner] createDashboardStep threw: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+      }
+    })(),
+  ]);
 
   // MCP installation is handled by McpScreen — no prompt here
 
@@ -1266,7 +1297,7 @@ async function runAgentWizardBody(
   }
 
   // Build outro data and store it for OutroScreen
-  const continueUrl = session.accountCreationFlow
+  const continueUrl = isCreateAccountOnboarding(session)
     ? session.signupMagicLinkUrl ?? OUTBOUND_URLS.products(cloudRegion)
     : undefined;
 
@@ -1309,6 +1340,10 @@ async function runAgentWizardBody(
 /**
  * Poll the Amplitude MCP server for event ingestion in agent mode.
  *
+ * Timing: inter-poll delay uses exponential-ish backoff (see
+ * `data-ingestion-agent-poll.ts`). Max wall time: `DATA_INGESTION_TIMEOUT_MS`
+ * env override, else shorter defaults for CI / `--agent` than the legacy 30m.
+ *
  * Emits structured NDJSON events via the AgentUI:
  *   - `status` events every poll cycle while waiting
  *   - `result` event when events are detected (includes event names)
@@ -1330,10 +1365,8 @@ async function pollForDataIngestion(
   );
   const { logToFile } = await import('../utils/debug.js');
 
-  const POLL_INTERVAL_MS = 30_000;
-  // Allow override for testing; default 30 minutes.
-  const MAX_WAIT_MS =
-    Number(process.env.DATA_INGESTION_TIMEOUT_MS) || 30 * 60 * 1000;
+  const MAX_WAIT_MS = resolveDataIngestionMaxWaitMs(session);
+  let interPollWaitMs = DATA_INGESTION_POLL_BACKOFF_START_MS;
 
   // Resolve the numeric Amplitude app ID.
   // It is set by resolveEnvironmentSelection for the environment-picker path,
@@ -1383,9 +1416,9 @@ async function pollForDataIngestion(
   // process tore down, leaving the request stuck in the background.
   const PER_POLL_TIMEOUT_MS = 25_000;
   // Bail out of the poll loop the moment the wizard is cancelled
-  // (Ctrl+C / SIGINT → graceful-exit → abortWizard). Without this the
-  // 30s setTimeout below would block the 2s grace window for up to 28s,
-  // so the user would either see a hung exit or the kernel would
+  // (Ctrl+C / SIGINT → graceful-exit → abortWizard). Without this a long
+  // inter-poll setTimeout would block the 2s grace window for nearly the
+  // full wait duration, so the user would either see a hung exit or the kernel would
   // SIGKILL the process before the poll resolved.
   const wizardSignal = getWizardAbortSignal();
 
@@ -1449,7 +1482,7 @@ async function pollForDataIngestion(
     // Wait before the next poll, but bail early if deadline passed
     // OR if the wizard is cancelled. Race the timer with the abort
     // signal so a Ctrl+C unblocks immediately instead of waiting up
-    // to POLL_INTERVAL_MS for the next iteration to see the flag.
+    // to the inter-poll delay for the next iteration to see the flag.
     const remaining = deadline - Date.now();
     if (remaining <= 0) break;
     if (wizardSignal.aborted) {
@@ -1457,7 +1490,7 @@ async function pollForDataIngestion(
       return;
     }
     await new Promise<void>((resolve) => {
-      const waitMs = Math.min(POLL_INTERVAL_MS, remaining);
+      const waitMs = Math.min(interPollWaitMs, remaining);
       const timer = setTimeout(() => {
         wizardSignal.removeEventListener('abort', onAbort);
         resolve();
@@ -1468,6 +1501,7 @@ async function pollForDataIngestion(
       };
       wizardSignal.addEventListener('abort', onAbort, { once: true });
     });
+    interPollWaitMs = nextDataIngestionPollWaitMs(interPollWaitMs);
   }
 
   if (wizardSignal.aborted) {
@@ -1512,10 +1546,13 @@ ${items}
 /**
  * Build the integration prompt for the agent.
  *
- * `preStagedIntegrationSkillId` is the integration skill that the runner
- * already copied into `.claude/skills/<id>/`. When non-null the prompt skips
- * the load_skill_menu / install_skill discovery loop; otherwise the agent
- * falls back to discovering an integration skill at runtime.
+ * `preStagedIntegrationSkillId` is the integration skill id chosen before the
+ * agent runs: normally the bundled copy the runner pre-staged under
+ * `.claude/skills/<id>/`, or — when staging missed — the same id picked by
+ * `resolveIntegrationSkillId` (integration-skill-resolve) from on-disk `integration-*`
+ * directories so STEP 1 is always a single deterministic path (never a Glob
+ * disambiguation for the model). When null, no integration skill could be
+ * resolved and the agent should halt with `report_status`.
  *
  * Taxonomy + instrumentation + dashboard skills are always pre-staged when
  * bundled, so the prompt loads them by ID without menu/install steps.
@@ -1584,20 +1621,22 @@ function buildIntegrationPrompt(
       ? '\n' + additionalLines.map((line) => `- ${line}`).join('\n')
       : '';
 
-  // Integration-skill block: either reference the pre-staged skill directly,
-  // or fall back to the legacy load_skill_menu / install_skill flow when the
-  // runner couldn't pre-stage one (rare — typically TanStack Router and
-  // similar variants without a deterministic resolver).
+  // Integration-skill block: single pinned id from staging + resolver, or halt.
   const integrationSkillStep = preStagedIntegrationSkillId
-    ? `STEP 1: Load \`.claude/skills/${preStagedIntegrationSkillId}/SKILL.md\` via the Skill tool. The wizard has already pre-staged this integration skill for ${config.metadata.name}; do NOT call load_skill_menu or install_skill for the integration category.`
-    : `STEP 1: Call load_skill_menu (from the wizard-tools MCP server) with category "integration" to see available skills.
-   If the tool fails, call report_status with kind="error", code="MCP_MISSING", detail="Could not load skill menu" and halt.
-   Pick the skill that matches this project's framework, then call install_skill with that skill ID, then load \`.claude/skills/<skillId>/SKILL.md\` via the Skill tool.
-   If no suitable integration skill is found, call report_status with kind="error", code="RESOURCE_MISSING", detail="Could not find a suitable skill for this project" and halt.`;
+    ? `STEP 1: Load \`.claude/skills/${preStagedIntegrationSkillId}/SKILL.md\` via the Skill tool. The wizard already resolved a single integration skill id (\`${preStagedIntegrationSkillId}\`) for this ${config.metadata.name} run (bundled pre-stage when possible, otherwise a deterministic on-disk resolver — not Glob-based disambiguation). Do NOT call load_skill_menu or install_skill (they are not available on the wizard-tools server).`
+    : `STEP 1: Integration workflow — wizard-tools \`load_skill_menu\` / \`install_skill\` are **not registered** in this CLI; do not call them (they will fail or be absent from the tool list).
+
+   The taxonomy, instrumentation, and chart-plan skills are already under \`.claude/skills/\` for this run, but the runner could not resolve any \`integration-*\` skill id for ${config.metadata.name} (nothing bundled/pre-staged and no matching \`.claude/skills/integration-*/SKILL.md\` on disk).
+
+   Call \`report_status\` with kind="error", code="RESOURCE_MISSING", detail="No integration skill could be resolved for this framework." and halt.`;
+
+  const skillsIntro = preStagedIntegrationSkillId
+    ? `The wizard has pre-staged supporting skills into \`.claude/skills/\` and pinned one integration skill id for this run — load them with the Skill tool. Do NOT call load_skill_menu or install_skill (disabled).`
+    : `The wizard has pre-staged taxonomy, instrumentation, and chart-plan skills into \`.claude/skills/\` (load with the Skill tool). STEP 1 explains the integration workflow — do NOT call load_skill_menu or install_skill (disabled).`;
 
   return `You are setting up Amplitude analytics in this ${
     config.metadata.name
-  } project. The wizard has pre-staged the skills you'll need into \`.claude/skills/\` — load them with the Skill tool by ID instead of calling load_skill_menu / install_skill.
+  } project. ${skillsIntro}
 
 Early in the run (before env wiring and again before confirm_event_plan), load \`.claude/skills/wizard-prompt-supplement/SKILL.md\` via the Skill tool and \`Read\` the reference files it lists for your phase — they hold long-form contracts intentionally kept out of the static commandments (API keys, event-plan shape, setup report, lint scoping rationale, and browser SDK init tables when applicable).
 
@@ -1613,29 +1652,13 @@ ${appIdGuidance}
     config.prompts.packageInstallation ?? DEFAULT_PACKAGE_INSTALLATION
   }${additionalContext}
 
-Instructions (follow these steps IN ORDER - do not skip or reorder):
+Instructions (follow in order — your **system prompt commandments** carry the cross-cutting rules: TodoWrite checklist labels, Bash/env policy, parallel discovery, \`confirm_event_plan\` + \`.amplitude/events.json\`, \`record_dashboard\`, setup report + \`<wizard-report>\`, MCP \`reason\` on every wizard-tools call, and package-install background tasks. Do not contradict them):
 
 ${integrationSkillStep}
 
-STEP 2: Follow the skill's workflow files in sequence. Look for numbered workflow files in the references (e.g., files with patterns like "1.0-", "1.1-", "1.2-"). Start with the first one and proceed through each step until completion. Each workflow file will tell you what to do and which file comes next. Never directly write Amplitude tokens directly to code files; always use environment variables.
+STEP 2: Run the integration skill's numbered workflow reference files in order (e.g. \`1.0-*\`, \`1.1-*\`, …). Never paste secrets into source — use env vars; details live in commandments + \`wizard-prompt-supplement/references/api-keys-and-env.md\`.
 
-STEP 3: Set up environment variables for Amplitude using the wizard-tools MCP server (this runs locally — secret values never leave the machine):
-   - Use check_env_keys to see which keys already exist in the project's .env file (e.g. .env.local or .env).
-   - Use set_env_values to create or update the Amplitude public token and host, using the appropriate environment variable naming convention for ${
-     config.metadata.name
-   }, which you'll find in example code. The tool will also ensure .gitignore coverage. Don't assume the presence of keys means the value is up to date. Write the correct value each time.
-   - Reference these environment variables in the code files you create instead of hardcoding the public token and host.
-
-STEP 4: Add event tracking to this project. The taxonomy and instrumentation skills are already pre-staged at \`.claude/skills/\` — load them by ID with the Skill tool. Do NOT call load_skill_menu or install_skill for these.
-   - If you enabled Amplitude Autocapture in the SDK init code during integration (typical for web SDKs, not for Swift unless the plugin was added, and not applicable to backend SDKs), the events you propose to confirm_event_plan MUST exclude anything Autocapture already covers for this platform — no "Clicked", "Tapped", "Submitted", or "Viewed" events. If Autocapture is off or unsupported, propose events normally but still favor business-outcome and state-change events over raw interaction events.
-   - Load \`.claude/skills/amplitude-quickstart-taxonomy-agent/SKILL.md\` and follow it when **naming events**, choosing **properties**, and scoping a **starter-kit taxonomy** (business-outcome events, property limits, funnel/linkage rules). Keep using this skill alongside instrumentation so names stay analysis-ready.
-   - Load \`.claude/skills/add-analytics-instrumentation/SKILL.md\` and follow its workflow using the "File / Directory" input type: analyze the project's main source directory to discover user-facing features and surfaces that should be instrumented.
-   - The skill will guide you through discovering candidate events, filtering to the most critical ones, and producing a concrete tracking plan with exact file locations and tracking code.
-   - Implement the tracking calls for all priority-3 (critical) events identified by the skill.
-
-STEP 5: Create the Amplitude dashboard. Load \`.claude/skills/amplitude-chart-dashboard-plan/SKILL.md\` via the Skill tool and follow it exactly — it walks you through planning 4–6 charts, calling the Amplitude MCP \`create_chart\` and \`create_dashboard\` tools, and then calling the wizard-tools \`record_dashboard\` MCP tool with the resulting URL. \`record_dashboard\` is what makes the dashboard visible to the wizard outro and to downstream tooling — skipping it leaves the wizard to run a slow post-agent fallback that the user sees as a "Creating charts and dashboard…" hang. Mark the "Build your starter dashboard" todo completed ONLY AFTER \`record_dashboard\` returns "ok". Do NOT call load_skill_menu or install_skill for this skill.
-
-Important: Use the detect_package_manager tool (from the wizard-tools MCP server) to determine which package manager the project uses. Do not manually search for lockfiles or config files. Always install packages as a background task. Don't await completion; proceed with other work immediately after starting the installation. You must read a file immediately before attempting to write it, even if you have previously read it; failure to do so will cause a tool failure.
+STEP 3–5 (env, instrumentation, dashboard): After STEP 1–2, execute the phased work those skills describe. Load pre-staged skills by filesystem path with the Skill tool — \`.claude/skills/amplitude-quickstart-taxonomy-agent/SKILL.md\`, \`.claude/skills/add-analytics-instrumentation/SKILL.md\`, \`.claude/skills/amplitude-chart-dashboard-plan/SKILL.md\` — and follow each skill's workflow. Do **not** call \`load_skill_menu\` / \`install_skill\` for these IDs. Autocapture overlap, \`confirm_event_plan\` timing, and \`record_dashboard\` + todo gating are specified in \`wizard-prompt-supplement/references/\` (see the supplement SKILL index).
 
 
 `;

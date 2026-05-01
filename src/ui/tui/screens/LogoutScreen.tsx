@@ -53,11 +53,8 @@ export const LogoutScreen = ({
 
   const handleConfirm = () => {
     clearStoredCredentials();
-    // Wipe the install-dir-keyed surfaces (keychain, .env.local, project
-    // ampli.json bindings, session checkpoint). Same helper the signup
-    // success path uses — keeps the two "this directory is about to belong
-    // to a different account" entry points symmetric so any new surface
-    // gets covered by both automatically.
+    // Wipe install-dir-keyed surfaces (keychain, .env.local, bindings,
+    // checkpoint). Same helper as successful direct signup — symmetric UX.
     clearStaleProjectState(installDir, 'logout');
     onLoggedOut?.();
     setPhase(Phase.Done);
@@ -86,7 +83,7 @@ export const LogoutScreen = ({
       <Box marginTop={1} flexDirection="column">
         {phase === Phase.Confirm && (
           <ConfirmationInput
-            message="Clear stored Amplitude credentials from ~/.ampli.json?"
+            message="Clear stored Amplitude credentials (wizard session + project binding)?"
             confirmLabel="Log out"
             cancelLabel="Cancel"
             onConfirm={handleConfirm}

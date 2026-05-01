@@ -28,6 +28,7 @@ import {
   DEFAULT_AMPLITUDE_ZONE,
   DEFAULT_HOST_URL,
 } from '../../../lib/constants.js';
+import { isCreateAccountOnboarding } from '../../../lib/wizard-session.js';
 import { resolveZone } from '../../../lib/zone-resolution.js';
 import { toCredentialAppId } from '../../../lib/wizard-session.js';
 import { analytics } from '../../../utils/analytics.js';
@@ -493,10 +494,10 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
   const oauthWaiting = pendingOrgs === null && !manualFallbackOpen;
   // After email capture + ToS, "authentication" sounds like we're still
   // waiting on the user; the real wait is browser OAuth completing.
-  const oauthWaitHeadline = session.accountCreationFlow
+  const oauthWaitHeadline = isCreateAccountOnboarding(session)
     ? 'Complete sign-in in your browser'
     : 'Signing you in';
-  const oauthWaitPreparingLine = session.accountCreationFlow
+  const oauthWaitPreparingLine = isCreateAccountOnboarding(session)
     ? 'Opening your Amplitude sign-in page'
     : 'Preparing your sign-in link';
   const { tier: oauthCoachingTier } = useTimedCoaching({

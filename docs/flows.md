@@ -22,14 +22,14 @@ Per-screen Esc behavior:
 
 | Screen                | Esc action                                                    |
 | --------------------- | ------------------------------------------------------------- |
-| Auth                  | Back → ToS (if --signup), else RegionSelect                    |
+| Auth                  | Back → ToS (if create-account path), else RegionSelect         |
 | ToS                   | Back → EmailCapture (clears ToS acceptance)                    |
 | EmailCapture          | Back → RegionSelect (clears captured email)                    |
 | DataSetup             | Back → Auth (clears org/workspace selection)                  |
 | ActivationOptions     | Back → DataSetup (re-runs activation check)                   |
 | Setup                 | Pops one answered question; if none, walks back further       |
 | Slack                 | Back → DataIngestionCheck or Mcp                              |
-| DataIngestionCheck    | Back → Mcp (`q` is the "I'll come back later" exit)           |
+| DataIngestionCheck    | Back → Mcp; **Enter** or **q** skip verification (with confirm if no events yet); **x** exits to resume later |
 | CreateProject         | Cancel (existing) — also functions as back to Auth            |
 | FeatureOptIn          | Skip (confirms with no features selected — Esc=skip is the    |
 |                       | one screen that breaks the convention; hint bar makes it      |
@@ -126,15 +126,15 @@ flowchart TD
 title: Wizard flow
 ---
 flowchart TD
-    INTRO["IntroScreen<br/>(shows detected framework — detection runs before TUI starts;<br/>falls back to generic if undetected · user confirms or exits)<br/>If a crash-recovery checkpoint exists for this project,<br/>the user is prompted to resume or start fresh"]
+    INTRO["IntroScreen<br/>(shows detected framework — detection runs before TUI starts;<br/>falls back to generic if undetected)<br/>One menu: Continue — sign in vs Continue — create account, then framework/region/directory/cancel<br/>(non-interactive: --auth-onboarding sign-in or create-account)<br/>If a crash-recovery checkpoint exists for this project,<br/>the user is prompted to resume or start fresh"]
     INTRO --> REGION_SELECT
 
     REGION_SELECT["RegionSelect: US or EU?<br/>(Enter = US default · skipped for returning users)"]
-    REGION_SELECT --> SIGNUP_CHECK
+    REGION_SELECT --> CREATE_ACCOUNT_PATH
 
-    SIGNUP_CHECK{--signup flag?}
-    SIGNUP_CHECK -->|no| AUTH
-    SIGNUP_CHECK -->|yes| EMAIL_CAPTURE["EmailCaptureScreen<br/>(collect user email · pre-filled from --signup-email flag)"]
+    CREATE_ACCOUNT_PATH{Create new Amplitude account?<br/>(Intro picker or CLI --auth-onboarding create-account)}
+    CREATE_ACCOUNT_PATH -->|no — sign in to existing| AUTH
+    CREATE_ACCOUNT_PATH -->|yes — new account| EMAIL_CAPTURE["EmailCaptureScreen<br/>(collect user email · pre-filled from --email when passed on the CLI)"]
     EMAIL_CAPTURE --> TOS["ToSScreen<br/>(require explicit ToS acceptance)"]
     TOS --> AUTH
 
@@ -179,7 +179,7 @@ flowchart TD
 
     POST --> MCP_SCREEN["McpScreen<br/>(install MCP server · skipped on error)"]
     ERR --> OUTRO["See: Outro flow"]
-    MCP_SCREEN --> DATA_INGESTION["DataIngestionCheckScreen<br/>(polls MCP first, then activation API every 30s · full users pass immediately · user can exit and resume later)<br/>BrailleSpinner + coaching tips while waiting · celebration with event preview on success<br/>press Enter to continue"]
+    MCP_SCREEN --> DATA_INGESTION["DataIngestionCheckScreen<br/>(polls MCP first, then activation API every 30s · full users pass immediately)<br/>Enter or q skips verification (confirm if no events yet) · x exits to resume later<br/>BrailleSpinner + coaching tips while waiting · celebration with event preview on success"]
     DATA_INGESTION --> CHECKLIST["ChecklistScreen<br/>(first chart · first dashboard · taxonomy @todo)<br/>dashboard unlocks after chart · user can skip any item"]
     CHECKLIST --> SLACK_SCREEN["SlackScreen<br/>(connect Slack — skipped on error)"]
     SLACK_SCREEN --> OUTRO
@@ -265,7 +265,9 @@ flowchart TD
 ## Data Setup flow
 
 > **Partially implemented.** `DataSetupScreen` sets `activationLevel` (none /
-> partial / full). `DataIngestionCheckScreen` polls until events arrive.
+> partial / full). `DataIngestionCheckScreen` polls for events; the user can
+> skip verification (Enter or q, with a confirm step when nothing has been
+> observed yet) or exit to resume later (x).
 > `ChecklistScreen` offers first chart and first dashboard via browser
 > deep-links. Taxonomy agent and direct GraphQL chart/dashboard creation are
 > planned. See `features/05-data-setup-flow.feature` for the full target

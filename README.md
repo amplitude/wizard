@@ -208,6 +208,9 @@ full glossary.
 | `AMPLITUDE_WIZARD_TOKEN` | Alias for `AMPLITUDE_TOKEN` |
 | `AMPLITUDE_WIZARD_AGENT=1` | Force agent mode (NDJSON, auto-approve) |
 | `AMPLITUDE_WIZARD_MAX_TURNS` | Override the inner agent's per-run turn cap (default 200) |
+| `DATA_INGESTION_TIMEOUT_MS` | Override max wait (ms) for `--agent` ingestion polling after install; when unset, CI uses 10m and interactive agent uses 20m (see `src/lib/data-ingestion-agent-poll.ts`) |
+| `AMPLITUDE_WIZARD_DEBUG_CAN_USE_TOOL=1` | Log each inner-agent `canUseTool` gate decision to the wizard log file (with payload redaction) |
+| `AMPLITUDE_WIZARD_CAN_USE_TOOL_LOG_SAMPLE` | If set to a positive integer N, log every Nth `canUseTool` call without enabling full debug |
 
 **NDJSON schema.** Every event emitted in `--agent` mode carries a `v:1`
 version tag and a typed envelope. The stream includes inner-agent
@@ -364,7 +367,7 @@ project — handy for filing bug reports.
 |------|---------|-------------|
 | `--debug` | `AMPLITUDE_WIZARD_DEBUG` | Enable verbose logging |
 | `--verbose` | `AMPLITUDE_WIZARD_VERBOSE` | Print diagnostic info to the log |
-| `--signup` | `AMPLITUDE_WIZARD_SIGNUP` | Create a new Amplitude account during setup |
+| `--auth-onboarding` | `AMPLITUDE_WIZARD_AUTH_ONBOARDING` | **Interactive TUI:** pick “Continue — sign in” or “Continue — create…” on Intro (writes the same `authOnboardingPath` as this flag). **CI / `--agent` / no TTY:** pass `sign-in` (default) or `create-account` so OAuth follows the right path. Legacy env `AMPLITUDE_WIZARD_SIGNUP=1` maps to `create-account`. |
 | `--local-mcp` | `AMPLITUDE_WIZARD_LOCAL_MCP` | Use local MCP server at `http://localhost:8787/mcp` |
 | `--ci` | `AMPLITUDE_WIZARD_CI` | Non-interactive execution |
 | `--api-key <key>` | `AMPLITUDE_WIZARD_API_KEY` | Amplitude API key (skips OAuth) |
@@ -434,6 +437,8 @@ pnpm try          # run the wizard from source (no build needed)
 | `skills/` | Bundled markdown instructions the AI agent follows at runtime |
 
 See [CLAUDE.md](./CLAUDE.md) for full architecture documentation.
+
+**Contributing:** [CONTRIBUTING.md](./CONTRIBUTING.md) — setup, tests, and PR workflow (including AI-assisted changes and when to attach a **`/reflect`** checklist).
 
 ### Testing
 

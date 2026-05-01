@@ -32,7 +32,11 @@ export async function tryGetPackageJson({
       join(installDir, 'package.json'),
       'utf8',
     );
-    return JSON.parse(contents) as PackageDotJson;
+    const parsed: unknown = JSON.parse(contents);
+    if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
+      return null;
+    }
+    return parsed as PackageDotJson;
   } catch {
     return null;
   }

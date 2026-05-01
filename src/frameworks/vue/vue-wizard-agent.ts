@@ -11,6 +11,7 @@ import {
 import { tryGetPackageJson } from '../../utils/package-json-light';
 import { createVersionBucket } from '../../utils/semver';
 import { BROWSER_UNIFIED_SDK_PROMPT_LINE } from '../_shared/browser-sdk-prompt';
+import { isVuePoweredDocsSite } from '../_shared/vue-powered-docs-site';
 
 const FILE_SCAN_IGNORES = [
   '**/node_modules/**',
@@ -73,6 +74,8 @@ export const VUE_AGENT_CONFIG: FrameworkConfig<VueContext> = {
       if (packageJson) {
         // Nuxt projects have both 'vue' and 'nuxt' — don't claim them
         if (hasPackageInstalled('nuxt', packageJson)) return false;
+        // VitePress, VuePress, Slidev, etc. ship `vue` but are not product SPAs
+        if (isVuePoweredDocsSite(packageJson)) return false;
         return hasPackageInstalled('vue', packageJson);
       }
       // Fallback: sniff for .vue source files ONLY when package.json is

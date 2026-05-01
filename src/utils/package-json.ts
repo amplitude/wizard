@@ -3,6 +3,8 @@ export type PackageDotJson = {
   scripts?: Record<string, string | undefined>;
   dependencies?: Record<string, string>;
   devDependencies?: Record<string, string>;
+  /** When present, counts as installed for framework detection (after deps/dev). */
+  optionalDependencies?: Record<string, string>;
   resolutions?: Record<string, string>;
   overrides?: Record<string, string>;
   bin?: string | Record<string, string>;
@@ -18,7 +20,7 @@ type NpmPackage = {
 
 /**
  * Checks if @param packageJson has any of the @param packageNamesList package names
- * listed as a dependency or devDependency.
+ * listed as a dependency, devDependency, or optionalDependency.
  * If so, it returns the first package name that is found, including the
  * version (range) specified in the package.json.
  */
@@ -47,6 +49,7 @@ export function getPackageVersion(
 ): string | undefined {
   return (
     packageJson?.dependencies?.[packageName] ||
-    packageJson?.devDependencies?.[packageName]
+    packageJson?.devDependencies?.[packageName] ||
+    packageJson?.optionalDependencies?.[packageName]
   );
 }

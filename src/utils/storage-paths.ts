@@ -13,15 +13,20 @@
  *      by users who want the cache somewhere else).
  *
  *   2. Per-project metadata dir — `<installDir>/.amplitude/`
- *      Houses artifacts the user is meant to see and may want to keep:
- *      `events.json` (the approved event plan, useful for re-instrumentation)
- *      and `dashboard.json` (the dashboard URL the agent created).
- *      Gitignored as a single `.amplitude/` line.
+ *      Houses artifacts the user is meant to see and may want to commit or
+ *      keep locally: `events.json` (approved event plan),
+ *      `project-binding.json` (wizard org/project/source binding), and
+ *      `dashboard.json` (dashboard URL — often gitignored as machine-local).
  *
- * Unchanged (governed by external contracts):
- *   - `~/.ampli.json` — OAuth tokens; ampli CLI compatibility
+ * Per-user OAuth session (access/refresh tokens) lives in the cache root as
+ * `oauth-session.json` (mode `0o600`). Legacy `~/.ampli.json` is still read
+ * once for migration and kept in sync on write until fully retired.
+ *
+ * Project binding is also written to `<installDir>/ampli.json` during
+ * transition so older tooling that still looks there continues to work.
+ *
+ * Unchanged paths:
  *   - `<installDir>/.env.local` — API key fallback
- *   - `<installDir>/ampli.json` — ampli CLI tracking-plan config
  *
  * Recently moved into the per-user cache root:
  *   - `~/.amplitude/wizard/credentials.json` — Amplitude project API keys,
@@ -29,7 +34,7 @@
  *     `secret-tool` storage that triggered an OS unlock prompt on every
  *     launch (the wizard's project API key is a public ingestion key
  *     embedded in client SDK bundles, so file-on-disk at `0o600` matches
- *     its actual sensitivity — same precedent as `~/.ampli.json`).
+ *     its actual sensitivity — same precedent as the OAuth session file).
  */
 
 import { mkdirSync, realpathSync, statSync } from 'node:fs';
@@ -172,6 +177,22 @@ export function getCredentialsFile(): string {
 }
 
 /**
+ * Per-user OAuth session file (tokens + wizard `User-*` entries).
+ * Always written at mode `0o600`.
+ */
+export function getOAuthSettingsFile(): string {
+  return join(getCacheRoot(), 'oauth-session.json');
+}
+
+/**
+ * Legacy per-user OAuth file. Read for one-shot migration; still updated on
+ * write so older workflows that expect this path keep working during transition.
+ */
+export function getLegacyAmpliHomeOAuthPath(): string {
+  return join(homedir(), '.ampli.json');
+}
+
+/**
  * Path for a downloaded skill bundle (zip). Lives under `os.tmpdir()` because
  * it's a transient download immediately extracted into `<installDir>/.claude/`.
  * `os.tmpdir()` is used (not literal `/tmp/`) so the wizard works on Windows.
@@ -195,6 +216,14 @@ export function getEventsFile(installDir: string): string {
 /** Dashboard URL JSON written by the agent after dashboard creation. */
 export function getDashboardFile(installDir: string): string {
   return join(getProjectMetaDir(installDir), 'dashboard.json');
+}
+
+/**
+ * Canonical wizard project binding (org, project, source, zone, app id, etc.).
+ * Legacy `ampli.json` in the project root is still read/written during transition.
+ */
+export function getProjectBindingFile(installDir: string): string {
+  return join(getProjectMetaDir(installDir), 'project-binding.json');
 }
 
 /**

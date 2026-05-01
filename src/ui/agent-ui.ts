@@ -507,7 +507,7 @@ export class AgentUI implements WizardUI {
 
   /**
    * Emit a structured `signup_input_required` lifecycle event when the
-   * wizard is invoked with `--agent --signup` but one or more required
+   * wizard is invoked with `--agent --auth-onboarding create-account` but one or more required
    * inputs are missing (region, email, full-name, accept-tos). The
    * orchestrator inspects `missing[]`, prompts the human for the
    * missing values, and re-invokes the wizard with `resumeCommand` plus
@@ -1144,6 +1144,18 @@ export class AgentUI implements WizardUI {
     return Promise.resolve(selected);
   }
 
+  /**
+   * Agent / CI mode: there is no human in the loop, so this path **always**
+   * ends in an approved plan for the inner agent — either from
+   * `AMPLITUDE_WIZARD_EVENT_PLAN_DECISION` (apply resume flags) or by emitting
+   * `needs_input` + `decision_auto` with the recommended **approved** choice.
+   *
+   * Orchestrators should treat `event_plan` / `event_plan_set` on the NDJSON
+   * stream as the canonical payloads; the `result` line `event_plan auto-approved`
+   * records that the wizard did not block on stdin (distinct from env-flag
+   * resolutions, which emit `event_plan <decision> (via flag)` and skip
+   * `decision_auto`).
+   */
   promptEventPlan(
     events: Array<{ name: string; description: string }>,
   ): Promise<EventPlanDecision> {

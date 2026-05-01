@@ -104,23 +104,29 @@ const mockStartTUI = vi.fn(
 vi.mock('../ui/tui/start-tui', () => ({
   startTUI: mockStartTUI,
 }));
-vi.mock('../lib/wizard-session', () => ({
-  // Real buildSession includes region: null and credentials: null by default;
-  // mirror that so the auth-task checks behave correctly in tests.
-  // Also mirrors the schema's `acceptTos → tosAccepted` translation so
-  // runDirectSignupIfRequested's missing-flags gate sees the right value.
-  buildSession: (args: Record<string, unknown>) => ({
-    region: null,
-    credentials: null,
-    frameworkContext: {},
-    frameworkContextAnswerOrder: [],
-    apiKeyNotice: null,
-    signupAuth: null,
-    ...args,
-    tosAccepted: args.acceptTos === true ? true : null,
-  }),
-  DiscoveredFeature: { Stripe: 'stripe', LLM: 'llm' },
-}));
+vi.mock('../lib/wizard-session', async (importOriginal) => {
+  const actual = await importOriginal<typeof import('../lib/wizard-session')>();
+  return {
+    ...actual,
+    // Real buildSession includes region: null and credentials: null by default;
+    // mirror that so the auth-task checks behave correctly in tests.
+    // Also mirrors the schema's `acceptTos → tosAccepted` translation so
+    // runDirectSignupIfRequested's missing-flags gate sees the right value.
+    buildSession: (args: Record<string, unknown>) => ({
+      region: null,
+      credentials: null,
+      frameworkContext: {},
+      frameworkContextAnswerOrder: [],
+      apiKeyNotice: null,
+      signupAuth: null,
+      ...args,
+      accountCreationFlow: Boolean(
+        args.accountCreationFlow ?? args.signup ?? false,
+      ),
+      tosAccepted: args.acceptTos === true ? true : null,
+    }),
+  };
+});
 vi.mock('../lib/registry', () => ({ FRAMEWORK_REGISTRY: {} }));
 vi.mock('../lib/constants', () => ({
   DETECTION_TIMEOUT_MS: 100,
@@ -1297,7 +1303,8 @@ describe('--email and --full-name flags', () => {
 
     try {
       await runCLI([
-        '--signup',
+        '--auth-onboarding',
+        'create-account',
         '--ci',
         '--email',
         'ada',
@@ -1326,7 +1333,8 @@ describe('--email and --full-name flags', () => {
 
     try {
       await runCLI([
-        '--signup',
+        '--auth-onboarding',
+        'create-account',
         '--ci',
         '--email',
         'ada@example.com',
@@ -1349,7 +1357,8 @@ describe('--email and --full-name flags', () => {
 
   test('accepts --email and --full-name on the default command', async () => {
     await runCLI([
-      '--signup',
+      '--auth-onboarding',
+      'create-account',
       '--ci',
       '--email',
       'ada@example.com',
@@ -1384,7 +1393,8 @@ describe('--email and --full-name flags', () => {
     vi.mocked(performSignupOrAuth).mockRejectedValueOnce(new Error('boom'));
 
     await runCLI([
-      '--signup',
+      '--auth-onboarding',
+      'create-account',
       '--ci',
       '--email',
       'ada@example.com',
@@ -1415,7 +1425,7 @@ describe('--email and --full-name flags', () => {
     );
   });
 
-  test('--ci --signup without --accept-tos exits INVALID_ARGS', async () => {
+  test('--ci create-account without --accept-tos exits INVALID_ARGS', async () => {
     // `vi.clearAllMocks()` clears call data but not stored implementations,
     // so prior login-suite tests' `mockReturnValue` calls leak. Reset here.
     mockGetStoredUser.mockReturnValue(undefined);
@@ -1430,7 +1440,8 @@ describe('--email and --full-name flags', () => {
 
     try {
       await runCLI([
-        '--signup',
+        '--auth-onboarding',
+        'create-account',
         '--ci',
         '--email',
         'ada@example.com',
@@ -1457,7 +1468,7 @@ describe('--email and --full-name flags', () => {
     expect(stderrCalls.join('')).toMatch(/--accept-tos/);
   });
 
-  test('--agent --signup with no other flags emits signup_input_required and exits INPUT_REQUIRED', async () => {
+  test('--agent create-account with no other flags emits signup_input_required and exits INPUT_REQUIRED', async () => {
     // Reset stored-user implementation leaked from earlier login tests so
     // tryResolveZone returns null (otherwise zone resolves from a prior
     // test's `mockGetStoredUser.mockReturnValue({ zone: 'us', ... })` and
@@ -1473,7 +1484,13 @@ describe('--email and --full-name flags', () => {
     }) as typeof process.stdout.write;
 
     try {
-      await runCLI(['--signup', '--agent', '--install-dir', '/tmp/test']);
+      await runCLI([
+        '--auth-onboarding',
+        'create-account',
+        '--agent',
+        '--install-dir',
+        '/tmp/test',
+      ]);
 
       await waitFor(
         () => (process.exit as unknown as Mock).mock.calls.length > 0,

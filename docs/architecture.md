@@ -300,7 +300,7 @@ McpScreen                     Install Amplitude MCP server into editors
      │                        (VS Code, Cursor, Zed, Claude Desktop,
      │                         Claude Code, Codex)
      ▼
-DataIngestionCheckScreen      Polls activation API every 30s until events arrive
+DataIngestionCheckScreen      Polls for events; Enter/q can skip verification; x exits to resume later
      │
      ▼
 ChecklistScreen               First chart → first dashboard (unlocks after chart)
@@ -1020,7 +1020,7 @@ npx @amplitude/wizard --ci --install-dir . --api-key <KEY> --project-id 12345
 | **FeatureOptInScreen** | `screens/FeatureOptInScreen.tsx` | `discoveredFeatures` | `additionalFeatureQueue`, `optInFeaturesComplete` | Multi-select picklist (all on by default) for opt-in features (LLM, Session Replay). Skipped in CI/agent (auto-confirmed) and when nothing was discovered |
 | **RunScreen** | `screens/RunScreen.tsx` | `tasks`, `eventPlan`, `statusMessages`, `discoveredFeatures`, `additionalFeatureQueue`, `additionalFeatureCurrent`, `additionalFeatureCompleted` | `requestedTab` (clear) | Observational: 3–4 tabs (Status, Event plan (conditional), All logs, Snake). Shows ProgressList including queued additional features as task items |
 | **McpScreen** | `screens/McpScreen.tsx` | `runPhase`, `amplitudePreDetected` | `mcpComplete`, `mcpOutcome`, `mcpInstalledClients` | Detect editors → confirm → pick → install. Also handles pre-detected choice |
-| **DataIngestionCheckScreen** | `screens/DataIngestionCheckScreen.tsx` | `region`, org/project IDs | `dataIngestionConfirmed` | Polls activation API every 30s. Exit with q/Esc |
+| **DataIngestionCheckScreen** | `screens/DataIngestionCheckScreen.tsx` | `region`, org/project IDs | `dataIngestionConfirmed` | Polls activation API every 30s. Enter/q skip verification (confirm if no events); x exits; Esc back |
 | **ChecklistScreen** | `screens/ChecklistScreen.tsx` | `checklistChartComplete`, `checklistDashboardComplete` | `checklistComplete` | First chart → first dashboard. Dashboard locked until chart done |
 | **SlackScreen** | `screens/SlackScreen.tsx` | `selectedOrgName`, `selectedOrgId`, `region` | `slackComplete`, `slackOutcome` | 4 phases: prompt → opening → waiting → done |
 | **OutroScreen** | `screens/OutroScreen.tsx` | `outroData` | — | Success: picker (view report, open dashboard, exit). Error/cancel: any key exits |

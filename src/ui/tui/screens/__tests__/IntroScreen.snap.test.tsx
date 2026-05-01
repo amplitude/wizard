@@ -83,8 +83,9 @@ describe('IntroScreen snapshots', () => {
     });
     const { frame } = renderSnapshot(<IntroScreen store={store} />, store);
     expect(frame).toContain('Next.js (detected)');
-    // Continue / Change framework / Cancel actions
-    expect(frame).toContain('Continue');
+    // Continue (sign-in vs create) / Change framework / Cancel actions
+    expect(frame).toContain('Continue — sign in');
+    expect(frame).toContain('create');
     expect(frame).toContain('Change framework');
     expect(frame).toContain('Cancel');
   });

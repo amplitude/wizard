@@ -1,5 +1,6 @@
 /**
- * ToSScreen — Terms of Service acceptance for --signup flow.
+ * ToSScreen — Terms of Service acceptance on the create-account onboarding path
+ * (`--auth-onboarding create-account`; legacy alias: `--signup`).
  *
  * Pattern inspired by Stripe CLI: presents terms and privacy policy
  * links, requires explicit acceptance before proceeding to authentication.
@@ -8,9 +9,9 @@
 import { Box, Text } from 'ink';
 import type { WizardStore } from '../store.js';
 import { useWizardStore } from '../hooks/useWizardStore.js';
+import { useEscapeBack } from '../hooks/useEscapeBack.js';
 import { PickerMenu } from '../primitives/index.js';
 import { Colors, Icons } from '../styles.js';
-import { useScreenHints } from '../hooks/useScreenHints.js';
 import type { KeyHint } from '../components/KeyHintBar.js';
 import {
   TERMS_OF_SERVICE_URL,
@@ -20,7 +21,6 @@ import {
 const TOS_HINTS: readonly KeyHint[] = Object.freeze([
   { key: '↑↓', label: 'Navigate' },
   { key: 'Enter', label: 'Select' },
-  { key: 'Esc', label: 'Cancel' },
 ]);
 
 interface ToSScreenProps {
@@ -40,7 +40,7 @@ const OPTIONS = [
 
 export const ToSScreen = ({ store }: ToSScreenProps) => {
   useWizardStore(store);
-  useScreenHints(TOS_HINTS);
+  useEscapeBack(store, { extraHints: TOS_HINTS });
 
   const handleSelect = (value: string | string[]) => {
     const choice = Array.isArray(value) ? value[0] : value;

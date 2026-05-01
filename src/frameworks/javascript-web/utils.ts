@@ -8,6 +8,8 @@ export type JavaScriptContext = {
   packageManagerName?: string;
   hasTypeScript?: boolean;
   hasBundler?: string;
+  /** VitePress, VuePress, Slidev, etc. — Vue is present for tooling, not a product SPA */
+  vuePoweredDocsSite?: boolean;
 };
 
 const INDEX_HTML_MAX_DEPTH = 6;
@@ -92,12 +94,14 @@ export function detectBundler(
       .object({
         dependencies: z.record(z.string(), z.string()).optional(),
         devDependencies: z.record(z.string(), z.string()).optional(),
+        optionalDependencies: z.record(z.string(), z.string()).optional(),
       })
       .passthrough()
       .parse(JSON.parse(content));
     const allDeps: Record<string, string> = {
-      ...pkg.dependencies,
+      ...pkg.optionalDependencies,
       ...pkg.devDependencies,
+      ...pkg.dependencies,
     };
 
     if (allDeps['vite']) return 'vite';

@@ -73,6 +73,17 @@ describe('detectBundler', () => {
     writePackageJson({}, { vite: '^4.0.0', webpack: '^5.0.0' });
     expect(detectBundler({ installDir: tmpDir })).toBe('vite');
   });
+
+  it('detects vite from optionalDependencies', () => {
+    fs.writeFileSync(
+      path.join(tmpDir, 'package.json'),
+      JSON.stringify({
+        optionalDependencies: { vite: '^5.0.0' },
+      }),
+      'utf-8',
+    );
+    expect(detectBundler({ installDir: tmpDir })).toBe('vite');
+  });
 });
 
 // ── hasIndexHtml ──────────────────────────────────────────────────────────────
