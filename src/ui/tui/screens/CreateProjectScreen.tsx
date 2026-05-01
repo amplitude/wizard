@@ -30,6 +30,7 @@ import { TextInput } from '@inkjs/ui';
 import opn from 'opn';
 import type { WizardStore } from '../store.js';
 import { useWizardStore } from '../hooks/useWizardStore.js';
+import { useScreenInput } from '../hooks/useScreenInput.js';
 import { Colors, Icons } from '../styles.js';
 import { BrailleSpinner } from '../components/BrailleSpinner.js';
 import { TerminalLink } from '../primitives/index.js';
@@ -107,7 +108,7 @@ export const CreateProjectScreen = ({ store }: CreateProjectScreenProps) => {
   }, []);
 
   // Esc cancels from any phase that isn't a live submission.
-  useInput((input, key) => {
+  useScreenInput((input, key) => {
     if (key.escape && phase.kind !== 'submitting') {
       store.cancelCreateProject();
     }

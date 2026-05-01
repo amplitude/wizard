@@ -43,13 +43,19 @@ Built with [Ink](https://github.com/vadimdemedes/ink) (React for CLIs) + nanosto
 | `screen-registry.tsx` | Maps all 24 screen/overlay names (18 `Screen` + 6 `Overlay`) to React components |
 | `screens/` | 17 screen components (Auth, Run, Outro, MCP, Slack, etc.) — `Screen.Options` resolves to `null` and has no component file |
 | `components/` | `ConsoleView`, `JourneyStepper`, `HeaderBar`, `KeyHintBar`, `AmplitudeLogo`, `BrailleSpinner` |
-| `hooks/` | `useWizardStore` (stable subscription), `useAsyncEffect` (AbortController-based), `useScreenInput`, `useStdoutDimensions` |
+| `hooks/` | `useWizardStore` (stable subscription), `useAsyncEffect` (AbortController-based), `useScreenInput`, `useEscapeBack`, `useStdoutDimensions` |
 | `utils/` | `withTimeout`, `withRetry`, `classifyError`, `diagnostics` (flow evaluation + sanitized snapshots) |
 | `styles.ts` | Design tokens and color palette |
 | `console-commands.ts` | Slash command registration and dispatch |
 | `context/` | React context providers |
 | `primitives/` | Low-level UI building blocks |
 | `services/` | TUI-specific service modules |
+
+**Esc / back-navigation (Ink):**
+
+- **`@inkjs/ui` `TextInput`** wires its own stdin handler; Esc does not surface as router back by default. Parent screens must use **`useScreenInput`** (or equivalent) if users should leave the step with Esc.
+- **`ConfirmationInput`** maps Esc to **`onCancel`**. Combining it with **`useEscapeBack`** on the same surface causes double handling unless you gate **`useEscapeBack`** to phases without the confirm UI, or implement **`onCancel`** as “**`store.canGoBack()` → `store.goBack()`**, else skip/cancel” (see **`McpScreen`** / **`SlackScreen`**).
+- Prefer **`useScreenInput`** over Ink’s raw **`useInput`** on wizard screens so input respects **`CommandModeContext`** while the slash command bar is active.
 
 ### Agent mode (`--agent`)
 
@@ -114,7 +120,7 @@ OAuth flow, analytics tracking, env var handling, API key storage, debug logging
 If a callsite is inside the TUI or runs during a wizard session, prefer `observability/logger.ts`. Bare `console.log` in production source paths is an anti-pattern.
 
 Key additions:
-- `atomic-write.ts` — crash-safe JSON writes via temp-file + rename. Used for credentials, checkpoints, plans, agent recovery snapshots, update-check cache, benchmark JSON, canonical project metadata under `.amplitude/`, and other opted-in JSON persistence — not every byte the process writes (logs append, mkdir, editor installs, etc.).
+- `atomic-write.ts` — crash-safe JSON writes via temp-file + rename. Used by session checkpointing and config persistence.
 - `token-refresh.ts` — silent OAuth token refresh using stored refresh tokens. Proactively refreshes 5 minutes before expiry, falls back to full browser auth on failure.
 - `storage-paths.ts` — single source of truth for every path the wizard reads or writes. Per-user cache at `~/.amplitude/wizard/`, per-project metadata at `<installDir>/.amplitude/`. Override the cache root with `AMPLITUDE_WIZARD_CACHE_DIR` (used by tests).
 - `storage-migration.ts` — one-shot migration from the old `$TMPDIR/amplitude-wizard-*` + project-root dotfile layout. Idempotent, runs at startup. Drop after one release.
@@ -141,6 +147,21 @@ The `/diagnostics` slash command prints the full layout for the current project 
 - Checkpoint files never contain tokens, API keys, or access tokens
 - Config scoping validates org ID against live data to prevent cross-project leakage
 - Zone priority: CLI flag > env var > stored config (prevents env var pollution across projects)
+
+## Pull requests
+
+- Run the **`/reflect`** skill on the session and paste the numbered checklist into the PR description (or link to it). Treat that as part of the PR artifact, not optional narration. Human-oriented PR steps also live in [`CONTRIBUTING.md`](./CONTRIBUTING.md). When running **`/reflect`**, treat **this repo’s `CLAUDE.md`** as the canonical place to de-dupe proposals — a global `~/.claude/CLAUDE.md` may be absent in worktrees or sandboxes.
+- If **`git status`** shows your branch is **behind** its upstream (e.g. `origin/your-branch`), run **`git pull --rebase origin <branch>`** before **`git push`** so the push is fast-forward and history stays linear.
+- After you **`git push`** a branch, prefer opening the PR with the GitHub CLI: **`gh pr create --fill`** (or pass `--title` / `--body` explicitly). If `gh` is not installed or authenticated, use the compare URL your `git push` printed instead.
+- After changing **`src/ui/tui/`** screens, **`flows.ts`**, **`router.ts`**, or **`store.ts`** navigation-related code, run Vitest in a stable pool before pushing (avoids fork timeouts / flakes on wide runs):
+
+  ```bash
+  pnpm exec vitest run --pool=forks --maxWorkers=1 \
+    src/ui/tui/__tests__/router.test.ts \
+    src/ui/tui/__tests__/flow-invariants.test.ts
+  ```
+
+  Add any **`src/ui/tui/screens/__tests__/`** files that cover screens you edited.
 
 ## Commit conventions
 
@@ -183,6 +204,9 @@ pnpm skills:refresh # pull all skills from context-hub (integration, instrumenta
 
 ## Testing
 
+- **Focused TUI runs:** when iterating on Ink screens or the router, prefer  
+  `pnpm exec vitest run --pool=forks --maxWorkers=1 <paths…>`  
+  so workers stay predictable; use full `pnpm test` before merge when practical.
 - **Unit tests:** `src/**/__tests__/` — vitest, run with `pnpm test`
 - **Router + flow tests:** `src/ui/tui/__tests__/router.test.ts` — parameterized router resolution tests. `src/ui/tui/__tests__/flow-invariants.test.ts` — fast-check property-based tests verifying flow invariants (24 tests: no backward navigation, unauthenticated users never see Run, error state skips post-success screens, etc.)
 - **BDD tests:** `features/` — Cucumber.js feature files and step definitions, run with `pnpm test:bdd`

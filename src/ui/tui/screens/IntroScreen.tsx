@@ -411,7 +411,7 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
                   ? 'Continue — new account'
                   : 'Continue — create a new account',
                 value: 'continue_create',
-                ...(!narrow ? { hint: 'new org signup' } : {}),
+                ...(!narrow ? { hint: 'new organization' } : {}),
               },
               {
                 label: 'Change framework',

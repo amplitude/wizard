@@ -72,17 +72,27 @@ export const SlackScreen = ({
 
   const [phase, setPhase] = useState<Phase>(Phase.Prompt);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const unmountedRef = useRef(false);
 
-  // Esc steps back to the previous step. Disabled in the standalone /slack
-  // overlay (no flow to back into) and during the brief auto-complete
-  // window when we detect Slack is already wired up.
+  // ConfirmationInput phases wire Esc through onCancel → escCancelOrRouterBack.
+  // Everywhere else (Opening / Verifying spinner, Done celebration before
+  // auto-advance) we want Esc → goBack when the router allows it.
+  const confirmationInputPhase =
+    phase === Phase.Prompt ||
+    phase === Phase.Waiting ||
+    phase === Phase.NotConnected;
   useEscapeBack(store, {
-    enabled: !standalone && onComplete === undefined && phase === Phase.Prompt,
+    enabled:
+      !standalone &&
+      onComplete === undefined &&
+      !confirmationInputPhase,
   });
 
-  // Clear any pending timer on unmount
+  // Clear any pending timer on unmount and flag as unmounted so late-resolving
+  // async work won't schedule new timers or call markDone.
   useEffect(() => {
     return () => {
+      unmountedRef.current = true;
       if (timerRef.current !== null) clearTimeout(timerRef.current);
     };
   }, []);
@@ -109,12 +119,12 @@ export const SlackScreen = ({
     if (accessToken && orgId) {
       void fetchSlackConnectionStatus(accessToken, region, orgId).then(
         (isConnected) => {
-          if (cancelled) return;
+          if (cancelled || unmountedRef.current) return;
           logToFile(`[SlackScreen] slackConnectionStatus=${isConnected}`);
           if (isConnected) {
             setPhase(Phase.Done);
             timerRef.current = setTimeout(() => {
-              if (!cancelled) {
+              if (!cancelled && !unmountedRef.current) {
                 markDone(
                   store,
                   SlackOutcome.Configured,
@@ -150,6 +160,7 @@ export const SlackScreen = ({
 
     // Try the direct Slack OAuth URL first; fall back to settings page.
     const open = (url: string) => {
+      if (unmountedRef.current) return;
       setOpenedUrl(url);
       logToFile(
         `[SlackScreen] opening ${
@@ -171,6 +182,15 @@ export const SlackScreen = ({
 
   const handleSkip = () => {
     markDone(store, SlackOutcome.Skipped, standalone, onComplete);
+  };
+
+  /** Esc on confirm prompts: step back in the flow when possible, else skip Slack. */
+  const escCancelOrRouterBack = () => {
+    if (store.canGoBack()) {
+      store.goBack();
+    } else {
+      handleSkip();
+    }
   };
 
   const handleDone = () => {
@@ -196,6 +216,7 @@ export const SlackScreen = ({
     setPhase(Phase.Verifying);
     void fetchSlackConnectionStatus(accessToken, region, orgId).then(
       (isConnected) => {
+        if (unmountedRef.current) return;
         logToFile(
           `[SlackScreen] post-confirm slackConnectionStatus=${isConnected}`,
         );
@@ -207,9 +228,6 @@ export const SlackScreen = ({
             1500,
           );
         } else {
-          // Either confirmed false or status fetch errored — both mean we
-          // can't celebrate yet. Tell the user honestly and let them retry
-          // or skip.
           setPhase(Phase.NotConnected);
         }
       },
@@ -250,9 +268,9 @@ export const SlackScreen = ({
             <ConfirmationInput
               message={`Connect the "${appName}" Slack app to your workspace?`}
               confirmLabel="Connect"
-              cancelLabel="Skip for now"
+              cancelLabel={store.canGoBack() ? 'Back' : 'Skip for now'}
               onConfirm={handleConnect}
-              onCancel={handleSkip}
+              onCancel={escCancelOrRouterBack}
             />
           </Box>
         )}
@@ -299,9 +317,9 @@ export const SlackScreen = ({
               <ConfirmationInput
                 message="Connected to Slack?"
                 confirmLabel="Yes, connected"
-                cancelLabel="Skip for now"
+                cancelLabel={store.canGoBack() ? 'Back' : 'Skip for now'}
                 onConfirm={handleDone}
-                onCancel={handleSkip}
+                onCancel={escCancelOrRouterBack}
               />
             </Box>
           </Box>
@@ -325,9 +343,9 @@ export const SlackScreen = ({
               <ConfirmationInput
                 message="Try again?"
                 confirmLabel="Retry"
-                cancelLabel="Skip anyway"
+                cancelLabel={store.canGoBack() ? 'Back' : 'Skip anyway'}
                 onConfirm={handleRetry}
-                onCancel={handleSkip}
+                onCancel={escCancelOrRouterBack}
               />
             </Box>
           </Box>

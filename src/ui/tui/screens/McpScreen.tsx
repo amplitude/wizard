@@ -16,6 +16,7 @@ import { useState, useEffect, useRef } from 'react';
 import type { WizardStore } from '../store.js';
 import { McpOutcome, RunPhase } from '../store.js';
 import { useWizardStore } from '../hooks/useWizardStore.js';
+import { useEscapeBack } from '../hooks/useEscapeBack.js';
 import { ConfirmationInput, PickerMenu } from '../primitives/index.js';
 import { Colors, Icons } from '../styles.js';
 import { BrailleSpinner } from '../components/BrailleSpinner.js';
@@ -79,10 +80,13 @@ export const McpScreen = ({
 
   const isRemove = mode === 'remove';
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const unmountedRef = useRef(false);
 
-  // Clear any pending timer on unmount
+  // Clear any pending timer on unmount and flag as unmounted so late-resolving
+  // async work (e.g. detectClients) won't schedule new timers or call markDone.
   useEffect(() => {
     return () => {
+      unmountedRef.current = true;
       if (timerRef.current !== null) clearTimeout(timerRef.current);
     };
   }, []);
@@ -107,6 +111,7 @@ export const McpScreen = ({
     void (async () => {
       try {
         const detected = await installer.detectClients();
+        if (unmountedRef.current) return;
         if (detected.length === 0) {
           analytics.wizardCapture('MCP No Clients Detected', { mode });
           setPhase(Phase.None);
@@ -125,6 +130,7 @@ export const McpScreen = ({
           setPhase(Phase.Ask);
         }
       } catch {
+        if (unmountedRef.current) return;
         captureWizardError(
           'MCP Client Detection',
           'Editor client detection failed',
@@ -160,6 +166,27 @@ export const McpScreen = ({
     analytics.wizardCapture('MCP Skipped', { mode });
     markDone(store, McpOutcome.Skipped, [], standalone, onComplete);
   };
+
+  /** Esc on the install confirm: router back when possible, else skip MCP. */
+  const escCancelOrRouterBack = () => {
+    if (store.canGoBack()) {
+      store.goBack();
+    } else {
+      handleSkip();
+    }
+  };
+
+  // Esc → goBack on spinner / client picker / pre-detected choice. Disabled on
+  // Ask because ConfirmationInput owns Esc there (wired to escCancelOrRouterBack
+  // so we don't double-fire with this hook).
+  const escapeBackEnabled =
+    !standalone &&
+    !isOverlay &&
+    phase !== Phase.Ask &&
+    phase !== Phase.Working &&
+    phase !== Phase.Done;
+
+  useEscapeBack(store, { enabled: escapeBackEnabled });
 
   const doInstall = async (names: string[]) => {
     setPhase(Phase.Working);
@@ -301,9 +328,9 @@ export const McpScreen = ({
                         : 'Install the Amplitude MCP server to your editor?'
                     }
                     confirmLabel={isRemove ? 'Remove MCP' : 'Install MCP'}
-                    cancelLabel="No thanks"
+                    cancelLabel={store.canGoBack() ? 'Back' : 'No thanks'}
                     onConfirm={handleConfirm}
-                    onCancel={handleSkip}
+                    onCancel={escCancelOrRouterBack}
                   />
                 </Box>
               </>
