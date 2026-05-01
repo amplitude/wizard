@@ -91,7 +91,7 @@ All three modes share the same persistence infrastructure. State is layered by s
 
 ### Session checkpointing (`src/lib/session-checkpoint.ts`)
 
-Saves a sanitized wizard state snapshot to `$TMPDIR/amplitude-wizard-checkpoint.json` on key state transitions. On restart, loads it to skip already-completed setup steps (intro, region, org selection, framework detection) while still re-running the agent.
+Saves a sanitized wizard state snapshot to `~/.amplitude/wizard/runs/<sha256(installDir)>/checkpoint.json` on key state transitions. On restart, loads it to skip already-completed setup steps (intro, region, org selection, framework detection) while still re-running the agent. Per-project scoping lets two parallel runs in different directories crash-recover independently.
 
 **Invariants:**
 - Never contains credentials, tokens, or API keys

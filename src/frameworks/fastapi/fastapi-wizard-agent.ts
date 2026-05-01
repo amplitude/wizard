@@ -11,6 +11,7 @@ import {
   getFastAPIVersionBucket,
   FastAPIProjectType,
   findFastAPIAppFile,
+  IGNORE_PATTERNS,
 } from './utils';
 
 interface FastAPIContext extends Record<string, unknown> {
@@ -28,6 +29,8 @@ import * as path from 'node:path';
 export const FASTAPI_AGENT_CONFIG: FrameworkConfig<FastAPIContext> = {
   metadata: {
     name: 'FastAPI',
+    glyph: '⚡',
+    glyphColor: '#009688',
     integration: Integration.fastapi,
     docsUrl: 'https://amplitude.com/docs/sdks/analytics/python',
     unsupportedVersionDocsUrl:
@@ -66,7 +69,7 @@ export const FASTAPI_AGENT_CONFIG: FrameworkConfig<FastAPIContext> = {
         ],
         {
           cwd: installDir,
-          ignore: ['**/venv/**', '**/.venv/**', '**/env/**', '**/.env/**'],
+          ignore: IGNORE_PATTERNS,
         },
       );
 
@@ -94,13 +97,7 @@ export const FASTAPI_AGENT_CONFIG: FrameworkConfig<FastAPIContext> = {
         ['**/main.py', '**/app.py', '**/application.py', '**/__init__.py'],
         {
           cwd: installDir,
-          ignore: [
-            '**/venv/**',
-            '**/.venv/**',
-            '**/env/**',
-            '**/.env/**',
-            '**/__pycache__/**',
-          ],
+          ignore: IGNORE_PATTERNS,
         },
       );
 

@@ -424,3 +424,125 @@ export function detectAmplitudeInProject(
 
   return grepSourceFiles(installDir);
 }
+
+/**
+ * Source-only Amplitude detection — ignores package.json / lockfile metadata
+ * and only searches actual source code for an Amplitude import statement.
+ *
+ * Use this to corroborate that the SDK is *wired up*, not just installed.
+ * Distinguishes "the dep is in package.json but no file actually imports it"
+ * (stale install) from "the SDK is actually being used at runtime".
+ *
+ * Returns 'low' on a hit (because grepping source is intrinsically a weaker
+ * signal than a package-file declaration), or 'none' if nothing imports
+ * Amplitude anywhere under `installDir`.
+ */
+export function detectAmplitudeInProjectSource(
+  installDir: string,
+): AmplitudeDetectionResult {
+  return grepSourceFiles(installDir);
+}
+
+/**
+ * Per-signal breakdown of "is this project fully wired up?". Used by the
+ * Activation Check pre-flight to decide whether a re-run can skip the agent
+ * loop entirely. Each boolean is a hard yes/no on a single local artifact:
+ *
+ *   - `dependency`     — Amplitude SDK declared in package.json /
+ *                        requirements / Podfile / build.gradle / etc.
+ *                        (the same checks `detectAmplitudeInProject` runs).
+ *   - `sourceImport`   — at least one source file actually imports the SDK
+ *                        and uses it (`detectAmplitudeInProjectSource`).
+ *   - `ampliConfig`    — `ampli.json` exists with a non-empty OrgId AND
+ *                        ProjectId (so the next run can recover scope
+ *                        without re-prompting).
+ *   - `eventPlan`      — `.amplitude/events.json` (or root-level
+ *                        `.amplitude-events.json`) exists and is
+ *                        non-empty array — i.e. the user has already
+ *                        approved an event plan.
+ *
+ * Returns `fullyWired` true when ALL four signals are present. `present`
+ * and `missing` lists let the caller log exactly why the short-circuit
+ * fired or didn't (useful for triaging "but I had it set up!" reports).
+ */
+export interface FullyWiredCheck {
+  fullyWired: boolean;
+  signals: {
+    dependency: boolean;
+    sourceImport: boolean;
+    ampliConfig: boolean;
+    eventPlan: boolean;
+  };
+  /** Names of signals that PASSED — for log/UI summary. */
+  present: string[];
+  /** Names of signals that FAILED — for log/UI summary. */
+  missing: string[];
+}
+
+function readJsonSafely(filePath: string): unknown {
+  try {
+    return JSON.parse(fs.readFileSync(filePath, 'utf-8')) as unknown;
+  } catch {
+    return null;
+  }
+}
+
+function hasAmpliConfigScope(installDir: string): boolean {
+  const config = readJsonSafely(path.join(installDir, 'ampli.json'));
+  if (!config || typeof config !== 'object') return false;
+  const c = config as Record<string, unknown>;
+  return (
+    typeof c.OrgId === 'string' &&
+    c.OrgId.length > 0 &&
+    typeof c.ProjectId === 'string' &&
+    c.ProjectId.length > 0
+  );
+}
+
+function hasEventPlan(installDir: string): boolean {
+  // Read both the canonical (.amplitude/events.json) and legacy
+  // (.amplitude-events.json) locations. PR #2 in the bugbot follow-up
+  // series consolidates these; this dual-read keeps the activation
+  // pre-flight resilient across that migration.
+  for (const rel of ['.amplitude/events.json', '.amplitude-events.json']) {
+    const data = readJsonSafely(path.join(installDir, rel));
+    if (Array.isArray(data) && data.length > 0) return true;
+  }
+  return false;
+}
+
+/**
+ * Pre-flight check used by the Activation flow: are all four local
+ * "this project was fully set up by a prior wizard run" signals present?
+ *
+ * When the answer is yes, the wizard can short-circuit past the agent loop
+ * (Setup + Run screens) and route directly to the ingestion poll — re-runs
+ * on already-instrumented projects no longer waste 2-3 minutes re-running
+ * the agent on a no-op. The remote-events check that drives `'full'` still
+ * runs INSIDE DataIngestionCheckScreen on its own polling cadence; this
+ * function only governs whether the agent loop runs at all.
+ *
+ * Pure function over the filesystem; no API calls, no side-effects. Safe
+ * to call from synchronous render paths.
+ */
+export function isProjectFullyWired(installDir: string): FullyWiredCheck {
+  const dependency = detectAmplitudeInProject(installDir).confidence !== 'none';
+  const sourceImport =
+    detectAmplitudeInProjectSource(installDir).confidence !== 'none';
+  const ampliConfig = hasAmpliConfigScope(installDir);
+  const eventPlan = hasEventPlan(installDir);
+
+  const signals = { dependency, sourceImport, ampliConfig, eventPlan };
+  const present: string[] = [];
+  const missing: string[] = [];
+  for (const [name, value] of Object.entries(signals)) {
+    (value ? present : missing).push(name);
+  }
+
+  return {
+    fullyWired: dependency && sourceImport && ampliConfig && eventPlan,
+    signals,
+    present,
+    missing,
+  };
+}

@@ -15,7 +15,14 @@ import type { WizardStore } from '../store.js';
 import { useWizardStore } from '../hooks/useWizardStore.js';
 import { PickerMenu } from '../primitives/index.js';
 import { Colors, Icons } from '../styles.js';
+import { useScreenHints } from '../hooks/useScreenHints.js';
+import type { KeyHint } from '../components/KeyHintBar.js';
 import type { CloudRegion } from '../../../lib/wizard-session.js';
+
+const REGION_HINTS: readonly KeyHint[] = Object.freeze([
+  { key: '↑↓', label: 'Navigate' },
+  { key: 'Enter', label: 'Select' },
+]);
 
 interface RegionSelectScreenProps {
   store: WizardStore;
@@ -36,6 +43,7 @@ const REGIONS: Array<{ label: string; hint: string; value: CloudRegion }> = [
 
 export const RegionSelectScreen = ({ store }: RegionSelectScreenProps) => {
   useWizardStore(store);
+  useScreenHints(REGION_HINTS);
 
   const { session } = store;
 
@@ -66,12 +74,17 @@ export const RegionSelectScreen = ({ store }: RegionSelectScreenProps) => {
         }}
       />
 
-      <Box marginTop={1}>
+      <Box marginTop={1} flexDirection="column">
         <Text color={Colors.muted}>
           {Icons.dot} Data residency affects API endpoints and compliance. You
           can change this later with{' '}
           <Text color={Colors.secondary}>/region</Text>.
         </Text>
+        {session.regionForced && (
+          <Text color={Colors.warning}>
+            {Icons.dot} You&apos;ll need to sign in again for the new region.
+          </Text>
+        )}
       </Box>
     </Box>
   );

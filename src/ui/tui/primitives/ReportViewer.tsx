@@ -13,9 +13,13 @@ import { useStdoutDimensions } from '../hooks/useStdoutDimensions.js';
 import { useScreenInput } from '../hooks/useScreenInput.js';
 import { Colors } from '../styles.js';
 import { renderMarkdown } from '../utils/terminal-rendering.js';
+import { watchFileWhenAvailable } from '../utils/watchFileWhenAvailable.js';
 
 /** Rows consumed by ConsoleView border + TitleBar + separator + tab bar chrome */
 const CHROME_ROWS = 10;
+
+/** ANSI SGR reset — closes bold/color/background. */
+const ANSI_RESET = '\x1b[0m';
 
 interface ReportViewerProps {
   filePath: string;
@@ -36,7 +40,16 @@ export const ReportViewer = ({ filePath }: ReportViewerProps) => {
         if (raw === prevRawRef.current) return; // skip redundant re-renders
         prevRawRef.current = raw;
         const rendered = renderMarkdown(raw);
-        setLines(rendered.split('\n'));
+        // marked-terminal wraps long headings/code blocks across multiple
+        // lines but only emits the closing reset at the end of the block.
+        // When we split on \n and render each line in its own <Text>, any
+        // line whose color span continues onto the next line leaks its
+        // open-color into the rest of the terminal — which is what caused
+        // the entire screen to turn lilac/pink after viewing the setup
+        // report. Append a hard reset to each line so styling cannot bleed
+        // past line boundaries even if the source rendering forgets to
+        // close itself.
+        setLines(rendered.split('\n').map((l) => l + ANSI_RESET));
       } catch {
         setLines(['(No report found — the agent may still be running)']);
       }
@@ -44,35 +57,16 @@ export const ReportViewer = ({ filePath }: ReportViewerProps) => {
 
     updateContent();
 
-    // Watch for the file to appear/update (agent may still be writing)
-    let watcher: fs.FSWatcher | undefined;
-    let interval: ReturnType<typeof setInterval> | undefined;
+    // Single-owner watcher that closes the swap race between the poll
+    // interval and the fs.watch handle. See `watchFileWhenAvailable`
+    // for the race details. Replaced two-variable closure cleanup
+    // (watcher + interval) with one `dispose()`.
+    const handle = watchFileWhenAvailable({
+      filePath,
+      onChange: updateContent,
+    });
 
-    const startWatch = () => {
-      try {
-        watcher = fs.watch(filePath, () => updateContent());
-      } catch {
-        // File not yet available — poll
-        interval = setInterval(() => {
-          try {
-            fs.accessSync(filePath);
-            updateContent();
-            clearInterval(interval);
-            interval = undefined;
-            startWatch();
-          } catch {
-            // still waiting
-          }
-        }, 1000);
-      }
-    };
-
-    startWatch();
-
-    return () => {
-      watcher?.close();
-      if (interval) clearInterval(interval);
-    };
+    return () => handle.dispose();
   }, [filePath]);
 
   const maxOffset = Math.max(0, lines.length - visibleLines);

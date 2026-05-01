@@ -16,7 +16,9 @@ import { Box, Text } from 'ink';
 import type { WizardStore } from './store.js';
 import { createScreens, createServices } from './screen-registry.js';
 import { CommandModeContext } from './context/CommandModeContext.js';
+import { ContentAreaContext } from './context/ContentAreaContext.js';
 import { ConsoleView } from './components/ConsoleView.js';
+import { CtrlCHandler } from './components/CtrlCHandler.js';
 import { HeaderBar } from './components/HeaderBar.js';
 import { JourneyStepper } from './components/JourneyStepper.js';
 import { useStdoutDimensions } from './hooks/useStdoutDimensions.js';
@@ -57,6 +59,10 @@ export const App = ({ store }: AppProps) => {
 
   return (
     <CommandModeContext.Provider value={store.commandMode}>
+      {/* Always-on Ctrl+C interceptor. Uses Ink's useInput so it gets
+          the key event in raw mode. Drives graceful-exit flow directly
+          (banner → save checkpoint → flush analytics → exit). */}
+      <CtrlCHandler store={store} />
       <Box
         flexDirection="column"
         height={rows}
@@ -72,7 +78,7 @@ export const App = ({ store }: AppProps) => {
           <HeaderBar
             width={width}
             orgName={store.session.selectedOrgName}
-            workspaceName={store.session.selectedWorkspaceName}
+            projectName={store.session.selectedProjectName}
             envName={store.session.selectedEnvName}
           />
 
@@ -90,19 +96,23 @@ export const App = ({ store }: AppProps) => {
             paddingX={Layout.paddingX}
             overflow="hidden"
           >
-            <DissolveTransition
-              transitionKey={store.currentScreen}
-              width={contentAreaWidth}
-              height={contentHeight}
-              direction={direction}
+            <ContentAreaContext.Provider
+              value={{ height: contentHeight, width: contentAreaWidth }}
             >
-              <ScreenErrorBoundary
-                store={store}
-                retryToken={store.screenErrorRetry}
+              <DissolveTransition
+                transitionKey={store.currentScreen}
+                width={contentAreaWidth}
+                height={contentHeight}
+                direction={direction}
               >
-                {activeScreen}
-              </ScreenErrorBoundary>
-            </DissolveTransition>
+                <ScreenErrorBoundary
+                  store={store}
+                  retryToken={store.screenErrorRetry}
+                >
+                  {activeScreen}
+                </ScreenErrorBoundary>
+              </DissolveTransition>
+            </ContentAreaContext.Provider>
           </Box>
         </ConsoleView>
       </Box>

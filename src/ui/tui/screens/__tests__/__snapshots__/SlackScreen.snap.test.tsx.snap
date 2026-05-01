@@ -1,0 +1,13 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`SlackScreen snapshots > renders the US prompt with the default Amplitude Slack app name 1`] = `
+"Slack Integration
+
+Connect Amplitude to Slack for chart previews, dashboard sharing,
+and real-time tracking plan notifications.
+
+ Connect the "Amplitude" Slack app to your workspace?
+
+    Connect
+    Skip for now"
+`;

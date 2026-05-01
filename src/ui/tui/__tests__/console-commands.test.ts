@@ -1,9 +1,15 @@
-import { describe, expect, it } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   parseFeedbackSlashInput,
   parseCreateProjectSlashInput,
   getWhoamiText,
+  getDiagnosticsText,
+  checkCommandBlockedByRun,
+  isKnownCommand,
+  COMMANDS,
 } from '../console-commands.js';
+import { RunPhase } from '../../../lib/wizard-session.js';
+import { CACHE_ROOT_OVERRIDE_ENV } from '../../../utils/storage-paths.js';
 
 describe('parseCreateProjectSlashInput', () => {
   it('returns the trimmed name after /create-project', () => {
@@ -56,7 +62,7 @@ describe('getWhoamiText', () => {
   const base = {
     selectedOrgId: null as string | null,
     selectedOrgName: null as string | null,
-    selectedWorkspaceName: null as string | null,
+    selectedProjectName: null as string | null,
     selectedEnvName: null as string | null,
     region: null as string | null,
     credentials: null as {
@@ -77,7 +83,7 @@ describe('getWhoamiText', () => {
     const result = getWhoamiText({
       ...base,
       selectedOrgName: 'Amplitude Website (Portfolio)',
-      selectedWorkspaceName: 'Amplitude',
+      selectedProjectName: 'Amplitude',
       selectedEnvName: 'Production',
       region: 'us',
       credentials: {
@@ -149,5 +155,191 @@ describe('getWhoamiText', () => {
     });
     expect(result).toContain('ada@example.com');
     expect(result).toContain('(authenticating…)');
+  });
+});
+
+describe('COMMANDS registry', () => {
+  it('exposes /diagnostics so the help UI surfaces it', () => {
+    const cmds = COMMANDS.map((c) => c.cmd);
+    expect(cmds).toContain('/diagnostics');
+  });
+
+  it('marks credential / region / org-mutating commands as requiresIdle', () => {
+    // These commands swap the agent's auth, region, or project context
+    // out from under it — they MUST be blocked while a run is active so
+    // mid-flight Amplitude API / MCP calls don't silently target the
+    // wrong project.
+    const requiresIdle = COMMANDS.filter((c) => c.requiresIdle).map(
+      (c) => c.cmd,
+    );
+    expect(requiresIdle).toEqual(
+      expect.arrayContaining([
+        '/region',
+        '/login',
+        '/logout',
+        '/create-project',
+      ]),
+    );
+  });
+
+  it('leaves read-only / overlay commands available during a run', () => {
+    // Surfacing /whoami, /mcp, /slack, /feedback, /debug, /diagnostics,
+    // /clear, /snake, /exit during a run is fine — they don't mutate the
+    // session state the agent depends on.
+    for (const cmd of [
+      '/whoami',
+      '/mcp',
+      '/slack',
+      '/feedback',
+      '/debug',
+      '/diagnostics',
+      '/clear',
+      '/snake',
+      '/exit',
+    ]) {
+      const def = COMMANDS.find((c) => c.cmd === cmd);
+      expect(def?.requiresIdle).toBeFalsy();
+    }
+  });
+});
+
+describe('checkCommandBlockedByRun', () => {
+  it('returns null for any command outside Running', () => {
+    for (const phase of [
+      RunPhase.Idle,
+      RunPhase.Completed,
+      RunPhase.Error,
+    ] as const) {
+      expect(checkCommandBlockedByRun('/region', phase)).toBeNull();
+      expect(checkCommandBlockedByRun('/login', phase)).toBeNull();
+      expect(checkCommandBlockedByRun('/logout', phase)).toBeNull();
+      expect(checkCommandBlockedByRun('/create-project', phase)).toBeNull();
+    }
+  });
+
+  it('returns a tailored message during Running for each requiresIdle command', () => {
+    expect(checkCommandBlockedByRun('/region', RunPhase.Running)).toContain(
+      'Region change is paused',
+    );
+    expect(checkCommandBlockedByRun('/login', RunPhase.Running)).toContain(
+      'Login is paused',
+    );
+    expect(checkCommandBlockedByRun('/logout', RunPhase.Running)).toContain(
+      'Logout is paused',
+    );
+    expect(
+      checkCommandBlockedByRun('/create-project', RunPhase.Running),
+    ).toContain('Creating a new project is paused');
+  });
+
+  it('every blocked-command message tells the user how to unblock', () => {
+    for (const cmd of ['/region', '/login', '/logout', '/create-project']) {
+      const msg = checkCommandBlockedByRun(cmd, RunPhase.Running);
+      expect(msg).not.toBeNull();
+      expect(msg).toContain('Ctrl+C');
+      expect(msg).toContain('try again');
+    }
+  });
+
+  it('returns null for non-requiresIdle commands even during Running', () => {
+    // /whoami, /mcp, /slack, /feedback, /clear, /debug, /diagnostics,
+    // /snake, /exit must remain dispatchable mid-run.
+    for (const cmd of [
+      '/whoami',
+      '/mcp',
+      '/slack',
+      '/feedback',
+      '/clear',
+      '/debug',
+      '/diagnostics',
+      '/snake',
+      '/exit',
+    ]) {
+      expect(checkCommandBlockedByRun(cmd, RunPhase.Running)).toBeNull();
+    }
+  });
+
+  it('returns null for unknown commands so /typo falls through to the default error', () => {
+    expect(
+      checkCommandBlockedByRun('/not-a-real-command', RunPhase.Running),
+    ).toBeNull();
+  });
+});
+
+describe('isKnownCommand — ConsoleView handleSubmit routing', () => {
+  it('returns true for an exact command match', () => {
+    expect(isKnownCommand('/region')).toBe(true);
+    expect(isKnownCommand('/logout')).toBe(true);
+    expect(isKnownCommand('/clear')).toBe(true);
+  });
+
+  it('returns true when the command has trailing arguments', () => {
+    expect(isKnownCommand('/feedback love this tool')).toBe(true);
+    expect(isKnownCommand('/create-project My App')).toBe(true);
+  });
+
+  it('returns false for a slash-prefixed file path', () => {
+    expect(isKnownCommand('/lib/config.ts')).toBe(false);
+    expect(isKnownCommand('/lib/config.ts is broken')).toBe(false);
+  });
+
+  it('returns false for a prefix that does not exactly match any command', () => {
+    expect(isKnownCommand('/r')).toBe(false);
+    expect(isKnownCommand('/reg')).toBe(false);
+  });
+
+  it('returns false for plain text without a slash', () => {
+    expect(isKnownCommand('hello world')).toBe(false);
+    expect(isKnownCommand('what is the best framework?')).toBe(false);
+  });
+
+  it('returns false for empty string', () => {
+    expect(isKnownCommand('')).toBe(false);
+  });
+
+  it('returns false for bare /', () => {
+    expect(isKnownCommand('/')).toBe(false);
+  });
+});
+
+describe('getDiagnosticsText', () => {
+  let originalCacheOverride: string | undefined;
+
+  beforeEach(() => {
+    originalCacheOverride = process.env[CACHE_ROOT_OVERRIDE_ENV];
+    process.env[CACHE_ROOT_OVERRIDE_ENV] = '/tmp/wizard-diag-test';
+  });
+
+  afterEach(() => {
+    if (originalCacheOverride === undefined) {
+      delete process.env[CACHE_ROOT_OVERRIDE_ENV];
+    } else {
+      process.env[CACHE_ROOT_OVERRIDE_ENV] = originalCacheOverride;
+    }
+  });
+
+  it('lists every storage path the user might need for a bug report', () => {
+    const text = getDiagnosticsText('/Users/test/project-a');
+    expect(text).toContain('log:');
+    expect(text).toContain('log (json):');
+    expect(text).toContain('benchmark:');
+    expect(text).toContain('checkpoint:');
+    expect(text).toContain('events:');
+    expect(text).toContain('dashboard:');
+    expect(text).toContain('Cache root:');
+    expect(text).toContain('/tmp/wizard-diag-test');
+  });
+
+  it('uses per-project paths derived from installDir', () => {
+    const a = getDiagnosticsText('/Users/test/project-a');
+    const b = getDiagnosticsText('/Users/test/project-b');
+    // Two different projects should have different log paths — that's the
+    // whole point of the new layout (vs. the previous shared /tmp file).
+    expect(a).not.toBe(b);
+  });
+
+  it('includes a tar command pointing at the run dir for support bundles', () => {
+    const text = getDiagnosticsText('/p');
+    expect(text).toContain('tar -czf wizard-logs.tar.gz');
   });
 });

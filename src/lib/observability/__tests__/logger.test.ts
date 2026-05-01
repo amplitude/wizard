@@ -13,12 +13,22 @@ import { initCorrelation } from '../correlation';
 describe('logger', () => {
   let tempDir: string;
   let logFile: string;
+  let structuredLogFile: string;
 
   beforeEach(() => {
     tempDir = mkdtempSync(join(tmpdir(), 'wizard-logger-test-'));
+    // `.txt` mirrors the per-project layout introduced by storage-paths.ts
+    // (`log.txt` + `log.ndjson`). The structured path is auto-derived by
+    // `configureLogFile` when omitted, but we set it explicitly so the
+    // assertions below can read it back without coupling to the helper.
     logFile = join(tempDir, 'test.log');
+    structuredLogFile = join(tempDir, 'test.ndjson');
     initCorrelation('test-session-id');
-    configureLogFile({ path: logFile, enabled: true });
+    configureLogFile({
+      path: logFile,
+      structuredPath: structuredLogFile,
+      enabled: true,
+    });
     initLogger({
       mode: 'ci',
       debug: false,
@@ -58,11 +68,11 @@ describe('logger', () => {
     expect(lines[0]).toContain('"key":"value"');
   });
 
-  it('writes complete NDJSON to the companion .jsonl file', () => {
+  it('writes complete NDJSON to the companion .ndjson file', () => {
     const log = createLogger('test-module');
     log.info('hello world', { key: 'value' });
 
-    const jsonlContent = readFileSync(logFile + 'l', 'utf-8');
+    const jsonlContent = readFileSync(structuredLogFile, 'utf-8');
     const jsonLines = jsonlContent.split('\n').filter((l) => l.startsWith('{'));
     expect(jsonLines.length).toBe(1);
 
@@ -173,5 +183,44 @@ describe('logger', () => {
     configureLogFile({ path: '/nonexistent/path/log.txt', enabled: true });
     const log = createLogger('safe');
     expect(() => log.error('this should not crash')).not.toThrow();
+  });
+
+  // Regression: bugbot caught that `activeStructuredLogPath` previously
+  // appended `'l'` to the human path (`log.txt` → `log.txtl`), which
+  // diverged from the canonical `log.ndjson` location returned by
+  // `getStructuredLogFile` (storage-paths.ts) and referenced by docs +
+  // `/diagnostics`. The test pins the human/structured paths to be
+  // siblings: same directory, different extensions.
+  it('writes the structured log to a `.ndjson` sibling, not `.txtl`', () => {
+    const txtPath = join(tempDir, 'a.txt');
+    configureLogFile({ path: txtPath, enabled: true });
+    const log = createLogger('regression');
+    log.info('event');
+
+    const expectedNdjson = join(tempDir, 'a.ndjson');
+    expect(readFileSync(expectedNdjson, 'utf-8')).toContain('"msg":"event"');
+    // The previous implementation would have written here:
+    expect(() => readFileSync(txtPath + 'l', 'utf-8')).toThrow();
+  });
+
+  it('configureLogFile auto-derives the structured path when only `path` is passed', () => {
+    // Set only the human path; structured should be auto-derived to a
+    // `.ndjson` sibling. Verifies the contract that `setProjectLogFile`
+    // and `initLogger` rely on (`log.txt` → `log.ndjson`,
+    // `bootstrap.log` → `bootstrap.ndjson`).
+    configureLogFile({ path: join(tempDir, 'fresh.txt'), enabled: true });
+    const log = createLogger('derive');
+    log.info('hi');
+    expect(readFileSync(join(tempDir, 'fresh.ndjson'), 'utf-8')).toContain(
+      '"msg":"hi"',
+    );
+
+    // Same for `.log` extension (used by the bootstrap fallback path).
+    configureLogFile({ path: join(tempDir, 'fresh.log'), enabled: true });
+    const log2 = createLogger('derive-log');
+    log2.info('bye');
+    expect(readFileSync(join(tempDir, 'fresh.ndjson'), 'utf-8')).toContain(
+      '"msg":"bye"',
+    );
   });
 });

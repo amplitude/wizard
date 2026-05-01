@@ -11,15 +11,26 @@
  */
 
 import { Box, Text } from 'ink';
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import type { WizardStore } from '../store.js';
 import { useWizardStore } from '../hooks/useWizardStore.js';
+import { useEscapeBack } from '../hooks/useEscapeBack.js';
+import { useScreenInput } from '../hooks/useScreenInput.js';
 import { Colors, Icons } from '../styles.js';
 import { BrailleSpinner } from '../components/BrailleSpinner.js';
 import { fetchProjectActivationStatus } from '../../../lib/api.js';
-import { detectAmplitudeInProject } from '../../../lib/detect-amplitude.js';
-import type { AmplitudeZone } from '../../../lib/constants.js';
+import { DEFAULT_AMPLITUDE_ZONE } from '../../../lib/constants.js';
+import {
+  detectAmplitudeInProject,
+  detectAmplitudeInProjectSource,
+  isProjectFullyWired,
+} from '../../../lib/detect-amplitude.js';
+import { analytics } from '../../../utils/analytics.js';
+import { resolveZone } from '../../../lib/zone-resolution.js';
+import { withTimeout } from '../utils/with-timeout.js';
 import { logToFile } from '../../../utils/debug.js';
+
+const ACTIVATION_FETCH_TIMEOUT_MS = 30_000;
 
 interface DataSetupScreenProps {
   store: WizardStore;
@@ -27,15 +38,34 @@ interface DataSetupScreenProps {
 
 export const DataSetupScreen = ({ store }: DataSetupScreenProps) => {
   useWizardStore(store);
+  // Esc → back to Auth's org/project picker. The activation API call is
+  // idempotent so backing out mid-flight is safe.
+  useEscapeBack(store);
+
+  // Surfaces the timeout fallback prompt — "Couldn't reach Amplitude;
+  // continue anyway?" — when the activation fetch hangs past 30s. This
+  // matters because a hung proxy with no response would otherwise leave
+  // the spinner ticking forever.
+  const [timedOut, setTimedOut] = useState(false);
+
+  useScreenInput(
+    (input) => {
+      if (!timedOut) return;
+      if (input.toLowerCase() === 'y') {
+        // User wants to continue without confirmed activation status.
+        // Fall through with 'none' so the framework-detection flow runs.
+        store.setActivationLevel('none');
+      }
+    },
+    { isActive: timedOut },
+  );
 
   useEffect(() => {
     if (store.session.projectHasData !== null) return;
 
-    const { credentials, region, selectedOrgId, selectedWorkspaceId } =
-      store.session;
-    // credentials.appId is 0 for OAuth users; fall back to the workspace UUID
-    const appId =
-      store.session.credentials?.appId || selectedWorkspaceId || null;
+    const { credentials, selectedOrgId, selectedProjectId } = store.session;
+    // credentials.appId is 0 for OAuth users; fall back to the project UUID
+    const appId = store.session.credentials?.appId || selectedProjectId || null;
 
     // No credentials or project ID — can't check, fall through to Framework Detection
     if (!credentials || !appId || !selectedOrgId) {
@@ -44,10 +74,38 @@ export const DataSetupScreen = ({ store }: DataSetupScreenProps) => {
       return;
     }
 
-    const zone = (region ?? 'us') as AmplitudeZone;
+    // readDisk: false — region is populated on the session by the time this
+    // screen renders (flow is gated on region !== null). Skipping Tier 2/3
+    // avoids synchronous readAmpliConfig + getStoredUser disk reads on mount.
+    const zone = resolveZone(store.session, DEFAULT_AMPLITUDE_ZONE, {
+      readDisk: false,
+    });
     logToFile(
       `[DataSetup] checking activation for appId=${appId} zone=${zone}`,
     );
+
+    // Pre-flight: if the project already has all four local "fully wired"
+    // signals (SDK dep, source import, ampli.json scope, event plan on
+    // disk), skip the agent loop entirely. The user is re-running the
+    // wizard on a project a prior run already finished — re-running the
+    // agent for 2-3 minutes to no-op is a launch-blocking UX bug. We set
+    // `activationLevel = 'full'` (which the router uses to skip Setup +
+    // Run) and `localInstrumentationComplete = true` (which the router
+    // uses to KEEP DataIngestionCheck running, since remote events may
+    // not have arrived yet — the user may be re-running pre-deploy).
+    const wireCheck = isProjectFullyWired(store.session.installDir);
+    logToFile(
+      `[DataSetup] local wiring check: present=[${wireCheck.present.join(',')}] missing=[${wireCheck.missing.join(',')}] fullyWired=${wireCheck.fullyWired}`,
+    );
+    if (wireCheck.fullyWired) {
+      analytics.wizardCapture('activation skip on local wiring', {
+        present: wireCheck.present,
+      });
+      store.setLocalInstrumentationComplete(true);
+      store.setSnippetConfigured(true);
+      store.setActivationLevel('full');
+      return;
+    }
 
     // Run local static check in parallel with the API call.
     const localDetection = detectAmplitudeInProject(store.session.installDir);
@@ -57,12 +115,16 @@ export const DataSetupScreen = ({ store }: DataSetupScreenProps) => {
       } reason=${localDetection.reason ?? 'none'}`,
     );
 
-    void fetchProjectActivationStatus({
-      accessToken: credentials.accessToken,
-      zone,
-      appId,
-      orgId: selectedOrgId,
-    })
+    void withTimeout(
+      fetchProjectActivationStatus({
+        accessToken: credentials.accessToken,
+        zone,
+        appId,
+        orgId: selectedOrgId,
+      }),
+      ACTIVATION_FETCH_TIMEOUT_MS,
+      'fetchProjectActivationStatus',
+    )
       .then((status) => {
         logToFile(`[DataSetup] activation status: ${JSON.stringify(status)}`);
         store.setSnippetConfigured(status.hasDetSource);
@@ -74,7 +136,26 @@ export const DataSetupScreen = ({ store }: DataSetupScreenProps) => {
             status.hasPageViewedEvent &&
             status.hasSessionStartEvent &&
             status.hasSessionEndEvent;
-          store.setActivationLevel(isFull ? 'full' : 'partial');
+          // Cross-check the LOCAL project: the Amplitude project may have
+          // events from a previous install that has since been deleted from
+          // disk. If no source file actually imports an Amplitude SDK, the
+          // remote "full" verdict is a stale ghost — rerun setup. We use the
+          // source-only grep (not detectAmplitudeInProject) so a leftover
+          // dependency entry in package.json doesn't paper over a deleted
+          // initializer file. Without this guard, deleting amplitude.js but
+          // keeping the package.json dep silently skipped Setup.
+          if (
+            isFull &&
+            detectAmplitudeInProjectSource(store.session.installDir)
+              .confidence === 'none'
+          ) {
+            logToFile(
+              '[DataSetup] remote says full but no source imports — downgrading to partial',
+            );
+            store.setActivationLevel('partial');
+          } else {
+            store.setActivationLevel(isFull ? 'full' : 'partial');
+          }
         } else if (status.hasDetSource) {
           // SDK installed but no events yet
           store.setActivationLevel('partial');
@@ -92,17 +173,70 @@ export const DataSetupScreen = ({ store }: DataSetupScreenProps) => {
         }
       })
       .catch((err: unknown) => {
+        const message = err instanceof Error ? err.message : String(err);
+        const isTimeout = err instanceof Error && err.name === 'TimeoutError';
         logToFile(
-          `[DataSetup] activation check failed: ${
-            err instanceof Error ? err.message : String(err)
-          } — falling back to local detection`,
+          `[DataSetup] activation check failed: ${message}${
+            isTimeout ? ' (timeout)' : ''
+          } — ${
+            isTimeout
+              ? 'awaiting user decision'
+              : 'falling back to local detection'
+          }`,
         );
-        // If the API fails, use local detection as a fallback.
+        if (isTimeout) {
+          // Surface the manual fallback prompt and let the user decide.
+          // Local detection alone isn't strong enough signal to silently
+          // commit a path — the user knows whether their network is the
+          // problem and we should ask.
+          setTimedOut(true);
+          return;
+        }
+        // Other errors: use local detection as a fallback.
         store.setActivationLevel(
           localDetection.confidence !== 'none' ? 'partial' : 'none',
         );
       });
   }, []);
+
+  if (timedOut) {
+    return (
+      <Box flexDirection="column" flexGrow={1}>
+        <Box flexDirection="column">
+          <Text bold color={Colors.heading}>
+            Checking project setup
+          </Text>
+          <Box marginTop={1}>
+            <Text color={Colors.warning}>
+              Couldn&apos;t reach Amplitude after 30s. Network or proxy issue?
+            </Text>
+          </Box>
+          <Box marginTop={1}>
+            <Text color={Colors.body}>
+              Continue anyway? We&apos;ll skip the activation check and run full
+              setup.
+            </Text>
+          </Box>
+          <Box marginTop={1} gap={2}>
+            <Box>
+              <Text color={Colors.muted}>[</Text>
+              <Text bold color={Colors.body}>
+                Y
+              </Text>
+              <Text color={Colors.muted}>] Yes, continue</Text>
+            </Box>
+            <Box>
+              <Text color={Colors.muted}>[</Text>
+              <Text bold color={Colors.body}>
+                Esc
+              </Text>
+              <Text color={Colors.muted}>] Cancel and go back</Text>
+            </Box>
+          </Box>
+        </Box>
+      </Box>
+    );
+  }
 
   return (
     <Box flexDirection="column" flexGrow={1}>

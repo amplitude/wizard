@@ -13,3 +13,5 @@ export { createBenchmarkPipeline } from './benchmark';
 export type { BenchmarkData, StepUsage } from './benchmark';
 
 export { createPluginsFromConfig } from './benchmarks';
+
+export { createRetryMiddleware } from './retry';

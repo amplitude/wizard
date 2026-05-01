@@ -9,6 +9,8 @@ type FlutterContext = Record<string, unknown>;
 export const FLUTTER_AGENT_CONFIG: FrameworkConfig<FlutterContext> = {
   metadata: {
     name: 'Flutter',
+    glyph: '🐦',
+    glyphColor: '#54C5F8',
     integration: Integration.flutter,
     beta: true,
     docsUrl: 'https://amplitude.com/docs/sdks/analytics/flutter/flutter-sdk-4',

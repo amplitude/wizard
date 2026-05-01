@@ -15,6 +15,13 @@ Feature: Slash commands
     When I enter the slash command "/logout"
     Then the wizard should prompt me to log in again
 
+  Scenario: /region mid-session forces re-authentication against the new zone
+    Given I have just authenticated
+    When I enter the slash command "/region"
+    Then I should be taken back to region selection
+    When I select the "eu" region
+    Then the wizard should prompt me to log in again
+
   Scenario: /slack opens Amplitude settings to connect Slack
     Given the wizard is active
     When I enter the slash command "/slack"
@@ -22,9 +29,9 @@ Feature: Slash commands
 
   Scenario: /whoami shows current session info
     Given the wizard is active
-    And my org is "acme" and my workspace is "prod" and my region is "us"
+    And my org is "acme" and my project is "prod" and my region is "us"
     When I enter the slash command "/whoami"
-    Then I should see my org, workspace, and region
+    Then I should see my org, project, and region
 
   @todo
   Scenario: /overview opens the project in the browser

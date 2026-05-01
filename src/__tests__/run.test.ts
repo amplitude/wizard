@@ -18,6 +18,7 @@ vi.mock('../lib/wizard-session', () => ({
     setupConfirmed: false,
     integration: null,
     frameworkContext: {},
+    frameworkContextAnswerOrder: [],
     typescript: false,
     credentials: null,
     serviceStatus: null,
@@ -50,7 +51,6 @@ vi.mock('../ui', () => ({
     syncTodos: vi.fn(),
     setLoginUrl: vi.fn(),
     showServiceStatus: vi.fn(),
-    showSettingsOverride: vi.fn(),
     startRun: vi.fn(),
     setRunError: vi.fn(),
   }),
@@ -62,7 +62,14 @@ const mockRunAgentWizard = runAgentWizard as MockedFunction<
 >;
 const mockAnalytics = analytics as vi.Mocked<typeof analytics>;
 
-describe('runWizard error handling', () => {
+// Bump the per-test timeout for this suite. Each test runs in <1.5s in
+// isolation, but under the cold-cache parallel pressure of `pnpm test`
+// (which spins up 156 test files concurrently) module loading for
+// `../run` plus its transitive imports — TUI, agent-runner, observability,
+// nanostores — pushes past vitest's default 5s timeout intermittently.
+// 30s is generous enough that we never hit it on a healthy machine and
+// keep the suite green under load. Real bugs would fail well below 30s.
+describe('runWizard error handling', { timeout: 30_000 }, () => {
   beforeEach(() => {
     vi.clearAllMocks();
 
@@ -106,5 +113,85 @@ describe('runWizard error handling', () => {
 
     expect(mockAnalytics.captureException).not.toHaveBeenCalled();
     expect(mockAnalytics.shutdown).not.toHaveBeenCalled();
+  });
+
+  it('passes signup=true to session started when session.signup is set', async () => {
+    mockAnalytics.wizardCapture = vi.fn();
+    const testArgs = {
+      integration: Integration.nextjs,
+      signup: true,
+    };
+
+    mockRunAgentWizard.mockResolvedValue(undefined);
+
+    await runWizard(testArgs);
+
+    expect(mockAnalytics.wizardCapture).toHaveBeenCalledWith(
+      'session started',
+      expect.objectContaining({ signup: true }),
+    );
+  });
+
+  it('passes signup=false to session started when session.signup is unset', async () => {
+    mockAnalytics.wizardCapture = vi.fn();
+    const testArgs = {
+      integration: Integration.nextjs,
+    };
+
+    mockRunAgentWizard.mockResolvedValue(undefined);
+
+    await runWizard(testArgs);
+
+    expect(mockAnalytics.wizardCapture).toHaveBeenCalledWith(
+      'session started',
+      expect.objectContaining({ signup: false }),
+    );
+  });
+
+  // The TUI's directory picker mutates session.installDir at runtime.
+  // runWizard MUST treat the passed-in session as the source of truth
+  // and not re-derive installDir from CLI argv — doing that silently
+  // reverts the user's directory change. See PR #485 follow-up.
+  describe('installDir precedence', () => {
+    it('preserves session.installDir when a session is passed in (TUI selection wins over argv)', async () => {
+      mockRunAgentWizard.mockResolvedValue(undefined);
+      const session = {
+        debug: false,
+        forceInstall: false,
+        installDir: '/picked/by/tui',
+        ci: false,
+        signup: false,
+        localMcp: false,
+        menu: false,
+        setupConfirmed: false,
+        integration: Integration.nextjs,
+        frameworkContext: {},
+        frameworkContextAnswerOrder: [],
+        typescript: false,
+        credentials: null,
+        serviceStatus: null,
+        outroData: null,
+        frameworkConfig: null,
+      } as unknown as Parameters<typeof runWizard>[1];
+
+      // argv carries a different --install-dir; the session value MUST win.
+      await runWizard({ installDir: '/from/argv' }, session);
+
+      expect(session.installDir).toBe('/picked/by/tui');
+      const passedSession = mockRunAgentWizard.mock.calls[0][1];
+      expect(passedSession.installDir).toBe('/picked/by/tui');
+    });
+
+    it('uses argv.installDir when no session is provided (fresh build)', async () => {
+      mockRunAgentWizard.mockResolvedValue(undefined);
+
+      await runWizard({
+        integration: Integration.nextjs,
+        installDir: '/from/argv',
+      });
+
+      const passedSession = mockRunAgentWizard.mock.calls[0][1];
+      expect(passedSession.installDir).toBe('/from/argv');
+    });
   });
 });

@@ -69,6 +69,7 @@ extract_zip() {
 
   mkdir -p "$dest"
   unzip -q -o "$zip" -d "$dest"
+
   echo "  extracted $skill_id"
 }
 

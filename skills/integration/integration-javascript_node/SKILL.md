@@ -25,7 +25,6 @@ Follow these steps in order to complete the integration:
 
 - `references/EXAMPLE.md` - JavaScript Node example project code
 - `references/node.md` - Amplitude documentation for Node
-- `references/amplitude-quickstart.md` - Amplitude documentation for Amplitude Quickstart
 - `references/basic-integration-1.0-begin.md` - Amplitude setup - begin
 - `references/basic-integration-1.1-edit.md` - Amplitude setup - edit
 - `references/basic-integration-1.2-revise.md` - Amplitude setup - revise

@@ -6,13 +6,26 @@ on:
 
 jobs:
   validate-pr-title:
+    name: validate-pr-title
     runs-on: ubuntu-latest
     permissions:
       contents: read
       pull-requests: read
     steps:
-      - name: PR Conventional Commit Validation
-        uses:  ytanikin/PRConventionalCommits@b628c5a234cc32513014b7bfdd1e47b532124d98 # v1.3.0
+      - name: Validate PR title
+        uses: actions/github-script@f28e40c7f34bde8b3046d885e986cb6290c5673b # v7
         with:
-          task_types: '["feat","fix","docs","test","ci","refactor","perf","chore","revert"]'
-          add_label: 'false'
+          script: |
+            const title = context.payload.pull_request.title;
+            const types = ['feat', 'fix', 'docs', 'test', 'ci', 'refactor', 'perf', 'chore', 'revert'];
+            const conventionalCommitRegex = /^(feat|fix|docs|test|ci|refactor|perf|chore|revert)(\([^)]+\))?!?:\s*.+/;
+
+            if (!conventionalCommitRegex.test(title)) {
+              core.setFailed(
+                `Pull request title is not a valid conventional commit. Allowed types: ${types.join(', ')}.\n` +
+                `Title must be lowercase and match pattern: type(scope)?: description or type(scope)!: description`
+              );
+              return;
+            }
+
+            core.info('PR title is a valid conventional commit');

@@ -15,6 +15,7 @@ import type {
   SDKUsage,
 } from '../types';
 import type { TurnData } from './turn-counter';
+import { setSpanMeasurement } from '../../observability/index';
 
 export interface TokenData {
   phaseInput: number;
@@ -98,7 +99,7 @@ export class TokenTrackerPlugin implements Middleware {
   }
 
   onFinalize(
-    _resultMessage: SDKMessage,
+    resultMessage: SDKMessage,
     _totalDurationMs: number,
     _ctx: MiddlewareContext,
     store: MiddlewareStore,
@@ -110,6 +111,42 @@ export class TokenTrackerPlugin implements Middleware {
       messagesWithUsage: this.phaseMessagesWithUsage,
     });
     store.set('tokens', this.getData());
+
+    // Promote token totals to Sentry trace measurements so they show up as
+    // first-class metrics in the active root span. No-op when there is no
+    // active span or telemetry is disabled — purely additive to benchmark
+    // JSON, never replaces it.
+    //
+    // We prefer the resultMessage's `usage` (cumulative SDK total) when
+    // present so input + cache breakdowns survive even if individual
+    // assistant deltas were missed. Fall back to the running totals.
+    const usage = resultMessage.usage ?? this.lastUsage ?? null;
+    if (usage) {
+      setSpanMeasurement(
+        'agent.tokens.input',
+        Number(usage.input_tokens ?? 0),
+        'token',
+      );
+      setSpanMeasurement(
+        'agent.tokens.output',
+        Number(usage.output_tokens ?? 0),
+        'token',
+      );
+      setSpanMeasurement(
+        'agent.tokens.cache_read_input',
+        Number(usage.cache_read_input_tokens ?? 0),
+        'token',
+      );
+      setSpanMeasurement(
+        'agent.tokens.cache_creation_input',
+        Number(usage.cache_creation_input_tokens ?? 0),
+        'token',
+      );
+    }
+    // Always emit the wizard-side totals (input includes cache reads + creates,
+    // matching how the rest of the wizard reports token spend).
+    setSpanMeasurement('agent.tokens.total_input', this.totalInput, 'token');
+    setSpanMeasurement('agent.tokens.total_output', this.totalOutput, 'token');
   }
 
   private getData(): TokenData {

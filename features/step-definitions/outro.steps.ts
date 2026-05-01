@@ -28,7 +28,7 @@ Before(function () {
     appId: 0,
   };
   session.selectedOrgName = 'Test Org';
-  session.selectedWorkspaceName = 'Default';
+  session.selectedProjectName = 'Default';
   session.selectedEnvName = 'Default';
   session.region = 'us';
   session.projectHasData = false;

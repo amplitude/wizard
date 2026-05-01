@@ -6,8 +6,21 @@
  * invariants.
  */
 
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, vi } from 'vitest';
 import fc from 'fast-check';
+
+// Stub disk-backed zone signals so property tests don't pick up the
+// developer's real ~/.ampli.json. The Wizard flow's RegionSelect gate
+// uses `tryResolveZone`, which reads ampli.json + stored user as Tier
+// 2/3 — without these mocks, sessions with `region: null` would still
+// resolve to a non-null zone via disk and skip RegionSelect.
+vi.mock('../../../utils/ampli-settings.js', () => ({
+  getStoredUser: vi.fn(() => undefined),
+}));
+vi.mock('../../../lib/ampli-config.js', () => ({
+  readAmpliConfig: vi.fn(() => ({ ok: false, error: 'not_found' })),
+}));
+
 import { WizardRouter, Screen, Overlay, Flow } from '../router.js';
 import { FLOWS } from '../flows.js';
 import {
@@ -46,13 +59,13 @@ function mockCredentials() {
 
 /**
  * Apply a complete authenticated state to a session: credentials plus org
- * and workspace names (the two required by Auth.isComplete). Env name is
+ * and project names (the two required by Auth.isComplete). Env name is
  * set too — it's optional for Auth but realistic for a fully-resolved flow.
  */
 function applyAuthComplete(s: WizardSession) {
   s.credentials = mockCredentials();
   s.selectedOrgName = 'Acme';
-  s.selectedWorkspaceName = 'Amplitude';
+  s.selectedProjectName = 'Amplitude';
   s.selectedEnvName = 'Production';
 }
 
@@ -487,6 +500,48 @@ describe('WizardRouter complete happy path', () => {
 
     expect(router.resolve(session)).toBe(Screen.Mcp);
   });
+
+  it('locally-fully-wired re-runs skip Run but STILL show DataIngestionCheck', () => {
+    // Activation Check pre-flight: when all four local signals are present
+    // (SDK dep, source import, ampli.json scope, event plan on disk), the
+    // wizard short-circuits past Setup + Run by setting `activationLevel:
+    // 'full'` AND `localInstrumentationComplete: true`. The SECOND flag is
+    // what keeps DataIngestionCheck running — without it, a user who
+    // re-runs pre-deploy (no remote events yet) would silently skip the
+    // ingestion verification UX. With both set, they land on
+    // DataIngestionCheck after Mcp, which is the correct UX.
+    const session = buildSession({});
+    const router = new WizardRouter(Flow.Wizard);
+
+    session.introConcluded = true;
+    session.region = 'us';
+    applyAuthComplete(session);
+    session.projectHasData = true;
+    session.activationLevel = 'full';
+    session.localInstrumentationComplete = true;
+    session.mcpComplete = true; // walk past Mcp to land on the next entry
+
+    expect(router.resolve(session)).toBe(Screen.DataIngestionCheck);
+  });
+
+  it('remote-confirmed full activation still skips DataIngestionCheck (no localInstrumentationComplete)', () => {
+    // Counter-case: when activation reaches 'full' via the API check
+    // (50+ events in the project) and NOT via the local pre-flight,
+    // localInstrumentationComplete stays false. DataIngestionCheck must
+    // still be skipped — events are already flowing, no need to poll.
+    const session = buildSession({});
+    const router = new WizardRouter(Flow.Wizard);
+
+    session.introConcluded = true;
+    session.region = 'us';
+    applyAuthComplete(session);
+    session.projectHasData = true;
+    session.activationLevel = 'full';
+    session.localInstrumentationComplete = false;
+    session.mcpComplete = true;
+
+    expect(router.resolve(session)).toBe(Screen.Slack);
+  });
 });
 
 // ── Overlay tests ────────────────────────────────────────────────────
@@ -513,8 +568,8 @@ describe('WizardRouter overlay behavior', () => {
     expect(router.resolve(session)).toBe(Screen.RegionSelect);
 
     // Push and pop overlay
-    router.pushOverlay(Overlay.SettingsOverride);
-    expect(router.resolve(session)).toBe(Overlay.SettingsOverride);
+    router.pushOverlay(Overlay.Outage);
+    expect(router.resolve(session)).toBe(Overlay.Outage);
 
     router.popOverlay();
     expect(router.resolve(session)).toBe(Screen.RegionSelect);
@@ -634,4 +689,266 @@ describe('WizardRouter error phase routing', () => {
       }
     },
   );
+});
+
+// ── Additional invariants beyond the original 22 ─────────────────────
+//
+// These cover scenarios that have actually broken in production reviews
+// of the router pipeline.
+
+describe('WizardRouter additional invariants', () => {
+  function freshSession(): WizardSession {
+    return buildSession({});
+  }
+
+  it('Intro is the only screen reachable from a totally fresh session', () => {
+    // Strong invariant: regardless of what flow we instantiate, a
+    // freshly-built session that has not concluded intro must land on
+    // either Intro (Wizard flow) or the flow's own first screen — never
+    // some random downstream screen due to a misconfigured isComplete.
+    const session = freshSession();
+    expect(session.introConcluded).toBe(false);
+    expect(session.credentials).toBeNull();
+
+    const wizardRouter = new WizardRouter(Flow.Wizard);
+    expect(wizardRouter.resolve(session)).toBe(Screen.Intro);
+
+    // Sub-flows skip Intro because their show predicates don't gate on it.
+    const mcpAdd = new WizardRouter(Flow.McpAdd);
+    expect(mcpAdd.resolve(session)).toBe(Screen.McpAdd);
+  });
+
+  it('cancel resolves to Outro from any flow position before introConcluded', () => {
+    // The router has a cancel fast-path. Verify it works even when the
+    // user cancels at the very first screen — common for users who launch
+    // the wizard accidentally.
+    const session = freshSession();
+    session.outroData = { kind: OutroKind.Cancel, message: 'Setup cancelled.' };
+    const router = new WizardRouter(Flow.Wizard);
+    expect(router.resolve(session)).toBe(Screen.Outro);
+  });
+
+  it('createProject.pending=true takes precedence over a fully-authenticated session', () => {
+    // Edge case: user finishes auth, then triggers /create-project. The
+    // router should switch to CreateProject even though Auth.isComplete
+    // is satisfied.
+    const session = freshSession();
+    session.introConcluded = true;
+    session.region = 'us';
+    applyAuthComplete(session);
+    session.createProject = {
+      pending: true,
+      source: 'slash',
+      suggestedName: null,
+    };
+    const router = new WizardRouter(Flow.Wizard);
+    expect(router.resolve(session)).toBe(Screen.CreateProject);
+  });
+
+  it('a force-region request re-shows RegionSelect even when region is already set', () => {
+    const session = freshSession();
+    session.introConcluded = true;
+    session.region = 'eu';
+    session.regionForced = true;
+    const router = new WizardRouter(Flow.Wizard);
+    expect(router.resolve(session)).toBe(Screen.RegionSelect);
+  });
+
+  it('returning users skip RegionSelect when zone is resolvable from disk', async () => {
+    // Regression: after `wizard login`, ~/.ampli.json has the stored
+    // user's zone but session.region stays null (it represents *this
+    // run's* user intent). tryResolveZone reads disk Tier 2/3, so the
+    // gate must use it — not session.region — to skip RegionSelect.
+    const { getStoredUser } = await import('../../../utils/ampli-settings.js');
+    vi.mocked(getStoredUser).mockReturnValueOnce({
+      id: 'user-123',
+      email: 'returning@example.com',
+      firstName: 'R',
+      lastName: 'U',
+      zone: 'eu',
+    });
+    const session = freshSession();
+    session.introConcluded = true;
+    // session.region stays null — disk zone alone is enough.
+    const router = new WizardRouter(Flow.Wizard);
+    expect(router.resolve(session)).not.toBe(Screen.RegionSelect);
+  });
+
+  it('full activation always lands on Mcp before Outro (no skipping post-run setup)', () => {
+    // Regression target: a previous version of the flow accidentally let
+    // full-activation users skip MCP entirely, depriving them of Claude
+    // Code integration.
+    const session = freshSession();
+    session.introConcluded = true;
+    session.region = 'us';
+    applyAuthComplete(session);
+    session.projectHasData = true;
+    session.activationLevel = 'full';
+    const router = new WizardRouter(Flow.Wizard);
+    expect(router.resolve(session)).toBe(Screen.Mcp);
+  });
+
+  it('partial activation routes to ActivationOptions before Run', () => {
+    // ActivationOptions is the only screen that exists for partial
+    // activation. Ensure it sits between DataSetup and Setup/Run.
+    const session = freshSession();
+    session.introConcluded = true;
+    session.region = 'us';
+    applyAuthComplete(session);
+    session.projectHasData = false;
+    session.activationLevel = 'partial';
+    const router = new WizardRouter(Flow.Wizard);
+    expect(router.resolve(session)).toBe(Screen.ActivationOptions);
+  });
+
+  it('Slack always follows DataIngestionCheck on the success path', () => {
+    // Ordering invariant: post-run is always Mcp → DataIngestionCheck →
+    // Slack → Outro. If any new screen ever sneaks between
+    // DataIngestionCheck and Slack we want the test suite to catch it.
+    const session = freshSession();
+    session.introConcluded = true;
+    session.region = 'us';
+    applyAuthComplete(session);
+    session.projectHasData = false;
+    session.activationLevel = 'none';
+    session.runPhase = RunPhase.Completed;
+    session.mcpComplete = true;
+    session.dataIngestionConfirmed = true;
+    const router = new WizardRouter(Flow.Wizard);
+    expect(router.resolve(session)).toBe(Screen.Slack);
+  });
+
+  it('isComplete is monotonically advancing on the canonical happy path', () => {
+    // Build the canonical happy path one mutation at a time and verify
+    // that the resolved screen index never decreases.
+    const session = freshSession();
+    const router = new WizardRouter(Flow.Wizard);
+    const flowOrder = FLOWS[Flow.Wizard].map((entry) => entry.screen);
+    const indexOf = (s: Screen): number => flowOrder.indexOf(s);
+
+    let lastIndex = -1;
+    const checkpoint = (): void => {
+      const screen = router.resolve(session) as Screen;
+      const idx = indexOf(screen);
+      // Every screen the resolver returns must exist in the flow.
+      expect(idx).toBeGreaterThanOrEqual(0);
+      // And the index must never go backward.
+      expect(idx).toBeGreaterThanOrEqual(lastIndex);
+      lastIndex = idx;
+    };
+
+    checkpoint(); // Intro
+    session.introConcluded = true;
+    checkpoint(); // RegionSelect
+    session.region = 'us';
+    checkpoint(); // Auth
+    applyAuthComplete(session);
+    checkpoint(); // DataSetup
+    session.projectHasData = false;
+    session.activationLevel = 'none';
+    checkpoint(); // Run
+    session.runPhase = RunPhase.Completed;
+    checkpoint(); // Mcp
+    session.mcpComplete = true;
+    checkpoint(); // DataIngestionCheck
+    session.dataIngestionConfirmed = true;
+    checkpoint(); // Slack
+    session.slackComplete = true;
+    checkpoint(); // Outro
+  });
+
+  it('property: any sequence of overlay push/pop ends in a deterministic top screen', () => {
+    // Push and pop a random sequence of overlays — the resolved screen
+    // should always equal either the topmost overlay or the underlying
+    // flow screen, with no ghosts left over.
+    fc.assert(
+      fc.property(
+        fc.array(
+          fc.tuple(
+            fc.constantFrom('push' as const, 'pop' as const),
+            fc.constantFrom(
+              Overlay.Outage,
+              Overlay.Snake,
+              Overlay.Mcp,
+              Overlay.Slack,
+              Overlay.Logout,
+              Overlay.Login,
+            ),
+          ),
+          { minLength: 0, maxLength: 30 },
+        ),
+        (ops) => {
+          const router = new WizardRouter(Flow.Wizard);
+          const stack: Overlay[] = [];
+
+          for (const [op, overlay] of ops) {
+            if (op === 'push') {
+              router.pushOverlay(overlay);
+              stack.push(overlay);
+            } else {
+              router.popOverlay();
+              stack.pop();
+            }
+          }
+
+          const resolved = router.resolve(buildSession({}));
+          if (stack.length > 0) {
+            expect(resolved).toBe(stack[stack.length - 1]);
+          } else {
+            // Empty stack — should land on the base flow's first screen.
+            expect(resolved).toBe(Screen.Intro);
+          }
+        },
+      ),
+      { numRuns: 200 },
+    );
+  });
+
+  it('property: setRegion always satisfies the RegionSelect.isComplete predicate', () => {
+    // The RegionSelect entry's isComplete predicate is the canonical
+    // gate. Calling setRegion must make it pass for every region value.
+    fc.assert(
+      fc.property(fc.constantFrom('us' as const, 'eu' as const), (region) => {
+        const session = buildSession({});
+        session.introConcluded = true;
+        session.region = region;
+        session.regionForced = false;
+        const router = new WizardRouter(Flow.Wizard);
+        expect(router.resolve(session)).not.toBe(Screen.RegionSelect);
+      }),
+      { numRuns: 50 },
+    );
+  });
+
+  it('Outro is always reachable — the wizard never wedges on a non-terminal screen', () => {
+    // Take 100 random sessions and check that adding outroData=Cancel
+    // always resolves to Outro, no matter what other state is set.
+    fc.assert(
+      fc.property(
+        fc.record({
+          introConcluded: fc.boolean(),
+          regionSet: fc.boolean(),
+          credsSet: fc.boolean(),
+          mcpComplete: fc.boolean(),
+          activation: fc.constantFrom(
+            'none' as const,
+            'partial' as const,
+            'full' as const,
+          ),
+        }),
+        (s) => {
+          const session = buildSession({});
+          session.introConcluded = s.introConcluded;
+          session.region = s.regionSet ? 'us' : null;
+          if (s.credsSet) applyAuthComplete(session);
+          session.mcpComplete = s.mcpComplete;
+          session.activationLevel = s.activation;
+          session.outroData = { kind: OutroKind.Cancel };
+          const router = new WizardRouter(Flow.Wizard);
+          expect(router.resolve(session)).toBe(Screen.Outro);
+        },
+      ),
+      { numRuns: 100 },
+    );
+  });
 });

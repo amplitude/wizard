@@ -1,15 +1,16 @@
 /* React Router wizard for Amplitude */
 import type { WizardOptions } from '../../utils/types';
 import type { FrameworkConfig } from '../../lib/framework-config';
-import { detectNodePackageManagers } from '../../lib/package-manager-detection';
+import { detectNodePackageManagersLight as detectNodePackageManagers } from '../../lib/package-manager-detection-light';
 import { Integration } from '../../lib/constants';
 import {
   getPackageVersion,
   hasPackageInstalled,
   type PackageDotJson,
 } from '../../utils/package-json';
-import { tryGetPackageJson } from '../../utils/setup-utils';
+import { tryGetPackageJson } from '../../utils/package-json-light';
 import { getUI } from '../../ui';
+import { BROWSER_UNIFIED_SDK_PROMPT_LINE } from '../_shared/browser-sdk-prompt';
 import {
   getReactRouterMode,
   getReactRouterModeName,
@@ -69,7 +70,10 @@ function getReactRouterVersionCheckInfo(packageJson: PackageDotJson): {
 export const REACT_ROUTER_AGENT_CONFIG: FrameworkConfig<ReactRouterContext> = {
   metadata: {
     name: 'React Router',
+    glyph: '🧭',
+    glyphColor: '#CA4245',
     integration: Integration.reactRouter,
+    targetsBrowser: true,
     docsUrl: 'https://amplitude.com/docs/sdks/analytics/browser/browser-sdk-2',
     unsupportedVersionDocsUrl:
       'https://amplitude.com/docs/sdks/analytics/browser/browser-sdk-2',
@@ -101,6 +105,23 @@ export const REACT_ROUTER_AGENT_CONFIG: FrameworkConfig<ReactRouterContext> = {
         return { routerMode };
       }
       return {};
+    },
+    getIntegrationSkillId: (context) => {
+      // Mirrors the frameworkIdMap in prompts.getAdditionalContextLines
+      switch (context.routerMode) {
+        case ReactRouterMode.V6:
+          return 'integration-react-react-router-6';
+        case ReactRouterMode.V7_FRAMEWORK:
+          return 'integration-react-react-router-7-framework';
+        case ReactRouterMode.V7_DATA:
+          return 'integration-react-react-router-7-data';
+        case ReactRouterMode.V7_DECLARATIVE:
+          return 'integration-react-react-router-7-declarative';
+        default:
+          // TanStack Router (no routerMode) and unresolved cases: leave to the
+          // agent's load_skill_menu fallback.
+          return null;
+      }
     },
   },
 
@@ -177,7 +198,8 @@ export const REACT_ROUTER_AGENT_CONFIG: FrameworkConfig<ReactRouterContext> = {
       return [
         `Router mode: ${modeName}`,
         `Framework docs ID: ${frameworkId} (use amplitude://docs/frameworks/${frameworkId} for documentation)`,
-        `Preferred Amplitude SDK: @amplitude/unified (prefer over @amplitude/analytics-browser for new browser integrations)`,
+        BROWSER_UNIFIED_SDK_PROMPT_LINE,
+        `Initialize from the project's main entry point (typically src/main.tsx, src/index.tsx, or root.tsx for React Router 7 framework mode) before <RouterProvider /> mounts so the SDK is available on the first render.`,
       ];
     },
   },

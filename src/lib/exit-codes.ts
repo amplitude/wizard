@@ -12,6 +12,33 @@ export const ExitCode = {
    * generic agent failures.
    */
   PROJECT_NAME_TAKEN: 11,
+  /**
+   * Agent-mode invocation needs a decision from the orchestrator (e.g. which
+   * environment / project to use) and `--auto-approve` was not set. The
+   * wizard emits a `needs_input` NDJSON event with `choices` + `resumeFlags`,
+   * then exits with this code so outer agents can surface the question to a
+   * human and re-invoke with the chosen flag.
+   */
+  INPUT_REQUIRED: 12,
+  /**
+   * The inner agent attempted to write or run a destructive operation but
+   * the current invocation didn't grant `allowWrites` / `allowDestructive`.
+   * The PreToolUse write-gate (see `mode-config.ts: evaluateWriteGate`)
+   * denies the tool call, the wizard surfaces the deny reason, and exits
+   * here so outer agents can re-invoke with `--yes` or `--force`.
+   */
+  WRITE_REFUSED: 13,
+  /**
+   * Internal wizard bug — an uncaught exception, assertion violation, or
+   * other unexpected error in the wizard's own code (NOT in the inner
+   * Claude agent's behaviour). Distinct from `AGENT_FAILED=10` (the
+   * agent run terminated with a real failure, e.g. permission denial,
+   * network blip, model overload) and `GENERAL_ERROR=1` (catch-all
+   * "something went wrong"). Orchestrators should treat 20 as a wizard
+   * defect worth filing a bug report for; 10 is usually
+   * environmental/recoverable.
+   */
+  INTERNAL_ERROR: 20,
   USER_CANCELLED: 130,
 } as const;
 

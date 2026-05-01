@@ -8,79 +8,39 @@
  */
 
 import {
-  detectAllPackageManagers,
-  type PackageManager,
-} from '../utils/package-manager';
-import {
   detectPackageManager as detectPythonPM,
   PythonPackageManager,
 } from '../frameworks/python/utils';
+import { detectNodePackageManagersLight } from './package-manager-detection-light';
+import type {
+  DetectedPackageManager,
+  PackageManagerInfo,
+} from './package-manager-detection-types';
 
 // ---------------------------------------------------------------------------
-// Common types
+// Common types — re-exported from the shared types module so the lightweight
+// detection helpers (`package-manager-detection-light.ts`) and full module
+// don't need to import from each other.
 // ---------------------------------------------------------------------------
 
-/** Structured package manager info the agent can act on */
-export interface DetectedPackageManager {
-  name: string;
-  label: string;
-  installCommand: string;
-  runCommand?: string;
-}
-
-/** Result returned by every detector */
-export interface PackageManagerInfo {
-  detected: DetectedPackageManager[];
-  primary: DetectedPackageManager | null;
-  recommendation: string;
-}
-
-/** Signature each framework implements */
-export type PackageManagerDetector = (
-  installDir: string,
-) => Promise<PackageManagerInfo>;
+export type {
+  DetectedPackageManager,
+  PackageManagerInfo,
+  PackageManagerDetector,
+} from './package-manager-detection-types';
 
 // ---------------------------------------------------------------------------
 // Node.js helper
+//
+// Delegates to the dependency-free `detectNodePackageManagersLight` so both
+// the heavy and light call sites stay in sync. Detection cold paths should
+// import the light version directly (see `src/lib/package-manager-detection-light.ts`).
 // ---------------------------------------------------------------------------
 
-function serializeNodePM(pm: PackageManager): DetectedPackageManager {
-  return {
-    name: pm.name,
-    label: pm.label,
-    installCommand: pm.installCommand,
-    runCommand: pm.runScriptCommand,
-  };
-}
-
-/**
- * Detect Node.js package managers via lockfiles.
- * Wraps the existing detectAllPackageManagers() from utils/package-manager.ts.
- */
 export function detectNodePackageManagers(
   installDir: string,
 ): Promise<PackageManagerInfo> {
-  const detected = detectAllPackageManagers({ installDir }).map(
-    serializeNodePM,
-  );
-
-  if (detected.length === 0) {
-    return Promise.resolve({
-      detected: [],
-      primary: null,
-      recommendation: 'No lockfile found. Default to npm (npm add, npm run).',
-    });
-  }
-
-  const primary = detected[0];
-  return Promise.resolve({
-    detected,
-    primary,
-    recommendation:
-      detected.length === 1
-        ? `Use ${primary.label} (${primary.installCommand}).`
-        : `Multiple package managers detected. Prefer ${primary.label} (${primary.installCommand}).`,
-  });
+  return detectNodePackageManagersLight(installDir);
 }
 
 // ---------------------------------------------------------------------------

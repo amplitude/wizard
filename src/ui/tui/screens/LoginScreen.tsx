@@ -8,11 +8,12 @@
  */
 
 import { Box, Text } from 'ink';
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import type { WizardStore } from '../store.js';
 import { Colors, Icons } from '../styles.js';
 import { BrailleSpinner } from '../components/BrailleSpinner.js';
-import type { AmplitudeZone } from '../../../lib/constants.js';
+import { DEFAULT_AMPLITUDE_ZONE } from '../../../lib/constants.js';
+import { resolveZone } from '../../../lib/zone-resolution.js';
 
 interface LoginScreenProps {
   store: WizardStore;
@@ -30,6 +31,35 @@ export const LoginScreen = ({ store, onComplete }: LoginScreenProps) => {
   const [phase, setPhase] = useState<Phase>(Phase.Refreshing);
   const [errorMsg, setErrorMsg] = useState<string | null>(null);
 
+  // Tracks the auto-dismiss timer so unmount clears it. Without this
+  // ref + cleanup, navigating away from the overlay (Esc back-nav,
+  // outer screen swap, ScreenErrorBoundary retry) leaves a dangling
+  // setTimeout that fires `onComplete` against an unmounted overlay
+  // 1.5–2.5s later — popping the wrong overlay and producing visible
+  // navigation glitches.
+  const dismissTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const mountedRef = useRef(true);
+
+  useEffect(() => {
+    return () => {
+      mountedRef.current = false;
+      if (dismissTimerRef.current !== null) {
+        clearTimeout(dismissTimerRef.current);
+        dismissTimerRef.current = null;
+      }
+    };
+  }, []);
+
+  /** Schedule onComplete; refuses to schedule on an unmounted screen. */
+  const scheduleDismiss = (ms: number): void => {
+    if (!mountedRef.current) return;
+    if (dismissTimerRef.current !== null) clearTimeout(dismissTimerRef.current);
+    dismissTimerRef.current = setTimeout(() => {
+      dismissTimerRef.current = null;
+      if (mountedRef.current) onComplete();
+    }, ms);
+  };
+
   useEffect(() => {
     void (async () => {
       try {
@@ -41,17 +71,26 @@ export const LoginScreen = ({ store, onComplete }: LoginScreenProps) => {
           import('../../../utils/oauth.js'),
         ]);
 
+        if (!mountedRef.current) return;
+
         const user = getStoredUser();
-        const zone = (store.session.region ?? 'us') as AmplitudeZone;
+        // readDisk: true — login runs before the RegionSelect gate; disk
+        // tiers are the authoritative source for intent here.
+        const zone = resolveZone(store.session, DEFAULT_AMPLITUDE_ZONE, {
+          readDisk: true,
+        });
         const stored = getStoredToken(user?.id, zone);
 
         if (!stored) {
+          if (!mountedRef.current) return;
           setPhase(Phase.NoToken);
-          setTimeout(onComplete, 2500);
+          scheduleDismiss(2500);
           return;
         }
 
         const result = await refreshAccessToken(stored.refreshToken, zone);
+
+        if (!mountedRef.current) return;
 
         // Persist updated tokens to ~/.ampli.json
         if (user) {
@@ -67,16 +106,24 @@ export const LoginScreen = ({ store, onComplete }: LoginScreenProps) => {
         store.updateAccessToken(result.accessToken);
 
         setPhase(Phase.Success);
-        setTimeout(onComplete, 1500);
+        scheduleDismiss(1500);
       } catch (err) {
-        // Clear the stale token so the next wizard run forces fresh browser auth
-        const { clearStoredCredentials } = await import(
-          '../../../utils/ampli-settings.js'
-        );
-        clearStoredCredentials();
+        // Bail BEFORE touching disk if the user already navigated away —
+        // otherwise an in-flight refresh that throws after unmount would
+        // wipe `~/.ampli.json` for an overlay the user can no longer see.
+        // (Pre-fix this could happen on Esc-back-nav, outer screen swap,
+        // ScreenErrorBoundary retry, or any slash command that pops the
+        // overlay before the network call resolves.)
+        if (!mountedRef.current) return;
+        // Do NOT call clearStoredCredentials() here. It writes `{}` to
+        // ~/.ampli.json, blowing away every user/zone entry — not just
+        // the one we were trying to refresh. A failed silent refresh is
+        // already handled gracefully on the next run by the AuthScreen
+        // (which falls back to fresh browser auth when the stored token
+        // is invalid). Surfacing the error to the user is enough.
         setErrorMsg(err instanceof Error ? err.message : 'Unknown error');
         setPhase(Phase.Error);
-        setTimeout(onComplete, 2500);
+        scheduleDismiss(2500);
       }
     })();
   }, []);

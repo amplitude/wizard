@@ -27,8 +27,54 @@ export class ScreenErrorBoundary extends Component<Props, State> {
     return { error };
   }
 
-  componentDidCatch(error: Error): void {
+  componentDidCatch(
+    error: Error,
+    errorInfo: { componentStack?: string | null },
+  ): void {
     this.props.store.setScreenError(error);
+
+    // Audit 6.1 — emit a redacted diagnostic snapshot so support can
+    // reproduce the boundary trigger. The original implementation also
+    // wrote the snapshot to stderr, but that corrupts Ink's live frame
+    // (Ink's diff-based redraw doesn't account for direct stderr writes
+    // — the JSON either gets painted over or interleaves into the error
+    // screen the user is supposed to be reading). The log file already
+    // captures the same payload at full fidelity for support to read,
+    // so we drop the stderr write entirely.
+    try {
+      const store = this.props.store;
+      void import('../utils/diagnostics.js')
+        .then(({ createDiagnosticSnapshot }) => {
+          const snapshot = createDiagnosticSnapshot(
+            store,
+            store.version || 'dev',
+          );
+          const payload = {
+            error: {
+              name: error.name,
+              message: error.message,
+              component_stack: errorInfo.componentStack ?? null,
+            },
+            snapshot,
+          };
+          void import('../../../utils/debug.js')
+            .then(({ logToFile }) => {
+              logToFile(
+                `[screen-error] ${error.name}: ${
+                  error.message
+                }\n${JSON.stringify(payload, null, 2)}`,
+              );
+            })
+            .catch(() => {
+              // non-fatal
+            });
+        })
+        .catch(() => {
+          // diagnostics import failure is non-fatal
+        });
+    } catch {
+      // Never let diagnostics bubble another error out of the boundary.
+    }
   }
 
   componentDidUpdate(prevProps: Props): void {

@@ -38,7 +38,7 @@ function mockCredentials(): WizardSession['credentials'] {
 
 function ensureIdentityNames(s: WizardSession): void {
   s.selectedOrgName = s.selectedOrgName ?? 'Test Org';
-  s.selectedWorkspaceName = s.selectedWorkspaceName ?? 'Default';
+  s.selectedProjectName = s.selectedProjectName ?? 'Default';
   s.selectedEnvName = s.selectedEnvName ?? 'Default';
 }
 
@@ -47,7 +47,14 @@ function ensureIdentityNames(s: WizardSession): void {
 Before(function () {
   tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ampli-wizard-flow-test-'));
   router = new WizardRouter(Flow.Wizard);
-  session = buildSession({});
+  // Pin installDir to a fresh temp dir so `tryResolveZone` doesn't pick
+  // up the wizard repo's own `ampli.json` (which carries `Zone: "us"`)
+  // when BDD runs from the repo root. Without this, the RegionSelect
+  // gate's `tryResolveZone(s) === null` predicate sees a non-null Tier
+  // 2 zone signal and silently skips the picker — breaking flow
+  // assertions that expect new / returning users to land on
+  // RegionSelect.
+  session = buildSession({ installDir: tempDir });
   // Expose via World so wizard-overlays.steps.ts can access the same instances
   (this as Record<string, unknown>).wizardRouter = router;
   (this as Record<string, unknown>).wizardSession = session;
@@ -179,6 +186,31 @@ When('the wizard launches', function () {
   // session.projectHasData remains null (not yet checked)
 });
 
+When('the wizard launches with {string}', function (flags: string) {
+  // Parse flags and apply them to the session
+  if (flags.includes('--signup')) {
+    session.signup = true;
+  }
+  if (flags.includes('--signup-email')) {
+    const match = flags.match(/--signup-email\s+(\S+)/);
+    if (match) {
+      session.signupEmail = match[1];
+    }
+  }
+  // Check if valid credentials are stored (same as above)
+  const sharedConfigPath = (this as Record<string, unknown>).tempConfigPath as
+    | string
+    | undefined;
+  if (sharedConfigPath) {
+    const { getStoredToken } = require('../../src/utils/ampli-settings.js');
+    const token = getStoredToken(undefined, 'us', sharedConfigPath);
+    if (token) {
+      session.credentials = mockCredentials();
+      ensureIdentityNames(session);
+    }
+  }
+});
+
 // ── Intro screen ───────────────────────────────────────────────────────────────
 
 Then('I should see the IntroScreen', function () {
@@ -189,6 +221,84 @@ Then('I should see the IntroScreen', function () {
 When('I continue past the intro', function () {
   session.introConcluded = true;
 });
+
+When('I pick "Change region" on the intro', function () {
+  // Mirror IntroScreen's "Change region" branch: setRegionForced then
+  // concludeIntro. setRegionForced clears credentials/org/workspace so
+  // the flow treats this as a hard re-auth.
+  const s = session;
+  s.regionForced = true;
+  s.credentials = null;
+  s.pendingOrgs = null;
+  s.pendingAuthIdToken = null;
+  s.pendingAuthAccessToken = null;
+  s.userEmail = null;
+  s.selectedOrgId = null;
+  s.selectedOrgName = null;
+  s.selectedWorkspaceId = null;
+  s.selectedWorkspaceName = null;
+  s.selectedEnvName = null;
+  s.selectedAppId = null;
+  s.projectHasData = null;
+  s.introConcluded = true;
+});
+
+// ── Signup flow (email capture + ToS) ─────────────────────────────────────────
+
+When('I enter my email address', function () {
+  session.signupEmail = 'test@example.com';
+  session.emailCaptureComplete = true;
+});
+
+When('I am on the ToSScreen', function () {
+  const screen = router.resolve(session);
+  assert.strictEqual(
+    screen,
+    Screen.ToS,
+    `Expected ToS screen but got ${screen}`,
+  );
+});
+
+When('I accept the Terms of Service', function () {
+  session.tosAccepted = true;
+});
+
+When('I decline the Terms of Service', function () {
+  session.tosAccepted = false;
+  session.outroData = {
+    kind: OutroKind.Cancel,
+    message: 'Terms of Service not accepted',
+  };
+});
+
+Then('I should be on the EmailCaptureScreen', function () {
+  const screen = router.resolve(session);
+  assert.strictEqual(
+    screen,
+    Screen.EmailCapture,
+    `Expected EmailCapture screen but got ${screen}`,
+  );
+});
+
+Then('I should be on the ToSScreen', function () {
+  const screen = router.resolve(session);
+  assert.strictEqual(
+    screen,
+    Screen.ToS,
+    `Expected ToS screen but got ${screen}`,
+  );
+});
+
+Then(
+  'the email field should be pre-filled with {string}',
+  function (email: string) {
+    assert.strictEqual(
+      session.signupEmail,
+      email,
+      `Expected email to be ${email} but got ${session.signupEmail}`,
+    );
+  },
+);
 
 // ── Then ──────────────────────────────────────────────────────────────────────
 

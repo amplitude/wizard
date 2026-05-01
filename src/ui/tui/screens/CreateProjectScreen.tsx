@@ -2,8 +2,7 @@
  * CreateProjectScreen — Inline "Create new project…" flow.
  *
  * Reached from AuthScreen when the user picks "Create new project…" from
- * either the workspace picker or the project picker, and via the
- * `/create-project` slash command.
+ * the project picker, and via the `/create-project` slash command.
  *
  * Flow:
  *   1. Prompt for a project name (TextInput)
@@ -34,7 +33,8 @@ import { useWizardStore } from '../hooks/useWizardStore.js';
 import { Colors, Icons } from '../styles.js';
 import { BrailleSpinner } from '../components/BrailleSpinner.js';
 import { TerminalLink } from '../primitives/index.js';
-import { OUTBOUND_URLS, type AmplitudeZone } from '../../../lib/constants.js';
+import { OUTBOUND_URLS } from '../../../lib/constants.js';
+import { useResolvedZone } from '../hooks/useResolvedZone.js';
 import { analytics } from '../../../utils/analytics.js';
 import {
   createAmplitudeApp,
@@ -44,6 +44,7 @@ import {
   ApiError,
 } from '../../../lib/api.js';
 import { getHostFromRegion } from '../../../utils/urls.js';
+import { toCredentialAppId } from '../../../lib/wizard-session.js';
 
 interface CreateProjectScreenProps {
   store: WizardStore;
@@ -66,11 +67,7 @@ export const CreateProjectScreen = ({ store }: CreateProjectScreenProps) => {
   useWizardStore(store);
 
   const { session } = store;
-  // Normalize to a known zone — matches bin.ts's create-project path so an
-  // unexpected value defaults safely to 'us' instead of flowing into the
-  // proxy URL lookup as a cast string.
-  const zone: AmplitudeZone =
-    (session.region ?? session.pendingAuthCloudRegion) === 'eu' ? 'eu' : 'us';
+  const zone = useResolvedZone(session);
   const orgId = session.selectedOrgId;
   const orgName = session.selectedOrgName;
   // /create-project can fire mid-SUSI (pending* tokens set, credentials
@@ -135,7 +132,7 @@ export const CreateProjectScreen = ({ store }: CreateProjectScreenProps) => {
         name,
         code: 'INVALID_REQUEST',
         message:
-          'No organization selected. Cancel and pick an organization first.',
+          "We couldn't carry your organization through to project creation. Press Esc and pick the organization again. (If this keeps happening, run with `--debug` and report it.)",
       });
       return;
     }
@@ -181,11 +178,11 @@ export const CreateProjectScreen = ({ store }: CreateProjectScreenProps) => {
       }
 
       store.setSelectedEnvName(result.name);
-      // Dash creates a same-named taxonomy workspace alongside the new app.
-      // Setting the workspace name satisfies Auth.isComplete so the router
-      // can advance past Auth; the real workspace id will appear on the
+      // Dash creates a same-named taxonomy project alongside the new app.
+      // Setting the project name satisfies Auth.isComplete so the router
+      // can advance past Auth; the real project id will appear on the
       // next fetchAmplitudeUser refresh.
-      store.restoreSessionIds({ workspaceName: result.name });
+      store.restoreSessionIds({ projectName: result.name });
       store.setCredentials({
         accessToken:
           session.pendingAuthAccessToken ??
@@ -194,10 +191,10 @@ export const CreateProjectScreen = ({ store }: CreateProjectScreenProps) => {
         idToken,
         projectApiKey: result.apiKey,
         host: getHostFromRegion(zone),
-        // The proxy returns `appId` as a string; credentials.appId is
-        // numeric. Attempt a coercion — fall back to 0 if the backend ever
-        // returns a non-numeric id.
-        appId: Number.parseInt(result.appId, 10) || 0,
+        // The proxy returns `appId` as a string; credentials.appId is the
+        // branded `AppId | 0` shape. `toCredentialAppId` validates and
+        // brands the value, falling back to `0` for non-numeric input.
+        appId: toCredentialAppId(result.appId),
       });
       store.setProjectHasData(false);
       store.setApiKeyNotice(null);
@@ -344,12 +341,31 @@ export const CreateProjectScreen = ({ store }: CreateProjectScreenProps) => {
           {phase.code === 'FORBIDDEN' && (
             <Box flexDirection="column">
               <Text color={Colors.body}>
-                You don't have permission to create projects in this org. Ask an
-                admin, or pick a different org with "Start over".
+                You don't have permission to create a project
+                {orgName ? (
+                  <>
+                    {' '}
+                    in <Text bold>{orgName}</Text>
+                  </>
+                ) : (
+                  ' in this org'
+                )}
+                . Ask an admin to create one for you, or open Amplitude in your
+                browser and create it yourself.
               </Text>
               <Box marginTop={1}>
-                <Text color={Colors.muted}>Press Esc to go back.</Text>
+                <TerminalLink
+                  url={OUTBOUND_URLS.projectsSettings(zone, orgId ?? undefined)}
+                >
+                  Open Amplitude (so an admin can create the project)
+                </TerminalLink>
               </Box>
+              <Box marginTop={1}>
+                <Text color={Colors.muted}>
+                  Press O to open Amplitude, Esc to go back to the picker.
+                </Text>
+              </Box>
+              <FallbackKeyHandler onOpen={handleOpenFallback} />
             </Box>
           )}
           {phase.code === 'INTERNAL' && (

@@ -14,14 +14,17 @@ import { useState, useEffect, useRef } from 'react';
 import type { WizardStore } from '../store.js';
 import { SlackOutcome } from '../store.js';
 import { useWizardStore } from '../hooks/useWizardStore.js';
+import { useEscapeBack } from '../hooks/useEscapeBack.js';
 import { ConfirmationInput, TerminalLink } from '../primitives/index.js';
 import { Colors, Icons } from '../styles.js';
 import {
   fetchSlackInstallUrl,
   fetchSlackConnectionStatus,
 } from '../../../lib/api.js';
-import { OUTBOUND_URLS, type AmplitudeZone } from '../../../lib/constants.js';
+import { OUTBOUND_URLS } from '../../../lib/constants.js';
+import { useResolvedZone } from '../hooks/useResolvedZone.js';
 import { logToFile } from '../../../utils/debug.js';
+import { wizardSuccessExit } from '../../../utils/wizard-abort.js';
 import opn from 'opn';
 
 interface SlackScreenProps {
@@ -36,6 +39,8 @@ enum Phase {
   Prompt = 'prompt',
   Opening = 'opening',
   Waiting = 'waiting',
+  Verifying = 'verifying',
+  NotConnected = 'notConnected',
   Done = 'done',
 }
 
@@ -50,7 +55,10 @@ const markDone = (
   } else {
     store.setSlackComplete(outcome);
     if (standalone) {
-      process.exit(0);
+      // Standalone /slack slash-command run — flush analytics
+      // (the just-fired 'Slack Setup Complete' event) before the
+      // process exits.
+      void wizardSuccessExit(0);
     }
   }
 };
@@ -65,6 +73,13 @@ export const SlackScreen = ({
   const [phase, setPhase] = useState<Phase>(Phase.Prompt);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
+  // Esc steps back to the previous step. Disabled in the standalone /slack
+  // overlay (no flow to back into) and during the brief auto-complete
+  // window when we detect Slack is already wired up.
+  useEscapeBack(store, {
+    enabled: !standalone && onComplete === undefined && phase === Phase.Prompt,
+  });
+
   // Clear any pending timer on unmount
   useEffect(() => {
     return () => {
@@ -72,7 +87,7 @@ export const SlackScreen = ({
     };
   }, []);
 
-  const region = store.session.region ?? 'us';
+  const region = useResolvedZone(store.session);
   const isEu = region === 'eu';
   const appName = isEu ? 'Amplitude - EU' : 'Amplitude';
 
@@ -92,22 +107,25 @@ export const SlackScreen = ({
     // The App API uses access_token, not id_token.
     const accessToken = credentials?.accessToken;
     if (accessToken && orgId) {
-      void fetchSlackConnectionStatus(
-        accessToken,
-        region as AmplitudeZone,
-        orgId,
-      ).then((isConnected) => {
-        if (cancelled) return;
-        logToFile(`[SlackScreen] slackConnectionStatus=${isConnected}`);
-        if (isConnected) {
-          setPhase(Phase.Done);
-          timerRef.current = setTimeout(() => {
-            if (!cancelled) {
-              markDone(store, SlackOutcome.Configured, standalone, onComplete);
-            }
-          }, 1500);
-        }
-      });
+      void fetchSlackConnectionStatus(accessToken, region, orgId).then(
+        (isConnected) => {
+          if (cancelled) return;
+          logToFile(`[SlackScreen] slackConnectionStatus=${isConnected}`);
+          if (isConnected) {
+            setPhase(Phase.Done);
+            timerRef.current = setTimeout(() => {
+              if (!cancelled) {
+                markDone(
+                  store,
+                  SlackOutcome.Configured,
+                  standalone,
+                  onComplete,
+                );
+              }
+            }, 1500);
+          }
+        },
+      );
     }
 
     return () => {
@@ -115,10 +133,8 @@ export const SlackScreen = ({
     };
   }, []);
 
-  const zone = (region ?? 'us') as AmplitudeZone;
-
   const settingsUrl = OUTBOUND_URLS.slackSettings(
-    zone,
+    region,
     store.session.selectedOrgId,
   );
 
@@ -145,7 +161,7 @@ export const SlackScreen = ({
     };
 
     if (accessToken && orgId) {
-      void fetchSlackInstallUrl(accessToken, zone, orgId, settingsUrl).then(
+      void fetchSlackInstallUrl(accessToken, region, orgId, settingsUrl).then(
         (directUrl) => open(directUrl ?? settingsUrl),
       );
     } else {
@@ -158,11 +174,52 @@ export const SlackScreen = ({
   };
 
   const handleDone = () => {
-    setPhase(Phase.Done);
-    timerRef.current = setTimeout(
-      () => markDone(store, SlackOutcome.Configured, standalone, onComplete),
-      1500,
+    // Don't trust the user's "yes" — re-verify against the App API. The
+    // OAuth handshake can silently fail (closed tab, denied consent, popup
+    // blocker) and we'd otherwise celebrate a connection that doesn't
+    // exist.
+    const credentials = store.session.credentials;
+    const orgId = store.session.selectedOrgId;
+    const accessToken = credentials?.accessToken;
+
+    if (!accessToken || !orgId) {
+      // No way to verify — fall back to trusting the user. This matches
+      // the pre-existing behavior for unauthenticated/standalone runs.
+      setPhase(Phase.Done);
+      timerRef.current = setTimeout(
+        () => markDone(store, SlackOutcome.Configured, standalone, onComplete),
+        1500,
+      );
+      return;
+    }
+
+    setPhase(Phase.Verifying);
+    void fetchSlackConnectionStatus(accessToken, region, orgId).then(
+      (isConnected) => {
+        logToFile(
+          `[SlackScreen] post-confirm slackConnectionStatus=${isConnected}`,
+        );
+        if (isConnected) {
+          setPhase(Phase.Done);
+          timerRef.current = setTimeout(
+            () =>
+              markDone(store, SlackOutcome.Configured, standalone, onComplete),
+            1500,
+          );
+        } else {
+          // Either confirmed false or status fetch errored — both mean we
+          // can't celebrate yet. Tell the user honestly and let them retry
+          // or skip.
+          setPhase(Phase.NotConnected);
+        }
+      },
     );
+  };
+
+  const handleRetry = () => {
+    // User wants another shot — re-open the auth URL and go back to
+    // Waiting so they can confirm again.
+    handleConnect();
   };
 
   return (
@@ -244,6 +301,32 @@ export const SlackScreen = ({
                 confirmLabel="Yes, connected"
                 cancelLabel="Skip for now"
                 onConfirm={handleDone}
+                onCancel={handleSkip}
+              />
+            </Box>
+          </Box>
+        )}
+
+        {phase === Phase.Verifying && (
+          <Box marginTop={1}>
+            <Text color={Colors.active}>
+              Checking your Slack connection{Icons.ellipsis}
+            </Text>
+          </Box>
+        )}
+
+        {phase === Phase.NotConnected && (
+          <Box flexDirection="column" marginTop={1}>
+            <Text color={Colors.warning}>
+              We don&apos;t see the Slack connection yet. Make sure you finished
+              authorizing the {appName} app in your browser.
+            </Text>
+            <Box marginTop={1}>
+              <ConfirmationInput
+                message="Try again?"
+                confirmLabel="Retry"
+                cancelLabel="Skip anyway"
+                onConfirm={handleRetry}
                 onCancel={handleSkip}
               />
             </Box>

@@ -2,8 +2,9 @@
  * Types and logic for the project-level ~/.ampli.json configuration file.
  *
  * The ampli CLI reads and writes this file (named "ampli.json") in the project
- * directory to track which Amplitude workspace, source, and branch a project is
- * connected to. The wizard creates or updates this file during setup.
+ * directory to track which Amplitude project (formerly "workspace"), source,
+ * and branch a project is connected to. The wizard creates or updates this
+ * file during setup.
  *
  * Types are modelled after the ampli CLI's Settings class
  * (ampli/src/settings/index.ts) and are intentionally kept compatible.
@@ -32,7 +33,9 @@ export const AMPLI_CONFIG_FILENAME = 'ampli.json';
 export interface AmpliConfig {
   /** UUID of the Amplitude organization */
   OrgId?: string;
-  /** UUID of the Amplitude workspace */
+  /** UUID of the Amplitude project (formerly "workspace") */
+  ProjectId?: string;
+  /** @deprecated use ProjectId — kept for read-time back-compat migration */
   WorkspaceId?: string;
   /** UUID of the data source (tracking plan source) */
   SourceId?: string;
@@ -60,6 +63,24 @@ export interface AmpliConfig {
   SourceDirs?: string[];
   /** Named Amplitude SDK instances to generate */
   InstanceNames?: string[];
+  /**
+   * Numeric Amplitude app id (a.k.a. "Project ID" in the Amplitude UI).
+   * Stored as a string for forward compat with non-numeric ids and
+   * because JSON has no integer-vs-string distinction at this scale.
+   * Persisted by the wizard at the end of a successful run so a follow-up
+   * agent session can read it back without re-running env selection —
+   * the source of truth for "which Amplitude app does this codebase
+   * write events into."
+   */
+  AppId?: string;
+  /** Display name for `AppId`. Diagnostic only — `AppId` is the join key. */
+  AppName?: string;
+  /** Amplitude environment label that `AppId` resolved against (Production/Dev/etc). */
+  EnvName?: string;
+  /** Last dashboard URL the wizard created during this codebase's setup. */
+  DashboardUrl?: string;
+  /** Convenience id parsed from `DashboardUrl`. */
+  DashboardId?: string;
 }
 
 export type AmpliConfigParseResult =
@@ -71,6 +92,10 @@ export type AmpliConfigParseResult =
 const AmpliConfigSchema = z
   .object({
     OrgId: z.string().optional(),
+    ProjectId: z.string().optional(),
+    // Kept readable for back-compat with ampli.json files written before the
+    // workspace → project rename. parseAmpliConfig migrates it to ProjectId
+    // at the read boundary; everything downstream only sees ProjectId.
     WorkspaceId: z.string().optional(),
     SourceId: z.string().optional(),
     Branch: z.string().optional(),
@@ -85,12 +110,24 @@ const AmpliConfigSchema = z
     OmitApiKeys: z.boolean().optional(),
     SourceDirs: z.array(z.string()).optional(),
     InstanceNames: z.array(z.string()).optional(),
+    AppId: z.string().optional(),
+    AppName: z.string().optional(),
+    EnvName: z.string().optional(),
+    DashboardUrl: z.string().optional(),
+    DashboardId: z.string().optional(),
   })
   .passthrough();
 
 /**
  * Parse a raw JSON string into an AmpliConfig.
  * Returns a typed result rather than throwing.
+ *
+ * Read-time migration: if a legacy `WorkspaceId` field is present and the new
+ * `ProjectId` is absent, the value is copied to `ProjectId` and `WorkspaceId`
+ * is dropped from the returned object. When both are present, `ProjectId`
+ * wins. This keeps the rest of the codebase unaware of the legacy key;
+ * `writeAmpliConfig` only ever emits `ProjectId`, so files auto-migrate on
+ * the user's next save.
  */
 export function parseAmpliConfig(raw: string): AmpliConfigParseResult {
   if (hasMergeConflicts(raw)) {
@@ -101,7 +138,12 @@ export function parseAmpliConfig(raw: string): AmpliConfigParseResult {
     if (!result.success) {
       return { ok: false, error: 'invalid_json' };
     }
-    return { ok: true, config: result.data as AmpliConfig };
+    const config = { ...result.data } as AmpliConfig;
+    if (config.WorkspaceId && !config.ProjectId) {
+      config.ProjectId = config.WorkspaceId;
+    }
+    delete config.WorkspaceId;
+    return { ok: true, config };
   } catch {
     return { ok: false, error: 'invalid_json' };
   }
@@ -117,10 +159,10 @@ export function isMinimallyConfigured(config: AmpliConfig): boolean {
 
 /**
  * Returns true when the config is considered fully configured: it has an org,
- * a workspace, and a source linked.
+ * a project, and a source linked.
  */
 export function isConfigured(config: AmpliConfig): boolean {
-  return Boolean(config.OrgId && config.WorkspaceId && config.SourceId);
+  return Boolean(config.OrgId && config.ProjectId && config.SourceId);
 }
 
 /**
@@ -201,18 +243,34 @@ export function writeAmpliConfig(dir: string, config: AmpliConfig): void {
 }
 
 /**
- * Remove org/workspace/zone bindings from a project's ampli.json. Called on
+ * Remove org/project/zone bindings from a project's ampli.json. Called on
  * logout so a subsequent login doesn't auto-select the previous user's org
- * and workspace. Tracking-plan fields (SourceId, Branch, Version, etc.) are
+ * and project. Tracking-plan fields (SourceId, Branch, Version, etc.) are
  * preserved — they're not auth state. No-op if ampli.json is missing or
  * malformed.
+ *
+ * Also deletes the legacy `WorkspaceId` field as a belt-and-suspenders
+ * cleanup — parseAmpliConfig normalizes it away, but if the raw file still
+ * carries it (e.g. someone edited it by hand), we strip it here too.
  */
 export function clearAuthFieldsInAmpliConfig(dir: string): void {
   const result = readAmpliConfig(dir);
   if (!result.ok) return;
   const next: AmpliConfig = { ...result.config };
   delete next.OrgId;
+  delete next.ProjectId;
   delete next.WorkspaceId;
   delete next.Zone;
+  // The setup_complete fields below are also auth-scoped — they bind
+  // the project to a specific Amplitude app/env that only exists in
+  // the previously authenticated org. On logout, drop them so the
+  // next sign-in starts from a clean scope. Tracking-plan fields
+  // (SourceId, Branch, Version) survive — they belong to the project,
+  // not the user.
+  delete next.AppId;
+  delete next.AppName;
+  delete next.EnvName;
+  delete next.DashboardUrl;
+  delete next.DashboardId;
   writeAmpliConfig(dir, next);
 }

@@ -27,12 +27,12 @@ let session: WizardSession;
 const MOCK_ORG = {
   id: 'org-1',
   name: 'Acme',
-  workspaces: [{ id: 'ws-1', name: 'Default' }],
+  projects: [{ id: 'ws-1', name: 'Default' }],
 };
 const MOCK_ORG_MULTI_WS = {
   id: 'org-1',
   name: 'Acme',
-  workspaces: [
+  projects: [
     { id: 'ws-1', name: 'Default' },
     { id: 'ws-2', name: 'Staging' },
   ],
@@ -40,7 +40,7 @@ const MOCK_ORG_MULTI_WS = {
 const MOCK_ORG_2 = {
   id: 'org-2',
   name: 'Beta Corp',
-  workspaces: [{ id: 'ws-3', name: 'Main' }],
+  projects: [{ id: 'ws-3', name: 'Main' }],
 };
 
 // ── Lifecycle ─────────────────────────────────────────────────────────────────
@@ -54,7 +54,6 @@ Before(function () {
   session.region = 'us';
   // Simulate OAuth completing — pendingAuthIdToken set
   session.pendingAuthIdToken = 'id-token-abc';
-  session.pendingAuthCloudRegion = 'us';
 });
 
 After(function () {
@@ -63,15 +62,12 @@ After(function () {
 
 // ── Given ─────────────────────────────────────────────────────────────────────
 
-Given(
-  'the OAuth flow has completed with one org and one workspace',
-  function () {
-    session.pendingOrgs = [MOCK_ORG];
-  },
-);
+Given('the OAuth flow has completed with one org and one project', function () {
+  session.pendingOrgs = [MOCK_ORG];
+});
 
 Given(
-  'the OAuth flow has completed with one org and multiple workspaces',
+  'the OAuth flow has completed with one org and multiple projects',
   function () {
     session.pendingOrgs = [MOCK_ORG_MULTI_WS];
   },
@@ -86,13 +82,13 @@ Given('the OAuth flow has completed', function () {
 });
 
 Given(
-  'the OAuth flow has completed and org and workspace are selected',
+  'the OAuth flow has completed and org and project are selected',
   function () {
     session.pendingOrgs = [MOCK_ORG];
     session.selectedOrgId = MOCK_ORG.id;
     session.selectedOrgName = MOCK_ORG.name;
-    session.selectedWorkspaceId = MOCK_ORG.workspaces[0].id;
-    session.selectedWorkspaceName = MOCK_ORG.workspaces[0].name;
+    session.selectedProjectId = MOCK_ORG.projects[0].id;
+    session.selectedProjectName = MOCK_ORG.projects[0].name;
   },
 );
 
@@ -125,14 +121,14 @@ Given('the login URL is set in the session', function () {
 
 // ── When ──────────────────────────────────────────────────────────────────────
 
-When('the org and workspace are selected', function () {
+When('the org and project are selected', function () {
   session.selectedOrgId = MOCK_ORG.id;
   session.selectedOrgName = MOCK_ORG.name;
-  session.selectedWorkspaceId = MOCK_ORG.workspaces[0].id;
-  session.selectedWorkspaceName = MOCK_ORG.workspaces[0].name;
+  session.selectedProjectId = MOCK_ORG.projects[0].id;
+  session.selectedProjectName = MOCK_ORG.projects[0].name;
   writeAmpliConfig(projectDir, {
     OrgId: MOCK_ORG.id,
-    WorkspaceId: MOCK_ORG.workspaces[0].id,
+    ProjectId: MOCK_ORG.projects[0].id,
     Zone: 'us',
   });
 });
@@ -140,22 +136,22 @@ When('the org and workspace are selected', function () {
 When('I select an org', function () {
   session.selectedOrgId = MOCK_ORG.id;
   session.selectedOrgName = MOCK_ORG.name;
-  session.selectedWorkspaceId = MOCK_ORG.workspaces[0].id;
-  session.selectedWorkspaceName = MOCK_ORG.workspaces[0].name;
+  session.selectedProjectId = MOCK_ORG.projects[0].id;
+  session.selectedProjectName = MOCK_ORG.projects[0].name;
 });
 
-When('I select a workspace', function () {
-  session.selectedWorkspaceId = MOCK_ORG_MULTI_WS.workspaces[0].id;
-  session.selectedWorkspaceName = MOCK_ORG_MULTI_WS.workspaces[0].name;
+When('I select a project', function () {
+  session.selectedProjectId = MOCK_ORG_MULTI_WS.projects[0].id;
+  session.selectedProjectName = MOCK_ORG_MULTI_WS.projects[0].name;
 });
 
 When('I enter a valid Amplitude API key', function () {
   const key = 'my-amplitude-api-key-12345';
   session.selectedOrgName = session.selectedOrgName ?? MOCK_ORG.name;
-  session.selectedWorkspaceName =
-    session.selectedWorkspaceName ?? MOCK_ORG.workspaces[0].name;
+  session.selectedProjectName =
+    session.selectedProjectName ?? MOCK_ORG.projects[0].name;
   session.selectedEnvName =
-    session.selectedEnvName ?? MOCK_ORG.workspaces[0].name;
+    session.selectedEnvName ?? MOCK_ORG.projects[0].name;
   session.credentials = {
     accessToken: session.pendingAuthIdToken ?? '',
     projectApiKey: key,
@@ -179,15 +175,15 @@ Then('the org should be auto-selected', function () {
   );
 });
 
-Then('the workspace should be auto-selected', function () {
+Then('the project should be auto-selected', function () {
   assert.ok(
-    session.pendingOrgs?.[0]?.workspaces.length === 1,
-    'Expected exactly one workspace (auto-selectable)',
+    session.pendingOrgs?.[0]?.projects.length === 1,
+    'Expected exactly one project (auto-selectable)',
   );
 });
 
 Then('I should be prompted to enter my Amplitude API key', function () {
-  // Once org+workspace are selected (auto), credentials should still be null
+  // Once org+project are selected (auto), credentials should still be null
   // — the API key input step should follow.
   assert.strictEqual(
     session.credentials,
@@ -214,11 +210,11 @@ Then('that org should be stored in my session', function () {
   assert.ok(session.selectedOrgId, 'Expected selectedOrgId to be set');
 });
 
-Then('I should see a workspace picker', function () {
+Then('I should see a project picker', function () {
   assert.ok(
-    session.pendingOrgs?.[0]?.workspaces.length !== undefined &&
-      session.pendingOrgs[0].workspaces.length > 1,
-    'Expected multiple workspaces for picker to appear',
+    session.pendingOrgs?.[0]?.projects.length !== undefined &&
+      session.pendingOrgs[0].projects.length > 1,
+    'Expected multiple projects for picker to appear',
   );
   const screen = router.resolve(session);
   assert.strictEqual(
@@ -228,15 +224,12 @@ Then('I should see a workspace picker', function () {
   );
 });
 
-Then('that workspace should be stored in my session', function () {
-  assert.ok(
-    session.selectedWorkspaceId,
-    'Expected selectedWorkspaceId to be set',
-  );
+Then('that project should be stored in my session', function () {
+  assert.ok(session.selectedProjectId, 'Expected selectedProjectId to be set');
 });
 
 Then(
-  '"ampli.json" should be written with OrgId, WorkspaceId, and Zone',
+  '"ampli.json" should be written with OrgId, ProjectId, and Zone',
   function () {
     const result = readAmpliConfig(projectDir);
     assert.ok(
@@ -247,10 +240,7 @@ Then(
     );
     if (result.ok) {
       assert.ok(result.config.OrgId, 'Expected OrgId in ampli.json');
-      assert.ok(
-        result.config.WorkspaceId,
-        'Expected WorkspaceId in ampli.json',
-      );
+      assert.ok(result.config.ProjectId, 'Expected ProjectId in ampli.json');
       assert.ok(result.config.Zone, 'Expected Zone in ampli.json');
     }
   },
@@ -284,10 +274,10 @@ Then('I should proceed automatically with the saved key', function () {
   const result = readApiKeyWithSource(projectDir);
   assert.ok(result, 'Expected saved key');
   session.selectedOrgName = session.selectedOrgName ?? MOCK_ORG.name;
-  session.selectedWorkspaceName =
-    session.selectedWorkspaceName ?? MOCK_ORG.workspaces[0].name;
+  session.selectedProjectName =
+    session.selectedProjectName ?? MOCK_ORG.projects[0].name;
   session.selectedEnvName =
-    session.selectedEnvName ?? MOCK_ORG.workspaces[0].name;
+    session.selectedEnvName ?? MOCK_ORG.projects[0].name;
   session.credentials = {
     accessToken: session.pendingAuthIdToken ?? '',
     projectApiKey: result.key,

@@ -4,7 +4,11 @@
 
 // Kept in sync by release-please (x-release-please-version marker).
 // The prebuild script (sync-version.mjs) acts as a safety net.
-const VERSION = '1.4.0'; // x-release-please-version
+const VERSION = '1.13.3'; // x-release-please-version
+
+/** Public alias for the wizard version. Same value as the internal `VERSION`
+ * but exported for consumers (e.g. the bug-report module). */
+export const WIZARD_VERSION = VERSION;
 
 // ── Integration / CLI ───────────────────────────────────────────────
 
@@ -57,18 +61,36 @@ export const CLAUDE_PLUGIN_MARKETPLACE_NAME = 'amplitude';
 export const CLAUDE_PLUGIN_MARKETPLACE_REPO = 'amplitude/mcp-marketplace';
 export const CLAUDE_PLUGIN_ID = 'amplitude';
 
+/**
+ * Shared between yargs `coerce` and `CliArgsSchema` — a mismatch would let
+ * yargs accept a value zod rejects, silently nulling `signupEmail` via the
+ * `parsed.success` fallback. Format-only; provisioning is authoritative.
+ */
+export const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+
 // ── URLs ─────────────────────────────────────────────────────────────
 
-export const DEFAULT_URL = IS_DEV
-  ? 'http://localhost:8010'
-  : 'https://amplitude.com';
-export const DEFAULT_HOST_URL = IS_DEV
-  ? 'http://localhost:8010'
-  : 'https://api2.amplitude.com';
+export const DEFAULT_URL = 'https://amplitude.com';
+export const TERMS_OF_SERVICE_URL = 'https://amplitude.com/terms';
+export const PRIVACY_POLICY_URL = 'https://amplitude.com/privacy';
+/**
+ * Default Amplitude data ingestion host used when region resolution isn't
+ * available (e.g. CI mode without OAuth, --api-key path). Always points at
+ * a real prod ingestion endpoint so dev contributors don't leak
+ * `localhost:8010` into a user's `.env.local` or setup report. Override
+ * via `AMPLITUDE_WIZARD_INGESTION_HOST` for local proxying — empty or
+ * whitespace-only values are ignored to keep us in lockstep with
+ * `getHostFromRegion()`.
+ */
+const ingestionHostOverride =
+  process.env.AMPLITUDE_WIZARD_INGESTION_HOST?.trim();
+export const DEFAULT_HOST_URL =
+  ingestionHostOverride || 'https://api2.amplitude.com';
 
 // ── Analytics (internal) ──────────────────────────────────────────────
 
-// TODO: Replace with Amplitude analytics keys
+// OSS builds do not ship internal telemetry credentials. Private release flows
+// can inject real values at build time.
 export const ANALYTICS_AMPLITUDE_PUBLIC_PROJECT_WRITE_KEY = '';
 export const ANALYTICS_HOST_URL = '';
 export const ANALYTICS_TEAM_TAG = 'amplitude-wizard';
@@ -83,7 +105,9 @@ export const AMPLITUDE_ZONE_SETTINGS = {
     oAuthHost: process.env.OAUTH_HOST ?? 'https://auth.amplitude.com',
     oAuthClientId:
       process.env.OAUTH_CLIENT_ID ?? '0ac84169-c41c-4222-885b-31469c761cb0',
-    dataApiUrl: 'https://data-api.amplitude.com/graphql',
+    dataApiUrl:
+      process.env.AMPLITUDE_WIZARD_DATA_API_URL ??
+      'https://data-api.amplitude.com/graphql',
     /** App API GraphQL endpoint — org-scoped. Append the numeric orgId. */
     appApiUrlBase: 'https://core.amplitude.com/t/graphql/org/',
     webUrl: 'https://data.amplitude.com',
@@ -92,6 +116,9 @@ export const AMPLITUDE_ZONE_SETTINGS = {
     oAuthHost: 'https://auth.eu.amplitude.com',
     oAuthClientId:
       process.env.OAUTH_CLIENT_ID ?? '110d04a1-8e60-4157-9c43-fcbe4e014a85',
+    // AMPLITUDE_WIZARD_DATA_API_URL is US-only by design — matches the
+    // OAUTH_HOST override pattern. EU developers mocking the API locally
+    // should run tests against the `us` zone.
     dataApiUrl: 'https://data-api.eu.amplitude.com/graphql',
     /** App API GraphQL endpoint — org-scoped. Append the numeric orgId. */
     appApiUrlBase: 'https://core.eu.amplitude.com/t/graphql/org/',

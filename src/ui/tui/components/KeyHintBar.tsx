@@ -39,8 +39,8 @@ export const KeyHintBar = ({
 
   return (
     <Box width={width} paddingX={1} gap={2}>
-      {allHints.map((hint) => (
-        <Box key={hint.key + hint.label}>
+      {allHints.map((hint, index) => (
+        <Box key={`${index}:${hint.key}:${hint.label}`}>
           <Text color={Colors.muted}>[</Text>
           <Text color={Colors.body} bold>
             {hint.key}

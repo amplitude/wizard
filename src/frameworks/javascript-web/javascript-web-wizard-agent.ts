@@ -5,7 +5,7 @@ import { Integration } from '../../lib/constants';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { hasPackageInstalled } from '../../utils/package-json';
-import { tryGetPackageJson } from '../../utils/setup-utils';
+import { tryGetPackageJson } from '../../utils/package-json-light';
 import {
   FRAMEWORK_PACKAGES,
   detectJsPackageManager,
@@ -13,21 +13,25 @@ import {
   hasIndexHtml,
   type JavaScriptContext,
 } from './utils';
-import { detectNodePackageManagers } from '../../lib/package-manager-detection';
+import { detectNodePackageManagersLight as detectNodePackageManagers } from '../../lib/package-manager-detection-light';
+import { BROWSER_UNIFIED_SDK_PROMPT_LINE } from '../_shared/browser-sdk-prompt';
 
 export const JAVASCRIPT_WEB_AGENT_CONFIG: FrameworkConfig<JavaScriptContext> = {
   metadata: {
     name: 'JavaScript (Web)',
+    glyph: '🌐',
+    glyphColor: '#F7DF1E',
     integration: Integration.javascript_web,
+    targetsBrowser: true,
     beta: true,
     docsUrl: 'https://amplitude.com/docs/sdks/analytics/browser/browser-sdk-2',
-    gatherContext: (options: WizardOptions) => {
-      const packageManagerName = detectJsPackageManager(options);
+    gatherContext: async (options: WizardOptions) => {
+      const packageManagerName = await detectJsPackageManager(options);
       const hasTypeScript = fs.existsSync(
         path.join(options.installDir, 'tsconfig.json'),
       );
       const hasBundler = detectBundler(options);
-      return Promise.resolve({ packageManagerName, hasTypeScript, hasBundler });
+      return { packageManagerName, hasTypeScript, hasBundler };
     },
   },
 
@@ -114,7 +118,8 @@ export const JAVASCRIPT_WEB_AGENT_CONFIG: FrameworkConfig<JavaScriptContext> = {
         `Has TypeScript: ${context.hasTypeScript ? 'yes' : 'no'}`,
         `Framework docs ID: js (use amplitude://docs/frameworks/js for documentation if available)`,
         `Project type: Generic JavaScript/TypeScript application (no specific framework detected)`,
-        `Preferred Amplitude SDK: @amplitude/unified (prefer over @amplitude/analytics-browser for new browser integrations)`,
+        BROWSER_UNIFIED_SDK_PROMPT_LINE,
+        `Initialize from the project's main entry point (e.g. src/main.ts, src/index.ts, or wherever the app boots) before any tracked user code runs. For static-HTML / no-bundler projects, the CDN <script> tag flow is appropriate instead — but the npm path is preferred whenever a build pipeline exists.`,
       ];
 
       if (context.hasBundler) {

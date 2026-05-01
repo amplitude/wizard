@@ -4,6 +4,7 @@ import type { FrameworkConfig } from '../../lib/framework-config';
 import { PYTHON_PACKAGE_INSTALLATION } from '../../lib/framework-config';
 import { detectPythonPackageManagers } from '../../lib/package-manager-detection';
 import { Integration } from '../../lib/constants';
+import { BrandColors } from '../../lib/brand-colors';
 import fg from 'fast-glob';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
@@ -14,6 +15,7 @@ import {
   getFlaskVersionBucket,
   FlaskProjectType,
   findFlaskAppFile,
+  IGNORE_PATTERNS,
 } from './utils';
 
 type FlaskContext = {
@@ -24,6 +26,8 @@ type FlaskContext = {
 export const FLASK_AGENT_CONFIG: FrameworkConfig<FlaskContext> = {
   metadata: {
     name: 'Flask',
+    glyph: '🧪',
+    glyphColor: BrandColors.gray10,
     integration: Integration.flask,
     beta: true,
     docsUrl: 'https://amplitude.com/docs/sdks/analytics/python',
@@ -56,7 +60,7 @@ export const FLASK_AGENT_CONFIG: FrameworkConfig<FlaskContext> = {
         ],
         {
           cwd: installDir,
-          ignore: ['**/venv/**', '**/.venv/**', '**/env/**', '**/.env/**'],
+          ignore: IGNORE_PATTERNS,
         },
       );
 
@@ -81,13 +85,7 @@ export const FLASK_AGENT_CONFIG: FrameworkConfig<FlaskContext> = {
         ['**/app.py', '**/wsgi.py', '**/application.py', '**/__init__.py'],
         {
           cwd: installDir,
-          ignore: [
-            '**/venv/**',
-            '**/.venv/**',
-            '**/env/**',
-            '**/.env/**',
-            '**/__pycache__/**',
-          ],
+          ignore: IGNORE_PATTERNS,
         },
       );
 
