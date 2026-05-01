@@ -767,12 +767,14 @@ async function runAgentWizardBody(
   // Pre-stage all bundled skills the agent will need into the user's
   // .claude/skills/ directory. The taxonomy / instrumentation / dashboard
   // skills are constants; the integration skill is resolved per framework
-  // (with a sensible default fallback). When a skill is pre-staged the
-  // prompt points straight at it; otherwise the prompt uses on-disk Glob
-  // discovery — load_skill_menu / install_skill stay disabled on the server.
+  // (with a sensible default fallback). When staging succeeds the prompt pins
+  // that id; otherwise a deterministic on-disk resolver picks at most one
+  // `integration-*` match so the model never chooses among several Glob hits.
   const { preStageSkills, bundledSkillExists } = await import(
     './wizard-tools.js'
   );
+  const { listIntegrationSkillIdsOnDisk, resolveIntegrationSkillId } =
+    await import('./integration-skill-resolve.js');
   const integrationSkillId = config.metadata.getIntegrationSkillId
     ? config.metadata.getIntegrationSkillId(frameworkContext)
     : (() => {
@@ -783,6 +785,24 @@ async function runAgentWizardBody(
     session.installDir,
     integrationSkillId,
   );
+
+  let integrationSkillIdForPrompt: string | null =
+    integrationStaged && integrationSkillId ? integrationSkillId : null;
+  if (!integrationSkillIdForPrompt) {
+    const diskIds = listIntegrationSkillIdsOnDisk(session.installDir);
+    const resolved = resolveIntegrationSkillId({
+      integration: config.metadata.integration,
+      primaryBundledId: integrationSkillId,
+      frameworkContext,
+      candidateSkillIds: diskIds,
+    });
+    if (resolved?.source === 'lexicographic_tiebreak') {
+      logToFile(
+        `[runAgentWizard] integration skill lexicographic tie-break: picked "${resolved.skillId}" (scoped pool had multiple matches; consider tightening framework hints).`,
+      );
+    }
+    integrationSkillIdForPrompt = resolved?.skillId ?? null;
+  }
 
   const integrationPrompt =
     buildIntegrationPrompt(
@@ -797,7 +817,7 @@ async function runAgentWizardBody(
       },
       frameworkContext,
       skipAmplitudeMcp,
-      integrationStaged ? integrationSkillId : null,
+      integrationSkillIdForPrompt,
     ) + buildInlineFeatureSection(session.additionalFeatureQueue);
 
   // Initialize and run agent
@@ -1525,12 +1545,13 @@ ${items}
 /**
  * Build the integration prompt for the agent.
  *
- * `preStagedIntegrationSkillId` is the integration skill that the runner
- * already copied into `.claude/skills/<id>/`. When non-null the prompt points
- * the agent at that path. When null, the prompt directs the agent to discover
- * any staged `integration-*` skill on disk — **not** via
- * `load_skill_menu` / `install_skill`, which stay disabled in
- * `wizard-tools.ts` until the remote skill catalogue path is healthy again.
+ * `preStagedIntegrationSkillId` is the integration skill id chosen before the
+ * agent runs: normally the bundled copy the runner pre-staged under
+ * `.claude/skills/<id>/`, or — when staging missed — the same id picked by
+ * `resolveIntegrationSkillId` (integration-skill-resolve) from on-disk `integration-*`
+ * directories so STEP 1 is always a single deterministic path (never a Glob
+ * disambiguation for the model). When null, no integration skill could be
+ * resolved and the agent should halt with `report_status`.
  *
  * Taxonomy + instrumentation + dashboard skills are always pre-staged when
  * bundled, so the prompt loads them by ID without menu/install steps.
@@ -1599,22 +1620,18 @@ function buildIntegrationPrompt(
       ? '\n' + additionalLines.map((line) => `- ${line}`).join('\n')
       : '';
 
-  // Integration-skill block: reference the pre-staged skill, or on-disk
-  // discovery under `.claude/skills/` — never load_skill_menu / install_skill
-  // (those MCP tools are intentionally not registered).
+  // Integration-skill block: single pinned id from staging + resolver, or halt.
   const integrationSkillStep = preStagedIntegrationSkillId
-    ? `STEP 1: Load \`.claude/skills/${preStagedIntegrationSkillId}/SKILL.md\` via the Skill tool. The wizard has already pre-staged this integration skill for ${config.metadata.name}; do NOT call load_skill_menu or install_skill (they are not available on the wizard-tools server).`
+    ? `STEP 1: Load \`.claude/skills/${preStagedIntegrationSkillId}/SKILL.md\` via the Skill tool. The wizard already resolved a single integration skill id (\`${preStagedIntegrationSkillId}\`) for this ${config.metadata.name} run (bundled pre-stage when possible, otherwise a deterministic on-disk resolver — not Glob-based disambiguation). Do NOT call load_skill_menu or install_skill (they are not available on the wizard-tools server).`
     : `STEP 1: Integration workflow — wizard-tools \`load_skill_menu\` / \`install_skill\` are **not registered** in this CLI; do not call them (they will fail or be absent from the tool list).
 
-   The taxonomy, instrumentation, and chart-plan skills are already under \`.claude/skills/\` for this run, but no deterministic integration skill was pre-copied for ${config.metadata.name}.
+   The taxonomy, instrumentation, and chart-plan skills are already under \`.claude/skills/\` for this run, but the runner could not resolve any \`integration-*\` skill id for ${config.metadata.name} (nothing bundled/pre-staged and no matching \`.claude/skills/integration-*/SKILL.md\` on disk).
 
-   - Use \`Glob\` to find \`.claude/skills/integration-*/SKILL.md\` in this project. If exactly one file matches, load it with the Skill tool and continue to STEP 2.
-   - If several integration skills match, pick the single best fit for this project's stack, load it with the Skill tool, and briefly note the choice in \`amplitude-setup-report.md\`.
-   - If none match, call \`report_status\` with kind="error", code="RESOURCE_MISSING", detail="No bundled integration skill was staged for this framework." and halt.`;
+   Call \`report_status\` with kind="error", code="RESOURCE_MISSING", detail="No integration skill could be resolved for this framework." and halt.`;
 
   const skillsIntro = preStagedIntegrationSkillId
-    ? `The wizard has pre-staged the integration workflow and supporting skills into \`.claude/skills/\` — load them with the Skill tool. Do NOT call load_skill_menu or install_skill (disabled).`
-    : `The wizard has pre-staged taxonomy, instrumentation, and chart-plan skills into \`.claude/skills/\` (load with the Skill tool). Follow STEP 1 for the integration workflow — do NOT call load_skill_menu or install_skill (disabled).`;
+    ? `The wizard has pre-staged supporting skills into \`.claude/skills/\` and pinned one integration skill id for this run — load them with the Skill tool. Do NOT call load_skill_menu or install_skill (disabled).`
+    : `The wizard has pre-staged taxonomy, instrumentation, and chart-plan skills into \`.claude/skills/\` (load with the Skill tool). STEP 1 explains the integration workflow — do NOT call load_skill_menu or install_skill (disabled).`;
 
   return `You are setting up Amplitude analytics in this ${
     config.metadata.name
