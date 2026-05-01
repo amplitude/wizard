@@ -726,7 +726,7 @@ export const DataIngestionCheckScreen = ({
   // useEscapeBack is disabled so it does not also call store.goBack().
   useEscapeBack(store, {
     enabled: !celebrating && !awaitingSkipConfirm,
-    extraHints: celebrating ? NO_HINTS : VERIFY_EXTRA_HINTS,
+    extraHints: celebrating || awaitingSkipConfirm ? NO_HINTS : VERIFY_EXTRA_HINTS,
   });
 
   useScreenInput((_char, key) => {
