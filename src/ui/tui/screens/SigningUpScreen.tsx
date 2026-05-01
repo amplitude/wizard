@@ -37,7 +37,7 @@ import {
   performSignupOrAuth,
   trackSignupAttempt,
 } from '../../../utils/signup-or-auth.js';
-import { KNOWN_REQUIRED_FIELDS } from '../flows.js';
+import { KNOWN_REQUIRED_FIELDS, fieldPresentOnSession } from '../flows.js';
 
 interface SigningUpScreenProps {
   store: WizardStore;
@@ -114,6 +114,17 @@ export const SigningUpScreen = ({ store }: SigningUpScreenProps) => {
             (f) => !KNOWN_REQUIRED_FIELDS.has(f),
           );
           if (hasUnknownField) {
+            store.setSignupAbandoned(true);
+            return;
+          }
+          // If the server is asking for a field we already submitted,
+          // it's effectively rejecting our value. Re-prompting would
+          // just send the same value again and loop forever — bail to
+          // browser OAuth instead.
+          const allFieldsAlreadySent = result.requiredFields.every((f) =>
+            fieldPresentOnSession(s, f),
+          );
+          if (allFieldsAlreadySent) {
             store.setSignupAbandoned(true);
             return;
           }
