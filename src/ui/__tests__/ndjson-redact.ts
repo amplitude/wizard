@@ -165,14 +165,17 @@ export function redactNdjsonStream(
   rawNdjson: string,
   options: RedactOptions = {},
 ): Array<Record<string, unknown>> {
-  const lines = rawNdjson.split('\n').filter((l) => l.length > 0);
-  return lines.map((line, idx) => {
+  const lines = rawNdjson.split('\n');
+  const results: Array<Record<string, unknown>> = [];
+  for (let lineNum = 0; lineNum < lines.length; lineNum++) {
+    const line = lines[lineNum];
+    if (line.length === 0) continue;
     let parsed: unknown;
     try {
       parsed = JSON.parse(line);
     } catch (err) {
       throw new Error(
-        `redactNdjsonStream: line ${idx + 1} is not valid JSON: ${
+        `redactNdjsonStream: line ${lineNum + 1} is not valid JSON: ${
           (err as Error).message
         }`,
         { cause: err },
@@ -180,11 +183,12 @@ export function redactNdjsonStream(
     }
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
       throw new Error(
-        `redactNdjsonStream: line ${idx + 1} is not a JSON object`,
+        `redactNdjsonStream: line ${lineNum + 1} is not a JSON object`,
       );
     }
-    return redactEvent(parsed as Record<string, unknown>, options);
-  });
+    results.push(redactEvent(parsed as Record<string, unknown>, options));
+  }
+  return results;
 }
 
 /**
