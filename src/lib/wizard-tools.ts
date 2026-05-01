@@ -354,8 +354,9 @@ const SKILL_ID_ALLOWLIST = /^[a-z0-9][a-z0-9_-]*$/;
 /**
  * Check whether a bundled skill exists on disk by searching across all
  * category subdirectories under skills/. Used to decide whether to pre-stage
- * a skill before the agent runs vs leave the agent to discover via the
- * load_skill_menu fallback.
+ * a skill before the agent runs vs leave integration entry to the agent
+ * prompt's on-disk discovery path (`Glob` under `.claude/skills/` — the
+ * wizard-tools skill menu tools stay disabled).
  */
 export function bundledSkillExists(skillId: string): boolean {
   // Reject any skillId that's not a strict basename — defense in depth before
