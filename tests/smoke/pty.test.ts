@@ -18,7 +18,7 @@
  * Skip in unit `pnpm test`. Run via `pnpm test:smoke:pty`.
  */
 
-import { afterEach, describe, expect, it } from 'vitest';
+import { describe, expect, it } from 'vitest';
 import * as path from 'node:path';
 
 const REPO_ROOT = path.resolve(__dirname, '..', '..');
@@ -83,12 +83,6 @@ const WIZARD_ENTRY = path.join(REPO_ROOT, 'bin.ts');
 const describeIfPty = pty ? describe : describe.skip;
 
 describeIfPty('wizard CLI under a real PTY', () => {
-  let exits: Array<() => void> = [];
-  afterEach(() => {
-    for (const fn of exits) fn();
-    exits = [];
-  });
-
   it('--version prints the wizard version and exits 0', async () => {
     const { output, exitCode } = await runUnderPty([
       TSX_BIN,
