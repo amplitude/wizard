@@ -26,6 +26,7 @@ vi.mock('../../lib/api.js', async (importOriginal) => {
 
 vi.mock('../../lib/wizard-tools', () => ({
   persistDashboard: vi.fn(() => true),
+  mergeDashboardUrlIntoSetupReport: vi.fn(),
 }));
 vi.mock('../../utils/analytics', () => ({
   analytics: { wizardCapture: vi.fn() },
@@ -47,7 +48,10 @@ vi.mock('../../ui', () => {
 });
 
 import { createWizardDashboard } from '../../lib/api.js';
-import { persistDashboard } from '../../lib/wizard-tools';
+import {
+  mergeDashboardUrlIntoSetupReport,
+  persistDashboard,
+} from '../../lib/wizard-tools';
 import { analytics } from '../../utils/analytics';
 
 import * as uiModule from '../../ui';
@@ -162,6 +166,9 @@ describe('createDashboardStep', () => {
     typeof vi.fn
   >;
 
+  const mockedMergeDashboardUrlIntoSetupReport =
+    mergeDashboardUrlIntoSetupReport as unknown as ReturnType<typeof vi.fn>;
+
   const mockedWizardCapture = analytics.wizardCapture as unknown as ReturnType<
     typeof vi.fn
   >;
@@ -227,6 +234,10 @@ describe('createDashboardStep', () => {
 
     expect(mockedCreateWizardDashboard).not.toHaveBeenCalled();
     expect(mockedPersistDashboard).toHaveBeenCalledWith(installDir, dashboard);
+    expect(mockedMergeDashboardUrlIntoSetupReport).toHaveBeenCalledWith(
+      installDir,
+      dashboard.dashboardUrl,
+    );
     expect(mockedWizardCapture).toHaveBeenCalledWith(
       'dashboard created',
       expect.objectContaining({
@@ -260,6 +271,10 @@ describe('createDashboardStep', () => {
     });
 
     expect(mockedCreateWizardDashboard).not.toHaveBeenCalled();
+    expect(mockedMergeDashboardUrlIntoSetupReport).toHaveBeenCalledWith(
+      installDir,
+      dashboard.dashboardUrl,
+    );
     expect(mockedWizardCapture).toHaveBeenCalledWith(
       'dashboard created',
       expect.objectContaining({ source: 'cached' }),
@@ -277,6 +292,7 @@ describe('createDashboardStep', () => {
     });
 
     expect(mockedCreateWizardDashboard).not.toHaveBeenCalled();
+    expect(mockedMergeDashboardUrlIntoSetupReport).not.toHaveBeenCalled();
     expect(mockedWizardCapture).toHaveBeenCalledWith(
       'dashboard skipped',
       expect.objectContaining({ reason: 'missing org or app' }),
@@ -301,6 +317,10 @@ describe('createDashboardStep', () => {
     expect(mockedCreateWizardDashboard).toHaveBeenCalledTimes(1);
     expect(mockedPersistDashboard).toHaveBeenCalledWith(installDir, apiResult);
     expect(session.checklistDashboardUrl).toBe(apiResult.dashboardUrl);
+    expect(mockedMergeDashboardUrlIntoSetupReport).toHaveBeenCalledWith(
+      installDir,
+      apiResult.dashboardUrl,
+    );
     expect(mockedWizardCapture).toHaveBeenCalledWith(
       'dashboard created',
       expect.objectContaining({
@@ -333,6 +353,7 @@ describe('createDashboardStep', () => {
       'dashboard failed',
       expect.objectContaining({ reason: 'FORBIDDEN' }),
     );
+    expect(mockedMergeDashboardUrlIntoSetupReport).not.toHaveBeenCalled();
     expect(ui.applyJourneyTransition).toHaveBeenCalledWith(
       'dashboard',
       'completed',

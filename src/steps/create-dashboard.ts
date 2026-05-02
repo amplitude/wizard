@@ -28,7 +28,10 @@ import { DEFAULT_AMPLITUDE_ZONE, Integration } from '../lib/constants.js';
 import { getUI } from '../ui';
 import { analytics } from '../utils/analytics';
 import { logToFile } from '../utils/debug';
-import { persistDashboard } from '../lib/wizard-tools';
+import {
+  mergeDashboardUrlIntoSetupReport,
+  persistDashboard,
+} from '../lib/wizard-tools';
 import { getDashboardFile } from '../utils/storage-paths';
 import type { WizardSession } from '../lib/wizard-session';
 
@@ -131,6 +134,7 @@ export async function createDashboardStep(
     persistDashboard(session.installDir, existing);
     session.checklistDashboardUrl = existing.dashboardUrl;
     ui.setDashboardUrl(existing.dashboardUrl);
+    mergeDashboardUrlIntoSetupReport(session.installDir, existing.dashboardUrl);
     tryApplyDashboardJourney('completed');
     analytics.wizardCapture('dashboard created', {
       integration,
@@ -284,6 +288,7 @@ export async function createDashboardStep(
 
     session.checklistDashboardUrl = result.dashboardUrl;
     ui.setDashboardUrl(result.dashboardUrl);
+    mergeDashboardUrlIntoSetupReport(session.installDir, result.dashboardUrl);
     spinner.stop('Dashboard ready');
     tryApplyDashboardJourney('completed');
     ui.setPostAgentStep(STEP_ID, { status: 'completed' });
