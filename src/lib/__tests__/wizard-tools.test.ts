@@ -10,6 +10,7 @@ import {
   mergeEnvValues,
   persistEventPlan,
   persistDashboard,
+  mergeDashboardUrlIntoSetupReport,
   cleanupIntegrationSkills,
   cleanupWizardArtifacts,
   ensureWizardArtifactsIgnored,
@@ -484,6 +485,133 @@ describe('persistDashboard', () => {
     persistDashboard(tmpDir, { dashboardUrl: 'https://new', dashboardId: 'n' });
     const parsed = JSON.parse(fs.readFileSync(canonical(tmpDir), 'utf8'));
     expect(parsed).toEqual({ dashboardUrl: 'https://new', dashboardId: 'n' });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// mergeDashboardUrlIntoSetupReport
+// ---------------------------------------------------------------------------
+
+describe('mergeDashboardUrlIntoSetupReport', () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = makeTmpDir();
+  });
+  afterEach(() => cleanup(tmpDir));
+
+  it('replaces the standard Dashboard placeholder line', () => {
+    const reportPath = path.join(tmpDir, 'amplitude-setup-report.md');
+    fs.writeFileSync(
+      reportPath,
+      [
+        '<wizard-report>',
+        '## Analytics dashboard',
+        '- **Dashboard:** [URL once available from the wizard — do not guess]',
+        '</wizard-report>',
+      ].join('\n'),
+      'utf8',
+    );
+
+    mergeDashboardUrlIntoSetupReport(tmpDir, 'https://app.example/dashboard/1');
+
+    const out = fs.readFileSync(reportPath, 'utf8');
+    expect(out).toContain('- **Dashboard:** https://app.example/dashboard/1');
+    expect(out).not.toContain('do not guess');
+  });
+
+  it('replaces agent-style * Dashboard placeholder line', () => {
+    const reportPath = path.join(tmpDir, 'amplitude-setup-report.md');
+    fs.writeFileSync(
+      reportPath,
+      [
+        '<wizard-report>',
+        '## Analytics dashboard',
+        '* Dashboard: [URL once available from the wizard — do not guess]',
+        '</wizard-report>',
+      ].join('\n'),
+      'utf8',
+    );
+
+    mergeDashboardUrlIntoSetupReport(tmpDir, 'https://app.example/dash/x');
+
+    const out = fs.readFileSync(reportPath, 'utf8');
+    expect(out).toContain('- **Dashboard:** https://app.example/dash/x');
+    expect(out).not.toContain('do not guess');
+  });
+
+  it('replaces indented * Dashboard placeholder line', () => {
+    const reportPath = path.join(tmpDir, 'amplitude-setup-report.md');
+    fs.writeFileSync(
+      reportPath,
+      [
+        '<wizard-report>',
+        '## Analytics dashboard',
+        '   * Dashboard: [URL once available from the wizard — do not guess]',
+        '</wizard-report>',
+      ].join('\n'),
+      'utf8',
+    );
+
+    mergeDashboardUrlIntoSetupReport(tmpDir, 'https://app.example/dash/y');
+
+    const out = fs.readFileSync(reportPath, 'utf8');
+    expect(out).toContain('- **Dashboard:** https://app.example/dash/y');
+  });
+
+  it('inserts the dashboard URL before the “wizard will create” starter blurb', () => {
+    const reportPath = path.join(tmpDir, 'amplitude-setup-report.md');
+    fs.writeFileSync(
+      reportPath,
+      [
+        '<wizard-report>',
+        '## Analytics dashboard',
+        '',
+        'The wizard will create a starter dashboard automatically.',
+        '</wizard-report>',
+      ].join('\n'),
+      'utf8',
+    );
+
+    mergeDashboardUrlIntoSetupReport(
+      tmpDir,
+      'https://app.example/dashboard/wizard',
+    );
+
+    const out = fs.readFileSync(reportPath, 'utf8');
+    expect(out).toContain(
+      '- **Dashboard:** https://app.example/dashboard/wizard',
+    );
+    expect(out).toContain(
+      'The wizard will create a starter dashboard automatically.',
+    );
+  });
+
+  it('injects before </wizard-report> when no placeholder matched', () => {
+    const reportPath = path.join(tmpDir, 'amplitude-setup-report.md');
+    fs.writeFileSync(
+      reportPath,
+      [
+        '<wizard-report>',
+        '## Analytics dashboard',
+        '',
+        '</wizard-report>',
+      ].join('\n'),
+      'utf8',
+    );
+
+    mergeDashboardUrlIntoSetupReport(tmpDir, 'https://app.example/dashboard/2');
+
+    const out = fs.readFileSync(reportPath, 'utf8');
+    expect(out).toContain(
+      '**Dashboard (live):** https://app.example/dashboard/2',
+    );
+  });
+
+  it('no-ops when the setup report file is missing', () => {
+    expect(() =>
+      mergeDashboardUrlIntoSetupReport(tmpDir, 'https://app.example/d'),
+    ).not.toThrow();
   });
 });
 

@@ -1228,6 +1228,15 @@ async function runAgentWizardBody(
     logToFile('[agent-runner] post-run token refreshed');
   }
 
+  // Long agent runs often leave `credentials.appId` at the `0` sentinel while
+  // the real numeric id is only on the org/project graph. `pollForDataIngestion`
+  // used to be the first place we called `fetchAmplitudeUser` to recover — too
+  // late for `commitPlannedEventsStep` / `createDashboardStep`, which run in
+  // parallel immediately below. Hydrate `selectedAppId` once here (same
+  // resolution rules as `resolveAppIdViaUserApi`) so post-agent API calls
+  // see a consistent app scope right after the post-run token refresh.
+  await ensureSelectedAppIdForPostAgentSteps(session, accessToken, cloudRegion);
+
   // Surface the post-agent steps as a visible sub-list under the agent's
   // task list so the user sees forward motion through what was previously
   // a silent gap (5/5 agent tasks ✓ + a static "Creating charts…" footer
@@ -1658,7 +1667,7 @@ ${integrationSkillStep}
 
 STEP 2: Run the integration skill's numbered workflow reference files in order (e.g. \`1.0-*\`, \`1.1-*\`, …). Never paste secrets into source — use env vars; details live in commandments + \`wizard-prompt-supplement/references/api-keys-and-env.md\`.
 
-STEP 3–5 (env, instrumentation, dashboard docs): After STEP 1–2, execute the phased work those skills describe. Load pre-staged skills by filesystem path with the Skill tool — \`.claude/skills/amplitude-quickstart-taxonomy-agent/SKILL.md\`, \`.claude/skills/add-analytics-instrumentation/SKILL.md\`, \`.claude/skills/amplitude-chart-dashboard-plan/SKILL.md\` — and follow each skill's workflow. Do **not** call \`load_skill_menu\` / \`install_skill\` for these IDs. The wizard creates the starter dashboard server-side after this run — do **not** call Amplitude MCP \`create_chart\` / \`create_dashboard\` or wizard-tools \`record_dashboard\`. Autocapture overlap and \`confirm_event_plan\` timing are specified in \`wizard-prompt-supplement/references/\` (see the supplement SKILL index).
+STEP 3–5 (env, instrumentation, dashboard docs): After STEP 1–2, execute the phased work those skills describe. Load pre-staged skills by filesystem path with the Skill tool — \`.claude/skills/amplitude-quickstart-taxonomy-agent/SKILL.md\`, \`.claude/skills/add-analytics-instrumentation/SKILL.md\`, \`.claude/skills/amplitude-chart-dashboard-plan/SKILL.md\` — and follow each skill's workflow. Do **not** call \`load_skill_menu\` / \`install_skill\` for these IDs. The starter dashboard is created in the **same post-agent CLI phase** as saving your instrumented event plan to Amplitude (tracking plan) — authenticated server-side calls from the wizard, **not** agent MCP chart/dashboard tools. Do **not** call Amplitude MCP \`create_chart\` / \`create_dashboard\` or wizard-tools \`record_dashboard\`. Autocapture overlap and \`confirm_event_plan\` timing are specified in \`wizard-prompt-supplement/references/\` (see the supplement SKILL index).
 
 
 `;
@@ -1832,4 +1841,47 @@ async function resolveAppIdViaUserApi(
     }
   }
   return null;
+}
+
+/**
+ * Ensure `session.selectedAppId` is populated before post-agent work.
+ *
+ * TUI sessions may carry `credentials.appId === 0` (unset sentinel) while
+ * the authoritative numeric id exists only on the Amplitude org/project
+ * graph. `pollForDataIngestion` already recovers via `fetchAmplitudeUser`, but
+ * it runs *after* `commitPlannedEventsStep` and `createDashboardStep` — which
+ * execute in parallel right after the post-run OAuth refresh. Without an
+ * eager hydrate here, logs show `[commitPlannedEventsStep] no appId — skipping`
+ * and the dashboard step can miss `selectedAppId` / org scope even though the
+ * account is healthy (especially right after token rotation).
+ */
+async function ensureSelectedAppIdForPostAgentSteps(
+  session: WizardSession,
+  accessToken: string,
+  cloudRegion: string,
+): Promise<void> {
+  if (session.selectedAppId?.trim()) {
+    return;
+  }
+  const cred = session.credentials?.appId;
+  if (cred !== undefined && cred !== null && cred !== 0) {
+    session.selectedAppId = String(cred);
+    logToFile(
+      `[agent-runner] post-agent: set selectedAppId from credentials.appId=${String(
+        cred,
+      )}`,
+    );
+    return;
+  }
+  const resolved = await resolveAppIdViaUserApi(
+    session,
+    accessToken,
+    cloudRegion,
+  );
+  if (resolved) {
+    session.selectedAppId = resolved;
+    logToFile(
+      `[agent-runner] post-agent: hydrated selectedAppId from user API (${resolved})`,
+    );
+  }
 }

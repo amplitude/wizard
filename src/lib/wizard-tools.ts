@@ -1230,6 +1230,93 @@ export function writeFallbackReportIfMissing(
   }
 }
 
+const SETUP_REPORT_FILENAME = 'amplitude-setup-report.md';
+
+/**
+ * After the wizard creates (or reuses) a starter dashboard, patch
+ * `amplitude-setup-report.md` so the in-run Setup Report viewer can pick up a
+ * real URL via its file watcher. Best-effort: no-op if the report is missing or
+ * nothing matches.
+ */
+export function mergeDashboardUrlIntoSetupReport(
+  installDir: string,
+  dashboardUrl: string,
+): void {
+  const trimmed = dashboardUrl.trim();
+  if (!trimmed) return;
+
+  const reportPath = path.join(installDir, SETUP_REPORT_FILENAME);
+  if (!fs.existsSync(reportPath)) {
+    logToFile(
+      `[mergeDashboardUrlIntoSetupReport] skip — ${SETUP_REPORT_FILENAME} missing`,
+    );
+    return;
+  }
+
+  try {
+    let content = fs.readFileSync(reportPath, 'utf8');
+    const before = content;
+
+    // Agent templates vary: `- **Dashboard:** …`, `* Dashboard: …`, optional
+    // spaces / bold around "Dashboard", and either bracket wording for the
+    // placeholder link. One pattern keeps them in sync with the merged URL.
+    const dashboardPlaceholderBracket =
+      '\\[URL(?: once available from the wizard| once the wizard provides it)[^\\]]*\\]';
+    // Bold form is `**Dashboard:**` (colon before closing `**`), not `Dashboard**:`.
+    const markdownDashboardPlaceholderLine = new RegExp(
+      `^\\s*[*\\-]\\s*\\*{0,2}\\s*Dashboard:\\*{0,2}\\s*${dashboardPlaceholderBracket}`,
+      'm',
+    );
+
+    const replacements: Array<{ pattern: RegExp; replacement: string }> = [
+      {
+        pattern: markdownDashboardPlaceholderLine,
+        replacement: `- **Dashboard:** ${trimmed}`,
+      },
+      {
+        pattern:
+          /- Documented starter dashboard: \[URL once the wizard provides it[^\]]*\]/,
+        replacement: `- Documented starter dashboard: ${trimmed}`,
+      },
+      {
+        // Post-agent dashboard step runs after the agent drafts this blurb;
+        // splice the real URL in without removing the chart outline that follows.
+        pattern:
+          /(## Analytics dashboard\n\n)(\s*The wizard will create a starter dashboard automatically\.)/,
+        replacement: `$1- **Dashboard:** ${trimmed}\n\n$2`,
+      },
+    ];
+
+    for (const { pattern, replacement } of replacements) {
+      if (pattern.test(content)) {
+        content = content.replace(pattern, replacement);
+        break;
+      }
+    }
+
+    if (content === before && content.includes('</wizard-report>')) {
+      content = content.replace(
+        '</wizard-report>',
+        `\n**Dashboard (live):** ${trimmed}\n\n</wizard-report>`,
+      );
+    }
+
+    if (content !== before) {
+      fs.writeFileSync(reportPath, content, 'utf8');
+      logToFile(
+        `[mergeDashboardUrlIntoSetupReport] patched ${reportPath} with dashboard URL`,
+      );
+    } else {
+      logToFile(
+        `[mergeDashboardUrlIntoSetupReport] no placeholder matched in ${reportPath}`,
+      );
+    }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    logToFile(`[mergeDashboardUrlIntoSetupReport] ${msg}`);
+  }
+}
+
 // ---------------------------------------------------------------------------
 // Server factory
 // ---------------------------------------------------------------------------
