@@ -136,17 +136,17 @@ const InlineEventPlan = ({ store }: { store: WizardStore }) => {
 
 /** Compact conditional tips — Stripe doc link only (other features are queued tasks). */
 const ConditionalTips = ({ store }: { store: WizardStore }) => {
-  const { discoveredFeatures } = store.session;
+  const { discoveredFeatures, selectedOrgId, region } = store.session;
+  const zone = (region ?? 'us');
   const tips: ReactNode[] = [];
 
   if (discoveredFeatures.includes(DiscoveredFeature.Stripe)) {
+    const stripeUrl = OUTBOUND_URLS.stripeDataSource(zone, selectedOrgId);
     tips.push(
       <Text key="stripe" color={Colors.secondary}>
         <Text color={Colors.accent}>{Icons.diamond}</Text> Stripe detected
         {Icons.dash} add as data source:{' '}
-        <TerminalLink url={OUTBOUND_URLS.stripeDataSource}>
-          {OUTBOUND_URLS.stripeDataSource}
-        </TerminalLink>
+        <TerminalLink url={stripeUrl}>{stripeUrl}</TerminalLink>
       </Text>,
     );
   }
