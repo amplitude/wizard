@@ -54,13 +54,13 @@ afterEach(() => setAgentDriver(null));
 `src/ui/tui/screens/__tests__/*.snap.test.tsx` and use
 [`renderSnapshot` / `makeStoreForSnapshot`](../src/ui/tui/__tests__/snapshot-utils.tsx).
 NDJSON output gets normalized through
-[`redactNdjsonStream`](../src/ui/__tests__/ndjson-redact.ts) before
+[`redactNdjsonStream`](../src/ui/__tests__/ndjson-redact.ts) *(lands in #518)* before
 diffing — see [`docs/agent-ndjson-contract.md`](../docs/agent-ndjson-contract.md)
 for the contract.
 
 ## Smoke PTY lane — `pnpm test:smoke:pty`
 
-`vitest.config.smoke.ts`. Spawns the real wizard binary under a
+`vitest.config.smoke.ts`. Spawns the wizard via `tsx bin.ts` under a
 [`node-pty`](https://github.com/microsoft/node-pty) pseudo-terminal so
 TTY-only behavior surfaces:
 
@@ -93,6 +93,8 @@ via [`llmock`](https://github.com/CopilotKit/llmock) — an HTTP server that
 records `/messages`-shaped requests and replays them deterministically.
 The wizard subprocess hits `ANTHROPIC_BASE_URL=http://localhost:<port>`
 and the test suite owns the cassette JSON.
+
+*(The `llmock` dependency will be added when this Phase 4 feature is implemented.)*
 
 Why not extend MSW (which `e2e-tests/` already uses)? MSW only intercepts
 in the same Node process. The Claude Agent SDK runs in a child process, so
