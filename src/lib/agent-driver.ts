@@ -42,8 +42,18 @@ export function setAgentDriver(driver: AgentDriver | null): void {
 async function loadDefaultDriver(): Promise<AgentDriver> {
   if (!defaultDriverPromise) {
     defaultDriverPromise = (async () => {
-      const mod = await import('@anthropic-ai/claude-agent-sdk');
-      return mod.query as unknown as AgentDriver;
+      try {
+        const mod = await import('@anthropic-ai/claude-agent-sdk');
+        return mod.query as unknown as AgentDriver;
+      } catch (err) {
+        // Clear the cache on rejection so a retry can re-attempt the
+        // import. Without this, a transient import failure (broken
+        // install, missing peer dep, partial filesystem) would poison
+        // every subsequent getAgentDriver() call in the process with
+        // the same stale rejection.
+        defaultDriverPromise = null;
+        throw err;
+      }
     })();
   }
   return defaultDriverPromise;
