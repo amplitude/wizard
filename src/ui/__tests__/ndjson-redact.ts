@@ -165,14 +165,21 @@ export function redactNdjsonStream(
   rawNdjson: string,
   options: RedactOptions = {},
 ): Array<Record<string, unknown>> {
-  const lines = rawNdjson.split('\n').filter((l) => l.length > 0);
-  return lines.map((line, idx) => {
+  // Track the line number against the raw input, not the post-filter
+  // index — otherwise an error message reports the wrong line for any
+  // input that has blank lines before the offending line.
+  const lines = rawNdjson.split('\n');
+  const events: Array<Record<string, unknown>> = [];
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    if (line.length === 0) continue;
+    const lineNumber = i + 1;
     let parsed: unknown;
     try {
       parsed = JSON.parse(line);
     } catch (err) {
       throw new Error(
-        `redactNdjsonStream: line ${idx + 1} is not valid JSON: ${
+        `redactNdjsonStream: line ${lineNumber} is not valid JSON: ${
           (err as Error).message
         }`,
         { cause: err },
@@ -180,11 +187,12 @@ export function redactNdjsonStream(
     }
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) {
       throw new Error(
-        `redactNdjsonStream: line ${idx + 1} is not a JSON object`,
+        `redactNdjsonStream: line ${lineNumber} is not a JSON object`,
       );
     }
-    return redactEvent(parsed as Record<string, unknown>, options);
-  });
+    events.push(redactEvent(parsed as Record<string, unknown>, options));
+  }
+  return events;
 }
 
 /**

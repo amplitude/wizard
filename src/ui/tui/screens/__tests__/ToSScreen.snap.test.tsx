@@ -11,6 +11,7 @@
 import React from 'react';
 import { describe, expect, it } from 'vitest';
 import { ToSScreen } from '../ToSScreen.js';
+import { AuthOnboardingPath } from '../../../../lib/wizard-session.js';
 import {
   makeStoreForSnapshot,
   renderSnapshot,
@@ -18,7 +19,17 @@ import {
 
 describe('ToSScreen snapshots', () => {
   it('renders the heading, both legal links, and the accept/decline picker', () => {
-    const store = makeStoreForSnapshot();
+    // Pin the session at the "ToS is the active screen" point in the
+    // create-account flow: intro concluded, zone resolved, email capture
+    // done. This is the only state in which canGoBack() returns true on
+    // ToS, which is what triggers `useEscapeBack` to register the
+    // [Esc] Back hint we assert on below.
+    const store = makeStoreForSnapshot({
+      authOnboardingPath: AuthOnboardingPath.CreateAccount,
+      introConcluded: true,
+      region: 'us',
+      emailCaptureComplete: true,
+    });
     const { frame, hints } = renderSnapshot(<ToSScreen store={store} />, store);
 
     expect(frame).toContain('Terms of Service');

@@ -254,6 +254,14 @@ describe('redactNdjsonStream', () => {
     expect(() => redactNdjsonStream(raw)).toThrow(/line 2/);
   });
 
+  it('reports the raw input line number across blank-line gaps', () => {
+    // Blank line on line 2 means the malformed JSON is line 3 in the
+    // raw input. A naive post-filter index would mis-report this as
+    // line 2 (the second non-blank line).
+    const raw = '{"valid": true}\n\nnot json\n';
+    expect(() => redactNdjsonStream(raw)).toThrow(/line 3/);
+  });
+
   it('throws on a JSON value that is not an object', () => {
     const raw = '{"valid": true}\n["array", "not", "object"]\n';
     expect(() => redactNdjsonStream(raw)).toThrow(/not a JSON object/);
