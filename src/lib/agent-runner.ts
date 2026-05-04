@@ -1129,6 +1129,35 @@ async function runAgentWizardBody(
     });
   }
 
+  if (agentResult.error === AgentErrorType.GATEWAY_INVALID_REQUEST) {
+    captureWizardError(
+      'Agent API',
+      agentResult.message ?? 'Wizard request rejected by gateway',
+      'agent-runner',
+      {
+        integration: config.metadata.integration,
+        'error type': agentResult.error,
+      },
+    );
+
+    const usingDirectKey = !!process.env.ANTHROPIC_API_KEY;
+    await wizardAbort({
+      message: `Wizard request rejected by Amplitude gateway\n\nThe gateway returned "Invalid request sent to model provider" — this build of the wizard is sending a request shape (e.g. an \`anthropic-beta\` header or tool schema field) that the upstream model provider does not accept. Retrying will not help because the next request will be identically rejected.\n\nFix: upgrade to the latest \`@amplitude/wizard\` (npm i -g @amplitude/wizard@latest) — this build addresses known schema/beta rejection cases.\n\n${buildGatewayBypassHint()}\n\nIf you are already on the latest build, please report it (with the log file at ${getLogFilePath()}) to: ${SUPPORT_EMAIL}`,
+      error: new WizardError(
+        `Wizard request rejected by gateway: ${
+          agentResult.message ?? 'unknown'
+        }`,
+        {
+          integration: config.metadata.integration,
+          'error type': agentResult.error,
+          'using direct key': usingDirectKey,
+          'agent error detail': agentResult.message ?? null,
+        },
+      ),
+      exitCode: ExitCode.NETWORK_ERROR,
+    });
+  }
+
   if (
     agentResult.error === AgentErrorType.RATE_LIMIT ||
     agentResult.error === AgentErrorType.API_ERROR
