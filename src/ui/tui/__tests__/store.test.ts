@@ -20,6 +20,7 @@ import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import {
+  AuthOnboardingPath,
   OutroKind,
   AdditionalFeature,
   SlackOutcome,
@@ -712,7 +713,7 @@ describe('WizardStore', () => {
       expect(result.config.SourceId).toBe('src-1'); // unrelated fields preserved
     });
 
-    it('setRegion surfaces a feedback notice when ampli.json write fails', async () => {
+    it('setRegion surfaces a feedback notice when project binding writes fail', async () => {
       const store = createStore();
       writeAmpliConfig(store.session.installDir, {
         OrgId: 'org-1',
@@ -720,25 +721,18 @@ describe('WizardStore', () => {
         Zone: 'us',
       });
 
-      // Skip on root — chmod doesn't enforce restrictions there.
-      const isRoot =
-        typeof process.getuid === 'function' && process.getuid() === 0;
-      if (isRoot) return;
-
-      // Make the ampli.json file read-only so writeFileSync inside
-      // writeAmpliConfig throws EACCES.
-      const cfgPath = path.join(store.session.installDir, 'ampli.json');
-      const originalMode = fs.statSync(cfgPath).mode;
-      fs.chmodSync(cfgPath, 0o444);
+      const ampliConfig = await import('../../../lib/ampli-config.js');
+      const spy = vi
+        .spyOn(ampliConfig, 'writeAmpliConfig')
+        .mockReturnValue(false);
 
       try {
         store.setRegion('eu');
-        // Persistence runs in a microtask via dynamic import.
         await new Promise((r) => setTimeout(r, 50));
-
-        expect(store.commandFeedback ?? '').toMatch(/persist to ampli\.json/i);
+        expect(spy).toHaveBeenCalled();
+        expect(store.commandFeedback ?? '').toMatch(/binding files/i);
       } finally {
-        fs.chmodSync(cfgPath, originalMode);
+        spy.mockRestore();
       }
     });
 
@@ -920,6 +914,68 @@ describe('WizardStore', () => {
 
       expect(listener).toHaveBeenCalled();
       expect(store.getVersion()).toBeGreaterThan(before);
+    });
+  });
+
+  describe('backToWelcome', () => {
+    it('is a no-op when regionForced', () => {
+      const store = createStore();
+      store.session.introConcluded = true;
+      store.session.regionForced = true;
+      store.session.region = 'us';
+
+      store.backToWelcome();
+
+      expect(store.session.introConcluded).toBe(true);
+      expect(store.session.region).toBe('us');
+    });
+
+    it('rewinds intro and region and clears create-account draft', () => {
+      const store = createStore();
+      store.session.authOnboardingPath = AuthOnboardingPath.CreateAccount;
+      store.session.introConcluded = true;
+      store.session.region = 'eu';
+      store.session.emailCaptureComplete = true;
+      store.session.tosAccepted = false;
+      store.session.signupEmail = 'x@y.co';
+      store.session.signupFullName = 'X Y';
+      store.session.signupTokensObtained = true;
+
+      store.backToWelcome();
+
+      expect(store.session.introConcluded).toBe(false);
+      expect(store.session.region).toBeNull();
+      expect(store.session.emailCaptureComplete).toBe(false);
+      expect(store.session.tosAccepted).toBeNull();
+      expect(store.session.signupEmail).toBeNull();
+      expect(store.session.signupFullName).toBeNull();
+      expect(store.session.signupTokensObtained).toBe(false);
+      expect(wizardCaptureMock).toHaveBeenCalledWith('back navigation', {
+        to: 'welcome',
+      });
+    });
+
+    it('keeps create-account onboarding path after rewind', () => {
+      const store = createStore();
+      store.session.authOnboardingPath = AuthOnboardingPath.CreateAccount;
+      store.session.introConcluded = true;
+      store.session.region = 'us';
+
+      store.backToWelcome();
+
+      expect(store.session.authOnboardingPath).toBe(
+        AuthOnboardingPath.CreateAccount,
+      );
+    });
+
+    it('sets lastNavDirection to pop so back transitions animate correctly', () => {
+      const store = createStore();
+      store.session.introConcluded = true;
+      store.session.region = 'us';
+
+      store.backToWelcome();
+
+      expect(store.lastNavDirection).toBe('pop');
     });
   });
 

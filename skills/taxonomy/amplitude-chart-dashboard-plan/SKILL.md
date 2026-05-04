@@ -5,7 +5,7 @@ description: >
   strategist for translating an instrumented event taxonomy into a focused
   set of Amplitude charts and a single well-organized product dashboard.
   Use after event instrumentation is complete (SDK installed, events
-  implemented, .amplitude-events.json written). Produces a concrete chart
+  implemented, .amplitude/events.json written). Produces a concrete chart
   plan and drives chart + dashboard creation via the Amplitude MCP.
 ---
 
@@ -23,8 +23,10 @@ Work with exactly the events that were instrumented.
 
 ## Inputs
 
-1. **`.amplitude-events.json`** — read this file first. It lists every event
-   name (and optionally description) that was instrumented in this run.
+1. **`.amplitude/events.json`** — read this file first (canonical path under
+   `.amplitude/`). It lists every event name (and optionally description) that
+   was instrumented in this run. If missing, fall back to legacy
+   **`.amplitude-events.json`** at the repo root for older wizard runs.
 
 2. **Taxonomy funnels** — from the `amplitude-quickstart-taxonomy-agent` skill
    output or your own knowledge of the instrumented events. Identify 2–5
@@ -141,8 +143,10 @@ back to the wizard. Order:
    tooling. It also short-circuits the wizard's slow post-agent fallback
    step. Skipping it is the most common bug in this skill.
 
-**Use exact event names** from `.amplitude-events.json` — do not
-normalize, lowercase, or rename them when constructing chart definitions.
+**Use exact event names** from the event plan file (canonical
+`.amplitude/events.json`, or legacy `.amplitude-events.json` if that is all
+that exists) — do not normalize, lowercase, or rename them when constructing
+chart definitions.
 The event names must match exactly what was instrumented.
 
 ---
@@ -167,11 +171,10 @@ Always include a brief `reason` per the wizard's tool-call convention.
 }
 ```
 
-`record_dashboard` writes both the canonical
-`<projectRoot>/.amplitude/dashboard.json` and the legacy
-`<projectRoot>/.amplitude-dashboard.json` mirror. Do NOT write either
-file yourself — that path drifts from the canonical schema and the wizard
-will silently re-run the dashboard step from scratch.
+`record_dashboard` writes **only** the canonical
+`<projectRoot>/.amplitude/dashboard.json`. Do NOT write dashboard metadata
+files yourself — that drifts from the canonical schema and the wizard will
+silently re-run the dashboard step from scratch.
 
 After the call returns `"ok"`, mark the "Build your starter dashboard" todo
 completed.

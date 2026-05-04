@@ -1,5 +1,38 @@
 # Changelog
 
+## [1.15.0](https://github.com/amplitude/wizard/compare/wizard-v1.14.0...wizard-v1.15.0) (2026-05-01)
+
+
+### Features
+
+* **agent:** resolve integration skill deterministically ([#515](https://github.com/amplitude/wizard/issues/515)) ([f051cfc](https://github.com/amplitude/wizard/commit/f051cfc28ada20904e7d85fa56467cbad26c26d7))
+* atomic JSON persistence for dashboard and agent artifacts ([#498](https://github.com/amplitude/wizard/issues/498)) ([e3af45a](https://github.com/amplitude/wizard/commit/e3af45a72d62be53cb2c4a860f6ea7ee2ecbf336))
+* AuthOnboardingPath, replace --signup with --auth-onboarding ([#514](https://github.com/amplitude/wizard/issues/514)) ([9a5b4f1](https://github.com/amplitude/wizard/commit/9a5b4f15244516be503610ff5b3d72f92c8144a6))
+* harden framework detection and Vue-powered docs classification ([#494](https://github.com/amplitude/wizard/issues/494)) ([9dbac11](https://github.com/amplitude/wizard/commit/9dbac1165c02703c3daf712ad407fb6bf60134b7))
+* **tui:** Esc back navigation for signup spine and welcome rewind ([#520](https://github.com/amplitude/wizard/issues/520)) ([31ff065](https://github.com/amplitude/wizard/commit/31ff06596017088fcae954ca797000d0a09bece4))
+* **tui:** skip data ingestion verification with Enter/q; exit with x ([#513](https://github.com/amplitude/wizard/issues/513)) ([60362cb](https://github.com/amplitude/wizard/commit/60362cb37bd21803ef746858b936de0822f82718))
+* wizard-owned OAuth session and project binding storage ([#516](https://github.com/amplitude/wizard/issues/516)) ([e30c1cb](https://github.com/amplitude/wizard/commit/e30c1cbd0819e5aec61dbc166c523bece265d76c))
+
+
+### Bug Fixes
+
+* align integration prompt with disabled skill menu tools ([#499](https://github.com/amplitude/wizard/issues/499)) ([ed1c386](https://github.com/amplitude/wizard/commit/ed1c386ac991080998f78e746290bbd937dda416))
+* detect VitePress and VuePress as JavaScript (Web), not Vue ([#492](https://github.com/amplitude/wizard/issues/492)) ([f75f9cc](https://github.com/amplitude/wizard/commit/f75f9cc51470869c626ccbc626fd54ca37a11dc9))
+* persist event plan and dashboard only under .amplitude/ ([#504](https://github.com/amplitude/wizard/issues/504)) ([7ed215e](https://github.com/amplitude/wizard/commit/7ed215e2c82e28eb22701111dedbbaf8af2b6128))
+* preserve create-project 4xx semantics on malformed errors ([#219](https://github.com/amplitude/wizard/issues/219)) ([dc89224](https://github.com/amplitude/wizard/commit/dc892242504ab6a4fb7a04143fdc515670c3a7ea))
+* **prompts:** slim commandments; add wizard-prompt-supplement skill ([#505](https://github.com/amplitude/wizard/issues/505)) ([c185023](https://github.com/amplitude/wizard/commit/c185023096f69b19a25eb962ef5bd6104fbdd201))
+* **tui:** block Tab and / console during event plan prompt ([#508](https://github.com/amplitude/wizard/issues/508)) ([9f5ef1d](https://github.com/amplitude/wizard/commit/9f5ef1d26b33006ca9e317d9cb170f6f75bb937f))
+* **tui:** clarify intro menu for signed-in users ([#523](https://github.com/amplitude/wizard/issues/523)) ([0ec8dbb](https://github.com/amplitude/wizard/commit/0ec8dbbb070f43a31866f9d13de846fecbc91f0e))
+* **tui:** Esc back on signup spine; skip MCP/Slack when back exists ([#522](https://github.com/amplitude/wizard/issues/522)) ([3198d3c](https://github.com/amplitude/wizard/commit/3198d3c3d221fe88e0801ccd187f1031d4bbcbb1))
+* **tui:** Esc back-navigation for signup and confirm flows ([#509](https://github.com/amplitude/wizard/issues/509)) ([edebdb6](https://github.com/amplitude/wizard/commit/edebdb6ea9859e64051536a77a5a5f0d378168a7))
+* **tui:** mirror stream status to log file and clarify scoped-empty Logs tab ([#524](https://github.com/amplitude/wizard/issues/524)) ([965e3c4](https://github.com/amplitude/wizard/commit/965e3c4ba198400989ae918e4b3ffb40eb4a834a))
+* use atomic writes for agent state and update cache ([#503](https://github.com/amplitude/wizard/issues/503)) ([0908b00](https://github.com/amplitude/wizard/commit/0908b00f23b6f35aaddb0911f3a158cbcb66d683))
+
+
+### Performance Improvements
+
+* **agent:** backoff ingestion poll, parallel post-agent, gated canUseTool logs ([#510](https://github.com/amplitude/wizard/issues/510)) ([89395ae](https://github.com/amplitude/wizard/commit/89395ae64cd88fdb9ed05d2e6db2ed0d5c33873d))
+
 ## [1.14.0](https://github.com/amplitude/wizard/compare/wizard-v1.13.3...wizard-v1.14.0) (2026-05-01)
 
 

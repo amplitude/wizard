@@ -12,8 +12,10 @@ import {
   getEventsFile,
   getInstallationErrorLogFile,
   getLogFile,
+  getOAuthSettingsFile,
   getPlanFile,
   getPlansDir,
+  getProjectBindingFile,
   getProjectMetaDir,
   getRunDir,
   getStateFile,
@@ -169,6 +171,12 @@ describe('storage-paths', () => {
       expect(getStateFile('att', 1111)).not.toBe(getStateFile('att', 2222));
     });
 
+    it('OAuth session file lives at cache root', () => {
+      expect(getOAuthSettingsFile()).toBe(
+        path.join(tmpRoot, 'oauth-session.json'),
+      );
+    });
+
     it('updateCheck file is at the cache root', () => {
       expect(getUpdateCheckFile()).toBe(
         path.join(tmpRoot, 'update-check.json'),
@@ -184,6 +192,9 @@ describe('storage-paths', () => {
       );
       expect(getDashboardFile('/p')).toBe(
         path.join('/p', '.amplitude', 'dashboard.json'),
+      );
+      expect(getProjectBindingFile('/p')).toBe(
+        path.join('/p', '.amplitude', 'project-binding.json'),
       );
     });
   });

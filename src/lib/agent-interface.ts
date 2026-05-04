@@ -2590,8 +2590,8 @@ export async function runAgent(
           getUI().setDashboardUrl(result.data.dashboardUrl);
           // Mirror to canonical `.amplitude/dashboard.json` so the
           // dashboard URL has a stable location. The agent (via bundled
-          // skills) only writes the legacy path; both files are
-          // gitignored and preserved across runs.
+          // skills) may only write the legacy path; dashboard JSON remains
+          // gitignored by path so it is not picked up by `git add .`.
           if (winner === legacyDashboardFilePath) {
             persistDashboard(
               agentConfig.workingDirectory,
@@ -2745,6 +2745,11 @@ export async function runAgent(
       if (looksLikeStreamEventLine(line)) return;
       spinner.message(line);
       getUI().pushStatus(line);
+      // Mirror the throttled status pill into the per-project log so the TUI
+      // Logs tab stays useful during long tool calls. Stream deltas never hit
+      // handleSDKMessage, so without this the file can look idle while Progress
+      // shows the model's voice (users assume logging is broken).
+      logToFile('stream status:', truncateLogMessage(line, 512));
     };
     const enqueueStreamDelta = (delta: string): void => {
       if (!delta) return;

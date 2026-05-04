@@ -3,7 +3,7 @@ title: Amplitude Setup - Edit
 description: Implement Amplitude event tracking in the identified files, following best practices and the example project
 ---
 
-For each of the files and events noted in .amplitude-events.json, make edits to capture events using Amplitude. Make sure to set up any helper files needed. Carefully examine the included example project code: your implementation should match it as closely as possible. Do not spawn subagents.
+For each of the files and events listed in **`.amplitude/events.json`** (canonical plan under `.amplitude/`; only consult legacy **`.amplitude-events.json`** at the repo root if the canonical file is absent), make edits to capture events using Amplitude. Make sure to set up any helper files needed. Carefully examine the included example project code: your implementation should match it as closely as possible. Do not spawn subagents.
 
 For browser/frontend projects, use @amplitude/unified as the default SDK — it bundles Analytics, Session Replay, and Experiment in a single package. Only use @amplitude/analytics-browser if the project already has it installed.
 

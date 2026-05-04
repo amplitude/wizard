@@ -325,7 +325,7 @@ describe('getDiagnosticsText', () => {
     expect(text).toContain('benchmark:');
     expect(text).toContain('checkpoint:');
     expect(text).toContain('events:');
-    expect(text).toContain('dashboard:');
+    expect(text).toContain('binding:');
     expect(text).toContain('Cache root:');
     expect(text).toContain('/tmp/wizard-diag-test');
   });

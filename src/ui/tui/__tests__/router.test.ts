@@ -816,6 +816,7 @@ describe('WizardRouter', () => {
       resetSlack: () => mutate({ slackComplete: false, slackOutcome: null }),
       resetEmailCapture: () => mutate({ emailCaptureComplete: false }),
       resetToS: () => mutate({ tosAccepted: null }),
+      rewindIntro: () => mutate({ introConcluded: false }),
       cancelCreateProject: () =>
         mutate({
           createProject: { pending: false, source: null, suggestedName: null },
@@ -844,11 +845,16 @@ describe('WizardRouter', () => {
       expect(router.canGoBack(fresh())).toBe(false);
     });
 
-    it('reports canGoBack=false on RegionSelect (Intro is non-revertible)', () => {
+    it('reports canGoBack=true on RegionSelect (Esc returns to Welcome)', () => {
       const router = new WizardRouter();
       const session = sessionWith({ introConcluded: true });
-      // Active = RegionSelect, walking back hits Intro which has no revert -> wall
-      expect(router.canGoBack(session)).toBe(false);
+      expect(router.resolve(session)).toBe(Screen.RegionSelect);
+      expect(router.canGoBack(session)).toBe(true);
+
+      const { stub, ref } = makeStubStore(session);
+      expect(router.goBack(ref.session, stub as never)).toBe(true);
+      expect(ref.session.introConcluded).toBe(false);
+      expect(new WizardRouter().resolve(ref.session)).toBe(Screen.Intro);
     });
 
     it('canGoBack from Auth -> reverts past RegionSelect', () => {

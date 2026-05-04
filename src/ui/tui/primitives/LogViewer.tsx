@@ -44,6 +44,17 @@ const HORIZONTAL_STEP = 8;
  */
 const EMPTY_LOG_PLACEHOLDER = 'Waiting for the agent to start writing logs…';
 
+/** Shown when the file has older runs but nothing timestamped for this session yet. */
+function scopedEmptyPlaceholder(hiddenLines: number): string[] {
+  const n = hiddenLines;
+  const linesWord = n === 1 ? 'line' : 'lines';
+  return [
+    'No log lines from this session yet.',
+    `${n} earlier ${linesWord} from prior runs are above the session cut.`,
+    'Press `a` to show full history, or keep waiting — new lines append here.',
+  ];
+}
+
 interface LogViewerProps {
   filePath: string;
   /** Fixed visible height. Defaults to terminal rows minus chrome. */
@@ -170,8 +181,13 @@ export const LogViewer = ({
             : 0;
         const scopedLines = startIdx > 0 ? allLines.slice(startIdx) : allLines;
         setHiddenCount(startIdx);
+        const hasReadableContent = allLines.some((l) => l.trim().length > 0);
         const safeLines =
-          scopedLines.length > 0 ? scopedLines : [EMPTY_LOG_PLACEHOLDER];
+          scopedLines.length > 0
+            ? scopedLines
+            : startIdx > 0 && hasReadableContent
+              ? scopedEmptyPlaceholder(startIdx)
+              : [EMPTY_LOG_PLACEHOLDER];
         const nextLastIndex = Math.max(safeLines.length - 1, 0);
         const nextViewportTop = clampViewportTop(
           viewportTopRef.current,

@@ -3,7 +3,7 @@
 exports[`LogoutScreen snapshots > renders the initial confirm prompt 1`] = `
 "Log Out
 
- Clear stored Amplitude credentials from ~/.ampli.json?
+ Clear stored Amplitude credentials (wizard session + project binding)?
 
     Log out
     Cancel"

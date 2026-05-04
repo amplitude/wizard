@@ -57,7 +57,7 @@ export const LogoutScreen = ({
     clearStoredCredentials();
     clearApiKey(installDir);
     clearCheckpoint(installDir, 'logout');
-    // Strip OrgId/WorkspaceId/Zone from ampli.json so the next login shows
+    // Strip OrgId/ProjectId/Zone from project binding + ampli.json mirror so the next login shows
     // the org + project pickers instead of silently reusing stale IDs.
     // (Back-compat: ampli.json still stores the field as `WorkspaceId`.)
     clearAuthFieldsInAmpliConfig(installDir);
@@ -88,7 +88,7 @@ export const LogoutScreen = ({
       <Box marginTop={1} flexDirection="column">
         {phase === Phase.Confirm && (
           <ConfirmationInput
-            message="Clear stored Amplitude credentials from ~/.ampli.json?"
+            message="Clear stored Amplitude credentials (wizard session + project binding)?"
             confirmLabel="Log out"
             cancelLabel="Cancel"
             onConfirm={handleConfirm}

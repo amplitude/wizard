@@ -3,7 +3,7 @@ name: integration-astro-ssr
 description: Amplitude integration for server-rendered Astro applications with API routes
 metadata:
   author: Amplitude
-  version: dev
+  version: 1.2.6
 ---
 
 # Amplitude integration for Astro (SSR)
@@ -14,14 +14,17 @@ This skill helps you add Amplitude analytics to Astro (SSR) applications.
 
 Follow these steps in order to complete the integration:
 
-1. `basic-integration-1.0-begin.md` - Amplitude Setup - Begin ← **Start here**
-2. `basic-integration-1.1-edit.md` - Amplitude Setup - Edit
-3. `basic-integration-1.2-revise.md` - Amplitude Setup - Revise
-4. `basic-integration-1.3-conclude.md` - Amplitude Setup - Conclusion
+1. `references/basic-integration-1.0-begin.md` - Amplitude Setup - Begin ← **Start here**
+2. `references/basic-integration-1.1-edit.md` - Amplitude Setup - Edit
+3. `references/basic-integration-1.2-revise.md` - Amplitude Setup - Revise
+4. `references/basic-integration-1.3-conclude.md` - Amplitude Setup - Conclusion
 
 ## Reference files
 
 - `references/EXAMPLE.md` - Astro (SSR) example project code
+- `references/browser-unified-sdk.md` - Amplitude documentation for Browser Unified Sdk
+- `references/browser-sdk-2.md` - Amplitude documentation for Browser Sdk 2
+- `references/amplitude-quickstart.md` - Amplitude documentation for Amplitude Quickstart
 - `references/basic-integration-1.0-begin.md` - Amplitude setup - begin
 - `references/basic-integration-1.1-edit.md` - Amplitude setup - edit
 - `references/basic-integration-1.2-revise.md` - Amplitude setup - revise
