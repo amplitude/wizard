@@ -1418,6 +1418,7 @@ export class WizardStore {
         writeAmpliConfig(installDir, {
           OrgId: org.id,
           ProjectId: project.id,
+          ProjectName: project.name || undefined,
           Zone: zone,
         });
       });
