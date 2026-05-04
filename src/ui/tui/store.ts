@@ -1305,7 +1305,12 @@ export class WizardStore {
    * @param suggestedName optional pre-filled name (e.g. from /create-project <name> or --project-name)
    */
   startCreateProject(
-    source: 'project' | 'environment' | 'slash' | 'cli-flag',
+    source:
+      | 'project'
+      | 'environment'
+      | 'slash'
+      | 'cli-flag'
+      | 'account-confirm',
     suggestedName?: string | null,
   ): void {
     this.$session.setKey('createProject', {

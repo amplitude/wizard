@@ -593,8 +593,13 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
         store.confirmAccount();
         return;
       }
-      if (ch === 'c' || ch === 'n') {
+      if (ch === 'c') {
         store.rejectStoredAccount();
+        return;
+      }
+      if (ch === 'n') {
+        store.rejectStoredAccount();
+        store.startCreateProject('account-confirm');
         return;
       }
       if (key.escape) {
@@ -683,6 +688,13 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
               C
             </Text>
             <Text color={Colors.muted}>] Change project</Text>
+          </Box>
+          <Box>
+            <Text color={Colors.muted}>[</Text>
+            <Text bold color={Colors.body}>
+              N
+            </Text>
+            <Text color={Colors.muted}>] New project</Text>
           </Box>
           <Box>
             <Text color={Colors.muted}>[</Text>
