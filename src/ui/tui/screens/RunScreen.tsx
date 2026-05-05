@@ -344,7 +344,7 @@ const ProgressTab = ({ store }: { store: WizardStore }) => {
         <Box marginBottom={1} flexDirection="column">
           <Box justifyContent="space-between">
             <Box gap={1}>
-              <BrailleSpinner color={Colors.accent} frame={spinnerFrame} />
+              <BrailleSpinner color={Colors.accent} frame={spinnerFrame} wide />
               <Text color={Colors.body} bold>
                 {total > 0
                   ? // Avoid "X / Y" — Y can grow as the agent adds new tasks
