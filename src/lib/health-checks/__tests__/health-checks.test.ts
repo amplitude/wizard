@@ -241,8 +241,8 @@ const MCP_LANDING_HTML =
 
 const URLS = {
   anthropicStatus: 'https://status.claude.com/api/v2/status.json',
-  amplitudeStatus: 'https://www.amplitudestatus.com/api/v2/status.json',
-  amplitudeSummary: 'https://www.amplitudestatus.com/api/v2/summary.json',
+  amplitudeStatus: 'https://status.amplitude.com/api/v2/status.json',
+  amplitudeSummary: 'https://status.amplitude.com/api/v2/summary.json',
   githubStatus: 'https://www.githubstatus.com/api/v2/status.json',
   npmStatus: 'https://status.npmjs.org/api/v2/status.json',
   npmSummary: 'https://status.npmjs.org/api/v2/summary.json',

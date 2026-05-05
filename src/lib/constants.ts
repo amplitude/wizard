@@ -236,7 +236,7 @@ export const OUTBOUND_URLS = {
 
   /** Service status pages — shown in the OutageOverlay. */
   status: {
-    amplitude: 'https://www.amplitudestatus.com',
+    amplitude: 'https://status.amplitude.com',
   },
 
   // ── Support ───────────────────────────────────────────────────────────────

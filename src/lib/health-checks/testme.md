@@ -33,8 +33,8 @@ responses captured from production endpoints on 2026-03-05.
 | Service                 | URL                                                    | Healthy response                      |
 | ----------------------- | ------------------------------------------------------ | ------------------------------------- |
 | Anthropic               | `https://status.claude.com/api/v2/status.json`         | `{"status":{"indicator":"none",...}}` |
-| Amplitude               | `https://www.amplitudestatus.com/api/v2/status.json`   | Same shape                            |
-| Amplitude (components)  | `https://www.amplitudestatus.com/api/v2/summary.json`  | Adds `components[]` array             |
+| Amplitude               | `https://status.amplitude.com/api/v2/status.json`      | Same shape                            |
+| Amplitude (components)  | `https://status.amplitude.com/api/v2/summary.json`     | Adds `components[]` array             |
 | GitHub                  | `https://www.githubstatus.com/api/v2/status.json`      | Same shape                            |
 | npm                     | `https://status.npmjs.org/api/v2/status.json`          | Same shape                            |
 | npm (components)        | `https://status.npmjs.org/api/v2/summary.json`         | Adds `components[]` array             |
