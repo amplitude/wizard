@@ -2,7 +2,7 @@
 
 Author: senior engineering lead, prepared for the wizard team
 Date: 2026-05-04
-Source repos audited: `~/worktree-repos/{wizard, wizard-v2, wizard-rewrite, context-hub}`, `~/amplitude-repos/javascript/server/packages/thunder/src/wizard-proxy`
+Source repos audited: `~/worktree-repos/{wizard, wizard-v2, wizard-rewrite, context-hub}`, `~/amplitude-repos/javascript/server/packages/app-api/src/wizard-proxy`
 Repos referenced in the brief but not present locally: `marketplace-internal`, `mcp-marketplace`, `builder-skills`. Sections that depend on those are marked **[unverified — repo not local]**.
 
 This plan was reviewed by three independent senior reviewers (code correctness, PM/scope, architectural fit). Their findings have been integrated. Notable changes from the first draft: **LangGraph is dropped**, ambient-agent support **ships before** TUI rebuild, the foundation strategy is now **"wizard-v2 harness onto wizard-rewrite's presentation seam, no LangGraph"**, and Vercel AI Gateway + prompt caching are added as Phase 1+ items.
@@ -40,19 +40,19 @@ The wizard's agent harness fights the host agent's auth context — two harnesse
 - Tests exist: `src/lib/__tests__/sanitize-claude-env.test.ts`, `detect-nested-agent.test.ts`.
 
 ### Where the 400 actually originates
-Confirmed by reading the wizard-proxy implementation in Thunder (`~/amplitude-repos/javascript/server/packages/thunder/src/wizard-proxy/`):
+Confirmed by reading the wizard-proxy implementation in the App API (`~/amplitude-repos/javascript/server/packages/app-api/src/wizard-proxy/`):
 
 - **The wizard-proxy does no body validation and no schema scrubbing.** `router.ts:677-1224` resolves model against `MODEL_MAPPING`, validates `max_tokens`, runs a rough 1M-token pre-flight, then passes the body verbatim to Vertex via `buildVertexBody` (`vertex.ts:260-271`).
 - **The `anthropic-beta` header is passed through verbatim** (`router.ts:443-451`) for any value matching `/^[a-zA-Z0-9\-, ]+$/` — `context-1m-2025-08-07` matches.
 - **No code in `wizard-proxy/` touches `$schema`, `additionalProperties`, `exclusiveMinimum`, or any `tools[].input_schema` field.** Grep returns zero hits.
-- **The literal `"Invalid request sent to model provider"` string is wrapped by the proxy** at `router.ts:917-974` as a generic "upstream returned 4xx" wrapper. The actual upstream rejection is **Vertex AI's Anthropic publisher endpoint**. Thunder logs the real Vertex body server-side at `router.ts:927` via `winston.warn(LOG_PREFIX + ' Upstream error', { status, body: errText.substring(0, 500), ... })` (`LOG_PREFIX = '[WizardProxy]'`) — visible in Datadog if you have access — but the wizard never sees it.
+- **The literal `"Invalid request sent to model provider"` string is wrapped by the proxy** at `router.ts:917-974` as a generic "upstream returned 4xx" wrapper. The actual upstream rejection is **Vertex AI's Anthropic publisher endpoint**. The App API logs the real Vertex body server-side at `router.ts:927` via `winston.warn(LOG_PREFIX + ' Upstream error', { status, body: errText.substring(0, 500), ... })` (`LOG_PREFIX = '[WizardProxy]'`) — visible in Datadog if you have access — but the wizard never sees it.
 
-So the 400 is: **Vertex AI rejects → Thunder logs the real reason → Thunder returns the generic wrapper to the wizard**.
+So the 400 is: **Vertex AI rejects → the App API logs the real reason → the App API returns the generic wrapper to the wizard**.
 
 ### Actual root cause (ranked)
 
 **1. Highest-priority: `betas: ['context-1m-2025-08-07']` is rejected by Vertex AI.**
-At `agent-interface.ts:2969` the agent harness unconditionally opts into the 1M-context beta on the gateway path. The comment claims this is "safe to leave on — falls back to 200K if the backing model doesn't support it" — wrong on Vertex. Vertex AI's Anthropic publisher endpoint does not enable arbitrary `anthropic-beta` previews, returns 400 INVALID_ARGUMENT, and Thunder wraps as the generic message. **Confirmation step before shipping:** check Thunder's `[WizardProxy] Upstream error` logs for a recent failing request to confirm the real Vertex rejection — the cause may be the beta, the schema noise (#3), or both.
+At `agent-interface.ts:2969` the agent harness unconditionally opts into the 1M-context beta on the gateway path. The comment claims this is "safe to leave on — falls back to 200K if the backing model doesn't support it" — wrong on Vertex. Vertex AI's Anthropic publisher endpoint does not enable arbitrary `anthropic-beta` previews, returns 400 INVALID_ARGUMENT, and the App API wraps as the generic message. **Confirmation step before shipping:** check the App API's `[WizardProxy] Upstream error` logs for a recent failing request to confirm the real Vertex rejection — the cause may be the beta, the schema noise (#3), or both.
 
 **2. Reinforces #1.** `agent-interface.ts:1950` sets `CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS=true` in the SDK's child env, but `agent-interface.ts:2969` then *explicitly opts back into* a beta via the SDK's `betas` option, overriding the env disable.
 
@@ -63,7 +63,7 @@ At `agent-interface.ts:2969` the agent harness unconditionally opts into the 1M-
 **5. Long-tail — `ANTHROPIC_CUSTOM_HEADERS` malformed.** `buildAgentEnv` (`agent-interface.ts:1313-1342`) joins headers with `\n` via `createCustomHeaders().encode()`. If session metadata contains a newline or colon, the SDK hands the gateway garbage headers. Cheap to harden.
 
 ### Auth pattern decision (must pin in Phase 1)
-wizard-v2 (`client.ts:104-112`) uses `apiKey: 'unused-bearer-auth'` + manually injected `Authorization: Bearer <token>` header. wizard-rewrite (`wizard-anthropic-provider.ts:36-42`) uses `createAnthropic({ baseURL, authToken })` — `@ai-sdk/anthropic`'s built-in OAuth bearer mode. These are not drop-in compatible. **Decision: use `authToken` (wizard-rewrite's pattern)**. It's simpler, has fewer moving parts, and is what `@ai-sdk/anthropic` 3.x officially supports. Validate end-to-end against Thunder's `authenticate` middleware in Phase 1.
+wizard-v2 (`client.ts:104-112`) uses `apiKey: 'unused-bearer-auth'` + manually injected `Authorization: Bearer <token>` header. wizard-rewrite (`wizard-anthropic-provider.ts:36-42`) uses `createAnthropic({ baseURL, authToken })` — `@ai-sdk/anthropic`'s built-in OAuth bearer mode. These are not drop-in compatible. **Decision: use `authToken` (wizard-rewrite's pattern)**. It's simpler, has fewer moving parts, and is what `@ai-sdk/anthropic` 3.x officially supports. Validate end-to-end against the App API's `authenticate` middleware in Phase 1.
 
 ### What needs to change to fix it (Phase 1 scope)
 
@@ -168,7 +168,7 @@ What wizard-rewrite lacks: working sanitizer (same 400 bug), wired agent loop (o
 
 ### context-hub (`~/worktree-repos/context-hub`)
 
-`@amplitude/context-hub@1.2.0`. Three input streams: `mcp-marketplace` upstream + `transformation-config/` (config-based skills generated from docs + `basics/` example apps) + in-tree `skills/{instrumentation, taxonomy, wizard}`. Output: ~50 skill ZIPs + `manifest.json` + `skill-menu.json` + `skills-mcp-resources.zip` published to a versioned GitHub Release. CI enforces 1 MB per skill / 8 MB bundle, runs prompt-injection scanner, env-var-naming lint, triggers wizard E2E against `wizard-workbench`. Frontmatter has only `name` + `description`. Wizard pulls `latest` unpinned (`wizard/scripts/refresh-skills.sh:96`) — that's the actual drift vector. Runtime fetch infrastructure exists in `wizard-tools.ts` but is currently disabled.
+`@amplitude/context-hub@1.2.0`. Three input streams: `mcp-marketplace` upstream + `transformation-config/` (config-based skills generated from docs + `basics/` example apps) + in-tree `skills/{instrumentation, taxonomy, wizard}`. Output: ~50 skill ZIPs + `manifest.json` + `skill-menu.json` + `skills-mcp-resources.zip` published to a versioned GitHub Release. CI enforces 1 MB per skill / 8 MB bundle, runs prompt-injection scanner, env-var-naming lint, triggers wizard E2E against test apps. Frontmatter has only `name` + `description`. Wizard pulls `latest` unpinned (`wizard/scripts/refresh-skills.sh:96`) — that's the actual drift vector. Runtime fetch infrastructure exists in `wizard-tools.ts` but is currently disabled.
 
 ### What to carry forward vs. discard
 
@@ -317,7 +317,7 @@ This is a structurally better answer than "detect and emit JSON."
 
 ### Phase 1 — Stop the bleeding (1-2 weeks, 1 engineer)
 **Goal:** Fix the `--agent` API 400 bug for users on shipped wizard today.
-**Pre-work (1 day):** Confirm the exact Vertex rejection by reading Thunder's `[WizardProxy] Upstream error` logs in Datadog for a recent failing request. The proxy logs the upstream body (truncated to 500 chars) at `thunder/src/wizard-proxy/router.ts:927`. This tells us whether to ship just the beta strip, just the schema strip, or both.
+**Pre-work (1 day):** Confirm the exact Vertex rejection by reading the App API's `[WizardProxy] Upstream error` logs in Datadog for a recent failing request. The proxy logs the upstream body (truncated to 500 chars) at `app-api/src/wizard-proxy/router.ts:927`. This tells us whether to ship just the beta strip, just the schema strip, or both.
 **Scope:**
 - In `wizard/src/lib/agent-interface.ts:2969`, env-gate `betas: ['context-1m-2025-08-07']` behind `AMPLITUDE_WIZARD_GATEWAY_BETAS=1`. Default off on the gateway path. Delete the misleading "falls back to 200K" comment.
 - Add a sanitizing fetch wrapper that strips `anthropic-beta` and `$schema`/`additionalProperties`/`exclusiveMinimum`/`exclusiveMaximum` from `tools[].input_schema`. Port wizard-v2's `sanitizingFetch` and **add the two missing exclusive keys**.
@@ -331,7 +331,7 @@ This is a structurally better answer than "detect and emit JSON."
 **Goal:** New repo with a working agent loop end-to-end on Vercel AI SDK, against the live proxy, with one real tool.
 **Scope:**
 - Pick `wizard-rewrite` as the *layout* foundation. Strip LangGraph. Rename to `wizard-core` (or merge into `wizard` and delete `wizard-rewrite`).
-- Pin auth pattern: `authToken` via `@ai-sdk/anthropic` 3.x. Validate end-to-end against Thunder's `authenticate` middleware on day 1.
+- Pin auth pattern: `authToken` via `@ai-sdk/anthropic` 3.x. Validate end-to-end against the App API's `authenticate` middleware on day 1.
 - Pin model id: `claude-sonnet-4-6` via `WIZARD_CLAUDE_MODEL`.
 - Port wizard-v2's `LlmClient` sanitizer (with `exclusive*` additions) into `src/llm/`.
 - Port wizard-rewrite's `WizardInstallPresentation` interface + `ClackWizardInstallPresentation` + `MachineJsonInstallPresentation`.
@@ -359,7 +359,7 @@ This is a structurally better answer than "detect and emit JSON."
 **Scope:**
 - Port wizard-v2's 14 native templates (Swift/Kotlin/Flutter/Unity/Unreal/Java/Go/Python — minus whatever telemetry kills).
 - Add the detectors wizard-rewrite is missing for surviving frameworks.
-**Definition of done:** Detector + installer parity for every framework with non-trivial usage. E2E tests against `wizard-workbench` apps pass.
+**Definition of done:** Detector + installer parity for every framework with non-trivial usage. E2E tests against test apps pass.
 
 ### Phase 2b — Foundation breadth (4 weeks, 1-2 engineers)
 **Goal:** Port the rest of wizard-v2's working pieces onto the new foundation.
