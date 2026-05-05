@@ -29,7 +29,7 @@ import {
 } from '../primitives/index.js';
 import type { ProgressItem } from '../primitives/index.js';
 import { Colors, Icons, SPINNER_FRAMES, SPINNER_INTERVAL } from '../styles.js';
-import { BrailleSpinner } from '../components/BrailleSpinner.js';
+import { OrbitSpinner } from '../components/OrbitSpinner.js';
 import { AnimatedAmplitudeLogo } from '../components/AmplitudeLogo.js';
 import { RetryStatusChip } from '../components/RetryBanner.js';
 import { FileWritesPanel } from '../components/FileWritesPanel.js';
@@ -338,61 +338,66 @@ const ProgressTab = ({ store }: { store: WizardStore }) => {
     <Box flexDirection="row" flexGrow={1}>
       {/* Left: tasks and status (takes all remaining width) */}
       <Box flexDirection="column" flexGrow={1} flexShrink={1} paddingX={1}>
-        {/* Header bar: progress count + elapsed + (transient retry hint) +
-            currently editing. Retry status renders inline as a muted chip
-            after a 3s grace period — see RetryStatusChip. */}
-        <Box marginBottom={1} flexDirection="column">
-          <Box justifyContent="space-between">
-            <Box gap={1}>
-              <BrailleSpinner color={Colors.accent} frame={spinnerFrame} wide />
-              <Text color={Colors.body} bold>
-                {total > 0
-                  ? // Avoid "X / Y" — Y can grow as the agent adds new tasks
-                    // mid-run, which makes the progress bar look like it's
-                    // going backwards (6 tasks → 9 tasks). Show absolute
-                    // counts instead so the user sees forward motion.
-                    // `completedDisplay` is a high-water mark, so the "done"
-                    // count never regresses if new tasks appear after the
-                    // user already saw earlier ones finish.
-                    pending + inProgress > 0
-                    ? `${completedDisplay} done · ${inProgress + pending} to go`
-                    : `${completedDisplay} tasks complete`
-                  : 'Agent running'}
-              </Text>
-              <Text color={Colors.muted}>
-                {Icons.dot} {formatElapsed(elapsed)}
-              </Text>
-              <RetryStatusChip
-                retryState={store.session.retryState}
-                now={Date.now()}
-              />
+        {/* Header: OrbitSpinner on the left, all status text stacked to
+            the right. alignItems="flex-start" keeps the orbit pinned to
+            the top row while the text column grows downward. */}
+        <Box marginBottom={1} flexDirection="row" gap={2} alignItems="flex-start">
+          <OrbitSpinner tick={tick} color={Colors.accent} />
+
+          {/* Right column: progress + elapsed + file + sub-status lines */}
+          <Box flexDirection="column" flexGrow={1} flexShrink={1}>
+            <Box justifyContent="space-between">
+              <Box gap={1}>
+                <Text color={Colors.body} bold>
+                  {total > 0
+                    ? // Avoid "X / Y" — Y can grow as the agent adds new tasks
+                      // mid-run, which makes the progress bar look like it's
+                      // going backwards (6 tasks → 9 tasks). Show absolute
+                      // counts instead so the user sees forward motion.
+                      // `completedDisplay` is a high-water mark, so the "done"
+                      // count never regresses if new tasks appear after the
+                      // user already saw earlier ones finish.
+                      pending + inProgress > 0
+                      ? `${completedDisplay} done · ${inProgress + pending} to go`
+                      : `${completedDisplay} tasks complete`
+                    : 'Agent running'}
+                </Text>
+                <Text color={Colors.muted}>
+                  {Icons.dot} {formatElapsed(elapsed)}
+                </Text>
+                <RetryStatusChip
+                  retryState={store.session.retryState}
+                  now={Date.now()}
+                />
+              </Box>
+              {currentFile && (
+                <Text color={Colors.muted} wrap="truncate-end">
+                  {currentFile}
+                </Text>
+              )}
             </Box>
-            {currentFile && (
+
+            {/* Show the latest agent status on its own row while nothing is
+                finished yet. Stays below the counter (not inline) — long
+                status strings used to push the counter siblings to wrap onto
+                the next line. Truncated in JS as a belt-and-braces guard
+                against unbounded streamed content (e.g. raw stream-event
+                JSON from `runAgentLocally`). Once the first task lands, the
+                regular status pill below the tabs takes over and we don't
+                need to duplicate it in the header. */}
+            {completedDisplay === 0 && lastStatus && (
               <Text color={Colors.muted} wrap="truncate-end">
-                {currentFile}
+                {Icons.dot} {truncateStatus(lastStatus)}
+              </Text>
+            )}
+            {showColdStartHint && (
+              <Text color={Colors.muted}>
+                {Icons.dot} Still on the agent's first response — cold start
+                can take 30–60s while it loads skills and reads your project.
+                The status above shows it's working, not stuck.
               </Text>
             )}
           </Box>
-          {/* Show the latest agent status on its own row while nothing is
-              finished yet. Stays below the counter (not inline) — long
-              status strings used to push the counter siblings to wrap onto
-              the next line. Truncated in JS as a belt-and-braces guard
-              against unbounded streamed content (e.g. raw stream-event
-              JSON from `runAgentLocally`). Once the first task lands, the
-              regular status pill below the tabs takes over and we don't
-              need to duplicate it in the header. */}
-          {completedDisplay === 0 && lastStatus && (
-            <Text color={Colors.muted} wrap="truncate-end">
-              {Icons.dot} {truncateStatus(lastStatus)}
-            </Text>
-          )}
-          {showColdStartHint && (
-            <Text color={Colors.muted}>
-              {Icons.dot} Still on the agent's first response — cold start can
-              take 30–60s while it loads skills and reads your project. The
-              status above shows it's working, not stuck.
-            </Text>
-          )}
         </Box>
 
         {/* Tasks — the hero */}
