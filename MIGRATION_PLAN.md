@@ -2,10 +2,10 @@
 
 Author: senior engineering lead, prepared for the wizard team
 Date: 2026-05-04
-Source repos audited: `~/worktree-repos/{wizard, wizard-v2, wizard-rewrite, context-hub}`, `~/amplitude-repos/javascript/server/packages/app-api/src/wizard-proxy`
-Repos referenced in the brief but not present locally: `marketplace-internal`, `mcp-marketplace`, `builder-skills`. Sections that depend on those are marked **[unverified — repo not local]**.
+Source repos audited: `~/worktree-repos/{wizard, wizard-v2, wizard-rewrite, context-hub}`, `~/amplitude-repos/javascript/server/packages/app-api/src/wizard-proxy`, `~/amplitude-repos/amplitude` (main monorepo, especially `langley/amplitude_ai`, `mcp_gateway`, `houston`), `~/amplitude-repos/builder-skills`.
+Repo originally referenced as unverified: `marketplace-internal` (still not local; context-hub references `mcp-marketplace`, which is also remote-only — both should be confirmed by the team).
 
-This plan was reviewed by three independent senior reviewers (code correctness, PM/scope, architectural fit) plus a focused cherry-pick inventory and a proxy-strategy investigation. Their findings have been integrated. Notable changes from the first draft: **LangGraph is dropped**, ambient-agent support **ships before** TUI rebuild, the foundation strategy is now **"shipped wizard's TUI/CLI/safety nets + wizard-v2's harness/auth/templates/evals + wizard-rewrite's `WizardInstallPresentation` interface only"**, multi-provider failover lands at the **proxy** (not the client), and the wizard-proxy gets **extracted out of the App API** because the App API is Amplitude's main web app server and its blast radius is wrong for active LLM-request rewriting.
+This plan was reviewed by three independent senior reviewers (code correctness, PM/scope, architectural fit), a focused cherry-pick inventory, a proxy-strategy investigation, and a survey of the main Amplitude monorepo. Findings integrated. Notable changes from the first draft: **LangGraph is dropped**, ambient-agent support **ships before** TUI rebuild, the foundation strategy is now **"shipped wizard's TUI/CLI/safety nets + wizard-v2's harness/auth/templates/evals + wizard-rewrite's `WizardInstallPresentation` interface only"**, the wizard-proxy extraction is **deferred out of the v2 critical path** (still recommended long-term but does not block v2), and the wizard **adopts `amplitude_ai` and `mcp_gateway`** from the main Amplitude monorepo rather than rebuilding multi-provider LLM and MCP-gateway infrastructure that already exists in production.
 
 ---
 
@@ -17,7 +17,7 @@ Two clean rebuilds already exist. **wizard-v2** is operationally complete and al
 
 **Verdict (one sentence):** Build a single new v2 foundation by **lifting** the shipped wizard's Ink TUI + yargs CLI surface + safety nets, **lifting** wizard-v2's Vercel AI SDK harness + multi-account auth + native templates + eval harness, **lifting** wizard-rewrite's `WizardInstallPresentation` interface and the 11-node install-pipeline decomposition (sans LangGraph), and **publishing** as `@amplitude/wizard@2.0.0` — same npm name, major version bump, **CLI flag and slash-command surface preserved verbatim** for backwards compatibility.
 
-The destination is: a single ESM-only npm package, Vercel AI SDK v6 (`@ai-sdk/anthropic` 3.x) as the only agent runtime, prompt caching on the commandments + skills prefix, the shipped wizard's Ink TUI carried forward unchanged behind `WizardInstallPresentation`, ambient-agent mode that registers the wizard as an MCP server inside parent harnesses, MCP-native context delivery, skills pinned to a versioned `context-hub` release, multi-account auth from wizard-v2, native templates from wizard-v2 for every supported framework, a live eval harness from wizard-v2, and a **separately-extracted `wizard-proxy` service** running on existing AWS or GCP infrastructure (Cloud Run / ECS Fargate / equivalent) that owns multi-provider failover (Anthropic direct → AWS Bedrock → GCP Vertex), tool-schema sanitization, and the real-Vertex-error passthrough.
+The destination is: a single ESM-only npm package, Vercel AI SDK v6 (`@ai-sdk/anthropic` 3.x) as the only agent runtime, prompt caching on the commandments + skills prefix, the shipped wizard's Ink TUI carried forward unchanged behind `WizardInstallPresentation`, ambient-agent mode that registers the wizard as an MCP server inside parent harnesses, MCP-native context delivery, skills pinned to a versioned `context-hub` release, multi-account auth from wizard-v2, native templates from wizard-v2 for every supported framework, a live eval harness from wizard-v2, **delegation to `amplitude_ai`'s MCP server for Python framework/provider/agent detection** rather than duplicating it in TS, and **alignment with `amplitude_ai`'s 4-phase Detect → Discover → Instrument → Verify contract**. The wizard-proxy extraction is recommended long-term (existing AWS or GCP infra, where Amplitude's other platform services run) but is explicitly **out of v2 scope**; the Phase 1 client-side fix (already shipped in PR #528) is the v2-blocking proxy answer.
 
 ---
 
@@ -380,11 +380,48 @@ Cherry-picked from a feature-by-feature inventory of all three repos (shipped, w
 
 ---
 
+## 6.6. Adoption from the main Amplitude monorepo
+
+The main monorepo at `~/amplitude-repos/amplitude` contains two pieces of production infrastructure the wizard plan should adopt rather than rebuild. Discovery via dedicated agent run.
+
+### `amplitude_ai` (`langley/amplitude_ai/`) — adopt for Python detection + LLM-analytics workflows
+A shipping PyPI package with multi-provider LLM SDK (OpenAI, Anthropic, Bedrock, Azure OpenAI, Gemini, Mistral) at `langley/amplitude_ai/amplitude_ai/providers/`, integrations for LangChain/LlamaIndex/CrewAI/openai-agents/Claude Agent SDK/OpenTelemetry at `langley/amplitude_ai/amplitude_ai/integrations/`, and a 739-LOC pure-Python AST scanner at `langley/amplitude_ai/amplitude_ai/mcp/scan_project.py` that detects Python frameworks (FastAPI, Flask, Django), every major LLM provider, agent frameworks, streaming, multi-agent patterns, and message queues. Exposed as an MCP server with `scan_project`, `validate_file`, `instrument_file`, and `generate_verify_test` tools. Includes a 4-phase **Detect → Discover → Instrument → Verify** instrumentation contract at `langley/amplitude_ai/amplitude-ai.md:1-50` aimed at coding agents.
+
+**Wizard adoption:**
+- **Python detection delegates to `amplitude_ai`'s MCP server.** When the wizard detects a Python project, call `scan_project` for framework/provider/agent-library detection rather than duplicating the AST scan in TS. Two detection engines is the failure mode here — `amplitude_ai` is more thorough than the wizard's TS detectors and is owned by a separate team that updates it as the Python ecosystem moves.
+- **LLM-analytics customer path delegates to `amplitude_ai`'s skill.** A `langley/amplitude_ai/.cursor/skills/instrument-with-amplitude-ai/SKILL.md` already exists. The wizard's instrumentation skill should *route to* this for LangChain/CrewAI/openai-agents users rather than ship a competing instruction pack.
+- **The 4-phase contract is the canonical Amplitude story.** The wizard's overall workflow (currently: detect framework → install SDK → instrument events → confirm dashboard) should align verbatim with Detect → Discover → Instrument → Verify so the wizard and `amplitude_ai` tell users a single coherent story.
+- **The wizard does NOT replace `amplitude_ai`.** The wizard is for product analytics + onboarding ergonomics + multi-platform (web + mobile + native). `amplitude_ai` is for LLM analytics in Python LLM apps. They are complementary surfaces.
+
+### `mcp_gateway/` — adopt for any wizard-side MCP server delivery
+Production-grade MCP gateway built on `mcp-contextforge-gateway` (PyPI). Already solves OAuth (DCR), SSRF protection, identity forwarding via `x-amp-login-id`, cost guard, PII detection, three tenancy modes (BYO, org-managed, org-managed + user auth). API documented at `mcp_gateway/API.md:80-450`. Conventions per `mcp_gateway/CLAUDE.md:24-28`: tables `amp_*`, env vars `AMP_*`, new MCP integrations land as Context-Forge plugins (no forks; "upstream upgrades via `pip install --upgrade`").
+
+**Wizard adoption:**
+- The "wizard exposes itself as MCP server in ambient mode" greenfield item (per §6.5) lands as a Context-Forge plugin under `mcp_gateway/plugins/amplitude_wizard/`, not as a free-standing service. This inherits OAuth, SSRF, identity forwarding, cost guard, and PII detection from the gateway for free.
+- Ambient-mode behavior: when wizard detects it's running inside a host agent that talks MCP, route to `mcp_gateway` rather than running its own `wizard-mcp-server.ts` process.
+
+### `houston/chat` — out of scope but adjacent
+`houston/` (FastAPI + Temporal + OpenSearch + `pydantic_ai`) hosts the in-app Amplitude assistant. Mentioned for context — the wizard does **not** embed runtime chat; that's a separate service with heavy infra. Don't reinvent here.
+
+### `dynconfv2` — the only feature-flag system
+Per `amplitude/CLAUDE.md:50-53`, all wizard-side feature flags (e.g. the Phase 4 `AMPLITUDE_WIZARD_NEXT=1` opt-in) should be backed by `dynconfv2`, not invented in the wizard. Types are immutable — never reuse a flag key with new types.
+
+### `builder-skills` — out of scope for v2
+Public OSS marketplace of PM/analyst/marketer prompt templates. Different audience (knowledge workers vs. coding agents), different shape (prose templates vs. instruction packs that affect code), different lifecycle (curated by Amplitude product team vs. generated by code-detection logic). Should remain separate from context-hub. The earlier `[unverified — not local]` flag is removed; the answer is "out of scope for v2."
+
+### Constraints the v2 plan respects
+- Branch naming `JIRA-TICKET/<service>/feature-description` per `langley/CLAUDE.md:330-335`.
+- All new gateway tables prefixed `amp_`; env vars `AMP_*`.
+- Reuse canonical types in `amp/amp_typing/`, `amp/model/`; never widen types.
+- Detection logic must live next to `amplitude_ai`, not in TS-only code, or it will diverge.
+
+---
+
 ## 7. Phased Migration Roadmap
 
-**Total estimate: 30-40 engineer-weeks across 10 phases** (Phase P added). First-draft estimate of 16-22 weeks was optimistic by ~1.5x per the PM review; the +2-3 weeks for the wizard-proxy extraction is honest scope.
+**Total estimate: 28-36 engineer-weeks across 9 phases for v2 delivery** (Phase P moved out of v2 critical path — see "Future / non-blocking" section below).
 
-**Ship order optimized for user value:** 1 → 2a → P → 5 → 3 → 2b → 4 → 6 → 7 → 8 → 9. Phase P (proxy extraction) runs in parallel with 2a/2b since the proxy and the client foundation are independent. Ambient-agent ships before TUI rebuild because it's the higher-leverage user win (today's pain is bug + agent friction, not TUI).
+**Ship order optimized for user value:** 1 → 2a → 5 → 3 → 2b → 4 → 6 → 7 → 8 → 9. Ambient-agent ships before TUI rebuild because it's the higher-leverage user win (today's pain is bug + agent friction, not TUI).
 
 ### Phase 1 — Stop the bleeding (1-2 weeks, 1 engineer)
 **Goal:** Fix the `--agent` API 400 bug for users on shipped wizard today.
@@ -423,23 +460,6 @@ Cherry-picked from a feature-by-feature inventory of all three repos (shipped, w
 - E2E tests: spawn wizard inside Claude Code CLI, assert successful MCP-tool-call completion.
 - Document the env-var contract in `docs/ambient-agent-mode.md`.
 **Definition of done:** `npx amplitude-wizard install` inside Claude Code completes without 400 and via the MCP-server path. Smoke-tested on Cursor, Cline, Codex CLI, Copilot CLI.
-
-### Phase P — Wizard-proxy extraction from the App API (2-3 weeks, 1 engineer + 1 week SRE/platform partner)
-**Goal:** Move the LLM-rewriting logic out of Amplitude's main web app server into a focused service. Land the three server-side fixes that protect every wizard build still in the wild.
-**Why now:** the App API is a high-blast-radius monolith (the main GUI server). Active LLM-request rewriting belongs on a service whose blast-radius is bounded to wizard users. Independent of the wizard rebuild — can run in parallel with Phase 2a/2b.
-**Pre-work:** confirm with the platform team which AWS or GCP runtime fits Amplitude's existing patterns (Cloud Run / ECS Fargate / App Runner / equivalent). Don't reinvent infra; pick the conventional choice.
-**Scope:**
-- Lift `app-api/src/wizard-proxy/{router, vertex, auth, constants, *}.ts` into a new repo (or new package within the existing monorepo) named `wizard-proxy`.
-- Carry over Hydra introspection + Redis caching verbatim. Don't rebuild auth.
-- **Land the three server-side fixes** from §6 "Wizard-proxy: extract from the App API":
-  1. Replace the `anthropic-beta` regex pass-through (`router.ts:443-451`) with an explicit Vertex-honored allowlist.
-  2. Add a recursive `tools[].input_schema` sanitizer to `buildVertexBody` (`vertex.ts:260-271`) stripping `$schema`, `additionalProperties`, `exclusiveMinimum`, `exclusiveMaximum`, `$id`, `$ref`.
-  3. Real-Vertex-error passthrough on 400/404/422; keep generic wrappers for 401/403/429/5xx.
-- **Add multi-provider failover.** Anthropic direct → AWS Bedrock → GCP Vertex routing, with provider-credentials held only on the proxy service.
-- Stand up the new service behind a feature flag. Mirror traffic, then dial up to 100% over 1-2 weeks.
-- Delete the `wizard-proxy` route from the App API once the new service is at 100%.
-- Cross-stack tests: a wizard build pinned to the new proxy URL completes a full instrumentation run; a deliberately-noisy tool schema doesn't 400 anymore.
-**Definition of done:** New service is the canonical wizard-proxy at 100% traffic. App API has no LLM-rewriting code. The 400 rate from `--agent` mode (already partly fixed by Phase 1 client-side) drops to baseline-noise levels regardless of wizard version.
 
 ### Phase 3 — Native templates and detection parity (2-3 weeks, 1 engineer + 1 week telemetry analysis)
 **Goal:** Match shipped wizard's framework matrix using wizard-v2's inline templates instead of relying on context-hub skills for native frameworks.
@@ -520,7 +540,26 @@ Cherry-picked from a feature-by-feature inventory of all three repos (shipped, w
 **Definition of done:** `curl -fsSL https://amplitude.com/install-wizard | sh` works on macOS and Linux. Telemetry shows install funnel drop-off improves.
 
 ### Total estimate
-~28-36 engineer-weeks across 9 phases. Phases 1, 2a, 5, 3 are independently shippable user wins delivering value in months 1-3. Phase 4 (TUI rebuild) is the biggest variance driver — budget 8-10 weeks honestly, not 4-6.
+~28-36 engineer-weeks across 9 phases for v2 delivery. Phases 1, 2a, 5, 3 are independently shippable user wins delivering value in months 1-3. Phase 4 (TUI rebuild) is the biggest variance driver — budget 8-10 weeks honestly, not 4-6.
+
+---
+
+## 7.5. Future work (post-v2, non-blocking)
+
+These items are recommended but explicitly **out of v2 scope**. Schedule after v2 ships.
+
+### Phase P — Wizard-proxy extraction from the App API (2-3 weeks, 1 engineer + 1 week SRE/platform partner)
+**Status:** deferred per team direction. The Phase 1 client-side fix (PR #528) addresses the user-facing 400 today; extraction is a longer-term hardening project, not a v2 blocker.
+**Goal:** move the LLM-rewriting logic out of Amplitude's main web app server (the App API) into a focused service. The App API has GUI-scale blast radius; LLM-request rewriting belongs on a service whose failure mode is bounded to wizard users.
+**Where it lands when scheduled:** existing AWS or GCP infra (Cloud Run / ECS Fargate / App Runner / equivalent), matching the conventional Amplitude platform pattern. Pick based on what the platform team is already operating; don't introduce a new hosting provider for one service. Hydra introspection + Redis caching carry over verbatim.
+**Scope when picked up:**
+- Lift `app-api/src/wizard-proxy/{router, vertex, auth, constants, *}.ts` into a focused service.
+- Replace the `anthropic-beta` regex pass-through (`router.ts:443-451`) with an explicit Vertex-honored allowlist.
+- Add a recursive `tools[].input_schema` sanitizer to `buildVertexBody` (`vertex.ts:260-271`) stripping `$schema`, `additionalProperties`, `exclusiveMinimum`, `exclusiveMaximum`, `$id`, `$ref`.
+- Real-Vertex-error passthrough on 400/404/422; keep generic wrappers for 401/403/429/5xx.
+- Multi-provider failover (Anthropic direct → AWS Bedrock → GCP Vertex), credentials held only on the proxy service.
+- Mirror traffic behind a feature flag, dial up over 1-2 weeks, then delete the route from the App API.
+**Why this is genuinely non-blocking:** the in-the-wild `--agent` 400 rate is dominated by users on builds that pre-date PR #528. As that build ages out via npm `latest`, the urgency drops. The extraction's value shifts from "fix users today" to "harden the service boundary" — important, not urgent.
 
 ---
 
@@ -529,24 +568,30 @@ Cherry-picked from a feature-by-feature inventory of all three repos (shipped, w
 Three of the original "open questions" were really decisions deferred. Decisions are pinned here; remaining open questions are below.
 
 ### Decisions made in this plan (binding unless reopened by team)
-1. **Foundation strategy:** new repo `wizard-core` (or merged into `wizard`), structured per the §6.5 cherry-pick — shipped wizard's TUI/CLI/safety-nets + wizard-v2's harness/auth/templates/evals + wizard-rewrite's `WizardInstallPresentation` only. No LangGraph. (Was Open Q2.)
+1. **Foundation strategy:** new repo `wizard-core` (or merged into `wizard`), structured per the §6.5 cherry-pick — shipped wizard's TUI/CLI/safety-nets + wizard-v2's harness/auth/templates/evals + wizard-rewrite's `WizardInstallPresentation` only. No LangGraph.
 2. **Auth pattern:** `authToken` via `@ai-sdk/anthropic` 3.x.
 3. **Model id:** `claude-sonnet-4-6` via `WIZARD_CLAUDE_MODEL`.
 4. **Cutover:** same npm name (`@amplitude/wizard`), major version bump `@amplitude/wizard@2.0.0` in Phase 7. CLI flag and slash-command surface preserved verbatim per the §6.5 backwards-compat contract.
 5. **TUI:** lift, don't rewrite. The shipped Ink TUI carries forward verbatim behind `InkWizardInstallPresentation`.
 6. **Multi-account auth:** lifted from wizard-v2 (`src/auth/{accounts, oauth-login, ...}`). Storage rebased to shipped wizard's `~/.amplitude/wizard/` paths with backward-compat reads of `~/.ampli.json` and `~/.amplitude-wizard-v2/accounts.json` for one minor release.
 7. **Native templates:** wizard-v2's inline templates win over shipped wizard's skill-only delegation for native frameworks. Lift all 11 (Swift/Kotlin/Java/Go/Flutter/Unity/Unreal/Android/RN/Python/Node).
-8. **Ambient mode:** MCP-server-mode primary, NDJSON fallback.
-9. **Wizard-proxy:** extract from the App API into a focused service on existing AWS or GCP infra. The App API is Amplitude's main web app server; LLM-request rewriting belongs on a service whose blast-radius is bounded to wizard users. The earlier "keep and modify the App API" recommendation is reversed.
-10. **Multi-provider failover:** lives at the proxy, not the client. Anthropic direct → AWS Bedrock → GCP Vertex routing held only on the proxy service; client never sees provider creds.
+8. **Ambient mode:** MCP-server-mode primary, NDJSON fallback. The MCP-server-mode delivery lands as a Context-Forge plugin under `mcp_gateway/plugins/amplitude_wizard/`, not a free-standing service.
+9. **Wizard-proxy strategy:** Phase 1 client-side fix (already shipped in PR #528) is the v2 answer. Proxy extraction (Phase P) is **deferred to post-v2** as future work — recommended long-term, not blocking. When scheduled, lands on existing AWS or GCP infra matching Amplitude platform conventions.
+10. **Multi-provider routing for the wizard's own model calls:** stays on the App API's `wizard-proxy` for v2. When Phase P is scheduled post-v2, multi-provider failover (Anthropic direct → AWS Bedrock → GCP Vertex) lives at the extracted proxy.
+11. **Adopt `amplitude_ai`** from the main monorepo for Python framework/provider/agent detection (delegate to its MCP server) and for LLM-analytics customer paths (route to its instrumentation skill). Don't rebuild detection in TS for Python projects.
+12. **Adopt `mcp_gateway`** from the main monorepo for any wizard-side MCP server delivery. Plugins land as Context-Forge plugins; tables `amp_*`, env `AMP_*`. Don't fork.
+13. **Align with `amplitude_ai`'s 4-phase Detect → Discover → Instrument → Verify contract** as the canonical wizard workflow vocabulary.
+14. **Feature flags:** all wizard-side flags backed by `dynconfv2`. Never reuse a flag key with new types.
+15. **`builder-skills`:** out of scope for v2. Different audience (knowledge workers vs. coding agents), different lifecycle. Keep separate from context-hub.
 
 ### Remaining open questions
-1. **`marketplace-internal`, `mcp-marketplace`, `builder-skills` access.** Not in the local worktree. context-hub references `mcp-marketplace` as the upstream source for instrumentation skills (`scripts/refresh-instrumentation-skills.sh`); none of the four repos audited reference `builder-skills`. **Action:** confirm whether these are real Amplitude repos and grant access if they are, or remove them from the brief if they aren't. **Owner needed.**
+1. **`marketplace-internal` and `mcp-marketplace` access.** Not in the local worktree. context-hub references `mcp-marketplace` as the upstream source for instrumentation skills (`scripts/refresh-instrumentation-skills.sh`). `builder-skills` is now confirmed local and out of v2 scope. **Action:** confirm whether `marketplace-internal` / `mcp-marketplace` are real Amplitude repos and grant access if they are. **Owner needed.**
 2. **Native framework cut.** Phase 3 depends on telemetry analysis to drop dead frameworks. **Action:** assign owner + deadline for the framework-usage telemetry pull before Phase 2a kicks off. **Owner needed.**
-3. **Wizard-proxy runtime choice (Phase P).** Cloud Run vs ECS Fargate vs App Runner vs equivalent. **Action:** platform/SRE team decision based on existing Amplitude conventions. Don't reinvent infra.
+3. **`amplitude_ai` integration interface.** Wizard delegates Python detection to `amplitude_ai`'s MCP server (`scan_project`). The contract details (which MCP transport, error envelope, version pinning) need to be agreed with the `amplitude_ai` team. **Action:** spike with `amplitude_ai` owner before Phase 2b.
 4. **context-hub reorganization downstream consumers.** This plan moves `skills/wizard/wizard-prompt-supplement` into the wizard repo and keeps shared skills in context-hub. The Amplitude MCP server (and possibly other consumers) may expect the wizard skills in context-hub's release. **Action:** check downstream consumers before Phase 6.
 5. **Telemetry redaction default.** Plan recommends matching Anthropic Claude Code's default (redacted with `OTEL_LOG_USER_PROMPTS=1` opt-in). **Action:** confirm with security/legal before Phase 8.
 6. **Shipped wizard life-support window and ownership.** Phases 2-7 ship to a new repo while users remain on `@amplitude/wizard@1.x` for ~6 months. Plan says "security only," but no owner is named. **Action:** name a maintenance owner before Phase 2a.
 7. **Single-file binary platform matrix.** Phase 9 lists five targets. **Action:** confirm Windows is in scope; Bun compile has weaker Windows support than Node SEA today.
 8. **MCP Apps (SEP-1865) adoption timing.** Plan flags it as Phase 6+. **Action:** decide whether MCP Apps replaces `confirm_event_plan` in v2 or v3.
-9. **Beta flag policy.** Phase 4 introduces `AMPLITUDE_WIZARD_NEXT=1` for opt-in TUI. **Action:** decide rollout cohorts (employees only first? % rollout? Customer council?).
+9. **Beta flag policy.** Phase 4 introduces `AMPLITUDE_WIZARD_NEXT=1` for opt-in TUI (backed by `dynconfv2`). **Action:** decide rollout cohorts (employees only first? % rollout? Customer council?).
+10. **Phase P scheduling.** Deferred out of v2 critical path. **Action:** revisit after Phase 1 telemetry shows sustained low 400 rate; if customer-on-old-build 400s remain meaningful, Phase P moves earlier in the post-v2 queue.
