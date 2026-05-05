@@ -110,6 +110,72 @@ describe('performDirectSignup', () => {
     }
   });
 
+  it('returns needs_information with the server-requested required fields', async () => {
+    server.use(
+      http.post(PROVISIONING_URL, () =>
+        HttpResponse.json({
+          type: 'needs_information',
+          needs_information: {
+            type: 'object',
+            properties: {
+              full_name: { type: 'string', description: 'Full Name' },
+            },
+            required: ['full_name'],
+          },
+        }),
+      ),
+    );
+
+    const result = await performDirectSignup({
+      email: 'ada@example.com',
+      zone: 'us',
+    });
+
+    expect(result.kind).toBe('needs_information');
+    if (result.kind === 'needs_information') {
+      expect(result.requiredFields).toEqual(['full_name']);
+    }
+  });
+
+  it('omits full_name from the request body when fullName is not supplied', async () => {
+    let observedBody: Record<string, unknown> | null = null;
+    server.use(
+      http.post(PROVISIONING_URL, async ({ request }) => {
+        observedBody = (await request.json()) as Record<string, unknown>;
+        return HttpResponse.json({
+          type: 'needs_information',
+          needs_information: {
+            type: 'object',
+            properties: { full_name: { type: 'string' } },
+            required: ['full_name'],
+          },
+        });
+      }),
+    );
+
+    await performDirectSignup({ email: 'ada@example.com', zone: 'us' });
+
+    expect(observedBody).not.toBeNull();
+    expect(observedBody!).not.toHaveProperty('full_name');
+    expect(observedBody!.email).toBe('ada@example.com');
+  });
+
+  it('includes full_name in the request body when fullName is supplied', async () => {
+    let observedBody: Record<string, unknown> | null = null;
+    server.use(
+      http.post(PROVISIONING_URL, async ({ request }) => {
+        observedBody = (await request.json()) as Record<string, unknown>;
+        return HttpResponse.json({ type: 'oauth', oauth: { code: 'c' } });
+      }),
+      http.post(TOKEN_URL, () => HttpResponse.json(VALID_TOKEN_RESPONSE)),
+    );
+
+    await performDirectSignup(INPUT);
+
+    expect(observedBody).not.toBeNull();
+    expect(observedBody!.full_name).toBe('Ada Lovelace');
+  });
+
   it('returns requires_redirect on requires_auth response', async () => {
     server.use(
       http.post(PROVISIONING_URL, () =>

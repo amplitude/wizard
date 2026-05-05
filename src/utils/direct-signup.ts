@@ -33,6 +33,19 @@ const RedirectSchema = z.object({
   }),
 });
 
+// JSON-Schema-shaped payload from the server. We only consume `required` to
+// know which fields to collect next; `properties` is preserved as opaque so a
+// future server-side addition (e.g. a new field with extra metadata) doesn't
+// fail-closed the parse.
+const NeedsInformationSchema = z.object({
+  type: z.literal('needs_information'),
+  needs_information: z.object({
+    type: z.literal('object'),
+    properties: z.record(z.string(), z.unknown()),
+    required: z.array(z.string()).min(1),
+  }),
+});
+
 const ErrorSchema = z.object({
   type: z.literal('error'),
   error: z.object({ code: z.string(), message: z.string() }),
@@ -60,7 +73,13 @@ function provisioningUrl(zone: AmplitudeZone): string {
 
 export interface DirectSignupInput {
   email: string;
-  fullName: string;
+  /**
+   * Optional. Omit on the probe POST so the server can decide whether the
+   * account is new (→ `needs_information`) or already exists (→ redirect).
+   * Required on the follow-up POST when the wizard has collected the field
+   * the server asked for.
+   */
+  fullName?: string;
   zone: AmplitudeZone;
 }
 
@@ -78,12 +97,16 @@ export type DirectSignupResult =
       dashboardUrl: string | null;
     }
   | { kind: 'requires_redirect' }
+  | { kind: 'needs_information'; requiredFields: string[] }
   | { kind: 'error'; message: string; code?: string };
 
 /**
  * Attempts to create an Amplitude account and obtain tokens directly via the
- * provisioning endpoint (amplitude/javascript PR #103683). Callers should fall
- * back to the OAuth redirect flow on `requires_redirect` or `error`.
+ * provisioning endpoint (amplitude/javascript PR #103683). Callers should:
+ * - on `success`: store tokens and continue.
+ * - on `needs_information`: collect the requested field(s) and call again
+ *   with `fullName` populated.
+ * - on `requires_redirect` or `error`: fall back to the OAuth redirect flow.
  */
 export async function performDirectSignup(
   input: DirectSignupInput,
@@ -96,24 +119,29 @@ export async function performDirectSignup(
   const state = crypto.randomBytes(16).toString('hex');
   log.debug('[direct-signup] POST', { url, zone: input.zone });
 
+  // Build the request body conditionally — omit `full_name` entirely when
+  // unset, instead of sending it as an empty string. The server treats
+  // `!body.full_name` as "no name provided" and responds `needs_information`;
+  // sending `""` would either be rejected by the server's zod (`min(1)`)
+  // or — worse, depending on coercion — be accepted as a valid name.
+  const requestBody: Record<string, unknown> = {
+    email: input.email,
+    scopes: ['openid', 'offline'],
+    state,
+    client_id: oAuthClientId,
+    redirect_uri: `http://localhost:${OAUTH_PORT}/callback`,
+  };
+  if (input.fullName !== undefined && input.fullName.length > 0) {
+    requestBody.full_name = input.fullName;
+  }
+
   let response;
   try {
-    response = await axios.post(
-      url,
-      {
-        email: input.email,
-        scopes: ['openid', 'offline'],
-        state,
-        client_id: oAuthClientId,
-        redirect_uri: `http://localhost:${OAUTH_PORT}/callback`,
-        full_name: input.fullName,
-      },
-      {
-        headers: { 'Content-Type': 'application/json' },
-        timeout: REQUEST_TIMEOUT_MS,
-        validateStatus: (s) => s < 500,
-      },
-    );
+    response = await axios.post(url, requestBody, {
+      headers: { 'Content-Type': 'application/json' },
+      timeout: REQUEST_TIMEOUT_MS,
+      validateStatus: (s) => s < 500,
+    });
   } catch (e) {
     return {
       kind: 'error',
@@ -123,6 +151,14 @@ export async function performDirectSignup(
 
   const parsedRedirect = RedirectSchema.safeParse(response.data);
   if (parsedRedirect.success) return { kind: 'requires_redirect' };
+
+  const parsedNeeds = NeedsInformationSchema.safeParse(response.data);
+  if (parsedNeeds.success) {
+    return {
+      kind: 'needs_information',
+      requiredFields: parsedNeeds.data.needs_information.required,
+    };
+  }
 
   const parsedError = ErrorSchema.safeParse(response.data);
   if (parsedError.success) {
