@@ -344,7 +344,7 @@ const ProgressTab = ({ store }: { store: WizardStore }) => {
         <Box marginBottom={1} flexDirection="column">
           <Box justifyContent="space-between">
             <Box gap={1}>
-              <BrailleSpinner color={Colors.active} frame={spinnerFrame} />
+              <BrailleSpinner color={Colors.accent} frame={spinnerFrame} />
               <Text color={Colors.body} bold>
                 {total > 0
                   ? // Avoid "X / Y" — Y can grow as the agent adds new tasks
@@ -420,9 +420,11 @@ const ProgressTab = ({ store }: { store: WizardStore }) => {
         {coachingTier >= 1 && (
           <Box marginTop={1}>
             <Text color={Colors.muted}>
+              <Text color={Colors.accent}>{Icons.diamond} tip</Text>
+              {Icons.dash}
               {coachingTier >= 2
-                ? "This is unusually slow. Press ← / → to switch to the Logs tab and see what's stuck — or Ctrl+C to cancel."
-                : "Still working — press ← / → to switch to the Logs tab and see what's happening, or Ctrl+C to cancel."}
+                ? " This is unusually slow. Press ← / → to switch to the Logs tab and see what's stuck — or Ctrl+C to cancel."
+                : ' Still working — press ← / → to switch to the Logs tab and see what\'s happening, or Ctrl+C to cancel.'}
             </Text>
           </Box>
         )}
