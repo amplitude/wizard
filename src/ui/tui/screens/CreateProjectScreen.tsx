@@ -201,11 +201,32 @@ export const CreateProjectScreen = ({ store }: CreateProjectScreenProps) => {
       store.setApiKeyNotice(null);
 
       // Fire-and-forget org refresh so the new project appears if the user
-      // navigates back to the picker. Best-effort — never blocks the flow.
+      // navigates back to the picker, and so we can persist OrgId +
+      // ProjectId to ampli.json via setOrgAndProject().
+      //
+      // The create API only returns appId + name — the stable UUID project
+      // ID only appears in the org-list response. We find the new project by
+      // name in the refreshed org and call setOrgAndProject() so it writes
+      // OrgId, ProjectId, ProjectName, and Zone to ampli.json.
       void fetchAmplitudeUser(idToken, zone)
-        .then((info) => store.setPendingOrgs(info.orgs))
+        .then((info) => {
+          store.setPendingOrgs(info.orgs);
+          // Wire up the project UUID that only appears in the org refresh.
+          const freshOrg = info.orgs.find((o) => o.id === orgId);
+          const freshProject = freshOrg?.projects.find(
+            (p) => p.name === result.name,
+          );
+          if (freshOrg && freshProject) {
+            store.setOrgAndProject(
+              { id: freshOrg.id, name: freshOrg.name },
+              freshProject,
+              session.installDir,
+            );
+          }
+        })
         .catch(() => {
-          // Swallow — we've already landed on success.
+          // Swallow — we've already landed on success; ampli.json will be
+          // written on the next successful org refresh or wizard run.
         });
 
       // Clear the create-project state last, after credentials are set, so

@@ -1783,6 +1783,31 @@ export class WizardStore {
   }
 
   /**
+   * Enter the inline create-project flow from the account-confirmation screen.
+   *
+   * Unlike `rejectStoredAccount()` (which clears credentials + org so the
+   * full SUSI picker re-runs), this keeps credentials and the resolved org so
+   * CreateProjectScreen can authenticate and knows which org to create in.
+   * Only the project-level selection is cleared because the user is replacing
+   * the project, not switching orgs or signing in again.
+   */
+  clearProjectForNewProject(): void {
+    this.$session.setKey('requiresAccountConfirmation', false);
+    // Keep credentials — we already have valid auth tokens; no new OAuth
+    // round-trip is needed to create a project.
+    // Keep selectedOrgId / selectedOrgName — we're creating in the same org.
+    this.$session.setKey('selectedProjectId', null);
+    this.$session.setKey('selectedProjectName', null);
+    this.$session.setKey('selectedAppId', null);
+    this.$session.setKey('selectedEnvName', null);
+    this.$session.setKey('projectHasData', null);
+    analytics.wizardCapture('account project cleared for new project', {
+      'from screen': 'auth',
+    });
+    this.emitChange();
+  }
+
+  /**
    * Reject the silently-resolved org/project on a returning run and drop
    * back to the SUSI picker. Drops the cached selection AND credentials
    * so AuthScreen re-runs the OAuth-to-picker pipeline; the cached idToken
