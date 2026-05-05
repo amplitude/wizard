@@ -74,12 +74,33 @@ function bootstrapInstallDir(installDir: string): void {
  * Also runs `bootstrapInstallDir` so every command path migrates legacy
  * storage and switches the logger to the per-project location once
  * `installDir` is known.
+ *
+ * **Mode-gated args:** the resolved execution mode is threaded into
+ * `buildSession` so `--auth-onboarding`, `--email`, and `--accept-tos`
+ * are dropped in interactive TUI runs (the Intro picker, signup-email
+ * screen, and ToS screen own those decisions). Non-interactive modes
+ * (`--ci` / `--agent`) honor every flag as today.
  */
 export const buildSessionFromOptions = async (
   options: Record<string, unknown>,
   overrides?: { ci?: boolean },
 ) => {
   const { buildSession } = await import('../lib/wizard-session.js');
+  const { resolveMode } = await import('../lib/mode-config.js');
+  // Resolve the effective mode using the same inputs `resolveMode` uses
+  // elsewhere. `ci` may be forced via the `overrides` arg (e.g. the
+  // `apply` subcommand always runs CI-style); otherwise we read it from
+  // argv. `--agent` and `--yes` similarly come from argv. `isTTY` reflects
+  // the real terminal state — non-TTY auto-routes to ci, TTY + no other
+  // flags lands on `interactive`.
+  const { mode } = resolveMode({
+    ci: overrides?.ci ?? Boolean(options.ci),
+    yes: Boolean(options.yes),
+    autoApprove: Boolean(options.autoApprove),
+    force: Boolean(options.force),
+    agent: Boolean(options.agent),
+    isTTY: Boolean(process.stdout.isTTY),
+  });
   const session = buildSession({
     debug: options.debug as boolean | undefined,
     verbose: options.verbose as boolean | undefined,
@@ -107,6 +128,7 @@ export const buildSessionFromOptions = async (
     // refers to the Amplitude project (formerly workspace), not the app.
     appId: options.appId as string | undefined,
     appName: options.appName as string | undefined,
+    executionMode: mode,
   });
   bootstrapInstallDir(session.installDir);
   return session;

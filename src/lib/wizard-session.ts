@@ -916,6 +916,16 @@ function resolveAuthOnboardingPathFromArgs(args: {
  * `signup` / `accountCreationFlow` are legacy boolean inputs still merged
  * here so older scripts and env-injected argv keep working; both map to
  * create-account when true.
+ *
+ * **TUI scope of signup flags:** When `executionMode` is `'interactive'`,
+ * `--auth-onboarding`, `--email`, and `--accept-tos` are silently ignored
+ * because the TUI's Intro menu, signup-email screen, and ToS screen own
+ * those decisions. `--full-name` continues to pre-fill the name screen
+ * regardless of mode (no confirmation step is bypassed by pre-fill — it's
+ * just metadata). Non-interactive modes (`'ci'` / `'agent'`) honor every
+ * flag as today. When `executionMode` is omitted, behavior matches the
+ * pre-gating contract (all flags honored) — call sites that have not been
+ * updated to thread the resolved mode keep working unchanged.
  */
 export function buildSession(args: {
   debug?: boolean;
@@ -959,11 +969,37 @@ export function buildSession(args: {
    * session's region so RegionSelect is skipped in the TUI flow too.
    */
   region?: AmplitudeZone;
+  /**
+   * Resolved execution mode. When `'interactive'`, signup-related CLI args
+   * (`--auth-onboarding`, `--email`, `--accept-tos`) are silently ignored —
+   * the TUI screens are the canonical UX for those decisions. Omitting this
+   * preserves the legacy "honor every flag" behavior so callers that don't
+   * thread mode in (tests, store init, etc.) keep working.
+   */
+  executionMode?: import('./mode-config.js').ExecutionMode;
 }): WizardSession {
-  const resolvedAuthPath = resolveAuthOnboardingPathFromArgs(args);
-  // Validate CLI args via Zod — warn on bad input but fall back to defaults
+  const isInteractive = args.executionMode === 'interactive';
+  // In interactive mode, drop the signup-specific args at the doorstep so
+  // every downstream resolver (zod parse, auth-path resolution, default
+  // assignment) treats them as unset. Single-source-of-truth: the gating
+  // happens here, not at every read site.
+  const effectiveArgs = isInteractive
+    ? {
+        ...args,
+        authOnboardingPath: undefined,
+        authOnboarding: undefined,
+        signup: undefined,
+        accountCreationFlow: undefined,
+        signupEmail: undefined,
+        acceptTos: undefined,
+      }
+    : args;
+  const resolvedAuthPath = resolveAuthOnboardingPathFromArgs(effectiveArgs);
+  // Validate CLI args via Zod — warn on bad input but fall back to defaults.
+  // Parse against `effectiveArgs` so interactive-mode gating drops the
+  // ignored flags before zod's email/boolean validation sees them.
   const parsed = CliArgsSchema.safeParse({
-    ...args,
+    ...effectiveArgs,
     authOnboardingPath: resolvedAuthPath,
   });
   if (!parsed.success) {
@@ -974,8 +1010,10 @@ export function buildSession(args: {
     );
   }
 
-  // Use Zod-validated data (with coerced appId and defaults) when available
-  const validated = parsed.success ? parsed.data : args;
+  // Use Zod-validated data (with coerced appId and defaults) when available.
+  // The fallback also uses `effectiveArgs` so interactive-mode gating still
+  // applies on parse failure.
+  const validated = parsed.success ? parsed.data : effectiveArgs;
 
   return {
     debug: validated.debug ?? false,
@@ -986,7 +1024,7 @@ export function buildSession(args: {
     agent: false,
     authOnboardingPath: parsed.success
       ? parsed.data.authOnboardingPath
-      : resolveAuthOnboardingPathFromArgs(args),
+      : resolveAuthOnboardingPathFromArgs(effectiveArgs),
     // On parse failure we intentionally reject raw args for the signup
     // fields — otherwise a malformed email would skip zod's .email() check
     // via the fallback and reach the signup endpoint. Null here means the
