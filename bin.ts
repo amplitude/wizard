@@ -482,8 +482,8 @@ void yargs(hideBin(process.argv))
       type: 'string',
     },
     agent: {
-      hidden: true,
-      describe: 'internal: AMPLITUDE_WIZARD_AGENT env-var passthrough',
+      default: false,
+      describe: 'emit structured NDJSON output for automation',
       type: 'boolean',
     },
     'install-dir': {
