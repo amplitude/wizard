@@ -93,6 +93,7 @@ async function fetchUserWithProvisioningRetry(
 export type SignupAttemptStatus =
   | 'success'
   | 'requires_redirect'
+  | 'needs_information'
   | 'signup_error'
   | 'user_fetch_failed'
   | 'wrapper_exception'
@@ -197,6 +198,20 @@ export async function performSignupOrAuth(
   if (result.kind === 'requires_redirect') {
     log.debug('direct signup did not succeed', { kind: result.kind });
     trackSignupAttempt({ status: 'requires_redirect', zone: input.zone });
+    return null;
+  }
+  if (result.kind === 'needs_information') {
+    // The wrapper today is single-shot and can't collect missing fields —
+    // it's only called from non-TUI paths where both `email` and `fullName`
+    // are gated upstream. Reaching this branch means the wizard sent a
+    // valid full_name but the server still asked for more (a future-field
+    // case the wrapper isn't equipped to handle). Treat as a redirect-style
+    // fallback. The TUI path that handles `needs_information` properly
+    // lives in a follow-up PR (server-driven field collection).
+    log.debug('direct signup needs information', {
+      requiredFields: result.requiredFields,
+    });
+    trackSignupAttempt({ status: 'needs_information', zone: input.zone });
     return null;
   }
   if (result.kind === 'error') {
