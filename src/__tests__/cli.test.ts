@@ -985,19 +985,32 @@ describe('reset command', () => {
     );
 
     expect(process.exit).toHaveBeenCalledWith(0);
-    // All wizard-managed targets gone:
-    expect(fs.existsSync(path.join(projectDir, '.amplitude'))).toBe(false);
+    // Wizard-managed dotfiles are gone:
     expect(fs.existsSync(path.join(projectDir, '.amplitude-events.json'))).toBe(
       false,
     );
     expect(
       fs.existsSync(path.join(projectDir, 'amplitude-setup-report.md')),
     ).toBe(false);
-    // ampli.json: auth-scoped fields stripped, tracking-plan fields preserved.
+    // After deleting `.amplitude/`, `clearAuthFieldsInAmpliConfig` falls
+    // back to the legacy `ampli.json`, strips auth fields, and writes a
+    // fresh canonical binding. This prevents stale auth resurrection on
+    // the next launch. The `.amplitude/` dir is recreated with only the
+    // cleared binding.
+    const { getProjectBindingFile } = await import('../utils/storage-paths.js');
+    const bindingPath = getProjectBindingFile(projectDir);
+    expect(fs.existsSync(bindingPath)).toBe(true);
+    const binding = JSON.parse(fs.readFileSync(bindingPath, 'utf-8')) as Record<
+      string,
+      string
+    >;
+    expect(binding.OrgId).toBeUndefined();
+    expect(binding.SourceId).toBe('keep');
+    // Legacy `ampli.json` is untouched (Phase G-1 doesn't write it).
     const ampli = JSON.parse(
       fs.readFileSync(path.join(projectDir, 'ampli.json'), 'utf-8'),
     ) as Record<string, string>;
-    expect(ampli.OrgId).toBeUndefined();
+    expect(ampli.OrgId).toBe('org-1');
     expect(ampli.SourceId).toBe('keep');
 
     // JSON result line emitted to stdout:

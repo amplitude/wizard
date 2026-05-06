@@ -276,19 +276,28 @@ describe('readAmpliConfig + writeAmpliConfig round-trip', () => {
     expect(parsed.config.ProjectId).toBe('legacy-ws-id');
     expect(parsed.config.WorkspaceId).toBeUndefined();
 
-    // Write back: both canonical binding and legacy mirror hold the new shape.
+    // Write back: only the canonical binding is updated. Phase G-1 stopped
+    // writing the legacy `ampli.json` mirror; the legacy file on disk should
+    // remain in its original (pre-migration) shape.
     writeAmpliConfig(tmpDir, parsed.config);
     const bindingPath = getProjectBindingFile(tmpDir);
     const legacyResolved = ampliConfigPath(tmpDir);
-    for (const p of [bindingPath, legacyResolved]) {
-      const rawOnDisk = fs.readFileSync(p, 'utf-8');
-      const json = JSON.parse(rawOnDisk) as Record<string, unknown>;
-      expect(json.ProjectId).toBe('legacy-ws-id');
-      expect(json.WorkspaceId).toBeUndefined();
-      expect(json.OrgId).toBe('36958');
-      expect(json.SourceId).toBe('src-1');
-      expect(json.Zone).toBe('us');
-    }
+
+    const bindingJson = JSON.parse(
+      fs.readFileSync(bindingPath, 'utf-8'),
+    ) as Record<string, unknown>;
+    expect(bindingJson.ProjectId).toBe('legacy-ws-id');
+    expect(bindingJson.WorkspaceId).toBeUndefined();
+    expect(bindingJson.OrgId).toBe('36958');
+    expect(bindingJson.SourceId).toBe('src-1');
+    expect(bindingJson.Zone).toBe('us');
+
+    // Legacy mirror file is untouched — still has WorkspaceId from the
+    // original write.
+    const legacyJson = JSON.parse(
+      fs.readFileSync(legacyResolved, 'utf-8'),
+    ) as Record<string, unknown>;
+    expect(legacyJson.WorkspaceId).toBe('legacy-ws-id');
   });
 
   it('reads legacy ampli.json alone and creates project-binding.json on read', () => {
@@ -313,7 +322,12 @@ describe('readAmpliConfig + writeAmpliConfig round-trip', () => {
     expect(fs.existsSync(bindingPath)).toBe(true);
   });
 
-  it('merges binding over legacy when both exist', () => {
+  it('canonical binding is authoritative when both exist (no legacy merge)', () => {
+    // Phase G-1 read-side fix: when the canonical binding exists, it's the
+    // single source of truth — we do NOT merge legacy `ampli.json` data on
+    // top of it. Otherwise keys deliberately cleared from the binding
+    // (e.g. by `clearAuthFieldsInAmpliConfig`) would be resurrected from a
+    // stale legacy file, breaking logout/reset.
     fs.writeFileSync(
       path.join(tmpDir, 'ampli.json'),
       JSON.stringify({ OrgId: 'from-legacy', ProjectId: 'p', SourceId: 's' }),
@@ -329,8 +343,10 @@ describe('readAmpliConfig + writeAmpliConfig round-trip', () => {
     expect(parsed.ok).toBe(true);
     if (!parsed.ok) return;
     expect(parsed.config.OrgId).toBe('from-binding');
-    expect(parsed.config.ProjectId).toBe('p');
-    expect(parsed.config.SourceId).toBe('s');
+    // Keys absent from the canonical binding stay absent — we no longer
+    // backfill them from legacy.
+    expect(parsed.config.ProjectId).toBeUndefined();
+    expect(parsed.config.SourceId).toBeUndefined();
   });
 });
 
@@ -364,23 +380,225 @@ describe('clearAuthFieldsInAmpliConfig', () => {
 
     clearAuthFieldsInAmpliConfig(tmpDir);
 
-    for (const p of [
-      getProjectBindingFile(tmpDir),
-      path.join(tmpDir, 'ampli.json'),
-    ]) {
-      const rawOnDisk = fs.readFileSync(p, 'utf-8');
-      const json = JSON.parse(rawOnDisk) as Record<string, unknown>;
-      expect(json.OrgId).toBeUndefined();
-      expect(json.ProjectId).toBeUndefined();
-      expect(json.WorkspaceId).toBeUndefined();
-      expect(json.Zone).toBeUndefined();
-      expect(json.SourceId).toBe('src-1');
-      expect(json.Branch).toBe('main');
-    }
+    // Phase G-1: only the canonical binding file is cleared. The legacy
+    // `ampli.json` mirror is no longer written, so its on-disk contents
+    // remain whatever the user had before — we don't go back in to scrub
+    // a path we've stopped touching.
+    const bindingPath = getProjectBindingFile(tmpDir);
+    const bindingJson = JSON.parse(
+      fs.readFileSync(bindingPath, 'utf-8'),
+    ) as Record<string, unknown>;
+    expect(bindingJson.OrgId).toBeUndefined();
+    expect(bindingJson.ProjectId).toBeUndefined();
+    expect(bindingJson.WorkspaceId).toBeUndefined();
+    expect(bindingJson.Zone).toBeUndefined();
+    expect(bindingJson.SourceId).toBe('src-1');
+    expect(bindingJson.Branch).toBe('main');
   });
 
   it('is a no-op when neither binding nor ampli.json exists', () => {
     expect(() => clearAuthFieldsInAmpliConfig(tmpDir)).not.toThrow();
     expect(fs.existsSync(path.join(tmpDir, 'ampli.json'))).toBe(false);
+  });
+});
+
+// ── Phase G-1: ampli.json mirror writes are disabled ─────────────────────────
+//
+// Per FINAL_NEW_MIGRATION_PLAN.md §5 Phase G-1, the wizard no longer writes
+// the legacy `<installDir>/ampli.json` mirror. Reads still work for
+// back-compat (one minor cycle), but writes target only the canonical
+// `.amplitude/project-binding.json`.
+
+describe('Phase G-1: ampli.json mirror writes are disabled', () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'phase-g1-'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('writeAmpliConfig does not create ampli.json on a fresh project', () => {
+    const config: AmpliConfig = {
+      OrgId: 'org-fresh',
+      ProjectId: 'proj-fresh',
+      SourceId: 'src-fresh',
+      Zone: 'us',
+    };
+
+    expect(writeAmpliConfig(tmpDir, config)).toBe(true);
+
+    // Canonical write happened.
+    const bindingPath = getProjectBindingFile(tmpDir);
+    expect(fs.existsSync(bindingPath)).toBe(true);
+
+    // Legacy mirror was not created.
+    expect(fs.existsSync(ampliConfigPath(tmpDir))).toBe(false);
+  });
+
+  it('writeAmpliConfig leaves an existing ampli.json untouched', () => {
+    // Seed a pre-existing legacy mirror as if from a prior wizard version.
+    const legacyPath = ampliConfigPath(tmpDir);
+    const legacyContent = JSON.stringify({
+      OrgId: 'org-legacy',
+      ProjectId: 'proj-legacy',
+      SourceId: 'src-legacy',
+      stale: 'marker',
+    });
+    fs.writeFileSync(legacyPath, legacyContent, 'utf-8');
+    const legacyMtimeBefore = fs.statSync(legacyPath).mtimeMs;
+
+    // Write a brand-new config — only the canonical path should change.
+    writeAmpliConfig(tmpDir, {
+      OrgId: 'org-new',
+      ProjectId: 'proj-new',
+      SourceId: 'src-new',
+    });
+
+    const onDiskLegacy = JSON.parse(
+      fs.readFileSync(legacyPath, 'utf-8'),
+    ) as Record<string, unknown>;
+    // The bytes are byte-for-byte the original — Phase G-1 doesn't touch
+    // the legacy file on writes.
+    expect(onDiskLegacy.OrgId).toBe('org-legacy');
+    expect(onDiskLegacy.ProjectId).toBe('proj-legacy');
+    expect(onDiskLegacy.stale).toBe('marker');
+
+    // mtime is unchanged — proves no write happened, even one with the same
+    // content. (`atomicWriteJSON` uses temp-file + rename and would bump
+    // mtime if it had been called.)
+    const legacyMtimeAfter = fs.statSync(legacyPath).mtimeMs;
+    expect(legacyMtimeAfter).toBe(legacyMtimeBefore);
+
+    // Canonical binding has the new shape.
+    const bindingJson = JSON.parse(
+      fs.readFileSync(getProjectBindingFile(tmpDir), 'utf-8'),
+    ) as Record<string, unknown>;
+    expect(bindingJson.OrgId).toBe('org-new');
+    expect(bindingJson.ProjectId).toBe('proj-new');
+  });
+
+  it('readAmpliConfig still returns data when only a legacy ampli.json is present', () => {
+    // Simulate the upgrade path: a user with a pre-G-1 install has only
+    // `ampli.json` on disk. The read side must still surface that data so
+    // the wizard recognises a returning project.
+    const legacyPath = ampliConfigPath(tmpDir);
+    fs.writeFileSync(
+      legacyPath,
+      JSON.stringify({
+        OrgId: 'org-upgrade',
+        ProjectId: 'proj-upgrade',
+        SourceId: 'src-upgrade',
+        Zone: 'eu',
+      }),
+      'utf-8',
+    );
+
+    // Sanity check: no canonical binding yet.
+    expect(fs.existsSync(getProjectBindingFile(tmpDir))).toBe(false);
+
+    const result = readAmpliConfig(tmpDir);
+    expect(result.ok).toBe(true);
+    if (!result.ok) return;
+    expect(result.config.OrgId).toBe('org-upgrade');
+    expect(result.config.ProjectId).toBe('proj-upgrade');
+    expect(result.config.Zone).toBe('eu');
+  });
+
+  // Regression: after `wizard reset`, the canonical `.amplitude/` directory
+  // is removed but a stale legacy `ampli.json` may still be on disk. Before
+  // the read-side fix, `readAmpliConfig` happily merged that legacy file
+  // back in — so reset effectively did nothing for users who had been on
+  // pre-G-1 versions. With the fix, missing canonical → empty config.
+  //
+  // This also covers `clearAuthFieldsInAmpliConfig`: the canonical binding's
+  // cleared keys must not be backfilled from legacy (otherwise logout
+  // resurrects the prior org/project).
+  it('reset semantics: stale legacy ampli.json does not resurrect after canonical removed', () => {
+    // Step 1: legacy mirror has stale auth state from a pre-G-1 install.
+    const legacyPath = ampliConfigPath(tmpDir);
+    fs.writeFileSync(
+      legacyPath,
+      JSON.stringify({
+        OrgId: 'stale-org',
+        ProjectId: 'stale-proj',
+        SourceId: 'stale-src',
+        Zone: 'us',
+      }),
+      'utf-8',
+    );
+
+    // Step 2: simulate `wizard reset` — canonical .amplitude/ directory is
+    // gone (or never existed). The legacy mirror still has data.
+    const ampliDir = path.join(tmpDir, '.amplitude');
+    if (fs.existsSync(ampliDir)) {
+      fs.rmSync(ampliDir, { recursive: true, force: true });
+    }
+    expect(fs.existsSync(getProjectBindingFile(tmpDir))).toBe(false);
+
+    // Step 3: read. Pre-fix this returned the stale legacy data. Post-fix,
+    // because the binding is missing, we DO fall back to legacy (back-compat
+    // for true legacy-only installs) and migrate it forward — that's
+    // intentional: a missing canonical means "legacy install we haven't seen
+    // before," not "explicitly cleared." The resurrection-after-reset bug
+    // only fires when canonical exists but is empty/cleared, so we cover
+    // that case below.
+    const firstRead = readAmpliConfig(tmpDir);
+    expect(firstRead.ok).toBe(true);
+
+    // Step 4: now simulate a *cleared* canonical binding (the post-logout
+    // / post-clearAuthFields state). The cleared keys must NOT come back
+    // from legacy.
+    fs.writeFileSync(
+      getProjectBindingFile(tmpDir),
+      JSON.stringify({ SourceId: 'kept-src' }),
+      'utf-8',
+    );
+
+    const cleared = readAmpliConfig(tmpDir);
+    expect(cleared.ok).toBe(true);
+    if (!cleared.ok) return;
+    // Auth keys absent from canonical stay absent — no legacy resurrection.
+    expect(cleared.config.OrgId).toBeUndefined();
+    expect(cleared.config.ProjectId).toBeUndefined();
+    expect(cleared.config.Zone).toBeUndefined();
+    // Tracking-plan field deliberately kept in canonical survives.
+    expect(cleared.config.SourceId).toBe('kept-src');
+  });
+
+  it('clearAuthFieldsInAmpliConfig leaves legacy ampli.json bytes untouched', () => {
+    // Legacy mirror has auth fields the user wants cleared.
+    const legacyPath = ampliConfigPath(tmpDir);
+    const legacyContent = JSON.stringify({
+      OrgId: 'org-x',
+      ProjectId: 'proj-x',
+      SourceId: 'src-x',
+      Zone: 'us',
+    });
+    fs.writeFileSync(legacyPath, legacyContent, 'utf-8');
+    const legacyMtimeBefore = fs.statSync(legacyPath).mtimeMs;
+
+    clearAuthFieldsInAmpliConfig(tmpDir);
+
+    // Legacy file is untouched (Phase G-1 skips legacy writes — including
+    // the cleanup write inside clearAuthFieldsInAmpliConfig).
+    const legacyAfter = JSON.parse(
+      fs.readFileSync(legacyPath, 'utf-8'),
+    ) as Record<string, unknown>;
+    expect(legacyAfter.OrgId).toBe('org-x');
+    expect(legacyAfter.ProjectId).toBe('proj-x');
+    const legacyMtimeAfter = fs.statSync(legacyPath).mtimeMs;
+    expect(legacyMtimeAfter).toBe(legacyMtimeBefore);
+
+    // Canonical binding reflects the cleared auth fields.
+    const bindingJson = JSON.parse(
+      fs.readFileSync(getProjectBindingFile(tmpDir), 'utf-8'),
+    ) as Record<string, unknown>;
+    expect(bindingJson.OrgId).toBeUndefined();
+    expect(bindingJson.ProjectId).toBeUndefined();
+    expect(bindingJson.Zone).toBeUndefined();
+    expect(bindingJson.SourceId).toBe('src-x');
   });
 });

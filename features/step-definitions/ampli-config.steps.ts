@@ -232,14 +232,28 @@ Then('it should contain ProjectId {string}', function (expected: string) {
 
 Then(
   '{string} should not contain a WorkspaceId field',
-  function (_filename: string) {
-    const raw = fs.readFileSync(path.join(projectDir, 'ampli.json'), 'utf-8');
+  function (filename: string) {
+    // Phase G-1: writes land in the canonical binding path, not ampli.json.
+    // Read the raw file at the path the scenario named so the assertion stays
+    // honest about what's on disk.
+    const filePath = path.join(projectDir, filename);
+    const raw = fs.readFileSync(filePath, 'utf-8');
     const parsed = JSON.parse(raw) as Record<string, unknown>;
     assert.ok(
       !('WorkspaceId' in parsed),
-      `Expected WorkspaceId to be absent from written ampli.json, got keys: ${Object.keys(
+      `Expected WorkspaceId to be absent from written ${filename}, got keys: ${Object.keys(
         parsed,
       ).join(', ')}`,
+    );
+  },
+);
+
+Then(
+  '{string} should not exist in the project directory',
+  function (filename: string) {
+    assert.ok(
+      !fs.existsSync(path.join(projectDir, filename)),
+      `Expected ${filename} to NOT exist in ${projectDir}`,
     );
   },
 );

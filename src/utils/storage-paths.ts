@@ -20,10 +20,11 @@
  *
  * Per-user OAuth session (access/refresh tokens) lives in the cache root as
  * `oauth-session.json` (mode `0o600`). Legacy `~/.ampli.json` is still read
- * once for migration and kept in sync on write until fully retired.
+ * for migration; new writes target the canonical path only (Phase G-1).
  *
- * Project binding is also written to `<installDir>/ampli.json` during
- * transition so older tooling that still looks there continues to work.
+ * Project binding is written exclusively to
+ * `<installDir>/.amplitude/project-binding.json`. Legacy `<installDir>/ampli.json`
+ * is still read for back-compat (Phase G-1) but no longer written.
  *
  * Unchanged paths:
  *   - `<installDir>/.env.local` — API key fallback
@@ -185,8 +186,10 @@ export function getOAuthSettingsFile(): string {
 }
 
 /**
- * Legacy per-user OAuth file. Read for one-shot migration; still updated on
- * write so older workflows that expect this path keep working during transition.
+ * Legacy per-user OAuth file. Read for one-shot migration only — Phase G-1
+ * stopped writing this path. Reads remain for one minor cycle so existing
+ * installs migrate forward on first launch (per FINAL_NEW_MIGRATION_PLAN.md
+ * §10 decision 7).
  */
 export function getLegacyAmpliHomeOAuthPath(): string {
   return join(homedir(), '.ampli.json');
@@ -220,7 +223,8 @@ export function getDashboardFile(installDir: string): string {
 
 /**
  * Canonical wizard project binding (org, project, source, zone, app id, etc.).
- * Legacy `ampli.json` in the project root is still read/written during transition.
+ * Legacy `ampli.json` in the project root is still read for back-compat;
+ * Phase G-1 stopped the dual-write mirror.
  */
 export function getProjectBindingFile(installDir: string): string {
   return join(getProjectMetaDir(installDir), 'project-binding.json');

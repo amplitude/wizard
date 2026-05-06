@@ -4,7 +4,7 @@ import { getUI } from './helpers';
 export const resetCommand: CommandModule = {
   command: 'reset',
   describe:
-    'Remove project wizard state (`.amplitude/`, legacy `.amplitude-*.json`, setup report) and clear org/project/zone in `.amplitude/project-binding.json` and mirrored `ampli.json`. OAuth, API keys, and tracking-plan fields are left intact.',
+    'Remove project wizard state (`.amplitude/`, legacy `.amplitude-*.json`, setup report) and clear org/project/zone in `.amplitude/project-binding.json`. OAuth, API keys, and tracking-plan fields are left intact.',
   builder: (yargs) =>
     yargs.options({
       'install-dir': {
@@ -38,16 +38,6 @@ export const resetCommand: CommandModule = {
       // logout --clean` is the command for that. Reset is the "I want
       // a fresh setup run on this codebase" gesture, not "I'm done with
       // Amplitude entirely."
-      //
-      // Clear binding from canonical + legacy mirror before removing
-      // `.amplitude/`, or readAmpliConfig would migrate from `ampli.json` and
-      // recreate the directory.
-      try {
-        clearAuthFieldsInAmpliConfig(installDir);
-      } catch {
-        /* best-effort */
-      }
-
       const targets = [
         { path: path.join(installDir, '.amplitude'), kind: 'dir' as const },
         {
@@ -97,6 +87,17 @@ export const resetCommand: CommandModule = {
           }
         }
       }
+      // Write a cleared canonical binding AFTER removing `.amplitude/`.
+      // If a stale legacy `ampli.json` is still on disk (Phase G-1 stopped
+      // writing it), readAmpliConfig would fall back to it and resurrect
+      // auth fields that reset is supposed to clear. By clearing after
+      // deletion, the freshly written canonical binding takes precedence.
+      try {
+        clearAuthFieldsInAmpliConfig(installDir);
+      } catch {
+        /* best-effort */
+      }
+
       if (jsonOutput) {
         process.stdout.write(
           JSON.stringify({
