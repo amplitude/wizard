@@ -9,41 +9,16 @@
  */
 
 import type { AgentEventEnvelope } from '../../src/lib/agent-events.js';
+import type { Scenario } from './scenario-schema.js';
 
 /**
- * Declarative scenario manifest. Each Ring 1 scenario lives at
- * `evals/scenarios/<framework>/<variant>/scenario.json`. Scorers read
- * fields off this object; adding a scenario should not require new
- * scorer code.
+ * Declarative scenario manifest. Re-exported from the Zod schema in
+ * `scenario-schema.ts` — that module is the source of truth and
+ * loaders MUST call `parseScenario` rather than typecasting raw JSON.
+ * A typo in `expectedSdkPackage` (or any required field) silently
+ * flips Layer 0 into a false pass otherwise.
  */
-export interface Scenario {
-  /** Human-readable name, e.g. `nextjs-app-router/vanilla`. */
-  name: string;
-  /** Ring assignment: 1 = PR gate, 2 = nightly, 3 = pre-release. */
-  ring: 1 | 2 | 3;
-  /**
-   * Integration enum value passed to the wizard via `--integration`.
-   * Mirrors `Integration` in `src/lib/constants.ts`.
-   */
-  integrationHint: string;
-  /** Build command run inside the working dir for Layer 3 (Week 2+). */
-  buildCommand: string[];
-  /** SDK package family the agent is expected to install. */
-  expectedSdkPackage: string;
-  /** Env-var prefix the framework requires (`NEXT_PUBLIC_`, `VITE_`, etc.). */
-  expectedEnvPrefix: string;
-  /** File path (relative to install dir) where init() should land. */
-  expectedInitFile: string;
-  /** Event names the agent should `track()`. */
-  expectedEvents: string[];
-  /**
-   * Files / globs the agent must NOT touch. A modification here is a
-   * hard fail (criterion 10 — no build-config bridging).
-   */
-  forbiddenPaths: string[];
-  /** Free-form notes for the next contributor. */
-  notes?: string;
-}
+export type { Scenario } from './scenario-schema.js';
 
 /**
  * Snapshot of the working tree after a run. Computed by walking the
@@ -82,6 +57,16 @@ export interface Artifact {
   /** Every NDJSON line, parsed in order. */
   runLog: AgentEventEnvelope[];
   fsSnapshot: FsSnapshot;
+  /**
+   * Stderr captured from the wizard subprocess, post-redaction.
+   *
+   * Live runs apply `redactString` from
+   * `src/lib/observability/redact.ts` to the full buffer at flush time.
+   * Goldens may pin a `golden/stderr.txt`; absence is fine and yields
+   * an empty string. The `no-secret-in-stderr` Layer 0 scorer treats
+   * any token-shape match here as a redactor-failure hard fail.
+   */
+  stderr: string;
   /**
    * Source of the artifact. `live` = freshly spawned wizard. `golden`
    * = pre-recorded NDJSON + a baseline snapshot loaded from disk.

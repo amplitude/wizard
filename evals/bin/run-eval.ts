@@ -26,6 +26,7 @@ import { dirname, join, resolve } from 'node:path';
 
 import { runLive, runReplay } from '../runner/invoke-wizard.js';
 import { assertContract, parseStream } from '../runner/parse-stream.js';
+import { parseScenario } from '../runner/scenario-schema.js';
 import { score } from '../runner/score.js';
 import type { Scenario } from '../runner/types.js';
 
@@ -61,7 +62,10 @@ function loadScenario(scenarioDir: string): Scenario {
   if (!existsSync(path)) {
     throw new Error(`scenario.json missing: ${path}`);
   }
-  return JSON.parse(readFileSync(path, 'utf8')) as Scenario;
+  // Validate at load time so a typo in expectedSdkPackage / a missing
+  // required field surfaces here rather than as a confused scorer fail
+  // later. Throws ZodError with a useful path on invalid input.
+  return parseScenario(JSON.parse(readFileSync(path, 'utf8')));
 }
 
 async function main() {
@@ -83,15 +87,19 @@ async function main() {
   const hasGolden = existsSync(goldenDir);
   const useLive = args.live;
   if (useLive) {
-    const apiKey =
-      process.env.AMPLITUDE_EVAL_API_KEY ??
-      process.env.AMPLITUDE_WIZARD_API_KEY;
-    if (!apiKey) {
-      console.error(
-        'live mode requires AMPLITUDE_EVAL_API_KEY (or AMPLITUDE_WIZARD_API_KEY). ' +
-          'Falling back is not safe in live mode — exiting.',
+    // Auth resolution lives in `runLive` (`resolveLiveAuthMode`). We
+    // pre-check here only to print a helpful pre-flight warning; the
+    // runner is the source of truth and will throw if neither path is
+    // configured.
+    const hasOauth = !!process.env.WIZARD_OAUTH_TOKEN;
+    const hasBypassOptIn = process.env.EVALS_ALLOW_API_KEY_BYPASS === '1';
+    const hasApiKey = !!(
+      process.env.AMPLITUDE_EVAL_API_KEY ?? process.env.AMPLITUDE_WIZARD_API_KEY
+    );
+    if (!hasOauth && hasBypassOptIn && hasApiKey) {
+      console.warn(
+        '⚠️  Live run will use --api-key (gateway-bypass mode). LLM calls go direct-to-Anthropic and will not exercise the Amplitude LLM gateway. Set WIZARD_OAUTH_TOKEN to route through the gateway once wizard-side wiring lands.',
       );
-      process.exit(2);
     }
   } else if (!hasGolden) {
     console.error(

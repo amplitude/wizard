@@ -15,6 +15,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
+import { resolveExpectedSdkPackage } from '../../runner/scenario-schema.js';
 import type { Artifact, Scenario, Scorer } from '../../runner/types.js';
 
 interface PackageJsonShape {
@@ -23,11 +24,10 @@ interface PackageJsonShape {
 }
 
 /**
- * For browser frameworks, the project rule (and `expectedSdkPackage`
- * in the scenario manifest) is `@amplitude/unified`. We treat
- * `@amplitude/analytics-browser` as a *known wrong family* for those
- * scenarios — explicit hard-fail with a tailored detail so the next
- * developer immediately sees the project rule.
+ * For browser frameworks, the project rule is `@amplitude/unified`.
+ * We treat `@amplitude/analytics-browser` as a *known wrong family*
+ * for those scenarios — explicit hard-fail with a tailored detail so
+ * the next developer immediately sees the project rule.
  */
 const KNOWN_WRONG_BROWSER_FAMILY = '@amplitude/analytics-browser';
 
@@ -68,14 +68,17 @@ export const scorer: Scorer = {
       ...(pkg.devDependencies ?? {}),
     };
 
-    if (deps[scenario.expectedSdkPackage]) {
+    // Source of truth for "correct package" is the framework→SDK
+    // table, not a per-scenario field. A scenario that overrides the
+    // table must pair `expectedSdkPackage` with `sdkOverrideReason`
+    // (enforced in the schema).
+    const expected = resolveExpectedSdkPackage(scenario);
+
+    if (deps[expected]) {
       return { pass: true, weight: 0 };
     }
 
-    if (
-      scenario.expectedSdkPackage === '@amplitude/unified' &&
-      deps[KNOWN_WRONG_BROWSER_FAMILY]
-    ) {
+    if (expected === '@amplitude/unified' && deps[KNOWN_WRONG_BROWSER_FAMILY]) {
       return {
         pass: false,
         hardFail: true,
@@ -89,7 +92,7 @@ export const scorer: Scorer = {
       pass: false,
       hardFail: true,
       weight: 0,
-      detail: `package.json does not declare ${scenario.expectedSdkPackage}`,
+      detail: `package.json does not declare ${expected}`,
       evidencePath: 'package.json',
     };
   },

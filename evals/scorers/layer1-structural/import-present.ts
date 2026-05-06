@@ -13,6 +13,7 @@
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 
+import { resolveExpectedSdkPackage } from '../../runner/scenario-schema.js';
 import type { Artifact, Scenario, Scorer } from '../../runner/types.js';
 
 const IMPORT_RE = /import\s+(?:[\s\S]*?)\s+from\s+['"]([^'"]+)['"]/g;
@@ -65,26 +66,28 @@ export const scorer: Scorer = {
       };
     }
 
+    // SDK package family comes from the framework→SDK table by
+    // default; per-scenario overrides require an explicit reason
+    // (enforced in the schema).
+    const expectedPackage = resolveExpectedSdkPackage(scenario);
+
     const imports = new Set<string>();
     for (const m of text.matchAll(IMPORT_RE)) imports.add(m[1]);
     for (const m of text.matchAll(REQUIRE_RE)) imports.add(m[1]);
-    if (imports.has(scenario.expectedSdkPackage)) {
+    if (imports.has(expectedPackage)) {
       return { pass: true, weight: 10 };
     }
     // Permit subpaths (e.g. `@amplitude/unified/server`) — some SDKs
     // expose multiple entrypoints. Match by package-name prefix.
     for (const i of imports) {
-      if (
-        i === scenario.expectedSdkPackage ||
-        i.startsWith(`${scenario.expectedSdkPackage}/`)
-      ) {
+      if (i === expectedPackage || i.startsWith(`${expectedPackage}/`)) {
         return { pass: true, weight: 10 };
       }
     }
     return {
       pass: false,
       weight: 10,
-      detail: `${matchPath} does not import from ${scenario.expectedSdkPackage}`,
+      detail: `${matchPath} does not import from ${expectedPackage}`,
       evidencePath: matchPath,
     };
   },

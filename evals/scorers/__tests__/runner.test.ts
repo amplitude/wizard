@@ -14,8 +14,8 @@ import { describe, expect, it } from 'vitest';
 
 import { runReplay } from '../../runner/invoke-wizard.js';
 import { assertContract, parseStream } from '../../runner/parse-stream.js';
+import { parseScenario } from '../../runner/scenario-schema.js';
 import { score } from '../../runner/score.js';
-import type { Scenario } from '../../runner/types.js';
 import scenarioJson from '../../scenarios/nextjs-app-router/vanilla/scenario.json';
 
 const scenarioDir = resolve(
@@ -26,7 +26,9 @@ const scenarioDir = resolve(
   'nextjs-app-router',
   'vanilla',
 );
-const scenario = scenarioJson as Scenario;
+// Validate at import time so the runner test doubles as a schema
+// regression check — a malformed scenario.json fails the test loudly.
+const scenario = parseScenario(scenarioJson);
 
 describe('eval runner — nextjs-app-router/vanilla golden replay', () => {
   it('produces a contract-clean artifact and a clean Layer 0 + Layer 1 score', () => {
