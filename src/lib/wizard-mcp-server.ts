@@ -14,8 +14,8 @@
  * - Uses `@modelcontextprotocol/sdk` — the canonical MCP SDK — NOT the
  *   in-process `createSdkMcpServer` helper from `@anthropic-ai/claude-agent-sdk`
  *   (which is only for in-process agent loops, not standalone stdio servers).
- * - Tools wrap the pure functions in `agent-ops.ts`. No UI, no auth side
- *   effects, no writes — this PR keeps the surface read-only.
+ * - Tools wrap the pure functions in `agent-ops.ts`. No UI. Most tools are
+ *   read-only; `plan_setup` persists a new WizardPlan under a fresh planId.
  */
 import { z } from 'zod';
 import {
@@ -23,6 +23,7 @@ import {
   runStatus,
   runPlan,
   runVerify,
+  runGetEventPlan,
   getAuthStatus,
   getAuthToken,
   type DetectResult,
@@ -31,6 +32,7 @@ import {
   type AuthTokenResult,
   type PlanResult,
   type VerifyResult,
+  type EventPlanReadResult,
 } from './agent-ops.js';
 import {
   readDashboardPlan,
@@ -176,6 +178,34 @@ export function registerWizardTools(server: WizardMcpToolRegistrar): void {
     async (args: unknown) => {
       const { installDir } = (args ?? {}) as { installDir?: string };
       const result: VerifyResult = await runVerify(installDir ?? process.cwd());
+      return jsonContent(result);
+    },
+  );
+
+  // -- get_event_plan -----------------------------------------------------
+  server.registerTool(
+    'get_event_plan',
+    {
+      title: 'Get approved event plan',
+      description:
+        'Read the persisted event taxonomy the wizard saved after ' +
+        '`confirm_event_plan` (canonical `.amplitude/events.json` or ' +
+        'legacy paths). Returns `{ events: [{ name, description }], count }`. ' +
+        'Read-only — does not modify the project.',
+      inputSchema: {
+        installDir: z
+          .string()
+          .optional()
+          .describe(
+            'Absolute path to the project. Defaults to the current working directory.',
+          ),
+      },
+    },
+    (args: unknown) => {
+      const { installDir } = (args ?? {}) as { installDir?: string };
+      const result: EventPlanReadResult = runGetEventPlan(
+        installDir ?? process.cwd(),
+      );
       return jsonContent(result);
     },
   );
