@@ -112,9 +112,7 @@ export const SigningUpScreen = ({ store }: SigningUpScreenProps) => {
 
   // Render mimics the previous input screen so the screen swap feels
   // continuous: same heading, the submitted value as a static line, and
-  // a spinner. The TRANSITION_GROUPS map in App.tsx collapses the
-  // dissolve between SignupEmail/FullName/SigningUp so the user sees one
-  // screen "updating in place" rather than three discrete swaps.
+  // a spinner.
   const headerLabel =
     session.signupRequiredFields !== null && fullName !== null
       ? 'Creating your account…'

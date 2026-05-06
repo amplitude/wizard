@@ -54,14 +54,19 @@ describe('isAuthTaskGateReady', () => {
     ).toBe(false);
   });
 
-  it('blocks create-account runs that have only completed email capture', () => {
+  it('blocks create-account runs while ToS is unaccepted', () => {
+    // Pre-PR-539 the gate held on `emailCaptureComplete && !tosAccepted`.
+    // The flow rewire dropped `emailCaptureComplete` (the new ceremony
+    // gates on `signupEmail !== null` directly), so this case is now
+    // covered by the "ceremony in flight" check below — but the ToS-
+    // unaccepted path is still meaningful in its own right when the
+    // user enters the create-account flow without `--accept-tos`.
     expect(
       isAuthTaskGateReady(
         s({
           introConcluded: true,
           region: 'us',
           authOnboardingPath: 'create_account',
-          emailCaptureComplete: true,
           tosAccepted: false,
         }),
       ),
