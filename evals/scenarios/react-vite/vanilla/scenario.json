@@ -1,0 +1,17 @@
+{
+  "name": "react-vite/vanilla",
+  "ring": 1,
+  "integrationHint": "react-vite",
+  "buildCommand": ["pnpm", "build"],
+  "expectedEnvPrefix": "VITE_",
+  "expectedInitFile": "src/main.tsx",
+  "expectedEvents": ["Sign Up Submitted"],
+  "forbiddenPaths": [
+    "vite.config.ts",
+    "vite.config.js",
+    "vite.config.mjs",
+    "webpack.config.js",
+    "babel.config.js"
+  ],
+  "notes": "Vanilla React + Vite SPA Ring 1 scenario — the 'plain SPA' cohort with no meta-framework router. Tests VITE_ env prefix and the standard src/main.tsx entry. SDK family defaults from FRAMEWORK_TO_SDK (react-vite → @amplitude/unified)."
+}
