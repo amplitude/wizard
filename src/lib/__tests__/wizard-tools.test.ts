@@ -973,6 +973,7 @@ describe('resolveWizardAllowedToolNames', () => {
     process.env[envKey] = '1';
     expect(resolveWizardAllowedToolNames()).toEqual([
       ...WIZARD_TOOL_NAMES,
+      'wizard-tools:load_skill_menu',
       'wizard-tools:load_skill',
       'wizard-tools:load_skill_reference',
     ]);
