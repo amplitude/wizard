@@ -1,5 +1,8 @@
-import { vi, describe, it, expect, beforeEach } from 'vitest';
-import { resolveCredentials } from '../credential-resolution';
+import { vi, describe, it, expect, beforeEach, afterEach } from 'vitest';
+import {
+  resolveCiOAuthTokenFromEnv,
+  resolveCredentials,
+} from '../credential-resolution';
 import { buildSession } from '../wizard-session';
 import type { StoredUser, StoredOAuthToken } from '../../utils/ampli-settings';
 
@@ -313,5 +316,166 @@ describe('resolveCredentials — silent token refresh', () => {
     expect(vi.mocked(fetchAmplitudeUser).mock.calls[0][0]).toBe(
       'original-id-token',
     );
+  });
+});
+
+// ── CI env-var auth path (FINAL_NEW_MIGRATION_PLAN.md §7.5) ────────────────
+//
+// `WIZARD_OAUTH_TOKEN` + `WIZARD_EXPIRES_AT` + `WIZARD_ZONE` are the org-secret
+// env vars that let the eval / bench harness hit the wizard gateway without
+// running an interactive OAuth flow. The credential resolver MUST:
+//   - prefer the env path over the OAuth file when both are set
+//   - throw loudly when the env token is past its expiry (no silent refresh)
+//   - throw when WIZARD_EXPIRES_AT is missing or unparseable
+
+describe('resolveCiOAuthTokenFromEnv — env-var precedence', () => {
+  const originalToken = process.env.WIZARD_OAUTH_TOKEN;
+  const originalExpiry = process.env.WIZARD_EXPIRES_AT;
+
+  afterEach(() => {
+    if (originalToken === undefined) {
+      delete process.env.WIZARD_OAUTH_TOKEN;
+    } else {
+      process.env.WIZARD_OAUTH_TOKEN = originalToken;
+    }
+    if (originalExpiry === undefined) {
+      delete process.env.WIZARD_EXPIRES_AT;
+    } else {
+      process.env.WIZARD_EXPIRES_AT = originalExpiry;
+    }
+  });
+
+  it('returns null when WIZARD_OAUTH_TOKEN is unset', () => {
+    delete process.env.WIZARD_OAUTH_TOKEN;
+    delete process.env.WIZARD_EXPIRES_AT;
+    expect(resolveCiOAuthTokenFromEnv()).toBeNull();
+  });
+
+  it('returns null when WIZARD_OAUTH_TOKEN is empty / whitespace', () => {
+    process.env.WIZARD_OAUTH_TOKEN = '';
+    expect(resolveCiOAuthTokenFromEnv()).toBeNull();
+    process.env.WIZARD_OAUTH_TOKEN = '   ';
+    expect(resolveCiOAuthTokenFromEnv()).toBeNull();
+  });
+
+  it('parses ISO 8601 expiry and returns the token', () => {
+    process.env.WIZARD_OAUTH_TOKEN = 'ci-org-secret-token';
+    const futureIso = new Date(Date.now() + 3600 * 1000).toISOString();
+    process.env.WIZARD_EXPIRES_AT = futureIso;
+    const result = resolveCiOAuthTokenFromEnv();
+    expect(result?.accessToken).toBe('ci-org-secret-token');
+    expect(result?.expiresAtMs).toBe(Date.parse(futureIso));
+  });
+
+  it('parses unix-seconds expiry and returns the token', () => {
+    process.env.WIZARD_OAUTH_TOKEN = 'ci-org-secret-token';
+    const futureSeconds = Math.floor(Date.now() / 1000) + 3600;
+    process.env.WIZARD_EXPIRES_AT = String(futureSeconds);
+    const result = resolveCiOAuthTokenFromEnv();
+    expect(result?.accessToken).toBe('ci-org-secret-token');
+    expect(result?.expiresAtMs).toBe(futureSeconds * 1000);
+  });
+
+  it('throws when WIZARD_EXPIRES_AT is past — does NOT silent-refresh', () => {
+    process.env.WIZARD_OAUTH_TOKEN = 'ci-org-secret-token';
+    process.env.WIZARD_EXPIRES_AT = new Date(
+      Date.now() - 60 * 1000,
+    ).toISOString();
+    expect(() => resolveCiOAuthTokenFromEnv()).toThrow(/expired/i);
+    expect(() => resolveCiOAuthTokenFromEnv()).toThrow(
+      /rotate WIZARD_OAUTH_TOKEN/i,
+    );
+  });
+
+  it('throws when WIZARD_EXPIRES_AT is missing entirely', () => {
+    process.env.WIZARD_OAUTH_TOKEN = 'ci-org-secret-token';
+    delete process.env.WIZARD_EXPIRES_AT;
+    expect(() => resolveCiOAuthTokenFromEnv()).toThrow(
+      /missing or unparseable/i,
+    );
+  });
+
+  it('throws when WIZARD_EXPIRES_AT is unparseable garbage', () => {
+    process.env.WIZARD_OAUTH_TOKEN = 'ci-org-secret-token';
+    process.env.WIZARD_EXPIRES_AT = 'not-a-real-timestamp';
+    expect(() => resolveCiOAuthTokenFromEnv()).toThrow(
+      /missing or unparseable/i,
+    );
+  });
+});
+
+describe('resolveCredentials — WIZARD_OAUTH_TOKEN priority over OAuth file', () => {
+  const originalToken = process.env.WIZARD_OAUTH_TOKEN;
+  const originalExpiry = process.env.WIZARD_EXPIRES_AT;
+  const originalZone = process.env.WIZARD_ZONE;
+
+  beforeEach(() => {
+    vi.resetAllMocks();
+  });
+
+  afterEach(() => {
+    if (originalToken === undefined) delete process.env.WIZARD_OAUTH_TOKEN;
+    else process.env.WIZARD_OAUTH_TOKEN = originalToken;
+    if (originalExpiry === undefined) delete process.env.WIZARD_EXPIRES_AT;
+    else process.env.WIZARD_EXPIRES_AT = originalExpiry;
+    if (originalZone === undefined) delete process.env.WIZARD_ZONE;
+    else process.env.WIZARD_ZONE = originalZone;
+  });
+
+  it('uses WIZARD_OAUTH_TOKEN as the access token, ignoring the OAuth file', async () => {
+    // Stored OAuth file has a different token. The env path must win.
+    const { getStoredUser, getStoredToken } = await import(
+      '../../utils/ampli-settings.js'
+    );
+    vi.mocked(getStoredUser).mockReturnValue(makeRealUser('us'));
+    vi.mocked(getStoredToken).mockReturnValue({
+      ...makeToken(),
+      accessToken: 'oauth-file-token-should-be-ignored',
+    });
+
+    process.env.WIZARD_OAUTH_TOKEN = 'env-bearer-token';
+    process.env.WIZARD_EXPIRES_AT = new Date(
+      Date.now() + 3600 * 1000,
+    ).toISOString();
+
+    const session = buildSession({});
+    await resolveCredentials(session, { requireOrgId: false });
+
+    expect(session.credentials?.accessToken).toBe('env-bearer-token');
+    // No idToken from env path; downstream consumers know to skip
+    // idToken-dependent fetches.
+    expect(session.credentials?.idToken).toBeUndefined();
+  });
+
+  it('throws (does not silent-refresh) when env token is expired', async () => {
+    const { getStoredUser, getStoredToken } = await import(
+      '../../utils/ampli-settings.js'
+    );
+    vi.mocked(getStoredUser).mockReturnValue(makeRealUser('us'));
+    vi.mocked(getStoredToken).mockReturnValue(makeToken());
+
+    process.env.WIZARD_OAUTH_TOKEN = 'env-bearer-token';
+    process.env.WIZARD_EXPIRES_AT = new Date(
+      Date.now() - 60 * 1000,
+    ).toISOString();
+
+    const session = buildSession({});
+    await expect(
+      resolveCredentials(session, { requireOrgId: false }),
+    ).rejects.toThrow(/expired|rotate WIZARD_OAUTH_TOKEN/i);
+  });
+
+  it('honors WIZARD_ZONE when populating credentials.host', async () => {
+    process.env.WIZARD_OAUTH_TOKEN = 'env-bearer-token';
+    process.env.WIZARD_EXPIRES_AT = new Date(
+      Date.now() + 3600 * 1000,
+    ).toISOString();
+    process.env.WIZARD_ZONE = 'eu';
+
+    const session = buildSession({});
+    await resolveCredentials(session, { requireOrgId: false });
+
+    // The mocked getHostFromRegion returns `https://${zone}.amplitude.com`.
+    expect(session.credentials?.host).toBe('https://eu.amplitude.com');
   });
 });

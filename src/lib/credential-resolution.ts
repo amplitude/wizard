@@ -15,6 +15,84 @@ import { extractAppId } from './api';
 import { analytics } from '../utils/analytics';
 
 /**
+ * Parse `WIZARD_EXPIRES_AT` as either an ISO 8601 timestamp or a unix-seconds
+ * string. Returns the parsed epoch-millis value, or `null` if the value is
+ * missing or unparseable. Callers treat `null` as "no expiry info" — for the
+ * CI auth path we treat that as a hard failure because long-lived org secrets
+ * must always carry a checked expiry.
+ */
+function parseWizardExpiresAt(raw: string | undefined): number | null {
+  if (!raw) return null;
+  const trimmed = raw.trim();
+  if (!trimmed) return null;
+  // Pure-digit strings (optionally negative) are unix seconds. Convert to ms.
+  if (/^-?\d+(\.\d+)?$/.test(trimmed)) {
+    const seconds = Number(trimmed);
+    if (!Number.isFinite(seconds)) return null;
+    return Math.round(seconds * 1000);
+  }
+  // Otherwise expect an ISO 8601 timestamp. `Date.parse` returns NaN for
+  // non-ISO inputs; we propagate NaN as `null` so the caller fails loudly
+  // rather than treating a typo as "valid forever".
+  const ms = Date.parse(trimmed);
+  if (Number.isNaN(ms)) return null;
+  return ms;
+}
+
+/**
+ * Resolve a CI-supplied OAuth bearer token from environment variables.
+ *
+ * Reads `WIZARD_OAUTH_TOKEN` + `WIZARD_EXPIRES_AT`. When `WIZARD_OAUTH_TOKEN`
+ * is set:
+ *   - Throws if `WIZARD_EXPIRES_AT` is missing, unparseable, or in the past.
+ *     CI must NOT silent-refresh long-lived org secrets — rotating the
+ *     secret is an explicit, audited action, so we fail loudly with a
+ *     remediation message instead.
+ *   - Returns `{ accessToken, expiresAtMs }` on success.
+ *
+ * Returns `null` when `WIZARD_OAUTH_TOKEN` is not set — the caller then
+ * falls through to the standard OAuth-file path.
+ *
+ * Note: PR #549's `resolveWizardAnthropicAuthFromEnv` (AI-SDK path) reads
+ * `ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN`. Those are SDK-shaped env
+ * vars consumed at the gateway-call boundary; this function reads the
+ * `WIZARD_*` org-secret-shaped vars consumed at the credential-resolution
+ * boundary. The two layers compose: `WIZARD_OAUTH_TOKEN` flows into
+ * `session.credentials.accessToken`, which `agent-interface.ts` then writes
+ * into `ANTHROPIC_AUTH_TOKEN` for the SDK subprocess (legacy path) — the
+ * AI-SDK cutover (D-5) re-reads the same env var via the AI-SDK helper.
+ * Keep these naming conventions distinct: WIZARD_* is CI-facing, ANTHROPIC_*
+ * is SDK-facing.
+ */
+export function resolveCiOAuthTokenFromEnv(): {
+  accessToken: string;
+  expiresAtMs: number;
+} | null {
+  const tokenRaw = process.env.WIZARD_OAUTH_TOKEN;
+  if (!tokenRaw) return null;
+  const accessToken = tokenRaw.trim();
+  if (!accessToken) return null;
+
+  const expiresAtRaw = process.env.WIZARD_EXPIRES_AT;
+  const expiresAtMs = parseWizardExpiresAt(expiresAtRaw);
+  if (expiresAtMs === null) {
+    throw new Error(
+      'WIZARD_OAUTH_TOKEN is set but WIZARD_EXPIRES_AT is missing or unparseable. ' +
+        'Set WIZARD_EXPIRES_AT to an ISO 8601 timestamp or unix-seconds string. ' +
+        'CI org secret expired or misconfigured; rotate WIZARD_OAUTH_TOKEN.',
+    );
+  }
+  if (expiresAtMs <= Date.now()) {
+    throw new Error(
+      `WIZARD_OAUTH_TOKEN is set but expired at ${new Date(
+        expiresAtMs,
+      ).toISOString()}. ` + 'CI org secret expired; rotate WIZARD_OAUTH_TOKEN.',
+    );
+  }
+  return { accessToken, expiresAtMs };
+}
+
+/**
  * Resolve credentials from stored OAuth tokens and environment data.
  *
  * Mutates `session` in place:
@@ -83,6 +161,51 @@ export async function resolveCredentials(
     import('../utils/debug.js'),
     import('../utils/api-key-store.js'),
   ]);
+
+  // ── CI env-var auth path (FINAL_NEW_MIGRATION_PLAN.md §7.5) ────────────
+  // When CI org secrets are present, they take priority over the OAuth
+  // file. This lets the eval / bench harness hit the gateway without
+  // running an interactive OAuth flow. We DELIBERATELY do not fall through
+  // to silent-refresh — long-lived org secrets must be rotated explicitly,
+  // not refreshed in-process.
+  //
+  // Throws if WIZARD_OAUTH_TOKEN is set but WIZARD_EXPIRES_AT is missing,
+  // unparseable, or in the past — surfacing the rotation requirement
+  // loudly instead of letting the run continue with a stale credential
+  // and 401 on the first gateway call.
+  const ciEnvAuth = resolveCiOAuthTokenFromEnv();
+  if (ciEnvAuth) {
+    // Resolve zone for the host header. WIZARD_ZONE wins (matches the
+    // gateway URL resolver in `urls.ts`); otherwise fall through to the
+    // session/disk-derived zone so a CI run that only sets the token
+    // still picks up `--region` / stored zone correctly.
+    const zoneOverrideRaw = process.env.WIZARD_ZONE?.trim().toLowerCase();
+    const ciZone =
+      zoneOverrideRaw === 'us' || zoneOverrideRaw === 'eu'
+        ? zoneOverrideRaw
+        : resolveZone(session, DEFAULT_AMPLITUDE_ZONE, { readDisk: true });
+    session.credentials = {
+      accessToken: ciEnvAuth.accessToken,
+      // No idToken from env path — the CI bearer is enough to hit the
+      // gateway. Downstream API calls that require an idToken (project
+      // fetch, etc.) are guarded; CI runs supply `--api-key` or
+      // `--app-id` directly to bypass the project-key fetch.
+      idToken: undefined,
+      projectApiKey: '',
+      host: getHostFromRegion(ciZone),
+      appId: 0,
+    };
+    session.activationLevel = 'none';
+    session.projectHasData = false;
+    logToFile(
+      '[credential-resolution] using WIZARD_OAUTH_TOKEN from env (CI path)',
+      {
+        zone: ciZone,
+        expiresAt: new Date(ciEnvAuth.expiresAtMs).toISOString(),
+      },
+    );
+    return;
+  }
 
   // Resolve zone from stored user and project config
   const storedUser = getStoredUser();

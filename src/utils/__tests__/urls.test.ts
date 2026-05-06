@@ -76,12 +76,18 @@ describe('getHostFromRegion', () => {
 
 describe('getLlmGatewayUrlFromHost', () => {
   const originalProxyUrl = process.env.WIZARD_LLM_PROXY_URL;
+  const originalZone = process.env.WIZARD_ZONE;
 
   afterEach(() => {
     if (originalProxyUrl === undefined) {
       delete process.env.WIZARD_LLM_PROXY_URL;
     } else {
       process.env.WIZARD_LLM_PROXY_URL = originalProxyUrl;
+    }
+    if (originalZone === undefined) {
+      delete process.env.WIZARD_ZONE;
+    } else {
+      process.env.WIZARD_ZONE = originalZone;
     }
   });
 
@@ -94,6 +100,7 @@ describe('getLlmGatewayUrlFromHost', () => {
 
   it('never returns a localhost URL by default', () => {
     delete process.env.WIZARD_LLM_PROXY_URL;
+    delete process.env.WIZARD_ZONE;
     // Local LLM gateway hosting is rare and must be opt-in via
     // WIZARD_LLM_PROXY_URL — never a default, even in dev/test.
     expect(
@@ -106,6 +113,7 @@ describe('getLlmGatewayUrlFromHost', () => {
 
   it('returns EU gateway for eu.amplitude.com host', () => {
     delete process.env.WIZARD_LLM_PROXY_URL;
+    delete process.env.WIZARD_ZONE;
     expect(getLlmGatewayUrlFromHost('https://eu.amplitude.com')).toBe(
       'https://core.eu.amplitude.com/wizard',
     );
@@ -113,6 +121,7 @@ describe('getLlmGatewayUrlFromHost', () => {
 
   it('returns EU gateway for api.eu.amplitude.com host', () => {
     delete process.env.WIZARD_LLM_PROXY_URL;
+    delete process.env.WIZARD_ZONE;
     expect(getLlmGatewayUrlFromHost('https://api.eu.amplitude.com')).toBe(
       'https://core.eu.amplitude.com/wizard',
     );
@@ -120,8 +129,68 @@ describe('getLlmGatewayUrlFromHost', () => {
 
   it('returns US gateway for api2.amplitude.com host', () => {
     delete process.env.WIZARD_LLM_PROXY_URL;
+    delete process.env.WIZARD_ZONE;
     expect(getLlmGatewayUrlFromHost('https://api2.amplitude.com')).toBe(
       'https://core.amplitude.com/wizard',
+    );
+  });
+
+  // ── WIZARD_ZONE precedence (FINAL_NEW_MIGRATION_PLAN.md §7.5) ──────────
+  //
+  // CI / harness path: an explicit zone selector that bypasses host-based
+  // derivation. Lets the eval / bench harness target a specific gateway
+  // without threading a stored zone config through. Precedence:
+  //   WIZARD_LLM_PROXY_URL > WIZARD_ZONE > host-derived > US default.
+
+  it('WIZARD_ZONE=eu routes to the EU gateway regardless of host', () => {
+    delete process.env.WIZARD_LLM_PROXY_URL;
+    process.env.WIZARD_ZONE = 'eu';
+    // US-shaped host — WIZARD_ZONE wins.
+    expect(getLlmGatewayUrlFromHost('https://api2.amplitude.com')).toBe(
+      'https://core.eu.amplitude.com/wizard',
+    );
+  });
+
+  it('WIZARD_ZONE=us routes to the US gateway regardless of host', () => {
+    delete process.env.WIZARD_LLM_PROXY_URL;
+    process.env.WIZARD_ZONE = 'us';
+    // EU-shaped host — WIZARD_ZONE wins.
+    expect(getLlmGatewayUrlFromHost('https://api.eu.amplitude.com')).toBe(
+      'https://core.amplitude.com/wizard',
+    );
+  });
+
+  it('WIZARD_ZONE is case-insensitive', () => {
+    delete process.env.WIZARD_LLM_PROXY_URL;
+    process.env.WIZARD_ZONE = 'EU';
+    expect(getLlmGatewayUrlFromHost('https://api2.amplitude.com')).toBe(
+      'https://core.eu.amplitude.com/wizard',
+    );
+  });
+
+  it('invalid WIZARD_ZONE values fall through to host-derived', () => {
+    delete process.env.WIZARD_LLM_PROXY_URL;
+    process.env.WIZARD_ZONE = 'apac';
+    // Garbage value ignored — the EU host wins via host derivation.
+    expect(getLlmGatewayUrlFromHost('https://api.eu.amplitude.com')).toBe(
+      'https://core.eu.amplitude.com/wizard',
+    );
+  });
+
+  it('whitespace-only WIZARD_ZONE falls through to host-derived', () => {
+    delete process.env.WIZARD_LLM_PROXY_URL;
+    process.env.WIZARD_ZONE = '   ';
+    expect(getLlmGatewayUrlFromHost('https://api2.amplitude.com')).toBe(
+      'https://core.amplitude.com/wizard',
+    );
+  });
+
+  it('WIZARD_LLM_PROXY_URL beats WIZARD_ZONE', () => {
+    process.env.WIZARD_LLM_PROXY_URL = 'http://gateway-test:8010';
+    process.env.WIZARD_ZONE = 'eu';
+    // Full URL override wins over zone selector.
+    expect(getLlmGatewayUrlFromHost('https://api2.amplitude.com')).toBe(
+      'http://gateway-test:8010',
     );
   });
 });
