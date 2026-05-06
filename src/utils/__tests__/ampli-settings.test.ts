@@ -504,3 +504,89 @@ describe('clearStoredCredentials', () => {
     expect(mockWriteFileSync.mock.calls[0][0]).toBe('/custom/path.json');
   });
 });
+
+// ── Phase G-1: legacy ~/.ampli.json mirror writes are disabled ──────────────
+//
+// Per FINAL_NEW_MIGRATION_PLAN.md §5 Phase G-1, OAuth state writes target
+// only the canonical `~/.amplitude/wizard/oauth-session.json`. The legacy
+// `~/.ampli.json` mirror is read for back-compat but no longer written.
+
+describe('Phase G-1: legacy ~/.ampli.json writes are disabled', () => {
+  function makeUser(): StoredUser {
+    return {
+      id: 'phase-g1-user',
+      firstName: 'Ada',
+      lastName: 'Lovelace',
+      email: 'ada@example.com',
+      zone: 'us',
+    };
+  }
+
+  function makeToken(): StoredOAuthToken {
+    return {
+      accessToken: 'a',
+      idToken: 'i',
+      refreshToken: 'r',
+      expiresAt: FUTURE,
+    };
+  }
+
+  it('storeToken does not write to ~/.ampli.json', () => {
+    storeToken(makeUser(), makeToken());
+    const writtenPaths = mockWriteFileSync.mock.calls.map(
+      (call) => call[0] as string,
+    );
+    expect(writtenPaths.length).toBeGreaterThan(0);
+    for (const p of writtenPaths) {
+      expect(p.endsWith('/.ampli.json')).toBe(false);
+    }
+  });
+
+  it('replaceStoredUser does not write to ~/.ampli.json', () => {
+    replaceStoredUser(makeUser(), makeToken());
+    const writtenPaths = mockWriteFileSync.mock.calls.map(
+      (call) => call[0] as string,
+    );
+    expect(writtenPaths.length).toBeGreaterThan(0);
+    for (const p of writtenPaths) {
+      expect(p.endsWith('/.ampli.json')).toBe(false);
+    }
+  });
+
+  it('clearStoredCredentials does not write to ~/.ampli.json', () => {
+    clearStoredCredentials();
+    const writtenPaths = mockWriteFileSync.mock.calls.map(
+      (call) => call[0] as string,
+    );
+    expect(writtenPaths.length).toBeGreaterThan(0);
+    for (const p of writtenPaths) {
+      expect(p.endsWith('/.ampli.json')).toBe(false);
+    }
+  });
+
+  it('reads still surface OAuth data when only the legacy file exists', () => {
+    // The read path is allowed to fall back to legacy for one minor cycle.
+    // Simulate the migration scenario: canonical doesn't exist on disk,
+    // but the in-memory fsStore (which the readFileSync mock returns for
+    // any path) is populated with legacy OAuth data.
+    setupConfig({
+      'User-legacy-only': {
+        User: {
+          id: 'legacy-only',
+          firstName: 'Grace',
+          lastName: 'Hopper',
+          email: 'grace@example.com',
+          zone: 'us',
+        },
+        OAuthAccessToken: 'a',
+        OAuthIdToken: 'i',
+        OAuthRefreshToken: 'r',
+        OAuthExpiresAt: FUTURE,
+      },
+    });
+    const user = getStoredUser();
+    expect(user?.id).toBe('legacy-only');
+    const token = getStoredToken('legacy-only');
+    expect(token?.accessToken).toBe('a');
+  });
+});

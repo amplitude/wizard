@@ -189,8 +189,8 @@ export async function wizardSuccessExit(exitCode = 0): Promise<never> {
       }
       getUI().emitSetupComplete?.(setupComplete);
 
-      // Persist the canonical scope into ampli.json so a future
-      // agent session in the same codebase can recover the
+      // Persist the canonical scope into `.amplitude/project-binding.json`
+      // so a future agent session in the same codebase can recover the
       // appId / dashboardUrl without re-running setup. Best-effort:
       // a failed write here must never prevent exit.
       try {
@@ -220,7 +220,7 @@ export async function wizardSuccessExit(exitCode = 0): Promise<never> {
         });
         writeAmpliConfig(installDir, next);
       } catch {
-        /* ampli.json persistence is best-effort */
+        /* project-binding persistence is best-effort */
       }
     }
   } catch {

@@ -304,45 +304,38 @@ export function readAmpliConfig(dir: string): AmpliConfigParseResult {
 }
 
 /**
- * Write an AmpliConfig to the canonical binding path and mirror to legacy
- * `ampli.json` for transition compatibility.
+ * Write an AmpliConfig to the canonical binding path.
  *
- * @returns true if at least one destination was written successfully.
+ * Phase G-1 (FINAL_NEW_MIGRATION_PLAN.md §5): the legacy `ampli.json` mirror
+ * write was removed. Reads from `ampli.json` still work via `readAmpliConfig`
+ * for one minor cycle (per §10 decision 7) but nothing else writes the file.
+ *
+ * @returns true if the canonical binding was written successfully.
  */
 export function writeAmpliConfig(dir: string, config: AmpliConfig): boolean {
   const bindingPath = getProjectBindingFile(dir);
-  let anyOk = false;
   try {
     ensureDir(getProjectMetaDir(dir));
     atomicWriteJSON(bindingPath, config, 0o644);
-    anyOk = true;
+    return true;
   } catch (err) {
     log.warn('writeAmpliConfig: canonical binding write failed', {
       'error message': err instanceof Error ? err.message : String(err),
     });
+    return false;
   }
-  try {
-    fs.mkdirSync(dir, { recursive: true });
-    fs.writeFileSync(
-      ampliConfigPath(dir),
-      JSON.stringify(config, null, 2),
-      'utf-8',
-    );
-    anyOk = true;
-  } catch (err) {
-    log.warn('writeAmpliConfig: legacy ampli.json write failed', {
-      'error message': err instanceof Error ? err.message : String(err),
-    });
-  }
-  return anyOk;
 }
 
 /**
- * Remove org/project/zone bindings from a project's ampli.json. Called on
+ * Remove org/project/zone bindings from a project's binding file. Called on
  * logout so a subsequent login doesn't auto-select the previous user's org
  * and project. Tracking-plan fields (SourceId, Branch, Version, etc.) are
- * preserved — they're not auth state. No-op if ampli.json is missing or
- * malformed.
+ * preserved — they're not auth state. No-op if no binding is present.
+ *
+ * Phase G-1: writes go only to `<installDir>/.amplitude/project-binding.json`.
+ * The legacy `ampli.json` mirror is read for back-compat input but no longer
+ * written, so any stale auth fields lingering there will be ignored once the
+ * canonical binding is the freshest.
  *
  * Also deletes the legacy `WorkspaceId` field as a belt-and-suspenders
  * cleanup — parseAmpliConfig normalizes it away, but if the raw file still

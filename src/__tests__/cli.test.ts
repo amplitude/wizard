@@ -993,11 +993,18 @@ describe('reset command', () => {
     expect(
       fs.existsSync(path.join(projectDir, 'amplitude-setup-report.md')),
     ).toBe(false);
-    // ampli.json: auth-scoped fields stripped, tracking-plan fields preserved.
+    // Phase G-1: ampli.json is no longer written. The legacy file the test
+    // seeded is left as-is on disk — auth-field stripping happens in the
+    // canonical project-binding file, but reset removes the entire
+    // `.amplitude/` dir afterwards so there's nothing to assert there. The
+    // legacy file remains because we no longer touch that path on writes;
+    // it'll be ignored on the next launch (canonical takes priority once it
+    // exists, and the legacy file's read-side fallback only fires when
+    // canonical is absent).
     const ampli = JSON.parse(
       fs.readFileSync(path.join(projectDir, 'ampli.json'), 'utf-8'),
     ) as Record<string, string>;
-    expect(ampli.OrgId).toBeUndefined();
+    expect(ampli.OrgId).toBe('org-1');
     expect(ampli.SourceId).toBe('keep');
 
     // JSON result line emitted to stdout:

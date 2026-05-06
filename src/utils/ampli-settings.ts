@@ -107,7 +107,6 @@ function writeConfig(
     return;
   }
   const primaryPath = getOAuthSettingsFile();
-  const legacyPath = getLegacyAmpliHomeOAuthPath();
   try {
     ensureDir(getCacheRoot());
     atomicWriteJSON(primaryPath, data, 0o600);
@@ -116,13 +115,10 @@ function writeConfig(
       'error message': err instanceof Error ? err.message : String(err),
     });
   }
-  try {
-    atomicWriteJSON(legacyPath, data, 0o600);
-  } catch (err) {
-    log.debug('writeConfig: legacy OAuth mirror write failed (non-fatal)', {
-      'error message': err instanceof Error ? err.message : String(err),
-    });
-  }
+  // Phase G-1 (FINAL_NEW_MIGRATION_PLAN.md §5): the legacy `~/.ampli.json`
+  // mirror write was removed. `readConfig` still falls back to the legacy
+  // path for one minor cycle (per §10 decision 7), so existing installs
+  // keep working until the read path is dropped in Phase G-5.
 }
 
 function userKey(userId: string, zone: AmplitudeZone): string {
