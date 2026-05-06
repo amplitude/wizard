@@ -345,12 +345,17 @@ export const defaultCommand: CommandModule = {
         // the TUI-only safety check that clears credentials when no org is
         // selected. Without this, a successful signup would get silently
         // cleared and the browser would open anyway, defeating the point.
-        await runDirectSignupIfRequested(session, 'OAuth', async () => {
-          const { resolveCredentials } = await import(
-            '../lib/credential-resolution.js'
-          );
-          await resolveCredentials(session, { requireOrgId: false });
-        });
+        await runDirectSignupIfRequested(
+          session,
+          'OAuth',
+          async () => {
+            const { resolveCredentials } = await import(
+              '../lib/credential-resolution.js'
+            );
+            await resolveCredentials(session, { requireOrgId: false });
+          },
+          { canPrompt: true },
+        );
 
         await lazyRunWizard(
           options as Parameters<typeof lazyRunWizard>[0],
@@ -733,10 +738,12 @@ export const defaultCommand: CommandModule = {
               );
 
               // Try direct signup first when create-account + email + fullName are provided
-              // and the feature flag is enabled. performSignupOrAuth returns null when
-              // any of those gates are missing, or when the server returns a non-success
-              // response — in which case we fall through to the existing OAuth flow
-              // (TUI has a browser; this fallback is valid).
+              // and we have not already persisted tokens during EmailCapture.
+              //
+              // With `--signup`, SigningUpScreen runs performSignupOrAuth first and writes
+              // `session.signupAuth` on success (see isAuthTaskGateReady). The auth task must
+              // hydrate from that result — not POST again — or the duplicate signup hits
+              // requires_redirect and spuriously opens OAuth after a successful headless signup.
               //
               // On signup success, the wrapper already fetched the real user
               // profile (with provisioning retry) and persisted tokens to
@@ -764,34 +771,58 @@ export const defaultCommand: CommandModule = {
                 s.signupFullName &&
                 !s.signupTokensObtained
               ) {
-                const { performSignupOrAuth } = await import(
-                  '../utils/signup-or-auth.js'
-                );
-                try {
-                  const signupResult = await performSignupOrAuth({
-                    email: s.signupEmail,
-                    fullName: s.signupFullName,
-                    zone,
-                  });
-                  if (signupResult !== null) {
-                    auth = signupResult;
-                    signupUserInfo = signupResult.userInfo;
-                    signupTokensObtained = true;
-                    tui.store.setSignupMagicLinkUrl(
-                      signupResult.dashboardUrl ?? null,
-                    );
-                    getUI().log.info(
-                      'Direct signup succeeded; using newly created account.',
-                    );
-                  }
-                } catch (err) {
-                  trackSignupAttempt({ status: 'wrapper_exception', zone });
-                  getUI().log.warn(
-                    `Direct signup errored: ${
-                      err instanceof Error ? err.message : String(err)
-                    }. Falling back to OAuth.`,
+                if (s.signupAuth !== null) {
+                  const signupResult = s.signupAuth;
+                  auth = {
+                    idToken: signupResult.idToken,
+                    accessToken: signupResult.accessToken,
+                    refreshToken: signupResult.refreshToken,
+                    zone: signupResult.zone,
+                  };
+                  signupUserInfo = signupResult.userInfo;
+                  signupTokensObtained = true;
+                  tui.store.setSignupMagicLinkUrl(
+                    signupResult.dashboardUrl ?? null,
                   );
-                  auth = null;
+                  getUI().log.info(
+                    'Direct signup succeeded; using newly created account.',
+                  );
+                } else if (!s.signupAbandoned) {
+                  const { performSignupOrAuth } = await import(
+                    '../utils/signup-or-auth.js'
+                  );
+                  try {
+                    const signupResult = await performSignupOrAuth({
+                      email: s.signupEmail,
+                      fullName: s.signupFullName,
+                      zone,
+                      installDir: s.installDir,
+                    });
+                    if (signupResult.kind === 'success') {
+                      auth = {
+                        idToken: signupResult.idToken,
+                        accessToken: signupResult.accessToken,
+                        refreshToken: signupResult.refreshToken,
+                        zone: signupResult.zone,
+                      };
+                      signupUserInfo = signupResult.userInfo;
+                      signupTokensObtained = true;
+                      tui.store.setSignupMagicLinkUrl(
+                        signupResult.dashboardUrl ?? null,
+                      );
+                      getUI().log.info(
+                        'Direct signup succeeded; using newly created account.',
+                      );
+                    }
+                  } catch (err) {
+                    trackSignupAttempt({ status: 'wrapper_exception', zone });
+                    getUI().log.warn(
+                      `Direct signup errored: ${
+                        err instanceof Error ? err.message : String(err)
+                      }. Falling back to OAuth.`,
+                    );
+                    auth = null;
+                  }
                 }
               } else if (s.signupTokensObtained) {
                 // EmailCaptureScreen already called replaceStoredUser + set
@@ -818,7 +849,11 @@ export const defaultCommand: CommandModule = {
               }
 
               if (auth === null) {
-                auth = await performAmplitudeAuth({ zone, forceFresh });
+                auth = await performAmplitudeAuth({
+                  zone,
+                  forceFresh,
+                  installDir: tui.store.session.installDir,
+                });
               }
 
               // Update login URL (clears the "copy this URL" hint)
@@ -890,6 +925,10 @@ export const defaultCommand: CommandModule = {
                       'Account created, but user data is still being provisioned. ' +
                         'Opening browser to complete sign-in…',
                     );
+                    // `performSignupOrAuth` already emitted `user_fetch_failed`
+                    // on the signup path; this second event marks the rare
+                    // "signup succeeded then probe fetch failed" layer — not a
+                    // double-count of the same failure.
                     trackSignupAttempt({
                       status: 'browser_fallback_after_signup',
                       zone,
@@ -900,6 +939,7 @@ export const defaultCommand: CommandModule = {
                   auth = await performAmplitudeAuth({
                     zone,
                     forceFresh: true,
+                    installDir: tui.store.session.installDir,
                   });
                   userInfo = await fetchAmplitudeUser(
                     auth.idToken,
@@ -1009,6 +1049,7 @@ export const defaultCommand: CommandModule = {
               let auth = await performAmplitudeAuth({
                 zone,
                 forceFresh: false,
+                installDir: tui.store.session.installDir,
               });
               tui.store.setLoginUrl(null);
 
@@ -1046,7 +1087,11 @@ export const defaultCommand: CommandModule = {
                     : String(probeErr),
                 );
                 tui.store.setLoginUrl(null);
-                auth = await performAmplitudeAuth({ zone, forceFresh: true });
+                auth = await performAmplitudeAuth({
+                  zone,
+                  forceFresh: true,
+                  installDir: tui.store.session.installDir,
+                });
                 userInfo = await fetchAmplitudeUser(auth.idToken, zone);
               }
 

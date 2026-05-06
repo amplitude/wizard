@@ -24,6 +24,7 @@ import {
   buildSession,
   toCredentialAppId,
 } from '../../lib/wizard-session.js';
+import type { SignupSuccessResult } from '../../utils/signup-or-auth.js';
 import { DEFAULT_AMPLITUDE_ZONE } from '../../lib/constants.js';
 import { resolveZone } from '../../lib/zone-resolution.js';
 import {
@@ -595,6 +596,46 @@ export class WizardStore {
     this.emitChange();
   }
 
+  setSignupEmail(email: string): void {
+    this.$session.setKey('signupEmail', email);
+    analytics.wizardCapture('signup email captured', { 'has email': !!email });
+    this.emitChange();
+  }
+
+  setSignupFullName(name: string): void {
+    this.$session.setKey('signupFullName', name.trim());
+    analytics.wizardCapture('signup full name captured', {
+      'has name': !!name.trim(),
+    });
+    this.emitChange();
+  }
+
+  setSignupAuth(auth: SignupSuccessResult): void {
+    this.$session.setKey('signupAuth', auth);
+    this.emitChange();
+  }
+
+  setSignupRequiredFields(fields: string[]): void {
+    // Null out the previously-submitted value for any field the server is
+    // re-requesting so the flow re-resolves back to its collection screen
+    // (e.g. SignupFullName, whose `show` predicate gates on
+    // `signupFullName === null`). Without this, SigningUpScreen would
+    // record the requirement but the flow would skip the collection
+    // screen, leaving the user stuck on SigningUp with no way forward.
+    for (const field of fields) {
+      if (field === 'full_name') {
+        this.$session.setKey('signupFullName', null);
+      }
+    }
+    this.$session.setKey('signupRequiredFields', fields);
+    this.emitChange();
+  }
+
+  setSignupAbandoned(value: boolean): void {
+    this.$session.setKey('signupAbandoned', value);
+    this.emitChange();
+  }
+
   setRegion(region: string): void {
     this.$session.setKey('region', region as WizardSession['region']);
     this.$session.setKey('regionForced', false);
@@ -648,20 +689,6 @@ export class WizardStore {
       }
     })();
 
-    this.emitChange();
-  }
-
-  setSignupEmail(email: string): void {
-    this.$session.setKey('signupEmail', email);
-    analytics.wizardCapture('signup email captured', { 'has email': !!email });
-    this.emitChange();
-  }
-
-  setSignupFullName(fullName: string): void {
-    this.$session.setKey('signupFullName', fullName);
-    analytics.wizardCapture('signup full name captured', {
-      'has name': !!fullName,
-    });
     this.emitChange();
   }
 

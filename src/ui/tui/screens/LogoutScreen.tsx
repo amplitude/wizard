@@ -10,9 +10,7 @@ import { useState, useEffect, useRef } from 'react';
 import { ConfirmationInput } from '../primitives/index.js';
 import { Colors } from '../styles.js';
 import { clearStoredCredentials } from '../../../utils/ampli-settings.js';
-import { clearApiKey } from '../../../utils/api-key-store.js';
-import { clearCheckpoint } from '../../../lib/session-checkpoint.js';
-import { clearAuthFieldsInAmpliConfig } from '../../../lib/ampli-config.js';
+import { clearStaleProjectState } from '../../../utils/clear-stale-project-state.js';
 import { wizardSuccessExit } from '../../../utils/wizard-abort.js';
 
 interface LogoutScreenProps {
@@ -55,12 +53,9 @@ export const LogoutScreen = ({
 
   const handleConfirm = () => {
     clearStoredCredentials();
-    clearApiKey(installDir);
-    clearCheckpoint(installDir, 'logout');
-    // Strip OrgId/ProjectId/Zone from project binding + ampli.json mirror so the next login shows
-    // the org + project pickers instead of silently reusing stale IDs.
-    // (Back-compat: ampli.json still stores the field as `WorkspaceId`.)
-    clearAuthFieldsInAmpliConfig(installDir);
+    // Wipe install-dir-keyed surfaces (keychain, .env.local, bindings,
+    // checkpoint). Same helper as successful direct signup — symmetric UX.
+    clearStaleProjectState(installDir, 'logout');
     onLoggedOut?.();
     setPhase(Phase.Done);
     // Exit after a short delay so the user sees the confirmation.

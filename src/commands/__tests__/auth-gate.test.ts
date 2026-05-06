@@ -68,7 +68,7 @@ describe('isAuthTaskGateReady', () => {
     ).toBe(false);
   });
 
-  it('releases create-account onboarding once ToS is accepted', () => {
+  it('releases create-account onboarding once ToS is accepted (no --signup)', () => {
     expect(
       isAuthTaskGateReady(
         s({
@@ -77,6 +77,66 @@ describe('isAuthTaskGateReady', () => {
           authOnboardingPath: 'create_account',
           emailCaptureComplete: true,
           tosAccepted: true,
+          accountCreationFlow: false,
+          signupAuth: null,
+          signupAbandoned: false,
+        }),
+      ),
+    ).toBe(true);
+  });
+
+  it('blocks --signup after ToS until SigningUpScreen settles (no auth yet)', () => {
+    expect(
+      isAuthTaskGateReady(
+        s({
+          introConcluded: true,
+          region: 'us',
+          authOnboardingPath: 'create_account',
+          emailCaptureComplete: true,
+          tosAccepted: true,
+          accountCreationFlow: true,
+          signupAuth: null,
+          signupAbandoned: false,
+        }),
+      ),
+    ).toBe(false);
+  });
+
+  it('releases --signup once direct signup wrote signupAuth', () => {
+    expect(
+      isAuthTaskGateReady(
+        s({
+          introConcluded: true,
+          region: 'us',
+          accountCreationFlow: true,
+          emailCaptureComplete: true,
+          tosAccepted: true,
+          signupAuth: {
+            kind: 'success',
+            idToken: 'i',
+            accessToken: 'a',
+            refreshToken: 'r',
+            zone: 'us',
+            userInfo: null,
+            dashboardUrl: null,
+          },
+          signupAbandoned: false,
+        }),
+      ),
+    ).toBe(true);
+  });
+
+  it('releases --signup once SigningUpScreen abandoned to OAuth fallback', () => {
+    expect(
+      isAuthTaskGateReady(
+        s({
+          introConcluded: true,
+          region: 'us',
+          accountCreationFlow: true,
+          emailCaptureComplete: true,
+          tosAccepted: true,
+          signupAuth: null,
+          signupAbandoned: true,
         }),
       ),
     ).toBe(true);

@@ -25,7 +25,30 @@ import { useStdoutDimensions } from './hooks/useStdoutDimensions.js';
 import { useWizardStore } from './hooks/useWizardStore.js';
 import { DissolveTransition } from './primitives/index.js';
 import { ScreenErrorBoundary } from './primitives/index.js';
+import { Screen } from './router.js';
 import { Colors, Layout } from './styles.js';
+
+/**
+ * Screens that should animate together as a single visual step.
+ *
+ * `DissolveTransition` fires its wipe animation whenever `transitionKey`
+ * changes. Screens in the same group resolve to the same key, which
+ * suppresses the animation between them — the content swaps instantly
+ * while the surrounding chrome and perceived "step" stays stable.
+ *
+ * Used for the signup ceremony, where the router advances through
+ * SignupEmail → SigningUp → SignupFullName → SigningUp without any
+ * meaningful step change from the user's perspective. Each screen
+ * renders a layout that continues the visual context of the previous
+ * one (see `SigningUpScreen.tsx` — mimics the preceding input screen),
+ * so without the wipe, the three components look like one screen
+ * updating in place.
+ */
+const TRANSITION_GROUPS: Partial<Record<string, string>> = {
+  [Screen.SignupEmail]: 'signup',
+  [Screen.SigningUp]: 'signup',
+  [Screen.SignupFullName]: 'signup',
+};
 
 /** Height reserved for stepper + header + separators + hint bar + input. */
 const CHROME_HEIGHT = 8;
@@ -54,6 +77,10 @@ export const App = ({ store }: AppProps) => {
   const contentAreaWidth = Math.max(10, width - Layout.paddingX * 2);
   const direction = store.lastNavDirection === 'pop' ? 'right' : 'left';
   const activeScreen: ReactNode = screens[store.currentScreen] ?? null;
+  // Screens in the same transition group share a key so DissolveTransition
+  // doesn't animate between them (see TRANSITION_GROUPS docstring above).
+  const transitionKey =
+    TRANSITION_GROUPS[store.currentScreen] ?? store.currentScreen;
 
   const separator = Layout.separatorChar.repeat(Math.max(0, width - 2));
 
@@ -100,7 +127,7 @@ export const App = ({ store }: AppProps) => {
               value={{ height: contentHeight, width: contentAreaWidth }}
             >
               <DissolveTransition
-                transitionKey={store.currentScreen}
+                transitionKey={transitionKey}
                 width={contentAreaWidth}
                 height={contentHeight}
                 direction={direction}

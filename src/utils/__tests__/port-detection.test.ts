@@ -105,7 +105,8 @@ describe('isSameOrDescendant', () => {
   });
 
   it('matches through symlinks by canonicalizing both sides', async () => {
-    const { mkdtempSync, mkdirSync, symlinkSync, rmSync } = await import('fs');
+    const { mkdtempSync, mkdirSync, symlinkSync, unlinkSync, rmSync } =
+      await import('fs');
     const os = await import('os');
     const real = mkdtempSync(path.join(os.tmpdir(), 'port-real-'));
     const sub = path.join(real, 'app');
@@ -118,7 +119,11 @@ describe('isSameOrDescendant', () => {
       // both via symlink
       expect(isSameOrDescendant(path.join(link, 'app'), link)).toBe(true);
     } finally {
-      rmSync(link, { force: true });
+      // unlinkSync (not rmSync) — we want symlink-removal semantics, not
+      // directory-removal. rmSync on a symlink-to-directory was permissive
+      // in older Node and stricter in Node 23 (treats it as a directory and
+      // refuses without recursive:true, which would delete the target).
+      unlinkSync(link);
       rmSync(real, { recursive: true, force: true });
     }
   });

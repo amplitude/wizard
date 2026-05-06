@@ -646,6 +646,11 @@ export function gateCiSignupAcceptToS(
  *   - On the create-account path, ToS is accepted (so the browser doesn't open before
  *     EmailCapture / ToS finish — tosAccepted=true implies email capture
  *     is complete since ToS only renders after EmailCapture)
+ *   - With --signup, the SigningUpScreen ceremony has finished: either
+ *     `signupAuth` is populated (direct signup succeeded) or
+ *     `signupAbandoned` is true (redirect / error / unsupported field →
+ *     browser OAuth fallback). Without this, the auth task races the
+ *     screen-driven POST and opens OAuth while signup is still in flight.
  *
  * Pure function, exported for unit testing — the original inline closure
  * silently regressed when its individual conditions drifted and there was
@@ -659,6 +664,11 @@ export function isAuthTaskGateReady(
   if (session.regionForced) return false;
   if (isCreateAccountOnboarding(session) && session.tosAccepted !== true)
     return false;
+  const signupCeremonySettled =
+    !session.accountCreationFlow ||
+    session.signupAuth !== null ||
+    session.signupAbandoned;
+  if (!signupCeremonySettled) return false;
   return true;
 }
 
@@ -666,16 +676,24 @@ export function isAuthTaskGateReady(
  * Run the direct-signup wrapper for agent / CI / classic modes.
  *
  * No-op when account-creation provisioning inputs aren't all
- * set. On a non-null result, optionally runs `onSuccess` (classic uses this
- * to populate `session.credentials` via `resolveCredentials`). On null or
- * thrown errors, logs a human message that points at the mode's fallback
+ * set. On a `success` result, optionally runs `onSuccess` (classic uses this
+ * to populate `session.credentials` via `resolveCredentials`). On any
+ * non-success arm (`requires_redirect`, `needs_information`, `error`) or a
+ * thrown error, logs a human message that points at the mode's fallback
  * path (`fallbackLabel`) and returns — the caller's own auth path runs next.
  */
 export const runDirectSignupIfRequested = async (
   session: import('../lib/wizard-session').WizardSession,
   fallbackLabel: string,
   onSuccess?: () => Promise<void>,
+  opts?: { canPrompt?: boolean },
 ): Promise<void> => {
+  if (opts?.canPrompt && session.accountCreationFlow) {
+    const { promptForMissingSignupFields } = await import(
+      '../utils/signup-prompt.js'
+    );
+    await promptForMissingSignupFields(session);
+  }
   if (!accountCreationProvisioningInputsReady(session)) {
     return;
   }
@@ -698,12 +716,13 @@ export const runDirectSignupIfRequested = async (
     );
     process.exit(ExitCode.AUTH_REQUIRED);
   }
-  let tokens: Awaited<ReturnType<typeof performSignupOrAuth>>;
+  let result: Awaited<ReturnType<typeof performSignupOrAuth>>;
   try {
-    tokens = await performSignupOrAuth({
+    result = await performSignupOrAuth({
       email: session.signupEmail,
       fullName: session.signupFullName,
       zone,
+      installDir: session.installDir,
     });
   } catch (err) {
     // Only the wrapper itself threw — emit wrapper_exception and bail.
@@ -718,17 +737,37 @@ export const runDirectSignupIfRequested = async (
     );
     return;
   }
-  // Loose equality to also catch `undefined` — performSignupOrAuth's return
-  // type is `PerformSignupOrAuthResult | null`, but a defensive check covers
-  // both no-credentials sentinels.
-  if (tokens == null) {
-    getUI().log.info(
-      `Direct signup did not produce credentials; continuing to ${fallbackLabel}.`,
-    );
-    return;
+
+  switch (result.kind) {
+    case 'success':
+      // Fall through to the success path below.
+      break;
+    case 'requires_redirect':
+    case 'needs_information':
+    case 'error':
+      // Non-TUI modes (classic/agent/CI) have no interactive re-prompt
+      // for needs_information — bucket all non-success arms into the
+      // same "continue to fallback" path. The wrapper has already
+      // emitted the appropriate telemetry for each arm internally.
+      getUI().log.info(
+        `Direct signup did not produce credentials; continuing to ${fallbackLabel}.`,
+      );
+      return;
+    default:
+      // Exhaustiveness guard. If a new arm is added to
+      // PerformSignupOrAuthResult, `result satisfies never` fails at
+      // compile time; at runtime we fail closed to the fallback path
+      // rather than the success path below, which would attempt
+      // onSuccess() without credentials.
+      result satisfies never;
+      getUI().log.info(
+        `Direct signup did not produce credentials; continuing to ${fallbackLabel}.`,
+      );
+      return;
   }
+
   getUI().log.info('Direct signup succeeded; using newly created account.');
-  session.signupMagicLinkUrl = tokens.dashboardUrl ?? null;
+  session.signupMagicLinkUrl = result.dashboardUrl ?? null;
   if (onSuccess) {
     try {
       await onSuccess();
