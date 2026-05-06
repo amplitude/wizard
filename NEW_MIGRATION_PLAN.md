@@ -133,10 +133,10 @@ model aliases pinned to Sonnet 4.6 family.
 
 Follow `SKILLS_AND_CONTEXT_DESIGN.md`:
 
-1. **Tier 1** — inject `skill-menu.json` (narrowed post-detection) into the
-   system prefix; cap token budget. **Prototype helper shipped** behind
-   `AMPLITUDE_WIZARD_SKILL_TIERS=1` (`wizard-tools:load_skill_menu`, bundled
-   read-only).
+1. **Tier 1** — inject bundled skill ids/names into the system prefix when
+   `AMPLITUDE_WIZARD_SKILL_TIERS=1` (**`agent/skill-tier-prompt.ts`** appends a
+   compact JSON menu capped at ~12k chars alongside
+   **`wizard-tools:load_skill_menu`**).
 2. **Tier 2** — single `load_skill` tool returning markdown bodies **without**
    copying full trees to `.claude/skills/` unless we must for host
    compatibility. **Prototype shipped** behind `AMPLITUDE_WIZARD_SKILL_TIERS=1`
@@ -155,13 +155,13 @@ Follow `SKILLS_AND_CONTEXT_DESIGN.md`:
 `src/lib/agent/*` and add **`AMPLITUDE_WIZARD_AI_SDK=1`** (name TBD)
 experimental path:
 
-| Extract                      | Target module(s)                                      |
-| ---------------------------- | ----------------------------------------------------- |
-| Model alias / fallback / env | `agent/model-config.ts`                               |
-| Bash + path policy           | `agent/tool-policy.ts`                                |
-| Stream pill / lifecycle      | `agent/stream-presenter.ts`                           |
-| Gateway sanitizing fetch     | `agent/gateway-sanitize.ts` (port tests from rewrite) |
-| `runAgent` loop              | `agent/run-agent.ts` thin orchestrator                |
+| Extract                      | Target module(s)                                            |
+| ---------------------------- | ----------------------------------------------------------- |
+| Model alias / fallback / env | `agent/model-config.ts`                                     |
+| Bash + path policy           | `agent/tool-policy.ts` ✅ (wired from `agent-interface`)    |
+| Stream pill / lifecycle      | `agent/stream-presenter.ts`                                 |
+| Gateway sanitizing fetch     | `agent/gateway-sanitize.ts` ✅ (re-exports sanitize module) |
+| `runAgent` loop              | `agent/run-agent.ts` thin orchestrator                      |
 
 **AI SDK slice order:** `read_file` / grep-equivalent tools → full wizard tool
 surface → MCP bridge → default-on after parity harness (Vitest + live gateway
@@ -244,6 +244,13 @@ sanitization is still defense in depth.
 6. ✅ **`WizardInstallPresentation` seam** — `src/ui/install-presentation/` +
    `createWizardUiInstallPresentation` / `createNoopWizardInstallPresentation`
    (Phase B scaffold).
+7. ✅ **`agent/tool-policy.ts`** — Bash/path allowlist +
+   `createPreToolUseHook` + `wizardCanUseTool` (+ logging helpers);
+   `agent-interface` re-exports unchanged surface.
+8. ✅ **`agent/skill-tier-prompt.ts`** — tier-1 compact menu appended to inner
+   `systemPrompt.append` when `AMPLITUDE_WIZARD_SKILL_TIERS=1`.
+9. ✅ **`agent/gateway-sanitize.ts`** — canonical `stripSchemaNoise` /
+   `sanitizeWizardRequestInit` / `sanitizingFetch` re-export for new imports.
 
 ---
 
