@@ -1,0 +1,18 @@
+{
+  "name": "react-router-7/framework",
+  "ring": 1,
+  "integrationHint": "react-router-7-framework",
+  "buildCommand": ["pnpm", "build"],
+  "expectedEnvPrefix": "VITE_",
+  "expectedInitFile": "app/entry.client.tsx",
+  "expectedEvents": ["Sign In Submitted", "Sign Up Submitted", "Burrito Considered"],
+  "forbiddenPaths": [
+    "vite.config.ts",
+    "vite.config.js",
+    "vite.config.mjs",
+    "react-router.config.ts",
+    "webpack.config.js",
+    "babel.config.js"
+  ],
+  "notes": "Canonical React Router 7 (framework mode) Ring 1 scenario. Init lives in app/entry.client.tsx per the skill's EXAMPLE.md. Uses Vite under the hood — env var is VITE_PUBLIC_AMPLITUDE_API_KEY (VITE_ prefix). SDK family defaults from FRAMEWORK_TO_SDK; no override needed. The scorer's init-call-present regex requires `import { init }` + `init(`, so the golden uses the named-import shape rather than `initAll` from a namespace import."
+}
