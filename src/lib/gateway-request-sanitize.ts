@@ -14,6 +14,27 @@ const STRIPPED_SCHEMA_KEYS: ReadonlySet<string> = new Set([
   'exclusiveMaximum',
 ]);
 
+/** Keys stripped before requests hit Vertex-backed gateway routes (tests / guards). */
+export const GATEWAY_STRIPPED_SCHEMA_KEYS: ReadonlySet<string> =
+  STRIPPED_SCHEMA_KEYS;
+
+/**
+ * True if any object in `value` contains a key the gateway rejects on tool
+ * schemas. Use in tests (and optionally diagnostics) to assert sanitization
+ * coverage — O(n) over the JSON tree.
+ */
+export function treeContainsForbiddenSchemaKeys(value: unknown): boolean {
+  if (Array.isArray(value)) return value.some(treeContainsForbiddenSchemaKeys);
+  if (value && typeof value === 'object') {
+    const obj = value as Record<string, unknown>;
+    for (const [k, v] of Object.entries(obj)) {
+      if (STRIPPED_SCHEMA_KEYS.has(k)) return true;
+      if (treeContainsForbiddenSchemaKeys(v)) return true;
+    }
+  }
+  return false;
+}
+
 /**
  * Recursively strip JSON-schema metadata fields the wizard gateway rejects.
  */

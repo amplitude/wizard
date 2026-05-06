@@ -33,7 +33,9 @@ export {
 export type { PreToolUseHookOptions } from './tool-policy.js';
 export { buildSkillTierSystemPromptAppend } from './skill-tier-prompt.js';
 export {
+  GATEWAY_STRIPPED_SCHEMA_KEYS,
   sanitizingFetch,
   sanitizeWizardRequestInit,
   stripSchemaNoise,
+  treeContainsForbiddenSchemaKeys,
 } from './gateway-sanitize.js';
