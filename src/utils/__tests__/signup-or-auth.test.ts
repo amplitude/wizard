@@ -84,6 +84,65 @@ describe('performSignupOrAuth', () => {
     }
   });
 
+  // ── needs_information shape gate ─────────────────────────────────────
+  //
+  // The wizard's TUI ceremony can only collect the exact `required: ['full_name']`
+  // shape today. Any other shape (additional fields, missing fields, an
+  // empty array, a substitute) means the server contract has drifted past
+  // what this client supports — fall back to OAuth and emit a distinct
+  // telemetry status so the drift is visible.
+
+  it.each([
+    ['unknown field only', ['company']],
+    ['mixed full_name + unknown', ['full_name', 'company']],
+    ['empty required array', []],
+    ['unsupported substitute', ['email_verified']],
+  ])(
+    'returns error and emits needs_information_unsupported when required shape is %s',
+    async (_label, requiredFields) => {
+      const { performDirectSignup } = await import('../direct-signup.js');
+      vi.mocked(performDirectSignup).mockResolvedValue({
+        kind: 'needs_information',
+        requiredFields,
+      });
+      const { analytics } = await import('../analytics');
+
+      const result = await performSignupOrAuth({
+        email: 'ada@example.com',
+        fullName: null,
+        zone: 'us',
+      });
+
+      expect(result.kind).toBe('error');
+      expect(analytics.wizardCapture).toHaveBeenCalledWith(
+        AGENTIC_SIGNUP_ATTEMPTED_EVENT,
+        { status: 'needs_information_unsupported', zone: 'us' },
+      );
+    },
+  );
+
+  it('passes through the supported ["full_name"] shape unchanged', async () => {
+    const { performDirectSignup } = await import('../direct-signup.js');
+    vi.mocked(performDirectSignup).mockResolvedValue({
+      kind: 'needs_information',
+      requiredFields: ['full_name'],
+    });
+    const { analytics } = await import('../analytics');
+
+    const result = await performSignupOrAuth({
+      email: 'ada@example.com',
+      fullName: null,
+      zone: 'us',
+    });
+
+    expect(result.kind).toBe('needs_information');
+    // Telemetry status is the regular one, not the unsupported sentinel.
+    expect(analytics.wizardCapture).toHaveBeenCalledWith(
+      AGENTIC_SIGNUP_ATTEMPTED_EVENT,
+      { status: 'needs_information', zone: 'us' },
+    );
+  });
+
   it('returns redirect when direct signup returns requires_redirect', async () => {
     const { performDirectSignup } = await import('../direct-signup.js');
     vi.mocked(performDirectSignup).mockResolvedValue({

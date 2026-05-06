@@ -94,6 +94,16 @@ export type SignupAttemptStatus =
   | 'success'
   | 'requires_redirect'
   | 'needs_information'
+  /**
+   * Server returned `needs_information` with a `required` shape the wizard
+   * doesn't know how to collect (anything other than exactly `['full_name']`
+   * — including unknown new fields, an empty array, or a mix with unknown
+   * fields). Treated as a terminal abandon → user falls back to OAuth.
+   * Distinct from `signup_error` so the wire-contract drift is visible in
+   * the funnel — if this status starts firing, the server has added a
+   * required field the wizard doesn't yet handle.
+   */
+  | 'needs_information_unsupported'
   | 'signup_error'
   | 'user_fetch_failed'
   | 'wrapper_exception'
@@ -104,6 +114,29 @@ export type SignupAttemptStatus =
    * browser OAuth (which never fires this event).
    */
   | 'browser_fallback_after_signup';
+
+/**
+ * The single `required` shape the wizard's TUI ceremony knows how to
+ * collect. Anything else (additional fields, missing fields, empty array)
+ * means the server's contract has drifted past what this client supports
+ * — fall back to OAuth and emit `needs_information_unsupported` telemetry
+ * so the drift is visible.
+ */
+const SUPPORTED_NEEDS_INFORMATION_REQUIRED: ReadonlyArray<string> = [
+  'full_name',
+];
+
+function isSupportedNeedsInformationShape(
+  requiredFields: readonly string[],
+): boolean {
+  if (requiredFields.length !== SUPPORTED_NEEDS_INFORMATION_REQUIRED.length) {
+    return false;
+  }
+  for (const field of SUPPORTED_NEEDS_INFORMATION_REQUIRED) {
+    if (!requiredFields.includes(field)) return false;
+  }
+  return true;
+}
 
 export const AGENTIC_SIGNUP_ATTEMPTED_EVENT = 'agentic signup attempted';
 
@@ -216,6 +249,26 @@ export async function performSignupOrAuth(
     return { kind: 'redirect' };
   }
   if (result.kind === 'needs_information') {
+    if (!isSupportedNeedsInformationShape(result.requiredFields)) {
+      // Server asked for fields the wizard doesn't have screens to
+      // collect (or asked for nothing — empty array). The TUI ceremony
+      // can't make progress. Emit a distinct telemetry status so the
+      // drift is visible in the funnel, then surface as `error` so the
+      // SigningUpScreen falls through to OAuth via the abandon path.
+      log.warn('direct signup → needs_information with unsupported shape', {
+        requiredFields: result.requiredFields,
+        supported: SUPPORTED_NEEDS_INFORMATION_REQUIRED,
+      });
+      trackSignupAttempt({
+        status: 'needs_information_unsupported',
+        zone: input.zone,
+      });
+      return {
+        kind: 'error',
+        message:
+          'Server requested fields the wizard does not support — falling back to browser auth.',
+      };
+    }
     log.debug('direct signup → needs_information', {
       requiredFields: result.requiredFields,
     });
