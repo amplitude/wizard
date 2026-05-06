@@ -251,6 +251,13 @@ sanitization is still defense in depth.
    `systemPrompt.append` when `AMPLITUDE_WIZARD_SKILL_TIERS=1`.
 9. ✅ **`agent/gateway-sanitize.ts`** — canonical `stripSchemaNoise` /
    `sanitizeWizardRequestInit` / `sanitizingFetch` re-export for new imports.
+10. ✅ **Vercel AI SDK on the wire** — `ai` + `@ai-sdk/anthropic`; opt-in
+    `maybeRunAiSdkGatewayProbe` after `initializeAgent`
+    (`AMPLITUDE_WIZARD_AI_SDK_PROBE=1`; strict:
+    `AMPLITUDE_WIZARD_AI_SDK_PROBE_STRICT=1`). Plan:
+    `docs/internal/ai-sdk-esm-pivot.md`.
+11. ✅ **`package.json` `exports`** — root `"."` maps to `dist` like `main`
+    (Node 16+ exports resolution); true ESM `import` condition targets 2.0.
 
 ---
 

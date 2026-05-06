@@ -3,14 +3,25 @@
  *
  * Uses the global agent (getAgent) so all calls share the same initialized
  * SDK config (gateway URL, model, env) rather than making raw fetch calls.
+ *
+ * Opt-in: {@code AMPLITUDE_WIZARD_AI_SDK_CONSOLE=1} routes slash prompts
+ * through Vercel AI SDK (`streamText` + {@link sanitizingFetch}), matching the
+ * gateway probe stack. Local CLI runs keep the Agent SDK path.
  */
 
 import type { WizardSession } from './wizard-session.js';
 import { getLlmGatewayUrlFromHost } from '../utils/urls.js';
 import { RunPhase } from './wizard-session.js';
-import { buildAgentEnv, getAgent } from './agent-interface.js';
+import {
+  buildAgentEnv,
+  getAgent,
+  type AgentRunConfig,
+} from './agent-interface.js';
 import { safeParseSDKMessage } from './middleware/schemas.js';
 import { resolveWizardAllowedToolNames } from './wizard-tools.js';
+import { getConsoleQueryStack } from './agent/console-query-stack.js';
+import { parseAnthropicCustomHeaderBlock } from '../utils/custom-headers.js';
+import { sanitizingFetch } from './gateway-request-sanitize.js';
 
 export type ConsoleCredentials =
   | { kind: 'gateway'; baseUrl: string; apiKey: string }
@@ -89,18 +100,30 @@ export interface ConversationTurn {
   content: string;
 }
 
-/** Send a message to Claude with optional conversation history and return the text response. */
-export async function queryConsole(
-  userMessage: string,
-  sessionContext: string,
-  creds: ConsoleCredentials,
-  history: ConversationTurn[] = [],
-): Promise<string> {
-  if (creds.kind === 'none') {
-    return 'Claude is not available yet — complete authentication first.';
-  }
+function resolveAnthropicAuth(): { apiKey?: string; authToken?: string } {
+  const apiKey = process.env.ANTHROPIC_API_KEY?.trim();
+  if (apiKey) return { apiKey };
+  const authToken = process.env.ANTHROPIC_AUTH_TOKEN?.trim();
+  if (authToken) return { authToken };
+  return {};
+}
 
-  const agentConfig = await getAgent();
+function buildHistoryBlock(history: ConversationTurn[]): string {
+  if (history.length === 0) return '';
+  return (
+    '\n\n--- Conversation history ---\n' +
+    history
+      .map((t) => `${t.role === 'user' ? 'User' : 'Assistant'}: ${t.content}`)
+      .join('\n') +
+    '\n--- End of history ---'
+  );
+}
+
+async function queryConsoleWithClaudeAgentSdk(
+  userMessage: string,
+  systemAndHistory: string,
+  agentConfig: AgentRunConfig,
+): Promise<string> {
   const { query } = (await import('@anthropic-ai/claude-agent-sdk')) as {
     query: (params: {
       prompt: string;
@@ -108,29 +131,13 @@ export async function queryConsole(
     }) => AsyncIterable<unknown>;
   };
 
-  const historyBlock =
-    history.length > 0
-      ? '\n\n--- Conversation history ---\n' +
-        history
-          .map(
-            (t) => `${t.role === 'user' ? 'User' : 'Assistant'}: ${t.content}`,
-          )
-          .join('\n') +
-        '\n--- End of history ---'
-      : '';
-
   const collectedText: string[] = [];
 
-  // Forward x-amp-wizard-session-id so slash-prompt LLM calls land in the
-  // SAME Agent Analytics session as the main agent run, instead of falling
-  // through to the proxy's per-token-hash fallback (which would collapse all
-  // slash-prompt queries across every wizard run a user has ever done into
-  // one synthetic session).
-  //
-  // We rebuild ANTHROPIC_CUSTOM_HEADERS here rather than read from process.env
-  // because the SDK subprocess sets the env scoped to its query() call —
-  // process.env never sees the value the main run injected.
-  const customHeaders = buildAgentEnv({}, {}, agentConfig.agentSessionId);
+  const customHeaders = buildAgentEnv(
+    agentConfig.wizardMetadata ?? {},
+    agentConfig.wizardFlags ?? {},
+    agentConfig.agentSessionId,
+  );
 
   const response = query({
     prompt: userMessage,
@@ -140,7 +147,7 @@ export async function queryConsole(
       permissionMode: 'bypassPermissions',
       mcpServers: agentConfig.mcpServers,
       allowedTools: resolveWizardAllowedToolNames(),
-      systemPrompt: sessionContext + historyBlock,
+      systemPrompt: systemAndHistory,
       env: {
         ...process.env,
         ANTHROPIC_CUSTOM_HEADERS: customHeaders,
@@ -165,4 +172,86 @@ export async function queryConsole(
   }
 
   return collectedText.join('') || '(empty response)';
+}
+
+/**
+ * AI SDK path: same gateway + headers as the probe; no MCP / wizard-tools
+ * (slash console is Q&A only in this mode).
+ */
+async function queryConsoleWithVercelAiSdk(
+  userMessage: string,
+  systemAndHistory: string,
+  agentConfig: AgentRunConfig,
+): Promise<string> {
+  const [{ createAnthropic }, { streamText }] = await Promise.all([
+    import('@ai-sdk/anthropic'),
+    import('ai'),
+  ]);
+
+  const customHeaders = buildAgentEnv(
+    agentConfig.wizardMetadata ?? {},
+    agentConfig.wizardFlags ?? {},
+    agentConfig.agentSessionId,
+  );
+
+  const baseURL = process.env.ANTHROPIC_BASE_URL?.trim();
+  const auth = resolveAnthropicAuth();
+
+  const provider = createAnthropic({
+    ...(baseURL ? { baseURL } : {}),
+    ...auth,
+    headers: parseAnthropicCustomHeaderBlock(customHeaders),
+    fetch: sanitizingFetch,
+  });
+
+  const result = streamText({
+    model: provider(agentConfig.model),
+    system: systemAndHistory,
+    messages: [{ role: 'user', content: userMessage }],
+  });
+
+  let text = '';
+  for await (const part of result.textStream) {
+    text += part;
+  }
+  return text.trim() || '(empty response)';
+}
+
+/** Send a message to Claude with optional conversation history and return the text response. */
+export async function queryConsole(
+  userMessage: string,
+  sessionContext: string,
+  creds: ConsoleCredentials,
+  history: ConversationTurn[] = [],
+): Promise<string> {
+  if (creds.kind === 'none') {
+    return 'Claude is not available yet — complete authentication first.';
+  }
+
+  const agentConfig = await getAgent();
+  const historyBlock = buildHistoryBlock(history);
+  const systemAndHistory = sessionContext + historyBlock;
+
+  // Forward x-amp-wizard-session-id so slash-prompt LLM calls land in the
+  // SAME Agent Analytics session as the main agent run, instead of falling
+  // through to the proxy's per-token-hash fallback (which would collapse all
+  // slash-prompt queries across every wizard run a user has ever done into
+  // one synthetic session).
+  //
+  // buildAgentEnv runs in both stacks — Agent SDK via ANTHROPIC_CUSTOM_HEADERS,
+  // Vercel AI SDK via createAnthropic headers.
+
+  if (getConsoleQueryStack(agentConfig) === 'vercel-ai-sdk') {
+    return queryConsoleWithVercelAiSdk(
+      userMessage,
+      systemAndHistory,
+      agentConfig,
+    );
+  }
+
+  return queryConsoleWithClaudeAgentSdk(
+    userMessage,
+    systemAndHistory,
+    agentConfig,
+  );
 }
