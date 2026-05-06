@@ -17,15 +17,25 @@
 
 import type { BenchmarkResult } from './types.js';
 
-function shouldRun(): { run: boolean; reason?: string } {
-  if (process.env['WIZARD_LIVE_BENCHMARK'] !== '1') {
-    return { run: false, reason: 'WIZARD_LIVE_BENCHMARK not set' };
+interface RunOpts {
+  /** CLI `--live` flag from the harness. */
+  live?: boolean;
+}
+
+function shouldRun(opts: RunOpts = {}): { run: boolean; reason?: string } {
+  if (!opts.live && process.env['WIZARD_LIVE_BENCHMARK'] !== '1') {
+    return {
+      run: false,
+      reason: 'pass --live or set WIZARD_LIVE_BENCHMARK=1',
+    };
   }
   return { run: true };
 }
 
-export async function runFirstTokenLatencyBenchmark(): Promise<BenchmarkResult> {
-  const gate = shouldRun();
+export async function runFirstTokenLatencyBenchmark(
+  opts: RunOpts = {},
+): Promise<BenchmarkResult> {
+  const gate = shouldRun(opts);
   if (!gate.run) {
     return {
       id: 'first-token-latency',

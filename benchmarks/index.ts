@@ -146,8 +146,8 @@ async function main(): Promise<void> {
   results.push(await runToolExecBenchmark());
 
   // ---- Live benchmarks (gated) ---------------------------------------------
-  results.push(await runCacheHitsBenchmark());
-  results.push(await runFirstTokenLatencyBenchmark());
+  results.push(await runCacheHitsBenchmark({ live: opts.live }));
+  results.push(await runFirstTokenLatencyBenchmark({ live: opts.live }));
 
   const run: BenchmarkRun = {
     ts: new Date().toISOString(),

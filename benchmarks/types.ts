@@ -57,10 +57,3 @@ export interface BenchmarkRun {
   live: boolean;
   results: BenchmarkResult[];
 }
-
-/** Estimator: ~4 chars per token is the rough Anthropic ballpark. */
-export function estimateTokens(text: string): number {
-  // Trivial estimator. Goal is relative measurement, not exact token math.
-  // chars / 4 is the published Anthropic guidance for English prose.
-  return Math.ceil(text.length / 4);
-}
