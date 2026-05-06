@@ -177,7 +177,7 @@ export function runPrefixSizeBenchmark(repoRoot: string): BenchmarkResult {
     before: eagerTokens,
     after: lazyTokens,
     unit: 'tokens',
-    delta: `-${reductionPct}%`,
+    delta: `${reductionPct >= 0 ? '-' : '+'}${Math.abs(reductionPct)}%`,
     status,
     note,
     details: {
