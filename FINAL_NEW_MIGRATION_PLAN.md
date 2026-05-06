@@ -185,6 +185,8 @@ Performance is product-critical. We already collect the right signals via `src/l
 
 Port the five `*.bench.ts` files and the `baseline.json` / `results.json` shape into the wizard's existing `benchmarks/` (top-level, distinct from `src/lib/middleware/benchmarks/` which is per-turn telemetry). One target: `pnpm bench` runs them; CI uploads `results.json` as an artifact and diffs against `baseline.json`.
 
+`first-token-latency.bench.ts` and `cache-hits.bench.ts` need to hit the live gateway for honest numbers — they consume the auth secrets wired in §7.5.
+
 ### 6.2 Budgets (binding once Phase C lands; revisit per phase otherwise)
 
 | Metric | Source | Budget | Failure mode |
@@ -288,6 +290,45 @@ The PR-gate (§7.3) runs the **call-site fixtures whose IDs the PR touches**, no
 2. First three call sites covered as proof: `propose_event_plan` (PR #553's surface), `select_skill` (the Tier-2 `load_skill` decision from #544), and the inner-loop `streamText` site (Phase D-3).
 3. Every call site added in Phase D-3 onward lands paired. The Agent-SDK call sites get covered as they're ported to the AI-SDK runner — by D-6, every remaining call site is registered.
 
+### 7.5 Gateway auth for CI evals and benches
+
+The eval harness (§7.1) and bench harness (§6.1) both need the wizard's `--agent` runner to actually hit the live LLM gateway (`thunder/wizard-proxy`) — that is the binding parity signal. Today the wizard's runtime auth comes from interactive OAuth → `~/.amplitude/wizard/oauth-session.json` → `config.amplitudeBearerToken` → `ANTHROPIC_AUTH_TOKEN` at `src/lib/agent-interface.ts:1970-1971`. CI cannot run interactive OAuth, and the `--api-key` (direct Anthropic) path bypasses the gateway entirely — so it doesn't exercise the production code path that customers actually run.
+
+**Resolution: env-var auth, plumbed from GitHub org secrets.** The org already provisions `WIZARD_OAUTH_TOKEN`, `WIZARD_EXPIRES_AT`, and `WIZARD_ZONE` as secrets; today they are unused in this repo (`grep` returns zero hits in `src/` and `.github/`). Wire them in.
+
+**Wizard-side work (one PR, modest):**
+
+1. In the credential resolver (`src/lib/credential-resolution.ts` or the equivalent code path that produces `config.amplitudeBearerToken`), accept `WIZARD_OAUTH_TOKEN` from env as a *higher-priority* source than the OAuth file. If `WIZARD_EXPIRES_AT` is past, fail loudly with a remediation pointer rather than silently refreshing (CI should never refresh a long-lived org secret).
+2. Plumb `WIZARD_ZONE` into the gateway URL resolver in `src/utils/urls.ts:79` next to the existing `WIZARD_LLM_PROXY_URL` override. Zone selection is currently driven by the user's stored config; CI needs an explicit override.
+3. PR #549's `resolveWizardAnthropicAuthFromEnv` (the AI-SDK Anthropic factory) needs to read the same vars — verify the priority order matches the legacy path so D-5 cutover doesn't change auth behavior.
+
+**CI-side work (per-workflow, small):**
+
+Each workflow that runs the wizard's `--agent` against the live gateway declares `env:` pulling the three secrets:
+
+```yaml
+env:
+  WIZARD_OAUTH_TOKEN: ${{ secrets.WIZARD_OAUTH_TOKEN }}
+  WIZARD_EXPIRES_AT:  ${{ secrets.WIZARD_EXPIRES_AT }}
+  WIZARD_ZONE:        ${{ secrets.WIZARD_ZONE }}
+```
+
+This applies to: `evals-pr.yml` (the §7.3 PR-gate), `evals-nightly.yml`, `evals-pre-release.yml`, and `bench.yml` (the §6.1 bench harness once the bench port lands).
+
+**Fork-PR policy.** GitHub does not surface org secrets to PRs from forks. The decision is binding: **evals and benches do not run on fork PRs.** They run on push-to-internal-branch and on schedule. Internal contributors are not affected; external contributors get build + lint + unit tests only, with a comment from the bot pointing at the policy.
+
+**Token rotation.** When `WIZARD_OAUTH_TOKEN` is rotated, CI breaks until the secret is updated. The plan accepts this; the alternative (silent refresh in CI) means CI holds long-lived OAuth state, which is worse. Document the rotation runbook alongside the secret. Consider expiring tokens to a *generous* validity window (e.g. quarterly) to balance churn vs. security.
+
+**Optional: bypass-token PR to `thunder/wizard-proxy`.** A long-lived service token that CI uses without OAuth — server-side change in `amplitude/javascript`'s `thunder/src/wizard-proxy/`. Adds a header (e.g. `X-Wizard-CI-Token: <hash>`) checked against a stored allowlist; bypasses Hydra introspection. **Non-blocking** for this plan: the env-var path above unblocks evals and benches today. The bypass token is hardening for the case where OAuth-token rotation churn becomes operationally painful, and pairs naturally with the broader proxy hardening in §3 #7. Schedule when the platform team picks up that work, not before.
+
+**What this unblocks:**
+
+- §6.1 bench harness can run `cache-hits.bench.ts` and `first-token-latency.bench.ts` against the real gateway — fake numbers from mocked transports would defeat the point.
+- §7.2 cutover gate is *meaningful*: AI-SDK parity is measured against the same gateway that customers hit, with the same auth shape.
+- §7.4 per-call-site fixtures replay against the real gateway for streaming sites; structured-output sites can run mock-only since `generateObject` is deterministic enough.
+
+**Risk: token gets logged.** The wizard already redacts `ANTHROPIC_AUTH_TOKEN` from its observability surfaces (`src/lib/observability/logger.ts` + `src/ui/agent-ui.ts`'s NDJSON redactor — PR #518 hardens this). Verify `WIZARD_OAUTH_TOKEN` is on the same redaction list. Add a unit test that asserts the literal token never appears in any log path.
+
 ---
 
 ## 8. Skills & context (alignment with `SKILLS_AND_CONTEXT_DESIGN.md`)
@@ -345,6 +386,9 @@ The six questions previously open in earlier drafts of this plan are decided. Ea
 | `browser-sdk-2.md` duplication breaks Tier-3 lazy-load contract | C | Token-budget linter in context-hub CI fails on >2k-token bodies before this can regress further. |
 | `WizardSession` shape ossifies and the install-pipeline decomposition can't decouple cleanly | B | Property-based test covers the install graph the same way `flow-invariants.test.ts` covers screen flows; failures surface coupling. |
 | Agent SDK delete (D-6) loses bash sandboxing semantics | D-6 | Plan honestly: tool-policy middleware is 150-200 LOC under `src/lib/agent/tool-policy.ts`. Don't promise 50. |
+| `WIZARD_OAUTH_TOKEN` rotation breaks CI | §7.5 | Document rotation runbook; provision quarterly-validity tokens; fail loudly on expiry rather than silent-refresh. Bypass-token thunder PR available if rotation pain becomes operational. |
+| Org secret leaks via redaction gap | §7.5 | Token added to `src/lib/observability/logger.ts` + NDJSON redactor allowlist with a unit-test assertion that the literal value never appears in any log path. |
+| Fork-PR contributors lose eval signal | §7.5 | Binding policy: evals + benches don't run on fork PRs. Build + lint + unit tests still run. Bot comment explains the policy. |
 
 ---
 
@@ -354,8 +398,9 @@ The six questions previously open in earlier drafts of this plan are decided. Ea
 2. **Open a tracking issue per phase** mirroring the slice list in §5. PRs reference the phase issue, not this doc, so the doc stays evergreen.
 3. **Wire benchmark assertions** in CI per §6.2. Start with the cache-read warning, the bundle-size block, and the first-token-latency block. Add others as their measurements stabilize.
 4. **Land the first eval fixture** (`nextjs-app-router-vanilla/pristine/`) on top of #537. This is the gate-gate: D-5 requires the eval surface to be real.
-5. **Open the paired `browser-sdk-2.md` dedup PR** (wizard + context-hub) once #544-#546 land. Per §10 decision 1, lands in Phase C.
-6. **Archive `wizard-rewrite` and `wizard-v2`** once D-6 ships (Agent SDK deletion). Until then, keep them as reference implementations cited from the in-tree code.
+5. **Wire `WIZARD_OAUTH_TOKEN` / `WIZARD_EXPIRES_AT` / `WIZARD_ZONE` env-var auth** per §7.5. Single PR: extend `src/lib/credential-resolution.ts` and `src/utils/urls.ts` to read the env vars; verify PR #549's `resolveWizardAnthropicAuthFromEnv` matches the priority order; add the redaction-allowlist test. Unblocks evals and benches against the live gateway.
+6. **Open the paired `browser-sdk-2.md` dedup PR** (wizard + context-hub) once #544-#546 land. Per §10 decision 1, lands in Phase C.
+7. **Archive `wizard-rewrite` and `wizard-v2`** once D-6 ships (Agent SDK deletion). Until then, keep them as reference implementations cited from the in-tree code.
 
 ---
 
