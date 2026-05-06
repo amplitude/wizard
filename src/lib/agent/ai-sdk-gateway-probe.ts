@@ -9,24 +9,18 @@
  * Set {@code AMPLITUDE_WIZARD_AI_SDK_PROBE_STRICT=1} to throw on failure
  * (CI / dogfood). Default is log-only so a probe regression never blocks users.
  */
-import { createAnthropic } from '@ai-sdk/anthropic';
 import { streamText } from 'ai';
 
-import { sanitizingFetch } from '../gateway-request-sanitize.js';
 import { logToFile } from '../../utils/debug.js';
+import {
+  createWizardAiSdkAnthropic,
+  resolveWizardAnthropicAuthFromEnv,
+} from './wizard-ai-sdk-anthropic.js';
 
 export type AiSdkGatewayProbeResult =
   | { status: 'skipped'; reason: string }
   | { status: 'ok'; preview: string }
   | { status: 'error'; message: string };
-
-function resolveAuth(): { apiKey?: string; authToken?: string } {
-  const apiKey = process.env.ANTHROPIC_API_KEY?.trim();
-  if (apiKey) return { apiKey };
-  const authToken = process.env.ANTHROPIC_AUTH_TOKEN?.trim();
-  if (authToken) return { authToken };
-  return {};
-}
 
 /**
  * Single short completion to validate streaming + gateway auth. Does not use tools.
@@ -50,7 +44,7 @@ export async function maybeRunAiSdkGatewayProbe(args: {
   }
 
   const baseURL = process.env.ANTHROPIC_BASE_URL?.trim();
-  const auth = resolveAuth();
+  const auth = resolveWizardAnthropicAuthFromEnv();
   if (!baseURL && !auth.apiKey) {
     return {
       status: 'skipped',
@@ -65,11 +59,7 @@ export async function maybeRunAiSdkGatewayProbe(args: {
   }
 
   try {
-    const provider = createAnthropic({
-      ...(baseURL ? { baseURL } : {}),
-      ...auth,
-      fetch: sanitizingFetch,
-    });
+    const provider = createWizardAiSdkAnthropic();
 
     const result = streamText({
       model: provider(args.model),

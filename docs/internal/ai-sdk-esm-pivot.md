@@ -14,8 +14,10 @@ SDK** (`ai`, `@ai-sdk/anthropic`), **Vertex-safe fetch** (existing
    (`AMPLITUDE_WIZARD_AI_SDK_PROBE=1`). Optional CI gate:
    `AMPLITUDE_WIZARD_AI_SDK_PROBE_STRICT=1`.
 2. **Console dual path (opt-in):** `AMPLITUDE_WIZARD_AI_SDK_CONSOLE=1` routes
-   `queryConsole` through `streamText` + `sanitizingFetch` + `getConsoleQueryStack`;
-   local CLI runs stay on Agent SDK.
+   `queryConsole` through `streamText` + `getConsoleQueryStack`;
+   local CLI runs stay on Agent SDK. Shared **`createWizardAiSdkAnthropic`**
+   (`src/lib/agent/wizard-ai-sdk-anthropic.ts`) keeps probe + console on the
+   same auth / `baseURL` / `sanitizingFetch` wiring.
 3. **Dual harness:** `runAgent` flag to route **first user turn** (or smoke
    path) through `streamText` + tools stub — grow until MCP + wizard-tools
    parity.
