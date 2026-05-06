@@ -69,10 +69,22 @@ evals/
 
 The runner produces an `Artifact` from one of two sources:
 
-1. **`live`** — spawn the wizard against a fresh copy of `pristine/`, capture stdout NDJSON, walk the working tree at exit. This is what catches real regressions. Requires `AMPLITUDE_EVAL_API_KEY` (or `AMPLITUDE_WIZARD_API_KEY`) to be set.
-2. **`golden`** — load a pre-recorded `run.ndjson` + `exit-code.txt` + `working/` from disk. The artifact is content-equivalent to a real run; scorers cannot tell the difference.
+1. **`live`** — spawn the wizard against a fresh copy of `pristine/`, capture stdout NDJSON, walk the working tree at exit. This is what catches real regressions. Requires authentication (see [Live-mode authentication](#live-mode-authentication) below).
+2. **`golden`** — load a pre-recorded `run.ndjson` + `exit-code.txt` + `working/` from disk. The artifact is content-equivalent to a real run; scorers cannot tell the difference. Optionally loads a `golden/stderr.txt` to drive the secret-in-stderr scorer.
 
 Why both: the eval-only Amplitude project doesn't exist yet (decision #2 in the spec is still open), so a true live integration in CI isn't possible today. Golden gives us a green run that proves the framework is correct independently of ingestion. When the eval-only project lands, scenarios graduate to live and golden becomes a tool for offline scorer development.
+
+### Live-mode authentication
+
+`runLive` resolves auth in this order:
+
+1. **`WIZARD_OAUTH_TOKEN`** (preferred) — when set, the runner forwards `WIZARD_OAUTH_TOKEN` / `WIZARD_EXPIRES_AT` / `WIZARD_ZONE` to the wizard child process. This routes LLM calls through the Amplitude LLM gateway, which is the only path that catches gateway-specific regressions (Vertex schema noise, beta-header rejections, the proxy 400 class). **Wizard-side reading of these env vars is a follow-up wiring PR**; until it lands, this path will fail at the wizard's OAuth step.
+2. **`EVALS_ALLOW_API_KEY_BYPASS=1` + `--api-key`** — opt-in fallback. Routes LLM calls direct-to-Anthropic, skipping the gateway. **This cannot catch gateway-specific bugs.** The runner prints a warning when this mode is used. Use only when you understand the trade-off.
+3. **Neither** — error. The runner refuses to silently pick a default; the choice between gateway and bypass is too consequential.
+
+### Stderr capture and redaction
+
+Live runs capture the wizard subprocess's stderr (it is no longer piped through to the parent terminal) and apply `redactString` from `src/lib/observability/redact.ts` to the full buffer at flush time. The redacted stderr lands on the artifact at `Artifact.stderr` for scorer use; raw stderr is never persisted. The Layer 0 `no-secret-in-stderr` scorer asserts no JWT-, Bearer-, or hex-token-shaped string survived redaction — a hit there is a redactor regression and a hard fail.
 
 ## Adding a scenario (Week 1 shape)
 
@@ -91,10 +103,8 @@ The full flow is in `docs/evals.md` § Adding a new scenario. Mechanics for Week
 These are intentional Week 1 omissions, not bugs:
 
 - **No Layer 5 (ingestion verification).** The eval-only Amplitude project is unprovisioned (decision #2 open in the spec). Until it lands, every scenario stays at Layer 3 in PR rings.
-- **No live CI run.** Without an eval-only project + API key managed outside the user-facing OAuth flow, we can't safely run the wizard end-to-end against the fixture in CI. The framework is designed so this lights up cleanly when the project exists; until then, golden replay carries the green run.
-- **No Layer 0 secret-grep against stdout/stderr.** Spec contract point 5 (no raw secrets in stdout/stderr) is enforced by AgentUI's redactor, but the runner-side double-check isn't wired yet. Add when the live API key path is alive.
+- **Wizard-side `WIZARD_OAUTH_TOKEN` reading is a follow-up PR.** The runner forwards the env var to the wizard child today, but the wizard doesn't read it yet — live runs need either the wizard-side wiring or the explicit `EVALS_ALLOW_API_KEY_BYPASS=1` opt-in. Once the wizard-side lands, gateway-routed live evals work in CI without the bypass.
 - **AST-based init counting.** Layer 0's `single-init-call.ts` uses regex; it can false-positive on commented-out callsites. AST inspection moves it to Layer 2 in Week 2.
-- **No live-run secret leak detection in `parse-stream.ts`.** Today the runner trusts AgentUI's redaction. Add a stdout/stderr grep before scoring.
 
 ### Week 2 priorities
 

@@ -24,6 +24,7 @@ import { scorer as l0NoHardcodedKey } from '../scorers/layer0-hard-fail/no-hardc
 import { scorer as l0CorrectSdk } from '../scorers/layer0-hard-fail/correct-sdk-package.js';
 import { scorer as l0SingleInit } from '../scorers/layer0-hard-fail/single-init-call.js';
 import { scorer as l0NoBuildBridging } from '../scorers/layer0-hard-fail/no-build-config-bridging.js';
+import { scorer as l0NoSecretInStderr } from '../scorers/layer0-hard-fail/no-secret-in-stderr.js';
 
 import { scorer as l1FileTouched } from '../scorers/layer1-structural/file-touched.js';
 import { scorer as l1ImportPresent } from '../scorers/layer1-structural/import-present.js';
@@ -43,6 +44,7 @@ export const SCORERS: Scorer[] = [
   l0CorrectSdk,
   l0SingleInit,
   l0NoBuildBridging,
+  l0NoSecretInStderr,
   // Layer 1 — structural assertions.
   l1FileTouched,
   l1ImportPresent,
