@@ -23,18 +23,43 @@ export interface SkillMenu {
 
 /**
  * Resolve the bundled skills root directory.
- * Skills are shipped in `<wizardRoot>/skills/<category>/` subdirectories.
+ * Skills are shipped at `<wizardPackageRoot>/skills/<category>/` — sibling
+ * to the package's `package.json`.
+ *
+ * Walks up from this module looking for the nearest `package.json` whose
+ * `name` is `@amplitude/wizard`. Robust to file moves: previously the loop
+ * was hard-coded to a fixed depth (`i < 5`), which had zero headroom after
+ * extracting this helper from `src/lib/wizard-tools.ts` to
+ * `src/lib/wizard-tools/bundled-skills.ts` (one directory deeper). Any
+ * future move under `src/` would silently fall through.
  */
 function getSkillsRootDir(): string {
-  // Walk up from this file to find the wizard repo root (where skills/ lives)
+  // Defensive upper bound: a sane repo is far shallower than this. Used as
+  // a guard against pathological filesystems (e.g. a runaway symlink loop)
+  // rather than a real depth budget.
+  const MAX_DEPTH = 32;
   let dir = __dirname;
-  for (let i = 0; i < 5; i++) {
-    if (fs.existsSync(path.join(dir, 'skills'))) {
-      return path.join(dir, 'skills');
+  for (let i = 0; i < MAX_DEPTH; i++) {
+    const pkgPath = path.join(dir, 'package.json');
+    if (fs.existsSync(pkgPath)) {
+      try {
+        const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8')) as {
+          name?: string;
+        };
+        if (pkg.name === '@amplitude/wizard') {
+          return path.join(dir, 'skills');
+        }
+      } catch {
+        // Unreadable / malformed package.json — keep walking.
+      }
     }
-    dir = path.dirname(dir);
+    const parent = path.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
   }
-  // Fallback: relative to cwd
+  // Fallback: relative to cwd. Preserves prior behavior when running from
+  // a layout that doesn't contain the wizard's package.json (e.g. some
+  // bundler outputs or tests).
   return path.join(process.cwd(), 'skills');
 }
 
