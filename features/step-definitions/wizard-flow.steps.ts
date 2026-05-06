@@ -246,11 +246,20 @@ When('I pick "Change region" on the intro', function () {
   s.introConcluded = true;
 });
 
-// ── Signup flow (email capture + ToS) ─────────────────────────────────────────
+// ── Signup flow (server-driven field collection) ──────────────────────────────
+//
+// The signup flow now POSTs email-only first and routes the user based on
+// the server's response (oauth / requires_auth / needs_information / error).
+// These step bindings simulate the screen → store → router transitions
+// without booting the TUI or hitting the network — the SigningUpScreen's
+// useAsyncEffect is what fires the real POST. The test layer re-creates
+// the same session writes the screen would have made on each response arm.
 
 When('I enter my email address', function () {
+  // Mirrors SignupEmailScreen submitting → store.setSignupEmail(email).
+  // Subsequently SigningUpScreen mounts and POSTs; tests that need the
+  // post-response state simulate it via dedicated steps below.
   session.signupEmail = 'test@example.com';
-  session.emailCaptureComplete = true;
 });
 
 When('I am on the ToSScreen', function () {
@@ -274,12 +283,32 @@ When('I decline the Terms of Service', function () {
   };
 });
 
-Then('I should be on the EmailCaptureScreen', function () {
+When(
+  'the signup probe returns needs_information for {string}',
+  function (field: string) {
+    // Mirrors SigningUpScreen receiving needs_information from the server:
+    // store.setSignupRequiredFields([field]). The router's next resolve()
+    // will land on the ToS screen (always-rendered post-probe) or
+    // SignupFullName depending on what's needed.
+    session.signupRequiredFields = [field];
+  },
+);
+
+Then('I should be on the SignupEmailScreen', function () {
   const screen = router.resolve(session);
   assert.strictEqual(
     screen,
-    Screen.EmailCapture,
-    `Expected EmailCapture screen but got ${screen}`,
+    Screen.SignupEmail,
+    `Expected SignupEmail screen but got ${screen}`,
+  );
+});
+
+Then('I should be on the SignupFullNameScreen', function () {
+  const screen = router.resolve(session);
+  assert.strictEqual(
+    screen,
+    Screen.SignupFullName,
+    `Expected SignupFullName screen but got ${screen}`,
   );
 });
 

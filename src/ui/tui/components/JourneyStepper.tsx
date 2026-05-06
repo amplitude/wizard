@@ -28,7 +28,9 @@ const STEP_SCREENS: Record<string, Screen[]> = {
   Welcome: [Screen.Intro],
   Auth: [
     Screen.RegionSelect,
-    Screen.EmailCapture,
+    Screen.SignupEmail,
+    Screen.SigningUp,
+    Screen.SignupFullName,
     Screen.ToS,
     Screen.Auth,
     Screen.DataSetup,

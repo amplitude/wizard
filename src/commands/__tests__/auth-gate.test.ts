@@ -68,15 +68,58 @@ describe('isAuthTaskGateReady', () => {
     ).toBe(false);
   });
 
-  it('releases create-account onboarding once ToS is accepted', () => {
+  it('blocks create-account onboarding while signup ceremony is in flight', () => {
+    // Even with intro+region+ToS, the gate must hold for the create-account
+    // path until SigningUpScreen has settled the ceremony. Otherwise the
+    // auth task opens browser OAuth concurrently with the in-flight POST.
     expect(
       isAuthTaskGateReady(
         s({
           introConcluded: true,
           region: 'us',
           authOnboardingPath: 'create_account',
-          emailCaptureComplete: true,
           tosAccepted: true,
+          signupAuth: null,
+          signupAbandoned: false,
+        }),
+      ),
+    ).toBe(false);
+  });
+
+  it('releases create-account onboarding once signupAuth is captured', () => {
+    expect(
+      isAuthTaskGateReady(
+        s({
+          introConcluded: true,
+          region: 'us',
+          authOnboardingPath: 'create_account',
+          tosAccepted: true,
+          signupAuth: {
+            idToken: 'i',
+            accessToken: 'a',
+            refreshToken: 'r',
+            zone: 'us',
+            userInfo: null,
+            dashboardUrl: null,
+          },
+          signupAbandoned: false,
+        }),
+      ),
+    ).toBe(true);
+  });
+
+  it('releases create-account onboarding once SigningUpScreen abandons to OAuth', () => {
+    // signupAbandoned is the wrapper's "fall through to browser OAuth"
+    // signal — the auth task must release so the OAuth flow opens.
+    expect(
+      isAuthTaskGateReady(
+        s({
+          introConcluded: true,
+          region: 'us',
+          authOnboardingPath: 'create_account',
+          tosAccepted: false,
+          signupAuth: null,
+          signupAbandoned: true,
         }),
       ),
     ).toBe(true);

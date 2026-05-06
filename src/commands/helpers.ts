@@ -679,9 +679,13 @@ export function gateCiSignupAcceptToS(
  *   - Intro is dismissed  (so the logo / welcome stays visible)
  *   - Region is picked    (so the OAuth URL targets the right zone)
  *   - regionForced is off (so /region mid-session doesn't race the new pick)
- *   - On the create-account path, ToS is accepted (so the browser doesn't open before
- *     EmailCapture / ToS finish — tosAccepted=true implies email capture
- *     is complete since ToS only renders after EmailCapture)
+ *   - On the create-account path, the signup ceremony has settled — either
+ *     `signupAuth` is set (SigningUpScreen captured fresh tokens from the
+ *     direct-signup endpoint), or `signupAbandoned` is true (server
+ *     redirected / errored, OAuth fallback is the user's path forward).
+ *     Without this gate, the auth task races SigningUpScreen and opens
+ *     browser OAuth while the screen-driven POST is still in flight,
+ *     producing two concurrent auth attempts and an unwinnable UX race.
  *
  * Pure function, exported for unit testing — the original inline closure
  * silently regressed when its individual conditions drifted and there was
@@ -693,8 +697,11 @@ export function isAuthTaskGateReady(
   if (!session.introConcluded) return false;
   if (session.region === null) return false;
   if (session.regionForced) return false;
-  if (isCreateAccountOnboarding(session) && session.tosAccepted !== true)
-    return false;
+  if (isCreateAccountOnboarding(session)) {
+    const ceremonySettled =
+      session.signupAuth !== null || session.signupAbandoned;
+    if (!ceremonySettled) return false;
+  }
   return true;
 }
 
