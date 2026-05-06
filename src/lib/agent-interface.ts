@@ -287,6 +287,27 @@ export function selectModel(
   return useDirectApiKey ? alias : `anthropic/${alias}`;
 }
 
+/**
+ * Fallback model handed to the Claude Agent SDK when the primary model is
+ * unavailable (e.g. a Vertex outage on a single model family). The SDK
+ * rejects a fallback equal to the primary with `Fallback model cannot be
+ * the same as the main model`, so this MUST NOT match any value
+ * `selectModel` can return for any mode × `useDirectApiKey`. The
+ * `selectModel(...) !== FALLBACK_MODEL_*` invariant is pinned by a unit
+ * test in `agent-interface.test.ts`. Future "modernize the alias"
+ * changes — to either `selectModel` or this constant — must keep the
+ * two strictly disjoint.
+ *
+ * Capability: stays in the Sonnet family. The prior alias was the dated
+ * `claude-sonnet-4-5-20250514`; the bare `claude-sonnet-4-5` keeps the
+ * same family without colliding with `selectModel('standard', ...)`'s
+ * `claude-sonnet-4-6`. Haiku is intentionally avoided — the previous
+ * author flagged it as too weak for the wizard's code-generation
+ * prompts.
+ */
+export const FALLBACK_MODEL_DIRECT = 'claude-sonnet-4-5';
+export const FALLBACK_MODEL_GATEWAY = `anthropic/${FALLBACK_MODEL_DIRECT}`;
+
 export type AgentConfig = {
   workingDirectory: string;
   amplitudeMcpUrl: string;
@@ -2973,13 +2994,12 @@ export async function runAgent(
           options: {
             model: agentConfig.model,
             // Fallback model if primary is unavailable (e.g. Vertex outage).
-            // Must be capable enough for code generation — haiku is too weak.
-            // Pinned to the same alias `selectModel` returns for `standard`
-            // mode so the fallback path matches what the wizard advertises
-            // as the production model rather than a stale dated id.
+            // The constant lives at module scope so the unit test can pin
+            // the `primary !== fallback` invariant the SDK enforces. See
+            // `FALLBACK_MODEL_DIRECT` for capability + collision notes.
             fallbackModel: agentConfig.useDirectApiKey
-              ? 'claude-sonnet-4-6'
-              : 'anthropic/claude-sonnet-4-6',
+              ? FALLBACK_MODEL_DIRECT
+              : FALLBACK_MODEL_GATEWAY,
             // Stream text deltas as `stream_event` envelopes so we can
             // surface them in the status pill during long tool calls. The
             // for-await loop below extracts text_delta payloads and pushes

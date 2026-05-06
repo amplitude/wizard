@@ -31,6 +31,8 @@ import {
   AgentErrorType,
   AUTH_RETRY_LIMIT,
   selectModel,
+  FALLBACK_MODEL_DIRECT,
+  FALLBACK_MODEL_GATEWAY,
   isStallNonProgressMessage,
   redactToolLogPayload,
 } from '../agent-interface';
@@ -3537,6 +3539,28 @@ describe('selectModel', () => {
       'anthropic/claude-sonnet-4-6',
     );
   });
+
+  // The Claude Agent SDK rejects a `fallbackModel` equal to the primary
+  // `model` with `Fallback model cannot be the same as the main model`,
+  // failing the run before the agent makes any progress. Pin the
+  // invariant so a future "modernize the alias" change to either
+  // `selectModel` or `FALLBACK_MODEL_*` can't reintroduce BA-111.
+  it.each([
+    ['standard', true] as const,
+    ['standard', false] as const,
+    ['fast', true] as const,
+    ['fast', false] as const,
+    ['thorough', true] as const,
+    ['thorough', false] as const,
+  ])(
+    'never returns the fallback alias for mode=%s, useDirectApiKey=%s',
+    (mode, useDirectApiKey) => {
+      const fallback = useDirectApiKey
+        ? FALLBACK_MODEL_DIRECT
+        : FALLBACK_MODEL_GATEWAY;
+      expect(selectModel(mode, useDirectApiKey)).not.toBe(fallback);
+    },
+  );
 });
 
 describe('captureDiscoveryFromMessage', () => {
