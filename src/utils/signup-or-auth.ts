@@ -140,6 +140,15 @@ export interface SignupOrAuthInput {
    */
   fullName?: string | null;
   zone: AmplitudeZone;
+  /**
+   * Threaded from the screen's `useAsyncEffect`. Aborts the in-flight
+   * provisioning + token-exchange POSTs and gates the post-success
+   * persistence (`replaceStoredUser`) so a cancelled ceremony doesn't
+   * leak tokens to disk. Without this, `/exit` mid-POST would still
+   * persist tokens and the next launch would think the user is signed
+   * in.
+   */
+  signal?: AbortSignal;
 }
 
 /**
@@ -213,6 +222,7 @@ export async function performSignupOrAuth(
       email: input.email,
       ...(fullName !== null ? { fullName } : {}),
       zone: input.zone,
+      signal: input.signal,
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
@@ -309,6 +319,16 @@ export async function performSignupOrAuth(
     tosAcceptedAt: new Date().toISOString(),
   };
 
+  // Last guard before persistence: if the caller aborted at any point —
+  // axios responses already returned, fetchUserWithProvisioningRetry's
+  // sleep loop completed — skip the disk write so a cancelled ceremony
+  // doesn't leak tokens. Mirror the abort guards inside
+  // `performDirectSignup` so we cover the window between the last
+  // network call and `replaceStoredUser`.
+  if (input.signal?.aborted) {
+    log.debug('direct signup aborted before persistence; skipping write');
+    return { kind: 'error', message: 'aborted' };
+  }
   // Persist BEFORE telemetry: a disk/permission failure must propagate to
   // the outer catch so `wrapper_exception` is the sole event — emitting
   // success or user_fetch_failed first would double-count the attempt.

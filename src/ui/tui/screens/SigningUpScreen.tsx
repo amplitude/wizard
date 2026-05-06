@@ -63,7 +63,17 @@ export const SigningUpScreen = ({ store }: SigningUpScreenProps) => {
       const zone = resolveZone(session, DEFAULT_AMPLITUDE_ZONE, {
         readDisk: false,
       });
-      const result = await performSignupOrAuth({ email, fullName, zone });
+      // Thread `signal` through so axios cancels the in-flight POSTs on
+      // unmount AND the wrapper skips its `replaceStoredUser` write if
+      // the user backed out before the success arm settled. Without
+      // this, an abandoned ceremony can still leak tokens to disk and
+      // make the next launch think the user is signed in.
+      const result = await performSignupOrAuth({
+        email,
+        fullName,
+        zone,
+        signal,
+      });
 
       if (signal.aborted) return;
 

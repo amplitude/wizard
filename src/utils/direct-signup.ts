@@ -128,6 +128,16 @@ export interface DirectSignupInput {
    */
   fullName?: string;
   zone: AmplitudeZone;
+  /**
+   * Aborts both the provisioning POST and the token-exchange POST when
+   * fired. Threaded from the screen's `useAsyncEffect` so unmounting
+   * (Esc back, /exit, navigation) cancels in-flight network work
+   * before it can settle and trigger downstream side effects (token
+   * persistence). Without this, a cancelled ceremony can still leak
+   * `replaceStoredUser` writes that make the next launch think the
+   * user is signed in.
+   */
+  signal?: AbortSignal;
 }
 
 export type DirectSignupResult =
@@ -188,12 +198,21 @@ export async function performDirectSignup(
       headers: { 'Content-Type': 'application/json' },
       timeout: REQUEST_TIMEOUT_MS,
       validateStatus: (s) => s < 500,
+      signal: input.signal,
     });
   } catch (e) {
     return {
       kind: 'error',
       message: e instanceof Error ? e.message : String(e),
     };
+  }
+  // Bail before parsing if the caller aborted between sending the
+  // request and receiving the response. The screen's `useAsyncEffect`
+  // unmount handler fires the AbortController; without this guard we'd
+  // continue on to token exchange and potential persistence even though
+  // the user has navigated away.
+  if (input.signal?.aborted) {
+    return { kind: 'error', message: 'aborted', code: 'aborted' };
   }
 
   const parsedRedirect = RedirectSchema.safeParse(response.data);
@@ -280,6 +299,7 @@ export async function performDirectSignup(
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         timeout: REQUEST_TIMEOUT_MS,
         validateStatus: (s) => s < 500,
+        signal: input.signal,
       },
     );
   } catch (e) {
@@ -289,6 +309,11 @@ export async function performDirectSignup(
         e instanceof Error ? e.message : String(e)
       }`,
     };
+  }
+  // Same abort check as after the provisioning POST: skip downstream
+  // parsing if the caller backed out while we were waiting on Hydra.
+  if (input.signal?.aborted) {
+    return { kind: 'error', message: 'aborted', code: 'aborted' };
   }
 
   if (tokenResponse.status >= 400) {
