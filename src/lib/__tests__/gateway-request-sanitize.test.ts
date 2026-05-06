@@ -69,7 +69,9 @@ describe('sanitizeWizardRequestInit', () => {
       tools: Array<{ input_schema: Record<string, unknown> }>;
     };
     expect(parsed.tools[0].input_schema['$schema']).toBeUndefined();
-    expect(parsed.tools[0].input_schema['additionalProperties']).toBeUndefined();
+    expect(
+      parsed.tools[0].input_schema['additionalProperties'],
+    ).toBeUndefined();
     expect(parsed.tools[0].input_schema['exclusiveMinimum']).toBeUndefined();
     expect(parsed.tools[0].input_schema['properties']).toBeDefined();
   });
