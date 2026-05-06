@@ -389,6 +389,34 @@ export function bundledSkillExists(skillId: string): boolean {
 }
 
 /**
+ * Read bundled `SKILL.md` body for tiered-context experiments (never writes
+ * to `.claude/skills/`). Returns null when absent or malformed inputs.
+ */
+export function readBundledSkillBody(skillId: string): string | null {
+  if (!SKILL_ID_ALLOWLIST.test(skillId)) return null;
+  const skillsRoot = getSkillsRootDir();
+  try {
+    for (const category of fs.readdirSync(skillsRoot)) {
+      if (!SKILL_ID_ALLOWLIST.test(category)) continue;
+      // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
+      const candidate = path.join(skillsRoot, category, skillId);
+      // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
+      const skillMd = path.join(candidate, 'SKILL.md');
+      if (
+        fs.existsSync(candidate) &&
+        fs.statSync(candidate).isDirectory() &&
+        fs.existsSync(skillMd)
+      ) {
+        return fs.readFileSync(skillMd, 'utf8');
+      }
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+/**
  * Pre-stage a deterministic set of skills into the user's `.claude/skills/`
  * directory before the agent runs, so the agent can load them via the Skill
  * tool without having to call load_skill_menu / install_skill in a loop.
@@ -1426,6 +1454,55 @@ export async function createWizardToolsServer(options: WizardToolsOptions) {
     },
   );
 
+  /** Opt-in Tier-2 skill body delivery — see NEW_MIGRATION_PLAN Phase C / SKILLS_AND_CONTEXT_DESIGN.md */
+  const tieredSkillTools =
+    process.env.AMPLITUDE_WIZARD_SKILL_TIERS === '1'
+      ? [
+          tool(
+            'load_skill',
+            'Return SKILL.md for a bundled Amplitude skill id (single-step; no load_skill_menu loop). Opt-in: set AMPLITUDE_WIZARD_SKILL_TIERS=1. Use ids from the system skill menu / integration resolution only.',
+            {
+              skillId: z
+                .string()
+                .describe(
+                  'Bundled skill folder id (e.g. add-analytics-instrumentation)',
+                ),
+              reason: reasonField,
+            },
+            (args: { skillId: string; reason: string }) => {
+              void args.reason;
+              if (!bundledSkillExists(args.skillId)) {
+                return {
+                  content: [
+                    {
+                      type: 'text' as const,
+                      text: `Unknown or missing bundled skill: ${args.skillId}`,
+                    },
+                  ],
+                  isError: true,
+                };
+              }
+              const body = readBundledSkillBody(args.skillId);
+              if (body == null) {
+                return {
+                  content: [
+                    {
+                      type: 'text' as const,
+                      text: `Could not read SKILL.md for: ${args.skillId}`,
+                    },
+                  ],
+                  isError: true,
+                };
+              }
+              logToFile(`load_skill: ${args.skillId} (${body.length} chars)`);
+              return {
+                content: [{ type: 'text' as const, text: body }],
+              };
+            },
+          ),
+        ]
+      : [];
+
   // -- load_skill_menu / install_skill — DISABLED ───────────────────────────
   //
   // Both tools currently 400 in production: remote skill downloads return
@@ -1924,6 +2001,7 @@ Returns: "ok" on successful persistence, an error string otherwise. Idempotent �
       checkEnvKeys,
       setEnvValues,
       detectPM,
+      ...tieredSkillTools,
       // loadSkillMenu and installSkill intentionally not exposed — see
       // the disabled-tool block above for context. Constant skills are
       // pre-installed at runtime so the agent can `Skill.load` them
@@ -1959,6 +2037,20 @@ export const WIZARD_TOOL_NAMES = [
   `${SERVER_NAME}:record_dashboard`,
   `${SERVER_NAME}:wizard_feedback`,
 ];
+
+/**
+ * Tool names allowed for the inner agent, including opt-in experiments.
+ * Default matches {@link WIZARD_TOOL_NAMES}; when `AMPLITUDE_WIZARD_SKILL_TIERS=1`,
+ * appends `wizard-tools:load_skill` (must match tools registered in
+ * {@link createWizardToolsServer}).
+ */
+export function resolveWizardAllowedToolNames(): string[] {
+  const names = [...WIZARD_TOOL_NAMES];
+  if (process.env.AMPLITUDE_WIZARD_SKILL_TIERS === '1') {
+    names.push(`${SERVER_NAME}:load_skill`);
+  }
+  return names;
+}
 
 /** Stable server name — used by hooks to namespace `mcp__wizard-tools__*` tool calls. */
 export const WIZARD_TOOLS_SERVER_NAME = SERVER_NAME;

@@ -77,7 +77,7 @@ Estimates are order-of-magnitude; parallelize where dependencies allow.
 Follow `SKILLS_AND_CONTEXT_DESIGN.md`:
 
 1. **Tier 1** — inject `skill-menu.json` (narrowed post-detection) into the system prefix; cap token budget.
-2. **Tier 2** — single `load_skill` tool returning markdown bodies **without** copying full trees to `.claude/skills/` unless we must for host compatibility.
+2. **Tier 2** — single `load_skill` tool returning markdown bodies **without** copying full trees to `.claude/skills/` unless we must for host compatibility. **Prototype shipped** behind `AMPLITUDE_WIZARD_SKILL_TIERS=1` (wizard-tools MCP + `resolveWizardAllowedToolNames`).
 3. **Tier 3** — `load_skill_reference` or lazy `Read` of packaged references; dedupe oversized reference blobs like `browser-sdk-2.md` in context-hub over time.
 4. **Pinning** — CI and release branches should consume a **specific context-hub release tag**, not only `releases/latest`. `scripts/refresh-skills.sh` supports `CONTEXT_HUB_TAG` for that purpose.
 
@@ -141,8 +141,8 @@ Keep `MIGRATION_PLAN.md` §6.6 **as written**: wizard stays TS-first and team-ow
 1. ✅ **Document** this plan (`NEW_MIGRATION_PLAN.md`) and link it from `CLAUDE.md` / `README.md` only if the team wants public visibility (optional follow-up).
 2. ✅ **Pin context-hub in CI** via `CONTEXT_HUB_TAG` support in `scripts/refresh-skills.sh`.
 3. **Port pure `sanitizeWizardRequestInit` + tests** into `src/lib/gateway-request-sanitize.ts` (done) and **wire into the Claude Code subprocess** via `NODE_OPTIONS=--require …register-gateway-fetch-sanitize-bootstrap.js` (`gateway-fetch-sanitize-node-options.ts`, `agent-interface.ts`). Opt out with `AMPLITUDE_WIZARD_GATEWAY_SANITIZE_FETCH=0`. Skipped for direct `ANTHROPIC_API_KEY` and local-CLI paths.
-4. **Scaffold `src/lib/agent/`** with `model-config` extraction (no behavior change).
-5. **Prototype `load_skill`** per `SKILLS_AND_CONTEXT_DESIGN.md` §2 behind `AMPLITUDE_WIZARD_SKILL_TIERS=1`.
+4. ✅ **Scaffold `src/lib/agent/`** — `model-config.ts` exports `selectModel` + `sdkStandardFallbackModel`; `agent-interface.ts` re-exports for compatibility.
+5. ✅ **Prototype `load_skill`** — bundled `SKILL.md` inlined when `AMPLITUDE_WIZARD_SKILL_TIERS=1`; `resolveWizardAllowedToolNames()` keeps MCP registration and agent allowlist aligned (see `wizard-tools.ts`).
 6. ✅ **`WizardInstallPresentation` seam** — `src/ui/install-presentation/` + `createWizardUiInstallPresentation` / `createNoopWizardInstallPresentation` (Phase B scaffold).
 
 ---
