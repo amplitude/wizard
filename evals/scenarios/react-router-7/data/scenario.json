@@ -1,0 +1,17 @@
+{
+  "name": "react-router-7/data",
+  "ring": 1,
+  "integrationHint": "react-router-7-data",
+  "buildCommand": ["pnpm", "build"],
+  "expectedEnvPrefix": "VITE_",
+  "expectedInitFile": "src/main.tsx",
+  "expectedEvents": ["Sign In Submitted", "Sign Up Submitted"],
+  "forbiddenPaths": [
+    "vite.config.ts",
+    "vite.config.js",
+    "vite.config.mjs",
+    "webpack.config.js",
+    "babel.config.js"
+  ],
+  "notes": "React Router 7 data-mode (SPA) Ring 1 scenario. Distinct from /framework: data mode keeps the router as a config object passed to RouterProvider, so init lands at the SPA entry (src/main.tsx) before the router is mounted, not in entry.client.tsx. SDK family defaults from FRAMEWORK_TO_SDK (browser frameworks → @amplitude/unified)."
+}
