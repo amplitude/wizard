@@ -54,6 +54,15 @@ const RedirectSchema = z.object({
 // `needs_information`, which made every probe POST fall through to the
 // generic "unrecognized response shape" error and silently route users to
 // OAuth.
+//
+// **Wire contract:** the `properties` map's VALUES are opaque to the wizard.
+// `z.unknown()` is intentional — the server today emits
+// `{ type, description }` per property, but `description` is purely cosmetic
+// and may be removed (or any other inner field added) without coordination.
+// Do NOT tighten the inner shape without verifying every `selectModel`-mode
+// can still parse a response from the live server. There's a regression
+// test (`accepts properties values with or without optional metadata`) that
+// pins both shapes; keep it green if you change this.
 const NeedsInformationSchema = z.object({
   type: z.literal('needs_information'),
   needs_information: z.object({
