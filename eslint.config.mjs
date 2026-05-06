@@ -27,6 +27,7 @@ export default tseslint.config(
       'evals/scenarios/**/pristine/**',
       'evals/scenarios/**/golden/working/**',
       'evals/reports/**',
+      'benchmarks/**',
     ],
   },
 
