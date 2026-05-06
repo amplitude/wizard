@@ -9,6 +9,11 @@ export {
   type ConsoleQueryStackKind,
 } from './console-query-stack.js';
 export {
+  createWizardAiSdkAnthropic,
+  resolveWizardAnthropicAuthFromEnv,
+  type CreateWizardAiSdkAnthropicOptions,
+} from './wizard-ai-sdk-anthropic.js';
+export {
   enforceAiSdkProbeStrict,
   maybeRunAiSdkGatewayProbe,
 } from './ai-sdk-gateway-probe.js';

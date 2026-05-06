@@ -20,9 +20,9 @@ import {
 import { safeParseSDKMessage } from './middleware/schemas.js';
 import { resolveWizardAllowedToolNames } from './wizard-tools.js';
 import { getConsoleQueryStack } from './agent/console-query-stack.js';
+import { createWizardAiSdkAnthropic } from './agent/wizard-ai-sdk-anthropic.js';
+import { getAgentDriver } from './agent-driver.js';
 import { parseAnthropicCustomHeaderBlock } from '../utils/custom-headers.js';
-import { sanitizingFetch } from './gateway-request-sanitize.js';
-import { resolveAnthropicAuth } from './agent/anthropic-auth.js';
 
 export type ConsoleCredentials =
   | { kind: 'gateway'; baseUrl: string; apiKey: string }
@@ -117,12 +117,7 @@ async function queryConsoleWithClaudeAgentSdk(
   systemAndHistory: string,
   agentConfig: AgentRunConfig,
 ): Promise<string> {
-  const { query } = (await import('@anthropic-ai/claude-agent-sdk')) as {
-    query: (params: {
-      prompt: string;
-      options?: Record<string, unknown>;
-    }) => AsyncIterable<unknown>;
-  };
+  const query = await getAgentDriver();
 
   const collectedText: string[] = [];
 
@@ -176,10 +171,7 @@ async function queryConsoleWithVercelAiSdk(
   systemAndHistory: string,
   agentConfig: AgentRunConfig,
 ): Promise<string> {
-  const [{ createAnthropic }, { streamText }] = await Promise.all([
-    import('@ai-sdk/anthropic'),
-    import('ai'),
-  ]);
+  const { streamText } = await import('ai');
 
   const customHeaders = buildAgentEnv(
     agentConfig.wizardMetadata ?? {},
@@ -187,14 +179,8 @@ async function queryConsoleWithVercelAiSdk(
     agentConfig.agentSessionId,
   );
 
-  const baseURL = process.env.ANTHROPIC_BASE_URL?.trim();
-  const auth = resolveAnthropicAuth();
-
-  const provider = createAnthropic({
-    ...(baseURL ? { baseURL } : {}),
-    ...auth,
+  const provider = createWizardAiSdkAnthropic({
     headers: parseAnthropicCustomHeaderBlock(customHeaders),
-    fetch: sanitizingFetch,
   });
 
   const result = streamText({
