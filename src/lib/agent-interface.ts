@@ -52,7 +52,7 @@ import { classifyWriteOperation, truncateLogMessage } from './agent-events';
 import {
   createWizardToolsServer,
   persistDashboard,
-  WIZARD_TOOL_NAMES,
+  resolveWizardAllowedToolNames,
   type StatusReport,
   type StatusReporter,
 } from './wizard-tools';
@@ -82,6 +82,9 @@ import {
 } from './agent-hooks';
 import { getAgentDriver } from './agent-driver';
 import { buildGatewaySanitizeNodeOptions } from './gateway-fetch-sanitize-node-options.js';
+import { sdkStandardFallbackModel, selectModel } from './agent/model-config.js';
+
+export { selectModel, sdkStandardFallbackModel };
 
 /**
  * Mirror of @anthropic-ai/claude-agent-sdk ThinkingConfig. We mirror locally
@@ -255,59 +258,6 @@ export function resolveMaxTurns(
 // and clears it afterwards so the in-process wizard-tools `report_status` tool
 // can route structured events back into the per-run state bag.
 let _activeStatusReporter: StatusReporter | undefined;
-
-/**
- * Map a `WizardMode` to a Claude model alias. Internal — see
- * `docs/internal/agent-mode-flag.md` for the full mapping and rationale.
- *
- * The Amplitude LLM gateway expects the `anthropic/<alias>` prefix; the
- * direct Anthropic API expects the bare alias. The wizard's `fallbackModel`
- * is a different model on a different routing path, so a tier the gateway
- * doesn't currently vend silently degrades rather than failing the run.
- *
- * Exported so unit tests can pin the mapping without standing up the
- * full agent runtime.
- */
-export function selectModel(
-  mode: import('../utils/types').WizardMode,
-  useDirectApiKey: boolean,
-): string {
-  let alias: string;
-  switch (mode) {
-    case 'fast':
-      alias = 'claude-haiku-4-5';
-      break;
-    case 'thorough':
-      alias = 'claude-opus-4-7';
-      break;
-    case 'standard':
-    default:
-      alias = 'claude-sonnet-4-6';
-      break;
-  }
-  return useDirectApiKey ? alias : `anthropic/${alias}`;
-}
-
-/**
- * Fallback model handed to the Claude Agent SDK when the primary model is
- * unavailable (e.g. a Vertex outage on a single model family). The SDK
- * rejects a fallback equal to the primary with `Fallback model cannot be
- * the same as the main model`, so this MUST NOT match any value
- * `selectModel` can return for any mode × `useDirectApiKey`. The
- * `selectModel(...) !== FALLBACK_MODEL_*` invariant is pinned by a unit
- * test in `agent-interface.test.ts`. Future "modernize the alias"
- * changes — to either `selectModel` or this constant — must keep the
- * two strictly disjoint.
- *
- * Capability: stays in the Sonnet family. The prior alias was the dated
- * `claude-sonnet-4-5-20250514`; the bare `claude-sonnet-4-5` keeps the
- * same family without colliding with `selectModel('standard', ...)`'s
- * `claude-sonnet-4-6`. Haiku is intentionally avoided — the previous
- * author flagged it as too weak for the wizard's code-generation
- * prompts.
- */
-export const FALLBACK_MODEL_DIRECT = 'claude-sonnet-4-5';
-export const FALLBACK_MODEL_GATEWAY = `anthropic/${FALLBACK_MODEL_DIRECT}`;
 
 export type AgentConfig = {
   workingDirectory: string;
@@ -2564,7 +2514,7 @@ export async function runAgent(
       'Bash',
       'ListMcpResourcesTool',
       'Skill',
-      ...WIZARD_TOOL_NAMES,
+      ...resolveWizardAllowedToolNames(),
     ];
 
     // Watch for the event plan and feed it into the store.
@@ -2995,12 +2945,13 @@ export async function runAgent(
           options: {
             model: agentConfig.model,
             // Fallback model if primary is unavailable (e.g. Vertex outage).
-            // The constant lives at module scope so the unit test can pin
-            // the `primary !== fallback` invariant the SDK enforces. See
-            // `FALLBACK_MODEL_DIRECT` for capability + collision notes.
-            fallbackModel: agentConfig.useDirectApiKey
-              ? FALLBACK_MODEL_DIRECT
-              : FALLBACK_MODEL_GATEWAY,
+            // The constant lives in `agent/model-config.ts` so the unit
+            // test can pin the `primary !== fallback` invariant the SDK
+            // enforces. See `FALLBACK_MODEL_DIRECT` there for capability +
+            // collision notes.
+            fallbackModel: sdkStandardFallbackModel(
+              agentConfig.useDirectApiKey ?? false,
+            ),
             // Stream text deltas as `stream_event` envelopes so we can
             // surface them in the status pill during long tool calls. The
             // for-await loop below extracts text_delta payloads and pushes

@@ -10,7 +10,7 @@ import { getLlmGatewayUrlFromHost } from '../utils/urls.js';
 import { RunPhase } from './wizard-session.js';
 import { buildAgentEnv, getAgent } from './agent-interface.js';
 import { safeParseSDKMessage } from './middleware/schemas.js';
-import { WIZARD_TOOL_NAMES } from './wizard-tools.js';
+import { resolveWizardAllowedToolNames } from './wizard-tools.js';
 
 export type ConsoleCredentials =
   | { kind: 'gateway'; baseUrl: string; apiKey: string }
@@ -139,7 +139,7 @@ export async function queryConsole(
       cwd: agentConfig.workingDirectory,
       permissionMode: 'bypassPermissions',
       mcpServers: agentConfig.mcpServers,
-      allowedTools: WIZARD_TOOL_NAMES,
+      allowedTools: resolveWizardAllowedToolNames(),
       systemPrompt: sessionContext + historyBlock,
       env: {
         ...process.env,

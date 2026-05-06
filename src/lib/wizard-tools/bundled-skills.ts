@@ -162,6 +162,34 @@ export function bundledSkillExists(skillId: string): boolean {
 }
 
 /**
+ * Read bundled `SKILL.md` body for tiered-context experiments (never writes
+ * to `.claude/skills/`). Returns null when absent or malformed inputs.
+ */
+export function readBundledSkillBody(skillId: string): string | null {
+  if (!SKILL_ID_ALLOWLIST.test(skillId)) return null;
+  const skillsRoot = getSkillsRootDir();
+  try {
+    for (const category of fs.readdirSync(skillsRoot)) {
+      if (!SKILL_ID_ALLOWLIST.test(category)) continue;
+      // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
+      const candidate = path.join(skillsRoot, category, skillId);
+      // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
+      const skillMd = path.join(candidate, 'SKILL.md');
+      if (
+        fs.existsSync(candidate) &&
+        fs.statSync(candidate).isDirectory() &&
+        fs.existsSync(skillMd)
+      ) {
+        return fs.readFileSync(skillMd, 'utf8');
+      }
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+/**
  * Pre-stage a deterministic set of skills into the user's `.claude/skills/`
  * directory before the agent runs, so the agent can load them via the Skill
  * tool without having to call load_skill_menu / install_skill in a loop.
