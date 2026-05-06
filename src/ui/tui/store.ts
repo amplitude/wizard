@@ -651,6 +651,35 @@ export class WizardStore {
     this.emitChange();
   }
 
+  /**
+   * Wipe every piece of ceremony state at once. Used by both
+   * `setSignupEmail(null)` and `backToWelcome` so the reset semantics
+   * stay in one place. Treats the ceremony as a single conceptual unit
+   * keyed to email being present — backing out past the email step
+   * invalidates everything it produced.
+   *
+   * Intentionally does NOT touch `signupEmail` itself — callers are
+   * already setting it to null around this call (or, in
+   * `backToWelcome`, doing so via raw setKey for batched-write
+   * reasons). Splitting the email write from the ceremony reset keeps
+   * this helper composable.
+   */
+  private _resetCeremonyKeys(): void {
+    this.$session.setKey('signupRequiredFields', null);
+    this.$session.setKey('signupAuth', null);
+    this.$session.setKey('signupAbandoned', false);
+    // Clear the inputs the ceremony fed too. Defensive against a
+    // future change that adds an `onChange` lifting drafts to session
+    // state — without these, a stale `signupFullName` could ride
+    // through a re-probe or land in `~/.ampli.json` under the wrong
+    // name. `tosAccepted` has the same flavor of stale-but-load-bearing
+    // risk (`SigningUpScreen` only includes `full_name` in the POST
+    // when ToS is accepted, so a stale `true` could change POST
+    // semantics on the next forward pass).
+    this.$session.setKey('signupFullName', null);
+    this.$session.setKey('tosAccepted', null);
+  }
+
   setSignupEmail(email: string | null): void {
     this.$session.setKey('signupEmail', email);
     // Clearing the email means the user backed out of (or rewound past)
@@ -658,13 +687,9 @@ export class WizardStore {
     // that was keyed to the previous email. Without this, a subsequent
     // forward pass consumes a stale `signupRequiredFields` from the
     // prior probe POST and routes the user back through ToS/name
-    // collection with the wrong response cached. Bound here (not in a
-    // separate `resetSignupCeremony` helper that callers might forget)
-    // so every revert path lands in a consistent state.
+    // collection with the wrong response cached.
     if (email === null) {
-      this.$session.setKey('signupRequiredFields', null);
-      this.$session.setKey('signupAuth', null);
-      this.$session.setKey('signupAbandoned', false);
+      this._resetCeremonyKeys();
     } else {
       // Only fire on positive captures. Back-nav reverts call this
       // setter with `null` and must not pollute the funnel with false
@@ -856,18 +881,13 @@ export class WizardStore {
     this.$session.setKey('region', null);
 
     if (isCreateAccountOnboarding(this.session)) {
-      this.$session.setKey('tosAccepted', null);
+      // Wipe ceremony state via the shared helper (signupRequiredFields
+      // + signupAuth + signupAbandoned + signupFullName + tosAccepted)
+      // — same writes `setSignupEmail(null)` does, so back-to-Welcome
+      // and Esc-back-from-screens stay in sync without a "keep these
+      // matched" comment.
+      this._resetCeremonyKeys();
       this.$session.setKey('signupEmail', null);
-      this.$session.setKey('signupFullName', null);
-      // Mirror `setSignupEmail(null)`'s ceremony-reset contract: clearing
-      // signupEmail must invalidate the prior probe response so the next
-      // forward pass starts fresh. We can't *call* `setSignupEmail` here
-      // — backToWelcome batches multiple raw `setKey` writes and emits
-      // one change at the end — so the reset is inlined. Keep this in
-      // sync with `setSignupEmail` if its contract evolves.
-      this.$session.setKey('signupRequiredFields', null);
-      this.$session.setKey('signupAuth', null);
-      this.$session.setKey('signupAbandoned', false);
       this.$session.setKey('signupTokensObtained', false);
       this.$session.setKey('signupMagicLinkUrl', null);
       this.$session.setKey('pendingAuthAccessToken', null);

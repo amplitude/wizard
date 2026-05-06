@@ -2084,20 +2084,27 @@ describe('WizardStore', () => {
       expect(wizardCapture).not.toHaveBeenCalledWith('signup email captured');
     });
 
-    it('setSignupEmail(null) resets ceremony state (required fields, auth, abandoned)', () => {
+    it('setSignupEmail(null) resets the entire ceremony as one unit', () => {
       // Pre-seed a session that's mid-ceremony: probe POST returned
-      // needs_information, ToS was accepted, signupAuth is set from a
-      // success arm. Going back to the email screen must invalidate
-      // every piece of that state so the next forward pass starts
-      // fresh — otherwise the user re-types email and the wizard
-      // routes them through ToS/name with the previous response
-      // cached against the new email.
+      // needs_information, ToS was accepted, signupFullName was typed,
+      // signupAuth is populated from a success arm. Going back to the
+      // email screen must invalidate every piece of that state so the
+      // next forward pass starts fresh.
+      //
+      // Defensive coverage: signupFullName + tosAccepted are also
+      // cleared. They're not strictly required to clear today (no
+      // current code path reads them to wrongful effect), but they're
+      // part of the same conceptual "ceremony" unit — leaving them
+      // stale would leak across an Esc-back-then-retype cycle if
+      // anything ever reads them in that window.
       const store = createStore();
       const internal = store as unknown as {
         $session: { setKey: (k: string, v: unknown) => void };
       };
       internal.$session.setKey('signupRequiredFields', ['full_name']);
       internal.$session.setKey('signupAbandoned', false);
+      internal.$session.setKey('signupFullName', 'Ada Lovelace');
+      internal.$session.setKey('tosAccepted', true);
       internal.$session.setKey('signupAuth', {
         idToken: 'i',
         accessToken: 'a',
@@ -2112,6 +2119,8 @@ describe('WizardStore', () => {
       expect(store.session.signupRequiredFields).toBeNull();
       expect(store.session.signupAuth).toBeNull();
       expect(store.session.signupAbandoned).toBe(false);
+      expect(store.session.signupFullName).toBeNull();
+      expect(store.session.tosAccepted).toBeNull();
     });
 
     it('setSignupFullName with a string fires analytics and sets the value', () => {
