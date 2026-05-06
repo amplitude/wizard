@@ -1,0 +1,4 @@
+# `working/` directories are recreated from `pristine/` for every run.
+# Pristine fixtures (the lockfile-pinned starters) ARE checked in — only the
+# scratch copy is ignored.
+*/working/
