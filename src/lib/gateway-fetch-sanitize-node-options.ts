@@ -26,23 +26,22 @@ export function resolveRegisterGatewayFetchSanitizePath(): string {
 /**
  * Returns updated NODE_OPTIONS including `--require <register>` when the
  * register script exists next to this module in `dist/`.
+ *
+ * We intentionally only resolve the bootstrap relative to this module
+ * (`__dirname`) — never relative to `process.cwd()`. The cwd is the user's
+ * project directory, so a cwd-relative fallback would let a file at
+ * `<user-project>/dist/src/lib/register-gateway-fetch-sanitize-bootstrap.js`
+ * be `--require`'d into the agent subprocess. If the bootstrap is missing
+ * next to this module, return `undefined` so the SDK runs without the patch
+ * rather than loading code from an untrusted location.
  */
 export function buildGatewaySanitizeNodeOptions(
   existingNodeOptions: string | undefined,
 ): string | undefined {
   const besideThisModule = resolveRegisterGatewayFetchSanitizePath();
-  const fromDistRoot = path.join(
-    process.cwd(),
-    'dist/src/lib/register-gateway-fetch-sanitize-bootstrap.js',
-  );
-  const scriptPath = fs.existsSync(besideThisModule)
-    ? besideThisModule
-    : fs.existsSync(fromDistRoot)
-    ? fromDistRoot
-    : undefined;
-  if (!scriptPath) {
+  if (!fs.existsSync(besideThisModule)) {
     return undefined;
   }
-  const append = `--require ${JSON.stringify(scriptPath)}`;
+  const append = `--require ${JSON.stringify(besideThisModule)}`;
   return mergeNodeOptions(existingNodeOptions, append);
 }
