@@ -7,7 +7,12 @@
 import fs from 'fs';
 import path from 'path';
 
-/** Merge NODE_OPTIONS fragments without duplicating spaces. */
+/**
+ * Merge NODE_OPTIONS fragments. Joins with a single space — does **not**
+ * collapse internal whitespace, since NODE_OPTIONS may contain double-quoted
+ * paths with embedded spaces (e.g. `--require "/Users/My  Dir/file.js"`),
+ * and a quote-unaware `\s+`-collapse would corrupt those paths.
+ */
 export function mergeNodeOptions(
   existing: string | undefined,
   append: string,
@@ -15,7 +20,7 @@ export function mergeNodeOptions(
   const parts = [existing?.trim(), append.trim()].filter(
     (p): p is string => !!p && p.length > 0,
   );
-  return parts.join(' ').replace(/\s+/g, ' ');
+  return parts.join(' ');
 }
 
 /** Absolute path to the compiled `--require` bootstrap (same dir as this file). */

@@ -16,6 +16,16 @@ describe('mergeNodeOptions', () => {
       '--import ./a.mjs --require "./x.js"',
     );
   });
+
+  // Regression for bugbot — quote-unaware `\s+`-collapse would corrupt
+  // double-quoted paths containing multiple internal spaces. NODE_OPTIONS
+  // round-trips must preserve user input verbatim.
+  it('preserves multiple internal spaces inside a quoted path', () => {
+    const existing = '--require "/Users/My  Dir/file.js"';
+    expect(mergeNodeOptions(existing, '--import ./b.mjs')).toBe(
+      '--require "/Users/My  Dir/file.js" --import ./b.mjs',
+    );
+  });
 });
 
 describe('buildGatewaySanitizeNodeOptions', () => {
