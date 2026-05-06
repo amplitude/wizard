@@ -1492,6 +1492,67 @@ export async function createWizardToolsServer(options: WizardToolsOptions) {
     process.env.AMPLITUDE_WIZARD_SKILL_TIERS === '1'
       ? [
           tool(
+            'load_skill_menu',
+            'Return bundled skill ids + names by category for tiered skill loading. Read-only helper for AMPLITUDE_WIZARD_SKILL_TIERS=1.',
+            {
+              category: z
+                .string()
+                .optional()
+                .describe(
+                  'Optional category filter (integration, instrumentation, taxonomy, wizard).',
+                ),
+              reason: reasonField,
+            },
+            (args: { category?: string; reason: string }) => {
+              void args.reason;
+              const menu = loadBundledSkillMenu();
+              const categories = menu.categories;
+              if (args.category) {
+                const list = categories[args.category];
+                if (!list || list.length === 0) {
+                  return {
+                    content: [
+                      {
+                        type: 'text' as const,
+                        text: `No bundled skills found for category: ${args.category}`,
+                      },
+                    ],
+                    isError: true,
+                  };
+                }
+                return {
+                  content: [
+                    {
+                      type: 'text' as const,
+                      text: JSON.stringify(
+                        {
+                          category: args.category,
+                          skills: list.map((s) => ({ id: s.id, name: s.name })),
+                        },
+                        null,
+                        2,
+                      ),
+                    },
+                  ],
+                };
+              }
+              const out = Object.fromEntries(
+                Object.entries(categories).map(([name, entries]) => [
+                  name,
+                  entries.map((s) => ({ id: s.id, name: s.name })),
+                ]),
+              );
+              return {
+                content: [
+                  {
+                    type: 'text' as const,
+                    text: JSON.stringify({ categories: out }, null, 2),
+                  },
+                ],
+              };
+            },
+          ),
+          tool(
             'load_skill',
             'Return SKILL.md for a bundled Amplitude skill id (single-step; no load_skill_menu loop). Opt-in: set AMPLITUDE_WIZARD_SKILL_TIERS=1. Use ids from the system skill menu / integration resolution only.',
             {
@@ -2125,6 +2186,7 @@ export const WIZARD_TOOL_NAMES = [
 export function resolveWizardAllowedToolNames(): string[] {
   const names = [...WIZARD_TOOL_NAMES];
   if (process.env.AMPLITUDE_WIZARD_SKILL_TIERS === '1') {
+    names.push(`${SERVER_NAME}:load_skill_menu`);
     names.push(`${SERVER_NAME}:load_skill`);
     names.push(`${SERVER_NAME}:load_skill_reference`);
   }

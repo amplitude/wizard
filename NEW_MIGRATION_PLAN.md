@@ -134,7 +134,9 @@ model aliases pinned to Sonnet 4.6 family.
 Follow `SKILLS_AND_CONTEXT_DESIGN.md`:
 
 1. **Tier 1** — inject `skill-menu.json` (narrowed post-detection) into the
-   system prefix; cap token budget.
+   system prefix; cap token budget. **Prototype helper shipped** behind
+   `AMPLITUDE_WIZARD_SKILL_TIERS=1` (`wizard-tools:load_skill_menu`, bundled
+   read-only).
 2. **Tier 2** — single `load_skill` tool returning markdown bodies **without**
    copying full trees to `.claude/skills/` unless we must for host
    compatibility. **Prototype shipped** behind `AMPLITUDE_WIZARD_SKILL_TIERS=1`
