@@ -1,10 +1,20 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 
 // Mock the SDK BEFORE importing the module under test, otherwise the dynamic
 // import inside queryConsole resolves to the real package.
 const mockQuery = vi.fn();
 vi.mock('@anthropic-ai/claude-agent-sdk', () => ({
   query: (...args: unknown[]) => mockQuery(...args),
+}));
+
+const mockStreamText = vi.fn();
+vi.mock('ai', () => ({
+  streamText: (...args: unknown[]) => mockStreamText(...args),
+}));
+
+const mockCreateAnthropic = vi.fn();
+vi.mock('@ai-sdk/anthropic', () => ({
+  createAnthropic: (opts: unknown) => mockCreateAnthropic(opts),
 }));
 
 // queryConsole calls getAgent() to read the cached AgentRunConfig — stub it so
@@ -36,6 +46,9 @@ function fakeAgentConfig(agentSessionId?: string) {
     mcpServers: {},
     model: 'anthropic/claude-sonnet-4-6',
     agentSessionId,
+    useLocalClaude: false,
+    wizardFlags: {},
+    wizardMetadata: {},
   };
 }
 
@@ -52,8 +65,17 @@ function fakeStream(text: string): AsyncIterable<unknown> {
   };
 }
 
+function fakeTextStream(parts: string[]): AsyncIterable<string> {
+  return {
+    async *[Symbol.asyncIterator]() {
+      for (const p of parts) yield p;
+    },
+  };
+}
+
 describe('queryConsole — Agent Analytics session header', () => {
   beforeEach(() => {
+    delete process.env.AMPLITUDE_WIZARD_AI_SDK_CONSOLE;
     mockQuery.mockReset();
     mockQuery.mockReturnValue(fakeStream('hi'));
     vi.mocked(getAgent).mockReset();
@@ -117,5 +139,64 @@ describe('queryConsole — Agent Analytics session header', () => {
 
     expect(result).toContain('not available yet');
     expect(mockQuery).not.toHaveBeenCalled();
+  });
+});
+
+describe('queryConsole — Vercel AI SDK path (AMPLITUDE_WIZARD_AI_SDK_CONSOLE)', () => {
+  beforeEach(() => {
+    process.env.AMPLITUDE_WIZARD_AI_SDK_CONSOLE = '1';
+    mockQuery.mockReset();
+    mockStreamText.mockReset();
+    mockCreateAnthropic.mockReset();
+    vi.mocked(getAgent).mockReset();
+
+    const providerModel = vi.fn((model: string) => `resolved:${model}`);
+    mockCreateAnthropic.mockReturnValue(providerModel);
+    mockStreamText.mockReturnValue({
+      textStream: fakeTextStream(['hello', ' world']),
+    });
+  });
+
+  afterEach(() => {
+    delete process.env.AMPLITUDE_WIZARD_AI_SDK_CONSOLE;
+  });
+
+  it('uses streamText + createAnthropic headers instead of claude-agent-sdk query()', async () => {
+    vi.mocked(getAgent).mockResolvedValue(fakeAgentConfig(TEST_SESSION_ID));
+
+    const out = await queryConsole('ping', 'system ctx', CREDS);
+
+    expect(mockQuery).not.toHaveBeenCalled();
+    expect(mockCreateAnthropic).toHaveBeenCalledTimes(1);
+    const anthropicOpts = mockCreateAnthropic.mock.calls[0][0] as {
+      headers: Record<string, string>;
+    };
+    expect(anthropicOpts.headers['x-amp-wizard-session-id']).toBe(
+      TEST_SESSION_ID,
+    );
+
+    expect(mockStreamText).toHaveBeenCalledTimes(1);
+    const stArgs = mockStreamText.mock.calls[0][0] as {
+      system: string;
+      messages: Array<{ role: string; content: string }>;
+    };
+    expect(stArgs.system).toContain('system ctx');
+    expect(stArgs.messages[0].content).toBe('ping');
+
+    expect(out).toBe('hello world');
+  });
+
+  it('falls back to Agent SDK when useLocalClaude is true', async () => {
+    vi.mocked(getAgent).mockResolvedValue({
+      ...fakeAgentConfig(TEST_SESSION_ID),
+      useLocalClaude: true,
+    });
+    mockQuery.mockReturnValue(fakeStream('local'));
+
+    const out = await queryConsole('ping', 'ctx', CREDS);
+
+    expect(mockStreamText).not.toHaveBeenCalled();
+    expect(mockQuery).toHaveBeenCalled();
+    expect(out).toBe('local');
   });
 });

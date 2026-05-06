@@ -85,6 +85,10 @@ import {
 } from './agent-hooks';
 import { getAgentDriver } from './agent-driver';
 import { buildGatewaySanitizeNodeOptions } from './gateway-fetch-sanitize-node-options.js';
+import {
+  enforceAiSdkProbeStrict,
+  maybeRunAiSdkGatewayProbe,
+} from './agent/ai-sdk-gateway-probe.js';
 import { sdkStandardFallbackModel, selectModel } from './agent/model-config.js';
 import { buildSkillTierSystemPromptAppend } from './agent/skill-tier-prompt.js';
 
@@ -1230,6 +1234,17 @@ export async function initializeAgent(
         bearerTokenPresent: !!config.amplitudeBearerToken,
       });
     }
+
+    const aiSdkProbe = await maybeRunAiSdkGatewayProbe({
+      useLocalClaude,
+      model: agentRunConfig.model,
+    });
+    if (aiSdkProbe.status === 'skipped') {
+      logToFile('AI SDK gateway probe skipped:', aiSdkProbe.reason);
+    } else if (aiSdkProbe.status === 'ok') {
+      logToFile('AI SDK gateway probe OK');
+    }
+    enforceAiSdkProbeStrict(aiSdkProbe);
 
     getUI().log.step(`Verbose logs: ${getLogFilePath()}`);
     getUI().log.success("Agent initialized. Let's get cooking!");
