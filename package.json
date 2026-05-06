@@ -34,10 +34,18 @@
   ],
   "main": "dist/index.js",
   "typings": "dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "require": "./dist/index.js",
+      "default": "./dist/index.js"
+    }
+  },
   "typescript": {
     "definition": "dist/index.d.ts"
   },
   "dependencies": {
+    "@ai-sdk/anthropic": "^3.0.75",
     "@amplitude/analytics-browser": "2.36.2",
     "@amplitude/analytics-node": "1.5.51",
     "@amplitude/experiment-node-server": "1.13.4",
@@ -48,6 +56,7 @@
     "@pavus/snake-game": "1.1.1",
     "@sentry/node": "10.47.0",
     "adm-zip": "~0.5.17",
+    "ai": "^6.0.175",
     "axios": "1.13.5",
     "chalk": "2.4.2",
     "cli-highlight": "2.1.11",
