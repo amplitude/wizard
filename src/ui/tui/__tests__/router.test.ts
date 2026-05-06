@@ -422,6 +422,134 @@ describe('WizardRouter', () => {
     });
   });
 
+  // ── 2b. Signup ceremony resolution ─────────────────────────────────
+  //
+  // The four flow shapes the create-account ceremony must support:
+  //
+  //   1. No flags          : SignupEmail → SigningUp → ToS → SignupFullName → SigningUp → Auth
+  //   2. --email only      : SigningUp → ToS → SignupFullName → SigningUp → Auth
+  //   3. --email + --name  : SigningUp (probe) → ToS → SigningUp (success) → Auth
+  //                          (--full-name pre-fills but ToS still gates the second POST)
+  //   4. requires_redirect : SigningUp → Auth (browser OAuth fallback via signupAbandoned)
+  //
+  // Each `it` here pins down ONE router resolution along that path.
+
+  describe('signup ceremony resolution', () => {
+    function signupBase(overrides: Partial<WizardSession> = {}): WizardSession {
+      return sessionWith({
+        introConcluded: true,
+        region: 'us',
+        authOnboardingPath: 'create_account',
+        ...overrides,
+      });
+    }
+
+    it('shape 1 (no flags): empty session lands on SignupEmail', () => {
+      expect(new WizardRouter().resolve(signupBase())).toBe(Screen.SignupEmail);
+    });
+
+    it('shape 1: after email submit, lands on SigningUp for the probe', () => {
+      const session = signupBase({ signupEmail: 'ada@example.com' });
+      expect(new WizardRouter().resolve(session)).toBe(Screen.SigningUp);
+    });
+
+    it('shape 1: after needs_information, lands on ToS first', () => {
+      const session = signupBase({
+        signupEmail: 'ada@example.com',
+        signupRequiredFields: ['full_name'],
+      });
+      expect(new WizardRouter().resolve(session)).toBe(Screen.ToS);
+    });
+
+    it('shape 1: after ToS, lands on SignupFullName', () => {
+      const session = signupBase({
+        signupEmail: 'ada@example.com',
+        signupRequiredFields: ['full_name'],
+        tosAccepted: true,
+      });
+      expect(new WizardRouter().resolve(session)).toBe(Screen.SignupFullName);
+    });
+
+    it('shape 1: after name submit, lands on SigningUp for the second POST', () => {
+      const session = signupBase({
+        signupEmail: 'ada@example.com',
+        signupRequiredFields: ['full_name'],
+        tosAccepted: true,
+        signupFullName: 'Ada Lovelace',
+      });
+      expect(new WizardRouter().resolve(session)).toBe(Screen.SigningUp);
+    });
+
+    it('shape 1: after success, advances past SigningUp toward Auth', () => {
+      const session = signupBase({
+        signupEmail: 'ada@example.com',
+        signupRequiredFields: ['full_name'],
+        tosAccepted: true,
+        signupFullName: 'Ada Lovelace',
+        signupAuth: {
+          idToken: 'i',
+          accessToken: 'a',
+          refreshToken: 'r',
+          zone: 'us',
+          userInfo: null,
+          dashboardUrl: null,
+        },
+      });
+      // Auth's isComplete still requires creds + org/project, so resolve
+      // lands on Auth — that's the screen the router walks to past
+      // SigningUp.
+      expect(new WizardRouter().resolve(session)).toBe(Screen.Auth);
+    });
+
+    it('shape 2 (--email only): pre-filled email skips SignupEmail', () => {
+      const session = signupBase({ signupEmail: 'ada@example.com' });
+      // Same as shape 1 step 2 — the "skip" is implicit because the
+      // SignupEmail show predicate returns false on a non-null email.
+      expect(new WizardRouter().resolve(session)).toBe(Screen.SigningUp);
+    });
+
+    it('shape 3 (email + full_name pre-set): SignupFullName never resolves', () => {
+      // After needs_information arrives but full_name is already in the
+      // session, the SignupFullName screen's show predicate is false (name
+      // already present). The router skips to ToS, then back to SigningUp.
+      const session = signupBase({
+        signupEmail: 'ada@example.com',
+        signupFullName: 'Ada Lovelace',
+        signupRequiredFields: ['full_name'],
+      });
+      expect(new WizardRouter().resolve(session)).toBe(Screen.ToS);
+    });
+
+    it('shape 3: post-ToS with email + name set, second POST fires immediately', () => {
+      const session = signupBase({
+        signupEmail: 'ada@example.com',
+        signupFullName: 'Ada Lovelace',
+        signupRequiredFields: ['full_name'],
+        tosAccepted: true,
+      });
+      expect(new WizardRouter().resolve(session)).toBe(Screen.SigningUp);
+    });
+
+    it('shape 4 (requires_redirect): signupAbandoned advances past SigningUp', () => {
+      const session = signupBase({
+        signupEmail: 'existing@acme.com',
+        signupAbandoned: true,
+      });
+      // SigningUp's isComplete fires on signupAbandoned, ToS / SignupFullName
+      // skip (signupRequiredFields is null), router lands on Auth.
+      expect(new WizardRouter().resolve(session)).toBe(Screen.Auth);
+    });
+
+    it('signup screens are entirely skipped on the sign-in path', () => {
+      // sign_in (default) means none of the create-account screens apply.
+      const session = sessionWith({
+        introConcluded: true,
+        region: 'us',
+      });
+      expect(new WizardRouter().resolve(session)).toBe(Screen.Auth);
+    });
+  });
+
   // ── 3. Overlay stack ──────────────────────────────────────────────
 
   describe('overlay stack', () => {
