@@ -876,6 +876,160 @@ describe('runAgent', () => {
       expect(result.error).not.toBe(AgentErrorType.GATEWAY_DOWN);
     });
 
+    it('classifies "Invalid request sent to model provider" as GATEWAY_INVALID_REQUEST without retrying', async () => {
+      // Regression test for the `--agent` API 400 bug — Vertex AI rejects
+      // certain `anthropic-beta` values and `tools[].input_schema` keys,
+      // and Thunder's wizard-proxy wraps the upstream 400 as the literal
+      // string "Invalid request sent to model provider". Retrying with
+      // the same payload guarantees the same rejection, so the wizard
+      // must short-circuit the retry loop and surface a remediation hint.
+      vi.useFakeTimers();
+
+      let queryCallCount = 0;
+      mockQuery.mockImplementation(() => {
+        queryCallCount++;
+        return (async function* () {
+          yield {
+            type: 'result',
+            subtype: 'success',
+            is_error: true,
+            result:
+              'API Error: 400 {"type":"error","error":{"type":"api_error","message":"Invalid request sent to model provider"}}',
+          };
+        })();
+      });
+
+      const runPromise = runAgent(
+        defaultAgentConfig,
+        'test prompt',
+        defaultOptions,
+        mockSpinner as unknown as SpinnerHandle,
+        { successMessage: 'Done', errorMessage: 'Failed' },
+      );
+
+      await vi.advanceTimersByTimeAsync(200_000);
+
+      const result = await runPromise;
+
+      // CRITICAL: must be exactly 1 attempt — retrying is futile and
+      // wastes the user's time on a guaranteed-to-fail second 400.
+      expect(queryCallCount).toBe(1);
+      expect(result.error).toBe(AgentErrorType.GATEWAY_INVALID_REQUEST);
+    });
+
+    it('classifies "Invalid request sent to model provider" thrown error as GATEWAY_INVALID_REQUEST', async () => {
+      // The catch-branch counterpart to the post-stream test above. The
+      // SDK can either yield a result with is_error=true OR throw with
+      // the wrapper string in the message; both must short-circuit the
+      // retry loop the same way.
+      vi.useFakeTimers();
+
+      let queryCallCount = 0;
+      mockQuery.mockImplementation(() => {
+        queryCallCount++;
+        // eslint-disable-next-line require-yield
+        return (async function* () {
+          throw new Error(
+            'API Error: 400 {"type":"error","error":{"type":"api_error","message":"Invalid request sent to model provider"}}',
+          );
+        })();
+      });
+
+      const runPromise = runAgent(
+        defaultAgentConfig,
+        'test prompt',
+        defaultOptions,
+        mockSpinner as unknown as SpinnerHandle,
+        { successMessage: 'Done', errorMessage: 'Failed' },
+      );
+
+      await vi.advanceTimersByTimeAsync(200_000);
+
+      const result = await runPromise;
+
+      expect(queryCallCount).toBe(1);
+      expect(result.error).toBe(AgentErrorType.GATEWAY_INVALID_REQUEST);
+    });
+
+    it('does not opt into the 1M-context beta on the gateway path by default', async () => {
+      // Vertex AI's Anthropic publisher endpoint does not honor the
+      // `context-1m-2025-08-07` beta. Sending the `betas` SDK option
+      // here is the proximate cause of the `--agent` 400 inside Claude
+      // Code / Cursor / Cline. This test pins the wire shape so a future
+      // change cannot silently re-introduce the regression.
+      vi.useFakeTimers();
+
+      let capturedOptions: Record<string, unknown> | undefined;
+      mockQuery.mockImplementation(
+        (params: { options: Record<string, unknown> }) => {
+          capturedOptions = params.options;
+          return (async function* () {
+            yield {
+              type: 'result',
+              subtype: 'success',
+              is_error: false,
+              result: 'ok',
+            };
+          })();
+        },
+      );
+
+      const runPromise = runAgent(
+        defaultAgentConfig,
+        'test prompt',
+        defaultOptions,
+        mockSpinner as unknown as SpinnerHandle,
+        { successMessage: 'Done', errorMessage: 'Failed' },
+      );
+
+      await vi.advanceTimersByTimeAsync(10_000);
+      await runPromise;
+
+      expect(capturedOptions).toBeDefined();
+      // `useDirectApiKey` is undefined in defaultAgentConfig → gateway
+      // path. The `betas` option must not be present on this path
+      // unless explicitly opted in via AMPLITUDE_WIZARD_GATEWAY_BETAS=1.
+      expect(capturedOptions).not.toHaveProperty('betas');
+    });
+
+    it('opts into the 1M-context beta on the direct-API path', async () => {
+      // The beta is still safe on direct Anthropic — only Vertex
+      // rejects it. Preserve the long-context win for users who supply
+      // their own ANTHROPIC_API_KEY.
+      vi.useFakeTimers();
+
+      let capturedOptions: Record<string, unknown> | undefined;
+      mockQuery.mockImplementation(
+        (params: { options: Record<string, unknown> }) => {
+          capturedOptions = params.options;
+          return (async function* () {
+            yield {
+              type: 'result',
+              subtype: 'success',
+              is_error: false,
+              result: 'ok',
+            };
+          })();
+        },
+      );
+
+      const directKeyConfig = { ...defaultAgentConfig, useDirectApiKey: true };
+
+      const runPromise = runAgent(
+        directKeyConfig,
+        'test prompt',
+        defaultOptions,
+        mockSpinner as unknown as SpinnerHandle,
+        { successMessage: 'Done', errorMessage: 'Failed' },
+      );
+
+      await vi.advanceTimersByTimeAsync(10_000);
+      await runPromise;
+
+      expect(capturedOptions).toBeDefined();
+      expect(capturedOptions?.betas).toEqual(['context-1m-2025-08-07']);
+    });
+
     it('does not retry on non-stall errors', async () => {
       let queryCallCount = 0;
 

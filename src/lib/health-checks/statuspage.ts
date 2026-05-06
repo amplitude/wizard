@@ -128,15 +128,11 @@ export const checkAnthropicHealth = (): Promise<BaseHealthResult> =>
   });
 
 export const checkAmplitudeOverallHealth = (): Promise<BaseHealthResult> =>
-  fetchStatuspageIndicator(
-    'https://www.amplitudestatus.com/api/v2/status.json',
-  );
+  fetchStatuspageIndicator('https://status.amplitude.com/api/v2/status.json');
 
 export const checkAmplitudeComponentHealth =
   (): Promise<ComponentHealthResult> =>
-    fetchStatuspageSummary(
-      'https://www.amplitudestatus.com/api/v2/summary.json',
-    );
+    fetchStatuspageSummary('https://status.amplitude.com/api/v2/summary.json');
 
 export const checkGithubHealth = (): Promise<BaseHealthResult> =>
   fetchStatuspageIndicator('https://www.githubstatus.com/api/v2/status.json');

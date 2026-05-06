@@ -200,7 +200,32 @@ export enum AgentErrorType {
    * ANTHROPIC_API_KEY bypass workaround.
    */
   GATEWAY_DOWN = 'WIZARD_GATEWAY_DOWN',
+  /**
+   * Thunder's `wizard-proxy` returned the verbatim wrapper string
+   * `"Invalid request sent to model provider"` — a 400 from Vertex AI
+   * (Anthropic publisher endpoint) caused by a payload field Vertex
+   * does not accept. The most common causes are an `anthropic-beta`
+   * value Vertex doesn't honor (e.g. `context-1m-2025-08-07`) or
+   * `tools[].input_schema` keys Vertex's stricter JSON Schema
+   * validator rejects (`$schema`, `additionalProperties`,
+   * `exclusiveMinimum`, `exclusiveMaximum`).
+   *
+   * Retrying with the same payload is guaranteed to fail again, so the
+   * runner short-circuits the retry loop and surfaces a remediation
+   * message that points users at upgrading to a wizard build with the
+   * fix (and at the `ANTHROPIC_API_KEY` direct-API workaround in the
+   * meantime).
+   */
+  GATEWAY_INVALID_REQUEST = 'WIZARD_GATEWAY_INVALID_REQUEST',
 }
+
+/**
+ * Verbatim error wrapper Thunder's `wizard-proxy` returns when Vertex AI
+ * rejects the upstream request body (see Thunder's
+ * `src/wizard-proxy/router.ts:917-974` — the proxy clamps every 400 from
+ * the model provider to this exact string and hides the real reason).
+ */
+const GATEWAY_INVALID_REQUEST_MARKER = 'Invalid request sent to model provider';
 
 const DEFAULT_MAX_TURNS = 200;
 /**
@@ -2404,6 +2429,12 @@ export async function runAgent(
   //   stuck waiting through ~3 minutes of futile retries.
   let authErrorDetected = false;
   let authRetryCount = 0;
+  // Set by either short-circuit (post-stream or catch branch) when the
+  // upstream gateway / Vertex returns the verbatim
+  // `"Invalid request sent to model provider"` wrapper. The post-loop
+  // classifier reads this so the catch branch's thrown-error case is
+  // classified consistently with the post-stream collected-output case.
+  let gatewayInvalidRequestDetected = false;
 
   // Workaround for SDK bug: stdin closes before canUseTool responses can be sent.
   // The fix is to use an async generator for the prompt that stays open until
@@ -2943,9 +2974,12 @@ export async function runAgent(
             model: agentConfig.model,
             // Fallback model if primary is unavailable (e.g. Vertex outage).
             // Must be capable enough for code generation — haiku is too weak.
+            // Pinned to the same alias `selectModel` returns for `standard`
+            // mode so the fallback path matches what the wizard advertises
+            // as the production model rather than a stale dated id.
             fallbackModel: agentConfig.useDirectApiKey
-              ? 'claude-sonnet-4-5-20250514'
-              : 'anthropic/claude-sonnet-4-5-20250514',
+              ? 'claude-sonnet-4-6'
+              : 'anthropic/claude-sonnet-4-6',
             // Stream text deltas as `stream_event` envelopes so we can
             // surface them in the status pill during long tool calls. The
             // for-await loop below extracts text_delta payloads and pushes
@@ -2961,12 +2995,25 @@ export async function runAgent(
             // `thinking_delta` blocks streaming right before the 400.
             // See the long-form rationale in the comment block below.
             thinking: { type: 'disabled' },
-            // Opt into the 1M context window so long instrumentation runs
-            // (commandments + skills + accumulated tool results) don't trip
-            // compaction mid-flow. Compactions cause the long mid-run pauses
-            // users perceive as "the agent froze". Safe to leave on — falls
-            // back to 200K if the backing model doesn't support it.
-            betas: ['context-1m-2025-08-07'],
+            // 1M-context beta — DEFAULT OFF on the gateway path.
+            //
+            // Vertex AI's Anthropic publisher endpoint does not enable
+            // arbitrary `anthropic-beta` previews that the direct Anthropic
+            // API supports. `context-1m-2025-08-07` is one of those Vertex
+            // does not honor: Vertex returns 400 INVALID_ARGUMENT, the
+            // wizard proxy (Thunder) wraps that as the generic
+            // `"Invalid request sent to model provider"` (see Thunder's
+            // `wizard-proxy/router.ts:917-974`), and users running
+            // `--agent` inside Claude Code / Cursor / Cline cannot recover.
+            // Earlier copy here claimed "safe to leave on — falls back to
+            // 200K" — that is true on direct-Anthropic, false on Vertex.
+            //
+            // Set `AMPLITUDE_WIZARD_GATEWAY_BETAS=1` to opt back in for
+            // local diagnostic runs against the direct-API path.
+            ...(process.env.AMPLITUDE_WIZARD_GATEWAY_BETAS === '1' ||
+            agentConfig.useDirectApiKey
+              ? { betas: ['context-1m-2025-08-07'] }
+              : {}),
             cwd: agentConfig.workingDirectory,
             permissionMode: 'acceptEdits',
             mcpServers: agentConfig.mcpServers,
@@ -3494,6 +3541,25 @@ export async function runAgent(
         clearTimeout(staleTimer);
         wizardSignal.removeEventListener('abort', onWizardAbort);
         const partialOutput = collectedText.join('\n');
+
+        // Vertex / wizard-proxy "Invalid request" — payload-shape rejection.
+        // Retrying with the same payload is guaranteed to 400 again, so we
+        // short-circuit the retry loop and let the post-loop classifier
+        // surface GATEWAY_INVALID_REQUEST with a clear remediation hint.
+        if (
+          !receivedSuccessResult &&
+          partialOutput.includes(GATEWAY_INVALID_REQUEST_MARKER)
+        ) {
+          logToFile(
+            'Agent error: GATEWAY_INVALID_REQUEST (payload rejected by upstream — not retrying)',
+          );
+          analytics.wizardCapture('agent gateway invalid request', {
+            attempt,
+          });
+          gatewayInvalidRequestDetected = true;
+          break;
+        }
+
         const transientErrorMatchers = [
           { pattern: 'API Error: 400', label: 'api_400' },
           { pattern: 'API Error: 408', label: 'api_408' },
@@ -3607,6 +3673,24 @@ export async function runAgent(
         // These resolve on a fresh retry with a new conversation.
         const errMsg =
           innerError instanceof Error ? innerError.message : String(innerError);
+
+        // Vertex / wizard-proxy "Invalid request" — payload-shape rejection.
+        // Same short-circuit as the post-stream branch: retrying is futile
+        // because the next request body will be identically rejected.
+        if (
+          !receivedSuccessResult &&
+          errMsg.includes(GATEWAY_INVALID_REQUEST_MARKER)
+        ) {
+          logToFile(
+            'Agent error: GATEWAY_INVALID_REQUEST (payload rejected by upstream — not retrying)',
+          );
+          analytics.wizardCapture('agent gateway invalid request', {
+            attempt,
+          });
+          gatewayInvalidRequestDetected = true;
+          break;
+        }
+
         // Track upstream-gateway-shaped thrown errors on EVERY attempt
         // (including the final one). Mirrors the post-stream branch.
         if (
@@ -3746,6 +3830,30 @@ export async function runAgent(
       return { error: AgentErrorType.RATE_LIMIT, message: apiErrorMessage };
     }
 
+    // Wizard-proxy / Vertex AI rejected the payload shape. Distinct from
+    // GATEWAY_DOWN (which is "every retry failed the same way") and from
+    // RATE_LIMIT (which is recoverable on retry). The runner surfaces a
+    // remediation message that points users at upgrading the wizard.
+    //
+    // Consult both `outputText` (the result-message path captures the
+    // marker in `collectedText`) and the sticky flag (the catch path
+    // sets the flag from the thrown `Error.message` because the throw
+    // can fire before any messages reach `collectedText`).
+    if (
+      !receivedSuccessResult &&
+      (gatewayInvalidRequestDetected ||
+        outputText.includes(GATEWAY_INVALID_REQUEST_MARKER))
+    ) {
+      logToFile('Agent error: GATEWAY_INVALID_REQUEST');
+      spinner.stop('Wizard request rejected by gateway');
+      return {
+        error: AgentErrorType.GATEWAY_INVALID_REQUEST,
+        message: apiErrorMessage.includes('Unknown')
+          ? GATEWAY_INVALID_REQUEST_MARKER
+          : apiErrorMessage,
+      };
+    }
+
     // Every attempt died with an upstream-gateway-shaped error and we
     // never observed a successful result — the gateway is unhealthy,
     // not the wizard. Surface as GATEWAY_DOWN so the runner can show a
@@ -3808,6 +3916,24 @@ export async function runAgent(
       logToFile('Agent error (caught): RATE_LIMIT');
       spinner.stop('Rate limit exceeded');
       return { error: AgentErrorType.RATE_LIMIT, message: apiErrorMessage };
+    }
+
+    // See note in the non-throwing return path above — Vertex / wizard-proxy
+    // payload-shape rejection. Distinct from GATEWAY_DOWN. Consult the
+    // sticky flag for thrown-error cases where the marker came from the
+    // exception message rather than the streamed output.
+    if (
+      gatewayInvalidRequestDetected ||
+      outputText.includes(GATEWAY_INVALID_REQUEST_MARKER)
+    ) {
+      logToFile('Agent error (caught): GATEWAY_INVALID_REQUEST');
+      spinner.stop('Wizard request rejected by gateway');
+      return {
+        error: AgentErrorType.GATEWAY_INVALID_REQUEST,
+        message: apiErrorMessage.includes('Unknown')
+          ? GATEWAY_INVALID_REQUEST_MARKER
+          : apiErrorMessage,
+      };
     }
 
     // Backwards-compat fallback for bundled skills emitting legacy text

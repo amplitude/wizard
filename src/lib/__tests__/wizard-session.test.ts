@@ -106,6 +106,89 @@ describe('buildSession signup profile fields', () => {
   });
 });
 
+// ── interactive-mode arg gating ──────────────────────────────────────────
+//
+// In interactive TUI mode the wizard's Intro picker, signup-email screen,
+// and ToS screen own those decisions, so the corresponding CLI flags are
+// inert. `buildSession` drops them at the doorstep when `executionMode`
+// is `'interactive'`. `--full-name` is intentionally NOT gated — pre-fill
+// is just metadata and bypasses no confirmation step. Non-interactive
+// modes honor every flag as today.
+
+describe('buildSession executionMode gating', () => {
+  it('ignores --auth-onboarding in interactive mode', () => {
+    const s = buildSession({
+      authOnboarding: 'create-account',
+      executionMode: 'interactive',
+    });
+    // Falls through to the SignIn default; the Intro picker overwrites
+    // this when the user selects "Continue — create a new account".
+    expect(s.authOnboardingPath).toBe('sign_in');
+  });
+
+  it('ignores legacy --signup boolean in interactive mode', () => {
+    const s = buildSession({
+      signup: true,
+      executionMode: 'interactive',
+    });
+    expect(s.authOnboardingPath).toBe('sign_in');
+  });
+
+  it('ignores --email in interactive mode', () => {
+    const s = buildSession({
+      signupEmail: 'ada@example.com',
+      executionMode: 'interactive',
+    });
+    expect(s.signupEmail).toBeNull();
+  });
+
+  it('ignores --accept-tos in interactive mode', () => {
+    const s = buildSession({
+      acceptTos: true,
+      executionMode: 'interactive',
+    });
+    expect(s.tosAccepted).toBeNull();
+  });
+
+  it('honors --full-name in interactive mode (pre-fill is metadata only)', () => {
+    const s = buildSession({
+      signupFullName: 'Ada Lovelace',
+      executionMode: 'interactive',
+    });
+    expect(s.signupFullName).toBe('Ada Lovelace');
+  });
+
+  it.each(['ci', 'agent'] as const)(
+    'honors signup flags in %s mode',
+    (mode) => {
+      const s = buildSession({
+        authOnboarding: 'create-account',
+        signupEmail: 'ada@example.com',
+        signupFullName: 'Ada Lovelace',
+        acceptTos: true,
+        executionMode: mode,
+      });
+      expect(s.authOnboardingPath).toBe('create_account');
+      expect(s.signupEmail).toBe('ada@example.com');
+      expect(s.signupFullName).toBe('Ada Lovelace');
+      expect(s.tosAccepted).toBe(true);
+    },
+  );
+
+  it('preserves legacy "honor every flag" contract when executionMode is omitted', () => {
+    // Existing callers (tests, store init, region/mcp commands) pass no
+    // mode and must continue to receive the pre-gating behavior.
+    const s = buildSession({
+      authOnboarding: 'create-account',
+      signupEmail: 'ada@example.com',
+      acceptTos: true,
+    });
+    expect(s.authOnboardingPath).toBe('create_account');
+    expect(s.signupEmail).toBe('ada@example.com');
+    expect(s.tosAccepted).toBe(true);
+  });
+});
+
 // ── Branded ID schemas / helpers ──────────────────────────────────────────
 
 describe('AppIdSchema / toAppId', () => {
