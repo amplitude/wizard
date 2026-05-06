@@ -17,3 +17,13 @@ export function setUI(ui: WizardUI): void {
 }
 
 export type { WizardUI, SpinnerHandle } from './wizard-ui';
+
+export type {
+  InstallSpinnerPresenter,
+  WizardInstallPresentation,
+  WizardInstallPresentationLog,
+} from './install-presentation';
+export {
+  createWizardUiInstallPresentation,
+  createNoopWizardInstallPresentation,
+} from './install-presentation';
