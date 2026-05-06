@@ -8,7 +8,7 @@ import {
 import { Integration, DETECTION_TIMEOUT_MS } from './lib/constants';
 import { readEnvironment } from './utils/environment';
 import { resolveInstallDir } from './utils/install-dir';
-import { getUI } from './ui';
+import { createWizardUiInstallPresentation, getUI } from './ui';
 import fs from 'node:fs/promises';
 import { FRAMEWORK_REGISTRY } from './lib/registry';
 import { analytics } from './utils/analytics';
@@ -94,10 +94,14 @@ export async function runWizard(
     });
   }
 
-  getUI().intro(`Welcome to the Amplitude setup wizard`);
+  const installPresentation = createWizardUiInstallPresentation(
+    getUI(),
+    'wizard-run',
+  );
+  installPresentation.intro(`Welcome to the Amplitude setup wizard`);
 
   if (session.ci) {
-    getUI().log.info(chalk.dim('Running in CI mode'));
+    installPresentation.log.info(chalk.dim('Running in CI mode'));
   }
 
   const integration =
