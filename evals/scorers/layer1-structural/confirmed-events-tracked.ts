@@ -29,19 +29,12 @@ const SCAN_EXTS = ['.ts', '.tsx', '.js', '.jsx', '.mjs', '.cjs'];
 const TRACK_LITERAL = /\btrack\s*\(\s*(['"])((?:\\.|(?!\1).)*?)\1/g;
 
 function collectConfirmedEventNames(artifact: Artifact): string[] {
-  const out = new Set<string>();
-  for (const env of artifact.runLog) {
-    const data = env.data as { event?: string } | undefined;
-    if (data?.event === 'event_plan_confirmed') {
-      // The decision-bearing event doesn't carry the names directly.
-      // The names live on the preceding `event_plan_proposed`. Walk
-      // back to the most recent proposed plan and use that.
-      // Fall through — we resolve below.
-    }
-  }
+  // The decision-bearing `event_plan_confirmed` event doesn't carry the
+  // event names directly — they live on the preceding `event_plan_proposed`.
   // Strategy: take the LAST `event_plan_proposed` before the LAST
   // `event_plan_confirmed`. If there's a confirmed event at all, the
   // proposal it confirmed is the canonical list.
+  const out = new Set<string>();
   let lastProposedIndex = -1;
   let confirmedIndex = -1;
   for (let i = 0; i < artifact.runLog.length; i++) {
