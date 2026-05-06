@@ -33,8 +33,7 @@ export type CreateWizardAiSdkAnthropicOptions = {
 export function createWizardAiSdkAnthropic(
   opts: CreateWizardAiSdkAnthropicOptions = {},
 ) {
-  const baseURL =
-    opts.baseURL ?? process.env.ANTHROPIC_BASE_URL?.trim();
+  const baseURL = opts.baseURL ?? process.env.ANTHROPIC_BASE_URL?.trim();
   const auth = resolveWizardAnthropicAuthFromEnv();
   const headers =
     opts.headers && Object.keys(opts.headers).length > 0
