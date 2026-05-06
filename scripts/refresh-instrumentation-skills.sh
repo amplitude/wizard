@@ -9,6 +9,8 @@
 # Usage:
 #   bash scripts/refresh-instrumentation-skills.sh
 
+set -euo pipefail
+
 REPO="amplitude/mcp-marketplace"
 REMOTE_BASE="plugins/amplitude/skills"
 LOCAL_BASE="$(cd "$(dirname "$0")/.." && pwd)/skills/instrumentation"
