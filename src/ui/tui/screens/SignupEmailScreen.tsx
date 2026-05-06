@@ -51,7 +51,7 @@ export const SignupEmailScreen = ({ store }: SignupEmailScreenProps) => {
   // earlier screen has anything to revert).
   useScreenInput((_input, key) => {
     if (!key.escape) return;
-    analytics.wizardCapture('signup email screen back', {});
+    analytics.wizardCapture('signup email screen back');
     if (store.canGoBack()) {
       store.goBack();
       return;

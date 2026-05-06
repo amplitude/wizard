@@ -446,7 +446,7 @@ void yargs(hideBin(process.argv))
     },
     'full-name': {
       describe:
-        'full name to use when creating a new account (requires --auth-onboarding create-account)',
+        'full name to use when creating a new account. Required in --agent or --ci mode; in interactive TUI it pre-fills the name screen as a metadata-only shortcut.',
       type: 'string',
       coerce: (value: string | undefined) => {
         if (value === undefined) return value;

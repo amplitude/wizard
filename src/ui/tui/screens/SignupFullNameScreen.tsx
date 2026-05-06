@@ -47,7 +47,7 @@ export const SignupFullNameScreen = ({ store }: SignupFullNameScreenProps) => {
   // re-rendering this screen with stale required-fields state.
   useScreenInput((_input, key) => {
     if (!key.escape) return;
-    analytics.wizardCapture('signup full name screen back', {});
+    analytics.wizardCapture('signup full name screen back');
     store.setSignupEmail(null);
   });
 
