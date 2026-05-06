@@ -140,7 +140,7 @@ Keep `MIGRATION_PLAN.md` §6.6 **as written**: wizard stays TS-first and team-ow
 
 1. ✅ **Document** this plan (`NEW_MIGRATION_PLAN.md`) and link it from `CLAUDE.md` / `README.md` only if the team wants public visibility (optional follow-up).
 2. ✅ **Pin context-hub in CI** via `CONTEXT_HUB_TAG` support in `scripts/refresh-skills.sh`.
-3. **Port pure `sanitizeWizardRequestInit` + tests** into `src/lib/gateway-request-sanitize.ts` (done — wire into the live gateway HTTP path in a follow-up PR once the Agent SDK exposes a `fetch` hook or we route LLM calls through AI SDK).
+3. **Port pure `sanitizeWizardRequestInit` + tests** into `src/lib/gateway-request-sanitize.ts` (done) and **wire into the Claude Code subprocess** via `NODE_OPTIONS=--require …register-gateway-fetch-sanitize-bootstrap.js` (`gateway-fetch-sanitize-node-options.ts`, `agent-interface.ts`). Opt out with `AMPLITUDE_WIZARD_GATEWAY_SANITIZE_FETCH=0`. Skipped for direct `ANTHROPIC_API_KEY` and local-CLI paths.
 4. **Scaffold `src/lib/agent/`** with `model-config` extraction (no behavior change).
 5. **Prototype `load_skill`** per `SKILLS_AND_CONTEXT_DESIGN.md` §2 behind `AMPLITUDE_WIZARD_SKILL_TIERS=1`.
 

@@ -81,6 +81,7 @@ import {
   buildHooksConfig,
 } from './agent-hooks';
 import { getAgentDriver } from './agent-driver';
+import { buildGatewaySanitizeNodeOptions } from './gateway-fetch-sanitize-node-options.js';
 
 /**
  * Mirror of @anthropic-ai/claude-agent-sdk ThinkingConfig. We mirror locally
@@ -3108,6 +3109,30 @@ export async function runAgent(
               ...(agentConfig.useDirectApiKey
                 ? {}
                 : { ANTHROPIC_API_KEY: undefined }),
+              // Vertex-backed gateway rejects some JSON Schema metadata and
+              // `anthropic-beta` headers the SDK emits. The Claude Code child
+              // process loads `register-gateway-fetch-sanitize-bootstrap.js` via
+              // NODE_OPTIONS so `fetch` for `/v1/messages` is sanitized before
+              // it hits the wire. Opt out: AMPLITUDE_WIZARD_GATEWAY_SANITIZE_FETCH=0.
+              ...(agentConfig.useDirectApiKey ||
+              agentConfig.useLocalClaude ||
+              process.env.AMPLITUDE_WIZARD_GATEWAY_SANITIZE_FETCH === '0'
+                ? {}
+                : (() => {
+                    const next = buildGatewaySanitizeNodeOptions(
+                      process.env.NODE_OPTIONS,
+                    );
+                    if (next) {
+                      logToFile(
+                        'Gateway fetch sanitizer: NODE_OPTIONS includes --require register-gateway-fetch-sanitize-bootstrap.js',
+                      );
+                      return { NODE_OPTIONS: next };
+                    }
+                    logToFile(
+                      'Gateway fetch sanitizer: register script missing — NODE_OPTIONS unchanged',
+                    );
+                    return {};
+                  })()),
               ANTHROPIC_CUSTOM_HEADERS: buildAgentEnv(
                 agentConfig.wizardMetadata ?? {},
                 agentConfig.wizardFlags ?? {},
