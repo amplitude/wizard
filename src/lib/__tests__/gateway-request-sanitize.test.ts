@@ -10,9 +10,7 @@ import {
 describe('GATEWAY_STRIPPED_SCHEMA_KEYS', () => {
   it('includes known Vertex-hostile schema metadata keys', () => {
     expect(GATEWAY_STRIPPED_SCHEMA_KEYS.has('$schema')).toBe(true);
-    expect(GATEWAY_STRIPPED_SCHEMA_KEYS.has('additionalProperties')).toBe(
-      true,
-    );
+    expect(GATEWAY_STRIPPED_SCHEMA_KEYS.has('additionalProperties')).toBe(true);
   });
 });
 
@@ -104,9 +102,7 @@ describe('sanitizeWizardRequestInit', () => {
     expect(
       parsed.tools[0].input_schema['additionalProperties'],
     ).toBeUndefined();
-    expect(
-      parsed.tools[0].input_schema['exclusiveMinimum'],
-    ).toBeUndefined();
+    expect(parsed.tools[0].input_schema['exclusiveMinimum']).toBeUndefined();
     expect(parsed.tools[0].input_schema['properties']).toBeDefined();
     expect(
       treeContainsForbiddenSchemaKeys(JSON.parse(out.body as string)),
@@ -140,7 +136,9 @@ describe('sanitizeWizardRequestInit', () => {
       tools: Array<{ input_schema: Record<string, unknown> }>;
     };
     expect(parsed.tools[0].input_schema['$schema']).toBeUndefined();
-    expect(parsed.tools[1].input_schema['additionalProperties']).toBeUndefined();
+    expect(
+      parsed.tools[1].input_schema['additionalProperties'],
+    ).toBeUndefined();
     expect(treeContainsForbiddenSchemaKeys(parsed)).toBe(false);
   });
 
