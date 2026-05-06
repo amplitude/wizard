@@ -19,7 +19,7 @@ on:
   pull_request:
     paths:
       - 'benchmarks/**'
-      - 'src/lib/commandments**'
+      - 'src/lib/commandments.ts'
       - 'skills/**'
       - 'package.json'
       - '.github/workflows/bench.yml'
