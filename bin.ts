@@ -316,7 +316,7 @@ void yargs(hideBin(process.argv))
     },
     'auth-onboarding': {
       describe:
-        'sign-in (default) or create-account — for use in --ci/--agent when there is no Intro menu (ignored in interactive TUI; the menu is canonical)',
+        'sign-in (default) or create-account. Supported in --agent, --ci, and --classic modes; ignored otherwise.',
       choices: ['sign-in', 'create-account'] as const,
       type: 'string',
     },
@@ -434,7 +434,7 @@ void yargs(hideBin(process.argv))
     },
     email: {
       describe:
-        'email to use when creating a new account in --ci/--agent (requires --auth-onboarding create-account; ignored in interactive TUI — the email screen always renders)',
+        'email to use when creating a new account (requires --auth-onboarding create-account). Supported in --agent, --ci, and --classic modes; ignored otherwise.',
       type: 'string',
       coerce: (value: string | undefined) => {
         if (value === undefined) return value;
