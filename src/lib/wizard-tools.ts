@@ -1471,24 +1471,16 @@ export async function createWizardToolsServer(options: WizardToolsOptions) {
             },
             (args: { skillId: string; reason: string }) => {
               void args.reason;
-              if (!bundledSkillExists(args.skillId)) {
-                return {
-                  content: [
-                    {
-                      type: 'text' as const,
-                      text: `Unknown or missing bundled skill: ${args.skillId}`,
-                    },
-                  ],
-                  isError: true,
-                };
-              }
+              // Single traversal — readBundledSkillBody already walks every
+              // category subdir and returns null when missing, so an extra
+              // bundledSkillExists() probe just doubles the disk work.
               const body = readBundledSkillBody(args.skillId);
               if (body == null) {
                 return {
                   content: [
                     {
                       type: 'text' as const,
-                      text: `Could not read SKILL.md for: ${args.skillId}`,
+                      text: `Unknown or missing bundled skill: ${args.skillId}`,
                     },
                   ],
                   isError: true,
