@@ -130,7 +130,7 @@ async function main() {
         wizardBin: args.wizardBin,
       })
     : runReplay({ scenario, scenarioDir });
-  const { artifact, workingDir } = result;
+  const { artifact, workingDir, cleanup } = result;
 
   // Re-parse the run log + assert contract on the assembled artifact.
   // (parseStream + assertContract is also called inside the runner, but
@@ -140,8 +140,16 @@ async function main() {
   const parsed = parseStream(ndjson);
   const contract = assertContract(parsed, artifact.exitCode);
 
-  // Score against the workingDir the runner returned.
-  const report = score({ artifact, scenario, workingDir });
+  // Score against the workingDir the runner returned, then tear it
+  // down. The try/finally guarantees cleanup runs even if a scorer
+  // throws — without it, a single bad scorer would leak per-run
+  // tmpdirs across the whole eval suite.
+  let report;
+  try {
+    report = score({ artifact, scenario, workingDir });
+  } finally {
+    cleanup();
+  }
 
   // Write the report.
   const reportsRoot = args.reportsDir ?? resolve(repoRoot, 'evals', 'reports');

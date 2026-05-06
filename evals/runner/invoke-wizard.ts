@@ -175,6 +175,22 @@ export interface RunnerResult {
   artifact: Artifact;
   /** Absolute path to the directory scorers should read files from. */
   workingDir: string;
+  /**
+   * Tear down any per-run resources the runner created. The caller
+   * (`run-eval.ts`) MUST invoke this AFTER scoring completes — the
+   * runner deliberately does not clean up `workingDir` before returning
+   * so scorers can read files from it via `EVALS_WORKING_DIR`.
+   *
+   * - `runLive`: removes the tmpdir-scoped working tree. Best-effort —
+   *   `mintWorkingDir` is keyed on a fresh runId per call, so a leak
+   *   only costs tmpdir space and the next run's own pre-clean is a
+   *   backstop.
+   * - `runReplay`: no-op. The golden working dir is a permanent
+   *   fixture; deleting it would corrupt the scenario.
+   *
+   * Idempotent: calling more than once is safe.
+   */
+  cleanup: () => void;
 }
 
 /**
@@ -246,15 +262,11 @@ export async function runLive(
   const parsed = parseStream(stdout);
   const fsSnapshot = captureFsSnapshot(pristineDir, workingDir);
 
-  // Best-effort teardown. If this fails the next run will still
-  // start by removing `workingDir` (mintWorkingDir is keyed on runId,
-  // which is fresh per call, so a leak only costs tmpdir space).
-  try {
-    rmSync(workingDir, { recursive: true });
-  } catch {
-    // ignore — diagnostics will surface a stale dir
-  }
-
+  // Cleanup is deferred to `RunnerResult.cleanup` — the orchestrator
+  // (`run-eval.ts`) calls it after scoring runs, so scorers can still
+  // read files from `workingDir` via `EVALS_WORKING_DIR`. Removing the
+  // tree before returning would hard-fail every Layer 0 scorer that
+  // reads `package.json` or scans the source tree.
   return {
     artifact: {
       runId,
@@ -269,6 +281,13 @@ export async function runLive(
       source: 'live',
     },
     workingDir,
+    cleanup: () => {
+      try {
+        rmSync(workingDir, { recursive: true, force: true });
+      } catch {
+        // ignore — diagnostics will surface a stale dir
+      }
+    },
   };
 }
 
@@ -395,5 +414,8 @@ export function runReplay(options: ReplayOptions): RunnerResult {
     // Replay reads file content from the pre-recorded golden working
     // dir — that's the snapshot scorers should grade against.
     workingDir: goldenWorking,
+    // No-op: the golden working dir is a permanent fixture, not a
+    // per-run tmpdir. Deleting it would corrupt the scenario.
+    cleanup: () => {},
   };
 }

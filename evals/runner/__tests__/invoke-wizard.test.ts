@@ -16,7 +16,14 @@
  */
 
 import { EventEmitter } from 'node:events';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import {
+  existsSync,
+  mkdtempSync,
+  mkdirSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
@@ -161,6 +168,50 @@ describe('runLive — working dir + arg construction', () => {
     expect(args).not.toContain('--integration');
     // Sanity: integrationHint is not snuck in as a positional either.
     expect(args).not.toContain('nextjs');
+  });
+
+  // Regression: the runner used to `rmSync(workingDir)` before
+  // returning, which left scorers (which read files from
+  // `process.env.EVALS_WORKING_DIR`) grading against a deleted tree.
+  // The contract is now: runLive leaves `workingDir` populated;
+  // `cleanup()` tears it down on the orchestrator's schedule.
+  it('leaves workingDir populated on return; cleanup() removes it', async () => {
+    spawnMock.mockReturnValue(fakeChild(NDJSON_OK, 0));
+    const { workingDir, cleanup } = await runLive(runOptions());
+
+    // Tree must be readable so Layer 0 scorers can grade against it
+    // (`package.json` lookup, init-file scan, etc.).
+    expect(existsSync(workingDir)).toBe(true);
+    expect(existsSync(join(workingDir, 'package.json'))).toBe(true);
+    expect(readFileSync(join(workingDir, 'package.json'), 'utf8')).toBe('{}');
+
+    // Cleanup is the orchestrator's responsibility. Idempotent.
+    cleanup();
+    expect(existsSync(workingDir)).toBe(false);
+    expect(() => cleanup()).not.toThrow();
+  });
+
+  it('replay: cleanup is a no-op (golden working dir is a fixture)', async () => {
+    // Build a minimal golden fixture so runReplay loads.
+    const goldenDir = join(scenarioRoot, 'golden');
+    const goldenWorking = join(goldenDir, 'working');
+    mkdirSync(goldenWorking, { recursive: true });
+    writeFileSync(join(goldenDir, 'run.ndjson'), NDJSON_OK);
+    writeFileSync(join(goldenDir, 'exit-code.txt'), '0');
+    writeFileSync(join(goldenWorking, 'package.json'), '{}');
+
+    const { runReplay } = await import('../invoke-wizard.js');
+    const { workingDir, cleanup } = runReplay({
+      scenario: SCENARIO,
+      scenarioDir: scenarioRoot,
+    });
+
+    expect(workingDir).toBe(goldenWorking);
+    cleanup();
+    // Golden tree must survive cleanup — deleting it would corrupt
+    // the scenario for the next run.
+    expect(existsSync(goldenWorking)).toBe(true);
+    expect(existsSync(join(goldenWorking, 'package.json'))).toBe(true);
   });
 
   it('wizardBin override: spawns the override directly without pnpm exec tsx', async () => {
