@@ -1,0 +1,78 @@
+name: Evals (PR gate)
+
+# PR-gate evals: run Layers 0-3 against Ring 1 scenarios on PRs that
+# touch the wizard's agent surface or the eval suite itself. Layers 5
+# (ingestion) and 6 (LLM judge) deliberately don't run here — see
+# docs/evals.md § CI gating strategy for the rationale.
+
+on:
+  pull_request:
+    paths:
+      - 'src/lib/commandments.ts'
+      - 'src/lib/agent-interface.ts'
+      - 'src/lib/agent-runner.ts'
+      - 'src/lib/wizard-tools.ts'
+      - 'src/lib/registry.ts'
+      - 'src/lib/agent-events.ts'
+      - 'src/lib/exit-codes.ts'
+      - 'src/frameworks/**'
+      - 'src/ui/agent-ui.ts'
+      - 'skills/integration/**'
+      - 'evals/**'
+      - 'package.json'
+      - '.github/workflows/evals-pr.yml'
+
+# Run-once-per-ref semantics: a new push to the PR cancels the prior
+# run. PR-gate evals are deterministic against golden replays today,
+# so a stale run is never useful.
+concurrency:
+  group: evals-pr-scenarios-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  unit:
+    name: eval scorers (vitest)
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5.0.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Run eval scorer + runner tests
+        run: pnpm exec vitest run evals/
+
+  scenario:
+    name: Ring 1 — ${{ matrix.scenario }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 8
+    strategy:
+      fail-fast: false
+      matrix:
+        # Add new Ring 1 scenarios here as they land. Each scenario
+        # runs in parallel; the job fails on Layer 0 hard fail or any
+        # NDJSON contract violation (per evals/bin/run-eval.ts exit
+        # logic).
+        scenario:
+          - nextjs-app-router/vanilla
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5.0.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 20
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+      - name: Run eval — ${{ matrix.scenario }}
+        run: pnpm evals:run ${{ matrix.scenario }}
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: eval-report-${{ strategy.job-index }}
+          path: evals/reports/**/report.json
+          retention-days: 14
+          if-no-files-found: ignore
