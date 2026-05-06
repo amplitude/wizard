@@ -138,7 +138,13 @@ export function createWizardUiInstallPresentation(
         ui.log.step(`${label} ${toolOrOpts}${summary ? ` ${summary}` : ''}`);
         return;
       }
-      if (toolOrOpts.error != null) {
+      // Object branch must honor `ok` and `summary` the same way the string
+      // branch does — previously a caller passing `{ toolName }` with
+      // `ok: false` got a success checkmark, and `summary` was dropped.
+      const failed = ok === false || toolOrOpts.error != null;
+      const label = failed ? '✖' : '✔';
+      let detail = summary ? ` ${summary}` : '';
+      if (!detail && toolOrOpts.error != null) {
         const err = toolOrOpts.error;
         const message =
           err instanceof Error
@@ -146,10 +152,14 @@ export function createWizardUiInstallPresentation(
             : typeof err === 'string'
             ? err
             : JSON.stringify(err);
-        ui.log.warn(`${toolOrOpts.toolName}: ${message}`);
-        return;
+        detail = `: ${message}`;
       }
-      ui.log.step(`✔ ${toolOrOpts.toolName}`);
+      const line = `${label} ${toolOrOpts.toolName}${detail}`;
+      if (failed) {
+        ui.log.warn(line);
+      } else {
+        ui.log.step(line);
+      }
     },
 
     outroSuccess(message: string): void {

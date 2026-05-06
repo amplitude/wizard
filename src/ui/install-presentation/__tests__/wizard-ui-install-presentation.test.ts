@@ -42,6 +42,36 @@ describe('createWizardUiInstallPresentation', () => {
     ).rejects.toThrow(/selectFramework is not available/);
   });
 
+  it('appendToolResult honors ok=false on object form (regression)', () => {
+    const ui = new LoggingUI();
+    const stepSpy = vi.spyOn(ui.log, 'step');
+    const warnSpy = vi.spyOn(ui.log, 'warn');
+    const sut = createWizardUiInstallPresentation(ui, 'test-surface');
+
+    sut.appendToolResult({ toolName: 'deploy' }, 'failed step', false);
+
+    expect(stepSpy).not.toHaveBeenCalled();
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    const line = warnSpy.mock.calls[0]?.[0] as string;
+    expect(line).toContain('✖');
+    expect(line).toContain('deploy');
+    expect(line).toContain('failed step');
+  });
+
+  it('appendToolResult uses summary on object form when ok=true', () => {
+    const ui = new LoggingUI();
+    const stepSpy = vi.spyOn(ui.log, 'step');
+    const sut = createWizardUiInstallPresentation(ui, 'test-surface');
+
+    sut.appendToolResult({ toolName: 'deploy' }, 'wrote 3 files', true);
+
+    expect(stepSpy).toHaveBeenCalledTimes(1);
+    const line = stepSpy.mock.calls[0]?.[0] as string;
+    expect(line).toContain('✔');
+    expect(line).toContain('deploy');
+    expect(line).toContain('wrote 3 files');
+  });
+
   it('delegates spinner to WizardUI.spinner', () => {
     const ui = new LoggingUI();
     const inner = {
