@@ -101,6 +101,20 @@ export const buildSessionFromOptions = async (
     agent: Boolean(options.agent),
     isTTY: Boolean(process.stdout.isTTY),
   });
+  // Classic mode (`--classic` / AMPLITUDE_WIZARD_CLASSIC=1) is interactive
+  // in the prompt sense — it uses terminal prompts — but does NOT have the
+  // Ink TUI screens (Intro picker / EmailCaptureScreen / ToSScreen) that
+  // own the signup-flag UX in TUI mode. It also has its own direct-signup
+  // call site in `default.ts:348` that depends on `--auth-onboarding` /
+  // `--email` / `--full-name` populating the session. `resolveMode` sees
+  // a TTY without `--ci`/`--yes`/`--force`/`--agent` and classifies that
+  // as `'interactive'`, which would make `buildSession` strip those very
+  // flags — silently regressing classic-mode direct signup. Omit
+  // `executionMode` for classic so `buildSession` falls through to its
+  // legacy "honor every flag" path.
+  const isClassicMode =
+    Boolean(options.classic) || process.env.AMPLITUDE_WIZARD_CLASSIC === '1';
+  const executionMode = isClassicMode ? undefined : mode;
   const session = buildSession({
     debug: options.debug as boolean | undefined,
     verbose: options.verbose as boolean | undefined,
@@ -128,7 +142,7 @@ export const buildSessionFromOptions = async (
     // refers to the Amplitude project (formerly workspace), not the app.
     appId: options.appId as string | undefined,
     appName: options.appName as string | undefined,
-    executionMode: mode,
+    executionMode,
   });
   bootstrapInstallDir(session.installDir);
   return session;
