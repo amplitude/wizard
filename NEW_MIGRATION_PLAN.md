@@ -68,8 +68,8 @@ Estimates are order-of-magnitude; parallelize where dependencies allow.
 
 ### Phase B — Presentation + orchestration decoupling (2–4 weeks)
 
-- Add a **`WizardInstallPresentation`-compatible** interface under `src/ui/` (names can match rewrite for easier porting of ideas).
-- Route **non-agent** or **thin** flows through it first (welcome / confirm / spinner), then expand to agent streaming once signatures stabilize.
+- **Done (scaffold):** `src/ui/install-presentation/` defines `WizardInstallPresentation` + `InstallSpinnerPresenter` (`install-presentation-types.ts`), a **`WizardUI` bridge** (`createWizardUiInstallPresentation`), and a **noop** harness (`createNoopWizardInstallPresentation`). Exported from `src/ui/index.ts`. Interactive prompts **throw** on the bridge (Ink still owns full-screen flows); optional streaming hooks mirror wizard-rewrite.
+- **Next:** Route **non-agent** or **thin** install steps through the adapter (welcome / confirm / spinner), then align `--agent` NDJSON with the same orchestration for human-visible events.
 - **Outcome:** Ink TUI and `--agent` NDJSON share one orchestration path for human-visible events.
 
 ### Phase C — Skills & context economics (2–6 weeks, can overlap B)
@@ -143,6 +143,7 @@ Keep `MIGRATION_PLAN.md` §6.6 **as written**: wizard stays TS-first and team-ow
 3. **Port pure `sanitizeWizardRequestInit` + tests** into `src/lib/gateway-request-sanitize.ts` (done) and **wire into the Claude Code subprocess** via `NODE_OPTIONS=--require …register-gateway-fetch-sanitize-bootstrap.js` (`gateway-fetch-sanitize-node-options.ts`, `agent-interface.ts`). Opt out with `AMPLITUDE_WIZARD_GATEWAY_SANITIZE_FETCH=0`. Skipped for direct `ANTHROPIC_API_KEY` and local-CLI paths.
 4. **Scaffold `src/lib/agent/`** with `model-config` extraction (no behavior change).
 5. **Prototype `load_skill`** per `SKILLS_AND_CONTEXT_DESIGN.md` §2 behind `AMPLITUDE_WIZARD_SKILL_TIERS=1`.
+6. ✅ **`WizardInstallPresentation` seam** — `src/ui/install-presentation/` + `createWizardUiInstallPresentation` / `createNoopWizardInstallPresentation` (Phase B scaffold).
 
 ---
 
