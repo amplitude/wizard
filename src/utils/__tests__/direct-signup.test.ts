@@ -141,6 +141,45 @@ describe('performDirectSignup', () => {
     }
   });
 
+  it('accepts properties values with or without optional metadata', async () => {
+    // The wire contract treats each property's value as opaque to the
+    // wizard — `description` is cosmetic and may be removed without
+    // notice. This test pins that contract: a parse must succeed on
+    // BOTH `{ type }` (no description) and an entirely empty value
+    // `{}` (no fields at all). If you tighten `NeedsInformationSchema`
+    // and break this, the wizard would silently fail-closed when the
+    // server changes the JSON-Schema property descriptors.
+    let observedRequiredFields: string[] | null = null;
+    server.use(
+      http.post(PROVISIONING_URL, () =>
+        HttpResponse.json({
+          type: 'needs_information',
+          needs_information: {
+            schema: {
+              type: 'object',
+              properties: {
+                full_name: { type: 'string' }, // no description
+                future_field: {}, // no fields at all
+              },
+              required: ['full_name'],
+            },
+          },
+        }),
+      ),
+    );
+
+    const result = await performDirectSignup({
+      email: 'ada@example.com',
+      zone: 'us',
+    });
+
+    expect(result.kind).toBe('needs_information');
+    if (result.kind === 'needs_information') {
+      observedRequiredFields = result.requiredFields;
+    }
+    expect(observedRequiredFields).toEqual(['full_name']);
+  });
+
   it('omits full_name from the request body when fullName is not supplied', async () => {
     let observedBody: Record<string, unknown> | null = null;
     server.use(
