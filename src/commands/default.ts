@@ -697,13 +697,36 @@ export const defaultCommand: CommandModule = {
               // setRegion() flips regionForced back to false once the new
               // region is chosen, releasing the wait against the right zone.
               //
-              // For create-account onboarding, also wait for ToS acceptance. Otherwise the
-              // auth task races past EmailCapture / ToS and opens the OAuth
-              // browser before the user has filled in their email or
-              // accepted the terms — which is the entire point of the
-              // signup flow. See `isAuthTaskGateReady` for the full
-              // predicate (kept testable, since the inline version
-              // silently regressed when its conditions drifted).
+              // For create-account onboarding, also wait for the signup
+              // ceremony to settle (signupAuth set or signupAbandoned).
+              // Otherwise the auth task races past the SignupEmail /
+              // SigningUp / ToS / SignupFullName chain and opens the
+              // OAuth browser concurrently with the in-flight POST —
+              // two parallel auth attempts and a UX race the user can't
+              // win. See `isAuthTaskGateReady` for the full predicate
+              // (kept testable, since the inline version silently
+              // regressed when its conditions drifted).
+              //
+              // **Settle hazard.** This wait depends on `SigningUpScreen`
+              // eventually writing one of `signupAuth` / `signupAbandoned`
+              // via `useAsyncEffect`. Three paths guarantee that happens:
+              //
+              //   1. Network success → wrapper returns `success` →
+              //      `setSignupAuth(...)`.
+              //   2. Network non-success or unrecognized response →
+              //      wrapper returns `redirect` / `error` →
+              //      `setSignupAbandoned(true)`.
+              //   3. Network hang past axios's `REQUEST_TIMEOUT_MS`
+              //      (10s, in `direct-signup.ts`) → axios throws →
+              //      wrapper catches → `error` arm → abandon.
+              //
+              // `useAsyncEffect`'s AbortController fires on unmount;
+              // re-mount fires a fresh effect. `/exit` short-circuits
+              // via `OutroKind.Cancel` (the router teleports to Outro
+              // and the process exits, releasing this Promise via GC).
+              // The one path that would hang is a raw async-effect
+              // without the timeout — don't strip the `REQUEST_TIMEOUT_MS`
+              // from `direct-signup.ts` without re-thinking this gate.
               await new Promise<void>((resolve) => {
                 if (isAuthTaskGateReady(tui.store.session)) {
                   resolve();
