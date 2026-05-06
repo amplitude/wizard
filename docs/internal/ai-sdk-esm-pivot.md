@@ -13,12 +13,15 @@ SDK** (`ai`, `@ai-sdk/anthropic`), **Vertex-safe fetch** (existing
    opt-in probe `maybeRunAiSdkGatewayProbe` after gateway env is configured
    (`AMPLITUDE_WIZARD_AI_SDK_PROBE=1`). Optional CI gate:
    `AMPLITUDE_WIZARD_AI_SDK_PROBE_STRICT=1`.
-2. **Dual harness:** `runAgent` flag to route **first user turn** (or smoke
+2. **Console dual path (opt-in):** `AMPLITUDE_WIZARD_AI_SDK_CONSOLE=1` routes
+   `queryConsole` through `streamText` + `sanitizingFetch` + `getConsoleQueryStack`;
+   local CLI runs stay on Agent SDK.
+3. **Dual harness:** `runAgent` flag to route **first user turn** (or smoke
    path) through `streamText` + tools stub — grow until MCP + wizard-tools
    parity.
-3. **Default the AI SDK path** when evals + proxy smoke are green; keep Agent
+4. **Default the AI SDK path** when evals + proxy smoke are green; keep Agent
    SDK as fallback for one release if needed.
-4. **Packaging:** `package.json` now exposes a root **`exports` map** (still CJS
+5. **Packaging:** `package.json` now exposes a root **`exports` map** (still CJS
    artifacts) — next step for true ESM is **2.0** with `import` conditions once
    the runtime is one stack, not two.
 
@@ -28,6 +31,7 @@ SDK** (`ai`, `@ai-sdk/anthropic`), **Vertex-safe fetch** (existing
 | ---------------------------------------- | ---------------------------------------------------------------------------------------- |
 | `AMPLITUDE_WIZARD_AI_SDK_PROBE=1`        | After `initializeAgent`, run one short `streamText` through gateway + `sanitizingFetch`. |
 | `AMPLITUDE_WIZARD_AI_SDK_PROBE_STRICT=1` | Throw if the probe errors (CI / dogfood).                                                |
+| `AMPLITUDE_WIZARD_AI_SDK_CONSOLE=1`      | Route **ConsoleView** slash prompts through Vercel AI SDK (not local CLI; tools omitted vs Agent SDK path). |
 
 ## Relation to open stacked PRs
 

@@ -5,6 +5,10 @@ export {
   selectModel,
 } from './model-config.js';
 export {
+  getConsoleQueryStack,
+  type ConsoleQueryStackKind,
+} from './console-query-stack.js';
+export {
   enforceAiSdkProbeStrict,
   maybeRunAiSdkGatewayProbe,
 } from './ai-sdk-gateway-probe.js';

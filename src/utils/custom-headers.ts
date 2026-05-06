@@ -28,3 +28,20 @@ export function createCustomHeaders(): {
     },
   };
 }
+
+/**
+ * Reverse {@link createCustomHeaders}'s `encode()` output into a header map
+ * for clients that take explicit `headers` (e.g. Vercel AI SDK provider).
+ */
+export function parseAnthropicCustomHeaderBlock(
+  encoded: string,
+): Record<string, string> {
+  const out: Record<string, string> = {};
+  for (const line of encoded.split('\n')) {
+    if (!line.trim()) continue;
+    const idx = line.indexOf(': ');
+    if (idx <= 0) continue;
+    out[line.slice(0, idx)] = line.slice(idx + 2);
+  }
+  return out;
+}
