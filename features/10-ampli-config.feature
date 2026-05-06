@@ -58,8 +58,10 @@ Feature: ampli.json project configuration
     And the project should be considered configured
     When the wizard merges ampli.json with:
       | Version | 42.0.0 |
-    Then "ampli.json" should contain ProjectId "0adfd673-c53b-462c-bf88-84c7605286a4"
-    And "ampli.json" should not contain a WorkspaceId field
+    # Phase G-1: writes go to the canonical binding file, not the legacy
+    # ampli.json. The migration drops `WorkspaceId` and emits `ProjectId` only.
+    Then ".amplitude/project-binding.json" should contain ProjectId "0adfd673-c53b-462c-bf88-84c7605286a4"
+    And ".amplitude/project-binding.json" should not contain a WorkspaceId field
 
   Scenario: ampli.json exists but only has SourceId (minimal configuration)
     Given "ampli.json" exists in the project directory with content:
@@ -101,8 +103,11 @@ Feature: ampli.json project configuration
     And the user should be warned about merge conflicts
   # ── Writing ampli.json ────────────────────────────────────────────────────
 
-  Scenario: Wizard writes ampli.json after project setup
+  Scenario: Wizard writes canonical project binding after project setup
+    # Phase G-1: writes go only to <installDir>/.amplitude/project-binding.json.
+    # The legacy ampli.json mirror is no longer written.
     Given there is no "ampli.json" in the project directory
+    And there is no ".amplitude/project-binding.json" in the project directory
     When the wizard writes ampli.json with:
       | OrgId     |                                36958 |
       | ProjectId | 0adfd673-c53b-462c-bf88-84c7605286a4 |
@@ -110,7 +115,8 @@ Feature: ampli.json project configuration
       | Branch    | main                                 |
       | Path      | ./src/ampli                          |
       | Runtime   | node.js:typescript-ampli             |
-    Then "ampli.json" should exist in the project directory
+    Then ".amplitude/project-binding.json" should exist in the project directory
+    And "ampli.json" should not exist in the project directory
     And it should contain OrgId "36958"
     And it should contain SourceId "478440ff-666e-4998-8278-84ff7488dfa1"
     And it should contain ProjectId "0adfd673-c53b-462c-bf88-84c7605286a4"
