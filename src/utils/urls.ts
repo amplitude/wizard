@@ -70,15 +70,34 @@ export async function detectRegionFromToken(
  * `ANTHROPIC_BASE_URL` and appends `/v1/messages`.
  *
  * Always defaults to the prod gateway — running a local LLM gateway is rare
- * and must be opt-in. Set `WIZARD_LLM_PROXY_URL` to point the wizard at a
- * local proxy (e.g. when developing the gateway itself). Even in dev/test
- * we default to prod, because (a) most contributors don't run a local
- * gateway, and (b) tests don't make real network calls anyway — they mock.
+ * and must be opt-in.
+ *
+ * Resolution precedence (first match wins):
+ *   1. `WIZARD_LLM_PROXY_URL` — full URL override (LiteLLM, local proxy, etc.).
+ *   2. `WIZARD_ZONE` — region selector (`us` | `eu`). Used by CI so the
+ *      eval / bench harness can hit a specific gateway without threading a
+ *      stored zone config through. Invalid values are ignored (fall through).
+ *   3. `host` argument — derived from the user's stored config zone.
+ *   4. US default.
  */
 export const getLlmGatewayUrlFromHost = (host: string) => {
   const proxyOverride = process.env.WIZARD_LLM_PROXY_URL;
   if (proxyOverride) {
     return proxyOverride;
+  }
+
+  // CI / harness path: explicit zone override that bypasses host derivation
+  // entirely. Lets eval and benchmark workflows hit `core.amplitude.com/wizard`
+  // or `core.eu.amplitude.com/wizard` without depending on a stored OAuth
+  // session's zone. Trim before truthiness so empty / whitespace-only values
+  // fall through to the host-derived default rather than producing a
+  // mismatched URL.
+  const zoneOverride = process.env.WIZARD_ZONE?.trim().toLowerCase();
+  if (zoneOverride === 'eu') {
+    return 'https://core.eu.amplitude.com/wizard';
+  }
+  if (zoneOverride === 'us') {
+    return 'https://core.amplitude.com/wizard';
   }
 
   if (host.includes('eu.amplitude.com')) {
