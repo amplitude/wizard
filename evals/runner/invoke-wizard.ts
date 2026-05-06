@@ -142,9 +142,13 @@ export async function runLive(options: InvokeWizardOptions): Promise<Artifact> {
     '--yes',
     '--install-dir',
     workingDir,
-    '--integration',
-    scenario.integrationHint,
   ];
+  // useDetection defaults to `true` (pass `--integration`). Set
+  // `false` on a scenario to drop the hint and grade the wizard's
+  // detection pipeline against `integrationHint` as ground truth.
+  if (scenario.useDetection) {
+    args.push('--integration', scenario.integrationHint);
+  }
   if (auth.kind === 'api-key-bypass') {
     args.push('--api-key', auth.apiKey);
   }
