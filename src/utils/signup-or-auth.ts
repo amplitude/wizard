@@ -115,7 +115,6 @@ export type SignupAttemptStatus =
    */
   | 'browser_fallback_after_signup';
 
-
 export const AGENTIC_SIGNUP_ATTEMPTED_EVENT = 'agentic signup attempted';
 
 export type AgenticSignupAttemptedProperties = {

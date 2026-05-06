@@ -20,7 +20,5 @@
  *   }
  */
 export function assertNever(value: never): never {
-  throw new Error(
-    `assertNever: unexpected value ${JSON.stringify(value)}`,
-  );
+  throw new Error(`assertNever: unexpected value ${JSON.stringify(value)}`);
 }
