@@ -180,6 +180,80 @@ describe('performDirectSignup', () => {
     expect(observedRequiredFields).toEqual(['full_name']);
   });
 
+  // ── needs_information `required` shape gate (schema-layer) ───────────
+  //
+  // The schema's `.refine()` enforces that `required` is exactly
+  // `['full_name']`. Any other shape (additional fields, missing fields,
+  // empty array, substituted field) means the server's contract has
+  // drifted past what this client supports — the parse fails, and the
+  // type-aware fall-through detects `type === 'needs_information'` and
+  // returns `kind: 'error'` with `code: 'unsupported_required_shape'`.
+  // The wrapper maps that code to a distinct telemetry status.
+
+  it.each([
+    ['unknown field only', ['company']],
+    ['mixed full_name + unknown', ['full_name', 'company']],
+    ['empty required array', []],
+    ['unsupported substitute', ['email_verified']],
+    ['only full_name but with extras', ['full_name', 'phone']],
+  ])(
+    'rejects needs_information with %s as unsupported_required_shape',
+    async (_label, requiredFields) => {
+      server.use(
+        http.post(PROVISIONING_URL, () =>
+          HttpResponse.json({
+            type: 'needs_information',
+            needs_information: {
+              schema: {
+                type: 'object',
+                properties: Object.fromEntries(
+                  requiredFields.map((f) => [f, { type: 'string' }]),
+                ),
+                required: requiredFields,
+              },
+            },
+          }),
+        ),
+      );
+
+      const result = await performDirectSignup({
+        email: 'ada@example.com',
+        zone: 'us',
+      });
+
+      expect(result.kind).toBe('error');
+      if (result.kind === 'error') {
+        expect(result.code).toBe('unsupported_required_shape');
+      }
+    },
+  );
+
+  it('accepts the canonical `["full_name"]` shape (schema gate passes)', async () => {
+    // Companion to the table above: pin the one shape that DOES pass
+    // through the schema, so the gate's positive path is also covered.
+    server.use(
+      http.post(PROVISIONING_URL, () =>
+        HttpResponse.json({
+          type: 'needs_information',
+          needs_information: {
+            schema: {
+              type: 'object',
+              properties: { full_name: { type: 'string' } },
+              required: ['full_name'],
+            },
+          },
+        }),
+      ),
+    );
+
+    const result = await performDirectSignup({
+      email: 'ada@example.com',
+      zone: 'us',
+    });
+
+    expect(result.kind).toBe('needs_information');
+  });
+
   it('omits full_name from the request body when fullName is not supplied', async () => {
     let observedBody: Record<string, unknown> | null = null;
     server.use(

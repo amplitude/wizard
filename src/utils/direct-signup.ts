@@ -63,13 +63,32 @@ const RedirectSchema = z.object({
 // can still parse a response from the live server. There's a regression
 // test (`accepts properties values with or without optional metadata`) that
 // pins both shapes; keep it green if you change this.
+//
+// **Supported `required` shape:** the wizard's TUI ceremony has exactly one
+// collection screen (`SignupFullNameScreen`), so the only `required` value
+// it can act on is exactly `['full_name']`. The `.refine()` enforces this at
+// the parse layer — anything else (additional fields, missing fields, empty
+// array, substituted field) fails the parse and we route through the
+// type-aware handler below to `kind: 'error'` with `code:
+// 'unsupported_required_shape'`. That code maps to a distinct
+// `needs_information_unsupported` telemetry status in the wrapper so the
+// drift is visible in the funnel before users notice. To extend support,
+// update both this refine and `SUPPORTED_REQUIRED` together.
+const SUPPORTED_REQUIRED: ReadonlyArray<string> = ['full_name'];
 const NeedsInformationSchema = z.object({
   type: z.literal('needs_information'),
   needs_information: z.object({
     schema: z.object({
       type: z.literal('object'),
       properties: z.record(z.string(), z.unknown()),
-      required: z.array(z.string()).min(1),
+      required: z
+        .array(z.string())
+        .refine(
+          (arr) =>
+            arr.length === SUPPORTED_REQUIRED.length &&
+            SUPPORTED_REQUIRED.every((field) => arr.includes(field)),
+          { message: 'unsupported_required_shape' },
+        ),
     }),
   }),
 });
@@ -185,6 +204,31 @@ export async function performDirectSignup(
     return {
       kind: 'needs_information',
       requiredFields: parsedNeeds.data.needs_information.schema.required,
+    };
+  }
+  // The schema's `.refine()` rejected the `required` shape (e.g. the
+  // server added a new field the wizard doesn't have a screen for, or
+  // returned an empty `required` array). Detect this here — by peeking
+  // at the response's `type` field — so we can return a distinct error
+  // code instead of falling through to the generic "Unexpected response"
+  // path. The wrapper maps `code: 'unsupported_required_shape'` to
+  // `needs_information_unsupported` telemetry so the wire-contract drift
+  // is visible in the funnel.
+  const responseType =
+    typeof response.data === 'object' &&
+    response.data !== null &&
+    'type' in response.data
+      ? (response.data as { type: unknown }).type
+      : undefined;
+  if (responseType === 'needs_information') {
+    log.warn('[direct-signup] needs_information with unsupported shape', {
+      supported: SUPPORTED_REQUIRED,
+    });
+    return {
+      kind: 'error',
+      code: 'unsupported_required_shape',
+      message:
+        'Server requested fields the wizard does not support — falling back to browser auth.',
     };
   }
 

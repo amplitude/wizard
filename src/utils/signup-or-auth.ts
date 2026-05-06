@@ -115,28 +115,6 @@ export type SignupAttemptStatus =
    */
   | 'browser_fallback_after_signup';
 
-/**
- * The single `required` shape the wizard's TUI ceremony knows how to
- * collect. Anything else (additional fields, missing fields, empty array)
- * means the server's contract has drifted past what this client supports
- * — fall back to OAuth and emit `needs_information_unsupported` telemetry
- * so the drift is visible.
- */
-const SUPPORTED_NEEDS_INFORMATION_REQUIRED: ReadonlyArray<string> = [
-  'full_name',
-];
-
-function isSupportedNeedsInformationShape(
-  requiredFields: readonly string[],
-): boolean {
-  if (requiredFields.length !== SUPPORTED_NEEDS_INFORMATION_REQUIRED.length) {
-    return false;
-  }
-  for (const field of SUPPORTED_NEEDS_INFORMATION_REQUIRED) {
-    if (!requiredFields.includes(field)) return false;
-  }
-  return true;
-}
 
 export const AGENTIC_SIGNUP_ATTEMPTED_EVENT = 'agentic signup attempted';
 
@@ -249,26 +227,6 @@ export async function performSignupOrAuth(
     return { kind: 'redirect' };
   }
   if (result.kind === 'needs_information') {
-    if (!isSupportedNeedsInformationShape(result.requiredFields)) {
-      // Server asked for fields the wizard doesn't have screens to
-      // collect (or asked for nothing — empty array). The TUI ceremony
-      // can't make progress. Emit a distinct telemetry status so the
-      // drift is visible in the funnel, then surface as `error` so the
-      // SigningUpScreen falls through to OAuth via the abandon path.
-      log.warn('direct signup → needs_information with unsupported shape', {
-        requiredFields: result.requiredFields,
-        supported: SUPPORTED_NEEDS_INFORMATION_REQUIRED,
-      });
-      trackSignupAttempt({
-        status: 'needs_information_unsupported',
-        zone: input.zone,
-      });
-      return {
-        kind: 'error',
-        message:
-          'Server requested fields the wizard does not support — falling back to browser auth.',
-      };
-    }
     log.debug('direct signup → needs_information', {
       requiredFields: result.requiredFields,
     });
@@ -279,8 +237,21 @@ export async function performSignupOrAuth(
     };
   }
   if (result.kind === 'error') {
-    log.debug('direct signup → error', { message: result.message });
-    trackSignupAttempt({ status: 'signup_error', zone: input.zone });
+    log.debug('direct signup → error', {
+      message: result.message,
+      code: result.code,
+    });
+    // The schema's `.refine()` on `required` rejects shapes the wizard
+    // can't act on, and `direct-signup.ts` surfaces that with
+    // `code: 'unsupported_required_shape'`. Emit a distinct telemetry
+    // status so the wire-contract drift is visible separately from
+    // generic signup errors — one funnel query reveals when the server
+    // adds a required field the wizard doesn't yet handle.
+    const status: SignupAttemptStatus =
+      result.code === 'unsupported_required_shape'
+        ? 'needs_information_unsupported'
+        : 'signup_error';
+    trackSignupAttempt({ status, zone: input.zone });
     return { kind: 'error', message: result.message };
   }
 
