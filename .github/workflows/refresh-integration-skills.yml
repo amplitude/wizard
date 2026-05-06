@@ -5,6 +5,11 @@ on:
     # Every Monday at 09:00 UTC
     - cron: '0 9 * * 1'
   workflow_dispatch:
+    inputs:
+      context_hub_tag:
+        description: 'Optional context-hub release tag (e.g. v1.2.3). Leave empty to use latest.'
+        required: false
+        type: string
   # TODO: add repository_dispatch trigger once context-hub's build-release.yml
   # fires a dispatch event to this repo on release. Requires a PAT with repo
   # scope stored as WIZARD_DISPATCH_TOKEN in context-hub secrets.
@@ -24,6 +29,11 @@ jobs:
         run: bash scripts/refresh-integration-skills.sh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Pin context-hub release (e.g. v1.2.3). Two ways to set it:
+          #   - workflow_dispatch input (one-off manual override) — wins when set
+          #   - repo Actions variable `vars.CONTEXT_HUB_TAG` (persistent pin)
+          # When neither is set, script uses releases/latest (matches refresh-skills.sh).
+          CONTEXT_HUB_TAG: ${{ inputs.context_hub_tag || vars.CONTEXT_HUB_TAG }}
 
       - name: Check for changes
         id: diff

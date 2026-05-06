@@ -1,5 +1,5 @@
 /**
- * Zone resolution — single source of truth across TUI, agent, CI, classic.
+ * Zone resolution — single source of truth across TUI, agent, CI.
  *
  * Invariant: `session.region` is set ONLY by writes that reflect user intent
  * (--region flag / env var / /region slash / RegionSelect pick / checkpoint

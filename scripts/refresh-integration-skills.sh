@@ -6,8 +6,12 @@
 #   Override: CONTEXT_HUB_DIST=/path/to/dist/skills
 #
 # Remote mode (CI / no local build):
-#   Pulls integration-*.zip from the latest amplitude/context-hub GitHub release.
+#   Pulls integration-*.zip from an amplitude/context-hub GitHub release.
 #   Requires the GitHub CLI (gh) to be installed and authenticated.
+#
+#   By default uses the repository's latest release. Pin for reproducible CI
+#   or release branches:
+#     CONTEXT_HUB_TAG=v1.2.3 pnpm skills:refresh:integration
 #
 # Usage:
 #   pnpm skills:refresh:integration
@@ -51,12 +55,16 @@ else
   TMP_DIR=$(mktemp -d)
   trap "rm -rf '$TMP_DIR'" EXIT
 
-  echo "Refreshing integration skills from $REPO (latest release)..."
-  LATEST_TAG=$(gh api "repos/$REPO/releases/latest" --jq '.tag_name')
-  echo "Latest release: $LATEST_TAG"
+  if [[ -n "${CONTEXT_HUB_TAG:-}" ]]; then
+    RELEASE_TAG="$CONTEXT_HUB_TAG"
+    echo "Refreshing integration skills from $REPO (pinned release: $RELEASE_TAG)..."
+  else
+    RELEASE_TAG=$(gh api "repos/$REPO/releases/latest" --jq '.tag_name')
+    echo "Refreshing integration skills from $REPO (latest release: $RELEASE_TAG)..."
+  fi
 
   cd "$TMP_DIR"
-  gh release download "$LATEST_TAG" --repo "$REPO" --pattern "integration-*.zip" --clobber
+  gh release download "$RELEASE_TAG" --repo "$REPO" --pattern "integration-*.zip" --clobber
 
   count=0
   for zip in integration-*.zip; do

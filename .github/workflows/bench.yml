@@ -1,0 +1,55 @@
+name: Bench
+
+# Runs the offline performance bench harness (`pnpm bench`) and uploads
+# `benchmarks/results.json` as a CI artifact.
+#
+# Today the harness has 3 live benches (prefix-size, bundle-size,
+# tool-exec-time) and 2 stubbed benches (cache-hits, first-token-latency)
+# that depend on the Phase D-3 AI-SDK runner. CI runs all five — stubbed
+# rows emit `skipped` and don't fail the job.
+#
+# This workflow is a foundation: it captures `results.json` per run.
+# Diff-against-baseline assertions arrive in a follow-up once the
+# numbers are stable across a few green main runs.
+
+on:
+  push:
+    branches:
+      - main
+  pull_request:
+    paths:
+      - 'benchmarks/**'
+      - 'src/lib/commandments**'
+      - 'skills/**'
+      - 'package.json'
+      - '.github/workflows/bench.yml'
+  workflow_dispatch:
+
+jobs:
+  bench:
+    name: Bench harness
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Install pnpm
+        uses: pnpm/action-setup@eae0cfeb286e66ffb5155f1a79b90583a127a68b # v2
+        with:
+          version: 10.23.0
+          run_install: false
+      - name: Set up Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version-file: 'package.json'
+          cache: 'pnpm'
+      - name: Install dependencies with pnpm
+        run: pnpm install --frozen-lockfile
+      - name: Run bench harness
+        run: pnpm bench
+      - name: Upload results
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: bench-results-${{ github.sha }}
+          path: benchmarks/results.json
+          if-no-files-found: error
+          retention-days: 30

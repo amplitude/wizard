@@ -743,8 +743,8 @@ async function runAgentWizardBody(
     session.credentials.accessToken = accessToken;
   }
   // Derive cloudRegion from session via the centralized resolver.
-  // readDisk: true — the agent runner may be entered via paths (classic UI,
-  // resumed sessions) where the RegionSelect invariant isn't guaranteed.
+  // readDisk: true — the agent runner may be entered via paths (resumed
+  // sessions, TUI fallback) where the RegionSelect invariant isn't guaranteed.
   const cloudRegion: import('../utils/types.js').CloudRegion = resolveZone(
     session,
     DEFAULT_AMPLITUDE_ZONE,

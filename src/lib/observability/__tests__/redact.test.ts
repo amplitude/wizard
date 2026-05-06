@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, afterEach, vi } from 'vitest';
 import fc from 'fast-check';
 import { redact, redactString } from '../redact';
 
@@ -169,5 +169,72 @@ describe('redact (property-based)', () => {
         expect(result).toBe(str);
       }),
     );
+  });
+});
+
+// ── WIZARD_OAUTH_TOKEN env-value redaction (FINAL_NEW_MIGRATION_PLAN §7.5) ──
+//
+// The CI org secret carrying the gateway bearer must never reach stdout, log
+// files, or NDJSON output. The value is captured at module load (env vars
+// don't change mid-run) and substring-redacted from every string passed to
+// `redactString` / `redact`. This test forces a module reload with the env
+// var set so we exercise the real capture path.
+
+describe('redactString — WIZARD_OAUTH_TOKEN value redaction', () => {
+  const original = process.env.WIZARD_OAUTH_TOKEN;
+
+  afterEach(() => {
+    if (original === undefined) {
+      delete process.env.WIZARD_OAUTH_TOKEN;
+    } else {
+      process.env.WIZARD_OAUTH_TOKEN = original;
+    }
+    vi.resetModules();
+  });
+
+  it('redacts the literal WIZARD_OAUTH_TOKEN value from a freeform log line', async () => {
+    // Use a sentinel value that doesn't match any other regex (no `eyJ`
+    // JWT prefix, no 32-char hex, no Bearer wrapper) so we know the env-
+    // value path is what's redacting it.
+    process.env.WIZARD_OAUTH_TOKEN = 'my-super-secret-ci-token-xyz';
+    vi.resetModules();
+    const fresh = (await import('../redact')) as typeof import('../redact');
+    const line = `agent attempted to log token: my-super-secret-ci-token-xyz at startup`;
+    const result = fresh.redactString(line);
+    expect(result).not.toContain('my-super-secret-ci-token-xyz');
+    expect(result).toContain('[REDACTED_WIZARD_OAUTH_TOKEN]');
+  });
+
+  it('redacts WIZARD_OAUTH_TOKEN value when it appears inside a structured object', async () => {
+    process.env.WIZARD_OAUTH_TOKEN = 'my-super-secret-ci-token-xyz';
+    vi.resetModules();
+    const fresh = (await import('../redact')) as typeof import('../redact');
+    const result = fresh.redact({
+      msg: 'auth attempt',
+      token: 'my-super-secret-ci-token-xyz',
+    }) as Record<string, unknown>;
+    // Top-level string field with the literal value is replaced.
+    expect(result.token).toBe('[REDACTED_WIZARD_OAUTH_TOKEN]');
+  });
+
+  it('redacts WIZARD_OAUTH_TOKEN values short enough to NOT trigger the >=8 length floor only when long enough', async () => {
+    // Very short values (a typo / placeholder like `x`) are skipped to
+    // avoid pathological replacement. This is a safety floor.
+    process.env.WIZARD_OAUTH_TOKEN = 'x';
+    vi.resetModules();
+    const fresh = (await import('../redact')) as typeof import('../redact');
+    expect(fresh.redactString('error: code x failed at start')).toContain('x');
+  });
+
+  it('redacts the env var key in structured payloads regardless of value', async () => {
+    // SENSITIVE_KEYS now includes `wizard_oauth_token` — even without the env
+    // var being set, a payload that names the key directly gets redacted.
+    delete process.env.WIZARD_OAUTH_TOKEN;
+    vi.resetModules();
+    const fresh = (await import('../redact')) as typeof import('../redact');
+    const result = fresh.redact({
+      WIZARD_OAUTH_TOKEN: 'whatever-the-value-is',
+    }) as Record<string, unknown>;
+    expect(result.WIZARD_OAUTH_TOKEN).toBe('[REDACTED]');
   });
 });

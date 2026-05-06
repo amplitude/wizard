@@ -5,6 +5,11 @@ on:
     # Every Monday at 09:00 UTC
     - cron: '0 9 * * 1'
   workflow_dispatch:
+    inputs:
+      mcp_marketplace_ref:
+        description: 'Optional git ref (tag, branch, or SHA) on amplitude/mcp-marketplace. Leave empty for default branch tip.'
+        required: false
+        type: string
 
 jobs:
   refresh:
@@ -21,6 +26,7 @@ jobs:
         run: bash scripts/refresh-instrumentation-skills.sh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          MCP_MARKETPLACE_REF: ${{ inputs.mcp_marketplace_ref }}
 
       - name: Check for changes
         id: diff

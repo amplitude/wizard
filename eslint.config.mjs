@@ -22,6 +22,12 @@ export default tseslint.config(
       'e2e-tests/test-applications/**',
       '.claude/worktrees/**',
       '.claude/knowledge/**',
+      // Eval scenario fixtures are raw framework starters — out of
+      // scope for the wizard repo's lint config.
+      'evals/scenarios/**/pristine/**',
+      'evals/scenarios/**/golden/working/**',
+      'evals/reports/**',
+      'benchmarks/**',
     ],
   },
 

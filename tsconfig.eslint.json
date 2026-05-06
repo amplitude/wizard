@@ -11,9 +11,13 @@
     "test/**/*",
     "e2e-tests/**/*",
     "features/**/*",
-    "types/**/*"
+    "types/**/*",
+    "evals/**/*"
   ],
   "exclude": [
-    "e2e-tests/test-applications/**/*"
+    "e2e-tests/test-applications/**/*",
+    "evals/scenarios/**/pristine/**/*",
+    "evals/scenarios/**/golden/working/**/*",
+    "evals/reports/**/*"
   ]
 }

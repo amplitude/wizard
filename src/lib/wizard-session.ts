@@ -1002,8 +1002,8 @@ export function buildSession(args: {
   acceptTos?: boolean;
   /**
    * From --region CLI flag (--zone is accepted as an alias). Lets non-TUI
-   * modes (agent/CI/classic) pick the data center for direct signup, since
-   * they have no RegionSelect screen. When provided, pre-populates the
+   * modes (agent/CI) pick the data center for direct signup, since they
+   * have no RegionSelect screen. When provided, pre-populates the
    * session's region so RegionSelect is skipped in the TUI flow too.
    */
   region?: AmplitudeZone;
