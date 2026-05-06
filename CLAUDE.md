@@ -102,7 +102,29 @@ Skills are bundled markdown-based instructions that the agent can follow during 
 - `skills/instrumentation/` — Analytics instrumentation skills (event discovery, pattern matching, diff intake)
 - `skills/taxonomy/` — Quickstart taxonomy agent and chart/dashboard planning skills
 
-All three categories are owned and built by `amplitude/context-hub` and pulled into the wizard via `pnpm skills:refresh`. context-hub is the single source of truth: integration skills are generated from `transformation-config/`, taxonomy and instrumentation skills live in `context-hub/skills/`. Run `pnpm skills:refresh` to pull the latest from context-hub's GitHub release (or from a local `../context-hub/dist/skills/` build if that directory exists).
+All three categories are owned and built by `amplitude/context-hub` and pulled into the wizard via `pnpm skills:refresh`. context-hub is the single source of truth: integration skills are generated from `transformation-config/`, taxonomy and instrumentation skills live in `context-hub/skills/`.
+
+**Pinned, reproducible refresh.** The exact context-hub release used by wizard skills is pinned in `.context-hub-version` (e.g. `v1.2.6`). `pnpm skills:refresh` downloads the ZIPs attached to **that** release tag — every refresh produces the same skills regardless of who runs it.
+
+**Source selection (in order):**
+
+1. `CONTEXT_HUB_DIST=/path/to/dist/skills` — explicit local override
+2. `WIZARD_FORCE_REMOTE_SKILLS=1` — always use the GitHub release (ignore any sibling clone)
+3. `WIZARD_USE_LOCAL_SKILLS=1` + sibling `../context-hub/dist/skills/` — opt in to local-dev mode (must run `cd ../context-hub && pnpm build` first)
+4. **Default:** download the pinned tag from `amplitude/context-hub` releases
+
+> **Why this matters:** before this pin existed, the script silently preferred any sibling `../context-hub/` clone and would ship `version: dev` SKILL.md frontmatter into `wizard/skills/` whenever a developer happened to have one checked out. PR #538 caught the regression. The new default is "remote, pinned" — local sibling mode is opt-in.
+
+**Dev-version guard.** After every refresh the script greps for `version: dev` in any extracted SKILL.md and **fails the script** if found, unless `WIZARD_ALLOW_DEV_SKILLS=1` is explicitly set (testing only — never commit the result).
+
+**Bumping the pin:**
+
+```bash
+echo "v1.2.7" > .context-hub-version
+pnpm skills:verify-pin    # confirms the tag exists on amplitude/context-hub
+pnpm skills:refresh       # re-downloads with the new tag
+git commit .context-hub-version skills/
+```
 
 ### Steps (`src/steps/`)
 
@@ -199,7 +221,8 @@ pnpm test:proxy    # validate proxy health, models, streaming
 pnpm lint          # run prettier + eslint checks
 pnpm fix           # auto-fix lint issues
 pnpm flows         # render docs/flows.md diagrams to docs/diagrams/
-pnpm skills:refresh # pull all skills from context-hub (integration, instrumentation, taxonomy)
+pnpm skills:refresh   # pull all skills from context-hub (pinned tag in .context-hub-version)
+pnpm skills:verify-pin # confirm the pinned tag exists on amplitude/context-hub
 ```
 
 ## Testing

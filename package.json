@@ -144,6 +144,7 @@
     "test:proxy": "vitest run --config vitest.config.proxy.ts",
     "test:proxy:smoke": "vitest run --config vitest.config.proxy.ts -t 'proxy:smoke'",
     "skills:refresh": "bash scripts/refresh-skills.sh",
+    "skills:verify-pin": "node scripts/verify-context-hub-pin.mjs",
     "evals:run": "tsx evals/bin/run-eval.ts",
     "bench": "tsx benchmarks/index.ts",
     "sync": "git fetch origin main && git rebase origin/main && git push --force-with-lease"
