@@ -548,4 +548,83 @@ describe('performSignupOrAuth', () => {
       vi.useRealTimers();
     }
   });
+
+  // ── Abort-signal contract ────────────────────────────────────────────
+  //
+  // The wrapper threads `signal` through to axios (in `direct-signup`)
+  // AND gates `replaceStoredUser` behind a final `signal.aborted` check.
+  // Without that gate, a cancelled ceremony leaks tokens to disk: user
+  // navigates away mid-POST → in-flight wrapper still completes the
+  // success arm → tokens persist → next launch sees the user as signed
+  // in even though they explicitly backed out. This is exactly the
+  // "POST-after-unmount disk write" failure the reviewer flagged on
+  // PR #539.
+
+  it('aborting the signal pre-call returns error without persisting tokens', async () => {
+    const { performDirectSignup } = await import('../direct-signup.js');
+    // Even with success arm mocked, the pre-replaceStoredUser guard
+    // catches the abort and bails before persistence.
+    vi.mocked(performDirectSignup).mockResolvedValue({
+      kind: 'success',
+      tokens: {
+        accessToken: 'a',
+        idToken: 'i',
+        refreshToken: 'r',
+        expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+        zone: 'us',
+      },
+      dashboardUrl: null,
+    });
+    const { fetchAmplitudeUser } = await import('../../lib/api.js');
+    vi.mocked(fetchAmplitudeUser).mockResolvedValue({
+      id: 'user-123',
+      firstName: 'Ada',
+      lastName: 'Lovelace',
+      email: 'ada@example.com',
+      orgs: provisionedOrgs,
+    });
+    const { replaceStoredUser } = await import('../ampli-settings.js');
+
+    const controller = new AbortController();
+    controller.abort();
+
+    const result = await performSignupOrAuth({
+      email: 'ada@example.com',
+      fullName: 'Ada Lovelace',
+      zone: 'us',
+      signal: controller.signal,
+    });
+
+    // Wrapper returned the abort sentinel and skipped persistence.
+    expect(result.kind).toBe('error');
+    expect(replaceStoredUser).not.toHaveBeenCalled();
+  });
+
+  it('threads signal through to performDirectSignup', async () => {
+    // Pin the wire-level contract: whatever signal we pass to the
+    // wrapper must reach the underlying axios calls. Without this,
+    // the screen's useAsyncEffect AbortController couldn't actually
+    // cancel in-flight requests on unmount.
+    const { performDirectSignup } = await import('../direct-signup.js');
+    // direct-signup returns `requires_redirect` (wire vocabulary); the
+    // wrapper maps it to `redirect`. Mocking the inner kind here lets
+    // us short-circuit the wrapper before it reaches the success-arm
+    // tokens path while still exercising the signal pass-through.
+    vi.mocked(performDirectSignup).mockResolvedValue({
+      kind: 'requires_redirect',
+    });
+
+    const controller = new AbortController();
+
+    await performSignupOrAuth({
+      email: 'ada@example.com',
+      fullName: 'Ada Lovelace',
+      zone: 'us',
+      signal: controller.signal,
+    });
+
+    expect(performDirectSignup).toHaveBeenCalledWith(
+      expect.objectContaining({ signal: controller.signal }),
+    );
+  });
 });
