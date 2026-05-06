@@ -1,8 +1,18 @@
 /**
- * Runner-side tests for `runLive`. Spawn is mocked so we can exercise
- * the runner's arg construction and working-dir minting without
- * actually launching `pnpm` — slow, brittle, and pointless for this
- * level of assertion.
+ * Runner-side tests for `runLive` + `resolveWizardSpawn`.
+ *
+ * Spawn is mocked via `vi.mock('node:child_process')` so we can
+ * exercise the runner's arg construction and working-dir minting
+ * without actually launching `pnpm` — slow, brittle, and pointless
+ * for an arg-shape assertion. The pure helper `resolveWizardSpawn`
+ * is unit-tested directly.
+ *
+ * Regression classes covered:
+ *   - per-run working dir lands under `os.tmpdir()`, not the
+ *     scenario dir (so parallel runs don't collide)
+ *   - `useDetection: false` drops `--integration` from the spawn args
+ *   - `WIZARD_BIN` / `--wizard-bin` parameterizes the wizard binary
+ *     for Ring 3 packaging coverage; option beats env
  */
 
 import { EventEmitter } from 'node:events';
@@ -12,7 +22,11 @@ import { join } from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 
-import { runLive, type InvokeWizardOptions } from '../invoke-wizard.js';
+import {
+  resolveWizardSpawn,
+  runLive,
+  type InvokeWizardOptions,
+} from '../invoke-wizard.js';
 import type { Scenario } from '../scenario-schema.js';
 
 const spawnMock = vi.fn();
@@ -79,12 +93,14 @@ beforeEach(() => {
   writeFileSync(join(scenarioRoot, 'pristine', 'package.json'), '{}');
   // Snapshot env vars the runner reads so we don't leak across tests.
   savedEnv = {
+    WIZARD_BIN: process.env.WIZARD_BIN,
     WIZARD_OAUTH_TOKEN: process.env.WIZARD_OAUTH_TOKEN,
     EVALS_ALLOW_API_KEY_BYPASS: process.env.EVALS_ALLOW_API_KEY_BYPASS,
   };
   // Force the api-key-bypass auth path so tests don't need an OAuth
   // token. The path under test is arg construction, not auth.
   delete process.env.WIZARD_OAUTH_TOKEN;
+  delete process.env.WIZARD_BIN;
   process.env.EVALS_ALLOW_API_KEY_BYPASS = '1';
 });
 
@@ -145,5 +161,62 @@ describe('runLive — working dir + arg construction', () => {
     expect(args).not.toContain('--integration');
     // Sanity: integrationHint is not snuck in as a positional either.
     expect(args).not.toContain('nextjs');
+  });
+
+  it('wizardBin override: spawns the override directly without pnpm exec tsx', async () => {
+    spawnMock.mockReturnValue(fakeChild(NDJSON_OK, 0));
+    await runLive(runOptions({ wizardBin: 'npx @amplitude/wizard@latest' }));
+
+    const [cmd, args] = spawnMock.mock.calls[0];
+    expect(cmd).toBe('npx');
+    // First arg is the package spec the override carried, NOT
+    // `exec`/`tsx`/`bin.ts` from the default shape.
+    expect(args[0]).toBe('@amplitude/wizard@latest');
+    expect(args).not.toContain('tsx');
+    expect(args).not.toContain('bin.ts');
+    // Framework invariants still appended.
+    expect(args).toContain('--agent');
+    expect(args).toContain('--yes');
+    expect(args).toContain('--install-dir');
+  });
+});
+
+describe('resolveWizardSpawn', () => {
+  it('defaults to pnpm exec tsx bin.ts when no override is set', () => {
+    delete process.env.WIZARD_BIN;
+    const { cmd, baseArgs } = resolveWizardSpawn(runOptions());
+    expect(cmd).toBe('pnpm');
+    expect(baseArgs).toEqual(['exec', 'tsx', 'bin.ts']);
+  });
+
+  it('honors options.wizardBin and tokenizes the command on whitespace', () => {
+    const { cmd, baseArgs } = resolveWizardSpawn(
+      runOptions({ wizardBin: 'npx @amplitude/wizard@latest' }),
+    );
+    expect(cmd).toBe('npx');
+    expect(baseArgs).toEqual(['@amplitude/wizard@latest']);
+  });
+
+  it('honors WIZARD_BIN env when no option is set', () => {
+    process.env.WIZARD_BIN = '/path/to/built-cli';
+    const { cmd, baseArgs } = resolveWizardSpawn(runOptions());
+    expect(cmd).toBe('/path/to/built-cli');
+    expect(baseArgs).toEqual([]);
+  });
+
+  it('option wins when both option and env are set', () => {
+    process.env.WIZARD_BIN = 'env-binary';
+    const { cmd } = resolveWizardSpawn(
+      runOptions({ wizardBin: 'option-binary' }),
+    );
+    expect(cmd).toBe('option-binary');
+  });
+
+  it('falls back to default when override is whitespace-only', () => {
+    const { cmd, baseArgs } = resolveWizardSpawn(
+      runOptions({ wizardBin: '   ' }),
+    );
+    expect(cmd).toBe('pnpm');
+    expect(baseArgs).toEqual(['exec', 'tsx', 'bin.ts']);
   });
 });

@@ -35,6 +35,13 @@ interface CliArgs {
   live: boolean;
   /** When set, write reports under this dir; default `evals/reports/`. */
   reportsDir?: string;
+  /**
+   * Override the wizard binary the runner spawns. Forwarded to
+   * `runLive` as `wizardBin`. Equivalent to setting `WIZARD_BIN`
+   * on the runner process; the flag wins when both are set so
+   * one-off Ring 3 packaging runs don't have to mutate env.
+   */
+  wizardBin?: string;
 }
 
 function parseArgs(argv: string[]): CliArgs {
@@ -44,13 +51,14 @@ function parseArgs(argv: string[]): CliArgs {
     const a = argv[i];
     if (a === '--live') args.live = true;
     else if (a === '--reports-dir') args.reportsDir = argv[++i];
+    else if (a === '--wizard-bin') args.wizardBin = argv[++i];
     else if (a.startsWith('--')) {
       throw new Error(`unknown flag: ${a}`);
     } else rest.push(a);
   }
   if (rest.length !== 1) {
     throw new Error(
-      'usage: pnpm evals:run <scenario-id> [--live] [--reports-dir <path>]',
+      'usage: pnpm evals:run <scenario-id> [--live] [--reports-dir <path>] [--wizard-bin <cmd>]',
     );
   }
   args.scenarioId = rest[0];
@@ -119,6 +127,7 @@ async function main() {
         apiKey:
           process.env.AMPLITUDE_EVAL_API_KEY ??
           process.env.AMPLITUDE_WIZARD_API_KEY,
+        wizardBin: args.wizardBin,
       })
     : runReplay({ scenario, scenarioDir });
   const { artifact, workingDir } = result;

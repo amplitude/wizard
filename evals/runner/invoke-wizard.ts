@@ -57,6 +57,19 @@ export interface InvokeWizardOptions {
   apiKey?: string;
   /** Override the default 8-minute spawn timeout (ms). */
   timeoutMs?: number;
+  /**
+   * Override the wizard binary the runner spawns. Equivalent to
+   * setting `WIZARD_BIN` on the runner process; the option takes
+   * precedence so callers can drive multiple binaries from one
+   * process without mutating env.
+   *
+   * When set, the runner skips the default `pnpm exec tsx bin.ts`
+   * shape and spawns the override directly, e.g.
+   * `npx @amplitude/wizard@latest` or `/path/to/built-cli`. The
+   * `--agent --yes --install-dir <dir>` arg shape is appended by the
+   * runner regardless.
+   */
+  wizardBin?: string;
 }
 
 /**
@@ -106,6 +119,39 @@ export function resolveLiveAuthMode(
   throw new Error(
     'live mode requires authentication. Set WIZARD_OAUTH_TOKEN (preferred — routes through the Amplitude LLM gateway), or pass EVALS_ALLOW_API_KEY_BYPASS=1 with --api-key to opt into the gateway-bypass path. Bypass mode cannot catch gateway-specific regressions; use only when you understand the trade-off. Wizard-side reading of WIZARD_OAUTH_TOKEN/EXPIRES_AT/ZONE is a follow-up wiring PR.',
   );
+}
+
+/**
+ * Build the spawn shape (`cmd` + base `args`) for the wizard child.
+ *
+ * Default path: `pnpm exec tsx bin.ts ...` against the developer
+ * checkout. Set `WIZARD_BIN` (or pass `--wizard-bin <cmd>` to
+ * `evals/bin/run-eval.ts`, which forwards to `wizardBin`) to spawn an
+ * arbitrary command instead — e.g. `npx @amplitude/wizard@latest` or a
+ * built tarball path. This is what unlocks Ring 3 packaging coverage:
+ * we run the same scenarios against the published artifact, not just
+ * the source tree.
+ *
+ * When `wizardBin` is set the runner does NOT prepend `pnpm exec
+ * tsx bin.ts`; the caller is expected to pass a single command (e.g.
+ * `"npx"` plus its arg list, or a path to a built CLI). The `--agent
+ * --yes --install-dir <dir>` shape is appended by the runner — those
+ * are framework invariants, not packaging concerns.
+ */
+export function resolveWizardSpawn(options: InvokeWizardOptions): {
+  cmd: string;
+  baseArgs: string[];
+} {
+  const override = options.wizardBin ?? process.env.WIZARD_BIN;
+  if (override && override.trim().length > 0) {
+    // Tokenize on whitespace — good enough for the supported shapes
+    // (`npx @amplitude/wizard@latest`, `node /path/to/cli.js`,
+    // `/path/to/built-cli`). Anything that needs shell quoting should
+    // be wrapped in a script and pointed at via WIZARD_BIN.
+    const parts = override.trim().split(/\s+/);
+    return { cmd: parts[0], baseArgs: parts.slice(1) };
+  }
+  return { cmd: 'pnpm', baseArgs: ['exec', 'tsx', 'bin.ts'] };
 }
 
 /**
@@ -162,15 +208,8 @@ export async function runLive(
 
   const auth = resolveLiveAuthMode(options);
 
-  const args = [
-    'exec',
-    'tsx',
-    'bin.ts',
-    '--agent',
-    '--yes',
-    '--install-dir',
-    workingDir,
-  ];
+  const { cmd, baseArgs } = resolveWizardSpawn(options);
+  const args = [...baseArgs, '--agent', '--yes', '--install-dir', workingDir];
   // useDetection defaults to `true` (pass `--integration`). Set
   // `false` on a scenario to drop the hint and grade the wizard's
   // detection pipeline against `integrationHint` as ground truth.
@@ -197,7 +236,7 @@ export async function runLive(
   }
 
   const { stdout, stderr, exitCode } = await spawnAndCapture(
-    'pnpm',
+    cmd,
     args,
     { cwd: repoRoot, env },
     options.timeoutMs ?? 8 * 60_000,
