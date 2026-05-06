@@ -1338,6 +1338,18 @@ describe('WizardStore', () => {
       expect(store.tasks[4].status).toBe(TaskStatus.Pending);
     });
 
+    it('cascades wire to completed when dashboard becomes in_progress', () => {
+      // Wire stays derived `in_progress` for the whole multi-file
+      // instrumentation phase; the row must not read "done" until the
+      // journey moves on to dashboard (see `journey-state.ts` wire rules).
+      const store = createStore();
+      store.applyJourneyTransition('wire', 'in_progress');
+      store.applyJourneyTransition('dashboard', 'in_progress');
+
+      expect(store.tasks[3].status).toBe(TaskStatus.Completed); // wire (cascade)
+      expect(store.tasks[4].status).toBe(TaskStatus.InProgress); // dashboard
+    });
+
     it('promotes a stale in_progress step to completed when a later step is also in_progress', () => {
       // The classifier emits per-tool-call transitions; nothing
       // prevents `install: in_progress` from sitting in derived state
