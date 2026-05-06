@@ -316,7 +316,7 @@ void yargs(hideBin(process.argv))
     },
     'auth-onboarding': {
       describe:
-        'sign-in (default) or create-account. Supported in --agent, --ci, and --classic modes; ignored otherwise.',
+        'sign-in (default) or create-account. Intended for use in --agent, and --ci modes; interactive modes prompt for selection',
       choices: ['sign-in', 'create-account'] as const,
       type: 'string',
     },
@@ -434,7 +434,7 @@ void yargs(hideBin(process.argv))
     },
     email: {
       describe:
-        'email to use when creating a new account (requires --auth-onboarding create-account). Supported in --agent, --ci, and --classic modes; ignored otherwise.',
+        'email to use when creating a new account in --agent or --ci mode (requires --auth-onboarding create-account)',
       type: 'string',
       coerce: (value: string | undefined) => {
         if (value === undefined) return value;
@@ -459,7 +459,7 @@ void yargs(hideBin(process.argv))
     'accept-tos': {
       default: false,
       describe:
-        'explicitly agree to Amplitude Terms of Service when using --auth-onboarding create-account in --ci or --agent (ignored in interactive TUI — the ToS screen always renders)',
+        'explicitly agree to Amplitude Terms of Service when using --auth-onboarding create-account in --ci or --agent modes',
       type: 'boolean',
     },
     // Hidden shadows of env-only flags. .env('AMPLITUDE_WIZARD') auto-maps
