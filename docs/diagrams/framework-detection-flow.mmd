@@ -2,14 +2,18 @@
 title: Framework Detection flow
 ---
 flowchart TD
-    DETECT{Auto-detect framework?}
-    DETECT -->|success| RESULT["Show detection result"]
-    DETECT -->|failed or --menu| PICKER["Framework picker menu"] --> RESULT
-    RESULT --> CONFIRM{User confirms?}
+    PRE["run.ts — before TUI starts"]
+    PRE --> DETECT{Auto-detect framework?}
+    DETECT -->|success| STORE["Store integration in session"]
+    DETECT -->|failed| GENERIC["Store Generic integration in session"] --> STORE
+    DETECT -->|--menu flag| PICKER["Framework picker menu in IntroScreen"] --> STORE
+
+    STORE --> INTRO["IntroScreen shows result"]
+    INTRO --> CONFIRM{User confirms?}
     CONFIRM -->|cancel| EXIT["Exit"]
     CONFIRM -->|continue| SETUP_Q{Unresolved setup questions?}
-    SETUP_Q -->|no| RUN["→ Agent Run"]
+    SETUP_Q -->|no| PLAN["→ PlanScreen"]
     SETUP_Q -->|yes| SETUP["SetupScreen"]
     SETUP --> ANSWER{Answer auto-detectable?}
-    ANSWER -->|yes| RUN
-    ANSWER -->|no| PICKER_Q["PickerMenu for question"] --> RUN
+    ANSWER -->|yes| PLAN
+    ANSWER -->|no| PICKER_Q["PickerMenu for question"] --> PLAN

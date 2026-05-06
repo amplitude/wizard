@@ -22,10 +22,12 @@ Per-screen Esc behavior:
 
 | Screen                | Esc action                                                    |
 | --------------------- | ------------------------------------------------------------- |
-| Auth                  | Back → ToS (if create-account path), else RegionSelect         |
-| ToS                   | Back → EmailCapture (clears ToS acceptance)                    |
-| EmailCapture          | Back → RegionSelect (clears captured email)                    |
-| DataSetup             | Back → Auth (clears org/workspace selection)                  |
+| Auth                  | Back → SignupFullName / ToS / SignupEmail (whichever has the most recent meaningful revert on the create-account path), else RegionSelect |
+| SignupFullName        | Back → SignupEmail (clears email + ceremony state via `setSignupEmail(null)`'s bound reset, so the next pass re-probes from scratch) |
+| ToS                   | Back → SignupEmail (clears email + ceremony state — same reason as SignupFullName) |
+| SigningUp             | Transparent (`revert: () => false`) — back-walk skips this entry; no clean undo for an in-flight network call |
+| SignupEmail           | Back → RegionSelect (clears captured email *and* `signupRequiredFields` / `signupAuth` / `signupAbandoned` via `setSignupEmail(null)`) |
+| DataSetup             | Back → Auth (clears org/project selection)                    |
 | ActivationOptions     | Back → DataSetup (re-runs activation check)                   |
 | Setup                 | Pops one answered question; if none, walks back further       |
 | Slack                 | Back → DataIngestionCheck or Mcp                              |
@@ -37,6 +39,12 @@ Per-screen Esc behavior:
 | Intro                 | Cancel wizard (existing)                                      |
 | Outro                 | Close report dialog (existing)                                |
 | RegionSelect / Mcp    | No-op (no revertible step before them)                        |
+
+### Signup ceremony invariants
+
+- `setSignupEmail(null)` clears **all** ceremony state (`signupRequiredFields`, `signupAuth`, `signupAbandoned`) so any back-nav path that rewinds to the email step automatically invalidates the prior probe response. The ceremony is a single conceptual unit keyed to the email being present.
+- `SignupFullName.revert` and `ToS.revert` return `false` when the screen was skipped (server never asked, value never set) so the back-walk continues past them rather than firing a no-op revert that traps the user.
+- `SigningUpScreen` is the only signup screen with network I/O. Its `useAsyncEffect` writes one of `signupAuth` (success) / `signupRequiredFields` (needs more info) / `signupAbandoned` (redirect or error). The auth task in `default.ts` waits on this settle before opening browser OAuth (see `isAuthTaskGateReady` in `src/commands/helpers.ts`).
 
 The `[Esc] Back` hint appears in `KeyHintBar` only when back is actually
 available, so it never lies about what the keystroke will do.
@@ -132,11 +140,18 @@ flowchart TD
     REGION_SELECT["RegionSelect: US or EU?<br/>(Enter = US default · skipped for returning users)"]
     REGION_SELECT --> CREATE_ACCOUNT_PATH
 
-    CREATE_ACCOUNT_PATH{Create new Amplitude account?<br/>(Intro picker or CLI --auth-onboarding create-account)}
+    CREATE_ACCOUNT_PATH{Create new Amplitude account?<br/>(Intro picker; CLI --auth-onboarding create-account in non-TUI modes)}
     CREATE_ACCOUNT_PATH -->|no — sign in to existing| AUTH
-    CREATE_ACCOUNT_PATH -->|yes — new account| EMAIL_CAPTURE["EmailCaptureScreen<br/>(collect user email · pre-filled from --email when passed on the CLI)"]
-    EMAIL_CAPTURE --> TOS["ToSScreen<br/>(require explicit ToS acceptance)"]
-    TOS --> AUTH
+    CREATE_ACCOUNT_PATH -->|yes — new account| SIGNUP_EMAIL["SignupEmailScreen<br/>(collect user email)"]
+    SIGNUP_EMAIL --> SIGNING_UP_PROBE["SigningUpScreen<br/>(POST email-only — server decides next step)"]
+    SIGNING_UP_PROBE --> SERVER_RESPONSE{server response}
+    SERVER_RESPONSE -->|oauth — success| AUTH
+    SERVER_RESPONSE -->|requires_auth — existing user| AUTH
+    SERVER_RESPONSE -->|error| AUTH
+    SERVER_RESPONSE -->|needs_information — new user, asks for fields| TOS["ToSScreen<br/>(only renders post-needs_information — never asked of redirect/error users)"]
+    TOS --> SIGNUP_FULL_NAME["SignupFullNameScreen<br/>(only when server includes 'full_name' in required AND signupFullName is null;<br/>--full-name pre-fill skips this screen)"]
+    SIGNUP_FULL_NAME --> SIGNING_UP_RETRY["SigningUpScreen<br/>(re-POST with full_name)"]
+    SIGNING_UP_RETRY --> AUTH
 
     subgraph AUTH ["Auth / Account Setup (AuthScreen)"]
         SUSI["See: SUSI flow<br/>(OAuth → org → project → API key)"]
