@@ -43,6 +43,25 @@ export const ScenarioSchema = z
     expectedInitFile: z.string().min(1),
     expectedEvents: z.array(z.string().min(1)).default([]),
     forbiddenPaths: z.array(z.string().min(1)).default([]),
+    /**
+     * Controls whether the runner passes `--integration <hint>` to
+     * the wizard.
+     *
+     *   - `true` (default): runner forwards `--integration
+     *     <integrationHint>`. The wizard skips its detection pipeline
+     *     and the scenario evaluates the integration path
+     *     deterministically. This is the right setting for almost
+     *     every scenario — we want SDK-integration regressions
+     *     (wrong package, wrong init, missing env wiring) graded
+     *     independently of detection drift.
+     *
+     *   - `false`: runner drops `--integration`, the wizard runs
+     *     full framework detection against the pristine fixture, and
+     *     downstream scorers grade detection accuracy. `integrationHint`
+     *     is still required — it's the ground truth the detector
+     *     should land on.
+     */
+    useDetection: z.boolean().default(true),
     notes: z.string().optional(),
   })
   // Cross-field invariant: override + reason travel together. A
