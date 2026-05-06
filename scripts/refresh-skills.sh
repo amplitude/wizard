@@ -53,13 +53,23 @@ PIN_FILE="$WIZARD_ROOT/.context-hub-version"
 CATEGORIES=(integration instrumentation taxonomy)
 
 # Read pinned tag (single source of truth for which release to pull).
+# Hard-fails when the pin file is missing or empty — refusing to silently
+# fall back to "latest" keeps refreshes reproducible across machines and CI.
 read_pinned_tag() {
   if [[ ! -f "$PIN_FILE" ]]; then
-    echo ""
-    return 0
+    echo "ERROR: .context-hub-version is missing at $PIN_FILE." >&2
+    echo "  Create it with a single line containing a context-hub release tag," >&2
+    echo "  e.g. 'echo v1.2.3 > .context-hub-version', then re-run this script." >&2
+    exit 1
   fi
   local tag
   tag="$(tr -d '[:space:]' < "$PIN_FILE")"
+  if [[ -z "$tag" ]]; then
+    echo "ERROR: .context-hub-version is empty after trimming whitespace." >&2
+    echo "  Populate $PIN_FILE with a context-hub release tag (e.g. v1.2.3)" >&2
+    echo "  from https://github.com/$REPO/releases, then re-run this script." >&2
+    exit 1
+  fi
   echo "$tag"
 }
 
@@ -162,14 +172,10 @@ else
   TMP_DIR=$(mktemp -d)
   trap "rm -rf '$TMP_DIR'" EXIT
 
-  if [[ -n "$PINNED_TAG" ]]; then
-    echo "Refreshing all skills from $REPO (pinned $PINNED_TAG)..."
-    DOWNLOAD_TAG="$PINNED_TAG"
-  else
-    echo "Refreshing all skills from $REPO (no pin in .context-hub-version — using latest)..." >&2
-    DOWNLOAD_TAG="$(gh api "repos/$REPO/releases/latest" --jq '.tag_name')"
-    echo "  resolved latest: $DOWNLOAD_TAG"
-  fi
+  # read_pinned_tag hard-fails when .context-hub-version is missing/empty,
+  # so PINNED_TAG is guaranteed non-empty here.
+  echo "Refreshing all skills from $REPO (pinned $PINNED_TAG)..."
+  DOWNLOAD_TAG="$PINNED_TAG"
 
   cd "$TMP_DIR"
   if ! gh release download "$DOWNLOAD_TAG" --repo "$REPO" --pattern "*.zip" --clobber; then

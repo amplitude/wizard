@@ -77,11 +77,25 @@ function tryGh(tag) {
     ],
     { encoding: "utf8" },
   );
-  if (r.error || r.status !== 0) {
-    return { ok: false, stderr: r.stderr ?? r.error?.message ?? "" };
+  // ghRan distinguishes "gh wasn't usable" (ENOENT, not authed, etc.) from
+  // "gh ran and returned a definitive answer". Only the latter is trustworthy
+  // enough to short-circuit the unauthenticated REST soft-pass path.
+  if (r.error) {
+    return {
+      ok: false,
+      ghRan: false,
+      stderr: r.stderr ?? r.error?.message ?? "",
+    };
+  }
+  if (r.status !== 0) {
+    return {
+      ok: false,
+      ghRan: false,
+      stderr: r.stderr ?? "",
+    };
   }
   const found = (r.stdout ?? "").trim();
-  return { ok: found === tag, stderr: "", found };
+  return { ok: found === tag, ghRan: true, stderr: "", found };
 }
 
 async function fetchJson(path, token) {
@@ -156,6 +170,25 @@ async function main() {
   if (ghResult.ok) {
     console.log(`OK: ${tag} exists on ${CONTEXT_HUB_REPO} (verified via gh).`);
     return 0;
+  }
+
+  // gh ran successfully and authoritatively reported a different (or missing)
+  // tag — this is a conclusive miss. Don't fall through to the REST soft-pass
+  // path, which can mask a real bad pin behind "token can't see the repo".
+  if (ghResult.ghRan) {
+    console.error(
+      `error: pinned tag "${tag}" was not found on ${CONTEXT_HUB_REPO} (gh confirmed).`,
+    );
+    if (ghResult.found) {
+      console.error(`  gh returned tag_name="${ghResult.found}" instead.`);
+    }
+    if (ghResult.stderr) console.error(`  gh: ${ghResult.stderr.trim()}`);
+    console.error(
+      `\nFix: edit .context-hub-version to a valid release from ` +
+        `https://github.com/${CONTEXT_HUB_REPO}/releases (rotate the pin to an ` +
+        `existing tag), then commit the change.`,
+    );
+    return 1;
   }
 
   const token = pickToken();
