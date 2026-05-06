@@ -684,12 +684,6 @@ export class WizardStore {
     this.emitChange();
   }
 
-  markEmailCaptureComplete(): void {
-    this.$session.setKey('emailCaptureComplete', true);
-    analytics.wizardCapture('email capture complete');
-    this.emitChange();
-  }
-
   markSignupTokensObtained(): void {
     this.$session.setKey('signupTokensObtained', true);
     this.emitChange();
@@ -698,12 +692,6 @@ export class WizardStore {
   acceptTermsOfService(): void {
     this.$session.setKey('tosAccepted', true);
     analytics.wizardCapture('terms of service accepted');
-    this.emitChange();
-  }
-
-  resetEmailCapture(): void {
-    this.$session.setKey('emailCaptureComplete', false);
-    analytics.wizardCapture('back navigation', { to: 'email-capture' });
     this.emitChange();
   }
 
@@ -868,7 +856,6 @@ export class WizardStore {
     this.$session.setKey('region', null);
 
     if (isCreateAccountOnboarding(this.session)) {
-      this.$session.setKey('emailCaptureComplete', false);
       this.$session.setKey('tosAccepted', null);
       this.$session.setKey('signupEmail', null);
       this.$session.setKey('signupFullName', null);

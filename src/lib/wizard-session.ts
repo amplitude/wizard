@@ -772,14 +772,10 @@ export interface WizardSession {
   tosAccepted: boolean | null;
 
   /**
-   * True once the email capture step is complete on the create-account path.
-   * Email is required before showing ToS.
-   */
-  emailCaptureComplete: boolean;
-
-  /**
-   * True if signup tokens were already obtained during EmailCaptureScreen
-   * (to skip duplicate signup attempt in bin.ts)
+   * True if signup tokens were already obtained during the SigningUp
+   * ceremony (to skip duplicate signup attempt in `default.ts`'s auth
+   * task — keyed off this flag, not signupAuth, so the legacy classic /
+   * agent / CI paths that don't set signupAuth still benefit from it).
    */
   signupTokensObtained: boolean;
 
@@ -1157,9 +1153,8 @@ export function buildSession(args: {
 
     // --accept-tos pre-accepts ToS for non-TUI signup; in TUI mode the
     // ToSScreen still owns the UX but its `isComplete` check sees `true`
-    // and skips. Email capture is independently flagged below.
+    // and skips.
     tosAccepted: validated.acceptTos === true ? true : null,
-    emailCaptureComplete: false,
     signupTokensObtained: false,
     signupRequiredFields: null,
     signupAuth: null,

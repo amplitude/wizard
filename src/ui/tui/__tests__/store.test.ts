@@ -935,7 +935,6 @@ describe('WizardStore', () => {
       store.session.authOnboardingPath = AuthOnboardingPath.CreateAccount;
       store.session.introConcluded = true;
       store.session.region = 'eu';
-      store.session.emailCaptureComplete = true;
       store.session.tosAccepted = false;
       store.session.signupEmail = 'x@y.co';
       store.session.signupFullName = 'X Y';
@@ -953,7 +952,6 @@ describe('WizardStore', () => {
 
       expect(store.session.introConcluded).toBe(false);
       expect(store.session.region).toBeNull();
-      expect(store.session.emailCaptureComplete).toBe(false);
       expect(store.session.tosAccepted).toBeNull();
       expect(store.session.signupEmail).toBeNull();
       expect(store.session.signupFullName).toBeNull();

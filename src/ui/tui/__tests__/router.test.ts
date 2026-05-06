@@ -998,7 +998,6 @@ describe('WizardRouter', () => {
         }),
       resetDataIngestion: () => mutate({ dataIngestionConfirmed: false }),
       resetSlack: () => mutate({ slackComplete: false, slackOutcome: null }),
-      resetEmailCapture: () => mutate({ emailCaptureComplete: false }),
       resetToS: () => mutate({ tosAccepted: null }),
       // Mirror the production store's setSignupEmail(null) ceremony reset
       // so the stub stays faithful to the back-nav contract: clearing
