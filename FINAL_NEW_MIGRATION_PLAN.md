@@ -50,7 +50,7 @@ These decisions bind the rest of the document. Reopen only with explicit approva
 3. **One bundled MCP runtime.** Continue on `@modelcontextprotocol/sdk`. Generate the external `wizard-mcp-server.ts` tool surface from the same Zod sources that drive the in-process wizard tools (PR #553's `get_event_plan` is the first instance).
 4. **No LangGraph. No Python in the wizard surface.** `amplitude_ai`, `mcp_gateway`, `houston/chat` stay coordination points, not adoption targets, per `MIGRATION_PLAN.md` §6.6 §8.
 5. **TUI lifts; doesn't rewrite.** Ink + nanostores + flows.ts + router.ts stay. Decoupling is at the `WizardInstallPresentation` seam landing in PR #543.
-6. **Backwards-compat surface is binding.** Yargs flags, slash commands, NDJSON schema, exit codes, storage paths, and read-side compat for `~/.ampli.json` / `ampli.json` follow `MIGRATION_PLAN.md` §6.5's contract verbatim, including for the eventual 2.0.0 ESM cut.
+6. **Backwards-compat surface is binding for the read side; new writes target the modern paths.** Yargs flags, slash commands, NDJSON schema, exit codes, and modern storage paths (`~/.amplitude/wizard/` for user state, `<installDir>/.amplitude/` for project metadata — the same model `wizard-rewrite` / `wizard-v2` use) follow `MIGRATION_PLAN.md` §6.5's contract verbatim. Read-side compat for `~/.ampli.json` and per-project `ampli.json` stays for one minor cycle. **New writes go to the modern paths only** — the dual-write `ampli.json` mirror documented in `CLAUDE.md` is being retired. Active migration tracked in §5 Phase G.
 7. **wizard-proxy extraction is non-blocking.** Phase 1 client sanitizer (PR #528 already shipped, #541/#550 on stack) is the user-facing answer. Server-side hardening in `thunder/wizard-proxy` is post-cutover work and is the platform team's call when scheduled.
 8. **Tool-first decomposition.** Every important LLM-driven decision is a typed tool call with Zod-validated input/output, not a free-form prompt-and-parse. The agent loop is an orchestrator over tools; deterministic logic stays out of the loop. This makes each decision (a) replayable from a recorded fixture, (b) independently scored, (c) swappable at the tool boundary without refactoring the loop, (d) generatable as an MCP tool for ambient-agent mode without a second implementation.
 9. **Per-call-site eval coverage.** Every LLM call in the wizard ships with a fixture and a scorer. New tool = new fixture + scorer in the same PR. No exception path. The §7.2 cutover gate is the *floor*; per-call coverage is the *base*.
@@ -174,6 +174,36 @@ This is where the strategic bet pays off. Order the slices to keep the Agent SDK
 - Backwards-compat read for `~/.ampli.json` and per-project `ampli.json` for one minor; drop in 2.x minor after telemetry confirms migration (per `MIGRATION_PLAN.md` §6.5).
 
 **Done when:** `release-please` opens the 2.0.0 PR, the backwards-compat test suite is green, and one week of internal dogfood passes.
+
+### Phase G — Storage migration (sequenced after F, can begin in 2.x minors)
+
+**Goal:** stop writing `ampli.json`; eventually stop reading it. Adopt the storage model `wizard-rewrite` and `wizard-v2` already use: `~/.amplitude/` for user state, `<installDir>/.amplitude/` for project metadata. Per strategic posture #6, the modern paths are now the *only* write target.
+
+**Current state (verified 2026-05-06):**
+
+| Path | Status |
+|---|---|
+| `~/.amplitude/wizard/{oauth-session.json, credentials.json, runs/, plans/, state/}` | Modern. Already used. |
+| `<installDir>/.amplitude/{events.json, project-binding.json, dashboard.json}` | Modern. Already used. |
+| `~/.ampli.json` | Legacy. Still written by `src/utils/ampli-settings.ts` (474 LOC) for OAuth tokens. |
+| `<installDir>/ampli.json` | Legacy. Still written as a mirror per `CLAUDE.md`'s transition note. `src/lib/ampli-config.ts` (371 LOC) handles read + the `WorkspaceId → ProjectId` migration. |
+| TUI references to `ampli.json` | ~30 files per `MIGRATION_PLAN.md` §4. |
+
+**Slicing:**
+
+**G-1.** Stop writing the `ampli.json` dual-write mirror. Keep `src/lib/ampli-config.ts` read path intact; verify no caller depends on the write side via grep + test.
+
+**G-2.** Migrate the ~30 TUI references to read from modern paths only. On first read where the modern path is absent and the legacy path exists, perform a one-shot copy-forward from `ampli.json` → `<installDir>/.amplitude/*.json`; log the migration once per project.
+
+**G-3.** Add a startup one-shot migration: on wizard launch, if `~/.ampli.json` exists and `~/.amplitude/wizard/oauth-session.json` does not, copy the OAuth state forward and mark the legacy path read-only.
+
+**G-4.** Remove `src/utils/ampli-settings.ts` and `src/lib/ampli-config.ts`. Remove the `WorkspaceId → ProjectId` migration code (the one-shot has already run by this point in any reachable upgrade path).
+
+**G-5.** Drop `~/.ampli.json` and per-project `ampli.json` reads entirely in a 2.x minor after telemetry confirms <0.1% of runs read those paths.
+
+**Done when:** zero references to `ampli.json` or `~/.ampli.json` outside one-shot migration code; `pnpm test` green; telemetry confirms migration ran on >99% of upgraded installs.
+
+**Why this matters:** the dual-write tax is real (`ampli-config.ts` is 371 LOC + 474 LOC of `ampli-settings.ts` plus 30 TUI references). It's also a correctness risk — every code path that needs to know "where does the wizard store X?" has two answers, and the answer drifts by file. Concentrating writes on the modern paths makes the wizard's storage model documentable in one paragraph (per the `Session storage` table in `CLAUDE.md`) instead of a transition rule.
 
 ---
 
@@ -407,6 +437,8 @@ The six questions previously open in earlier drafts of this plan are decided. Ea
 5. **`1.x` life-support owner: wizard team rotation.** Engineers on the wizard team take turns triaging 1.x security/CVE issues during the ~6-month life-support window after 2.0 cuts over. Documented in the team handbook as a rotation, not a dedicated headcount. Details (length of rotation, escalation path) are an internal team-process decision, not a plan blocker.
 6. **OTel GenAI telemetry: deferred out of 2.0.** Phase F ships ESM packaging + dead-dep cleanup only. OpenTelemetry GenAI semantic conventions are revisited in a 2.x minor when there is bandwidth to do them properly. Reduces 2.0 scope; losses are limited to delaying parity with an industry convention that is still hardening anyway. Existing structured logger + Sentry + per-turn middleware benchmarks remain the wizard's observability surface for 2.0.
 
+7. **Storage migration: stop writing `ampli.json`; adopt the modern paths exclusively.** New writes target `~/.amplitude/wizard/` (user state) and `<installDir>/.amplitude/` (project metadata) — the same model `wizard-rewrite` and `wizard-v2` use. Read-side compat for `~/.ampli.json` and per-project `ampli.json` stays for one minor cycle (one-shot copy-forward on first read), then dropped. The wizard already uses the modern paths for new state; this decision retires the dual-write mirror and the 845 LOC of legacy `ampli-config.ts` + `ampli-settings.ts` that maintain it. Active migration tracked in Phase G.
+
 ---
 
 ## 11. Risk register
@@ -436,7 +468,8 @@ The six questions previously open in earlier drafts of this plan are decided. Ea
 4. **Land the per-call-site extension** to PR #560 once it merges: `runner/invoke-wizard.ts:runCallSite`, `evals/call-sites/registry.ts`, and the first three call-site fixtures (`propose_event_plan`, `select_skill`, inner-loop `streamText`). Resolve the four high-impact PR #560 review issues in the same window. This is the gate-gate: D-5 requires the eval surface to be real.
 5. **Wire `WIZARD_OAUTH_TOKEN` / `WIZARD_EXPIRES_AT` / `WIZARD_ZONE` env-var auth** per §7.5. Single PR: extend `src/lib/credential-resolution.ts` and `src/utils/urls.ts` to read the env vars; verify PR #549's `resolveWizardAnthropicAuthFromEnv` matches the priority order; add the redaction-allowlist test. Unblocks evals and benches against the live gateway.
 6. **Open the paired `browser-sdk-2.md` dedup PR** (wizard + context-hub) once #544-#546 land. Per §10 decision 1, lands in Phase C.
-7. **Archive `wizard-rewrite` and `wizard-v2`** once D-6 ships (Agent SDK deletion). Until then, keep them as reference implementations cited from the in-tree code.
+7. **Open a Phase G-1 PR** to stop the `ampli.json` dual-write. Smallest, safest start: makes new writes go to modern paths only; leaves all read paths intact. Per §10 decision 7.
+8. **Archive `wizard-rewrite` and `wizard-v2`** once D-6 ships (Agent SDK deletion). Until then, keep them as reference implementations cited from the in-tree code.
 
 ---
 
