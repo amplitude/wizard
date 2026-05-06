@@ -16,6 +16,7 @@ import {
 } from '../lib/wizard-session.js';
 import { setProjectLogFile } from '../lib/observability';
 import { runMigrationShim } from '../utils/storage-migration';
+import { assertNever } from '../utils/assert-never';
 import { CLI_INVOCATION } from './context';
 
 function authOnboardingPathFromArgv(
@@ -741,16 +742,27 @@ export const runDirectSignupIfRequested = async (
     );
     return;
   }
-  if (tokens.kind !== 'success') {
-    // needs_information / redirect / error — the wrapper already emitted
-    // the appropriate telemetry. Fall through to the mode's fallback path.
-    getUI().log.info(
-      `Direct signup did not produce credentials (${tokens.kind}); continuing to ${fallbackLabel}.`,
-    );
-    return;
+  // Exhaustive switch — `default: assertNever` makes a future arm a
+  // compile error so no new ceremony outcome silently routes to the
+  // mode's fallback without explicit review.
+  switch (tokens.kind) {
+    case 'success':
+      getUI().log.info('Direct signup succeeded; using newly created account.');
+      session.signupMagicLinkUrl = tokens.dashboardUrl ?? null;
+      return;
+    case 'needs_information':
+    case 'redirect':
+    case 'error':
+      // Wrapper already emitted the appropriate telemetry; non-TUI
+      // modes have no in-band collection screens, so all three arms
+      // route to the mode's existing fallback path.
+      getUI().log.info(
+        `Direct signup did not produce credentials (${tokens.kind}); continuing to ${fallbackLabel}.`,
+      );
+      return;
+    default:
+      assertNever(tokens);
   }
-  getUI().log.info('Direct signup succeeded; using newly created account.');
-  session.signupMagicLinkUrl = tokens.dashboardUrl ?? null;
 };
 
 /**

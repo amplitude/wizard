@@ -35,6 +35,7 @@ import { performSignupOrAuth } from '../../../utils/signup-or-auth.js';
 import { resolveZone } from '../../../lib/zone-resolution.js';
 import { DEFAULT_AMPLITUDE_ZONE } from '../../../lib/constants.js';
 import { createLogger } from '../../../lib/observability/logger.js';
+import { assertNever } from '../../../utils/assert-never.js';
 
 const log = createLogger('signing-up-screen');
 
@@ -77,35 +78,46 @@ export const SigningUpScreen = ({ store }: SigningUpScreenProps) => {
 
       if (signal.aborted) return;
 
-      if (result.kind === 'success') {
-        store.setSignupAuth({
-          idToken: result.idToken,
-          accessToken: result.accessToken,
-          refreshToken: result.refreshToken,
-          zone: result.zone,
-          userInfo: result.userInfo,
-          dashboardUrl: result.dashboardUrl,
-        });
-        // Mirror the dashboard magic link onto the screen-managed slot
-        // for parity with the legacy classic flow's outro display.
-        store.setSignupMagicLinkUrl(result.dashboardUrl);
-        // Mark signup tokens obtained so the post-TUI auth task hydrates
-        // from disk instead of opening browser OAuth (matches the old
-        // EmailCaptureScreen contract).
-        store.markSignupTokensObtained();
-        return;
+      // Exhaustive switch on the result kind. The `default: assertNever`
+      // forces a compile error if `PerformSignupOrAuthResult` grows a
+      // new arm — every new kind has to be explicitly considered here
+      // (even if the answer is "fall through to OAuth like redirect").
+      // Without this, a future arm like `kind: 'rate_limited'` would
+      // silently route to OAuth and lose its semantics; the compile
+      // error makes the contributor pick a behavior on purpose.
+      switch (result.kind) {
+        case 'success':
+          store.setSignupAuth({
+            idToken: result.idToken,
+            accessToken: result.accessToken,
+            refreshToken: result.refreshToken,
+            zone: result.zone,
+            userInfo: result.userInfo,
+            dashboardUrl: result.dashboardUrl,
+          });
+          // Mirror the dashboard magic link onto the screen-managed slot
+          // for parity with the legacy classic flow's outro display.
+          store.setSignupMagicLinkUrl(result.dashboardUrl);
+          // Mark signup tokens obtained so the post-TUI auth task hydrates
+          // from disk instead of opening browser OAuth (matches the old
+          // EmailCaptureScreen contract).
+          store.markSignupTokensObtained();
+          return;
+        case 'needs_information':
+          store.setSignupRequiredFields(result.requiredFields);
+          return;
+        case 'redirect':
+        case 'error':
+          // Fall through to browser OAuth via signupAbandoned. The auth
+          // gate releases on signupAbandoned and AuthScreen opens the
+          // browser. We don't surface the error message inline here
+          // because the user's likely outcome (browser OAuth) is the
+          // same in both cases.
+          store.setSignupAbandoned(true);
+          return;
+        default:
+          assertNever(result);
       }
-
-      if (result.kind === 'needs_information') {
-        store.setSignupRequiredFields(result.requiredFields);
-        return;
-      }
-
-      // redirect / error → fall through to browser OAuth via signupAbandoned.
-      // The auth gate releases on signupAbandoned and AuthScreen opens the
-      // browser. We don't surface the error message inline here because
-      // the user's likely outcome (browser OAuth) is the same in both cases.
-      store.setSignupAbandoned(true);
     },
     [email, fullName],
   );

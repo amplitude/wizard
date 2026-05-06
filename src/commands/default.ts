@@ -23,6 +23,7 @@ import {
   type WizardSession,
   isCreateAccountOnboarding,
 } from '../lib/wizard-session';
+import { assertNever } from '../utils/assert-never';
 
 /**
  * Load `--context-file` (or `AMPLITUDE_WIZARD_CONTEXT`) and stamp the
@@ -763,24 +764,37 @@ export const defaultCommand: CommandModule = {
                     fullName: s.signupFullName,
                     zone,
                   });
-                  if (signupResult.kind === 'success') {
-                    auth = {
-                      idToken: signupResult.idToken,
-                      accessToken: signupResult.accessToken,
-                      refreshToken: signupResult.refreshToken,
-                      zone: signupResult.zone,
-                    };
-                    signupUserInfo = signupResult.userInfo;
-                    signupTokensObtained = true;
-                    tui.store.setSignupMagicLinkUrl(
-                      signupResult.dashboardUrl ?? null,
-                    );
-                    getUI().log.info(
-                      'Direct signup succeeded; using newly created account.',
-                    );
+                  // Exhaustive switch — `default: assertNever` makes a
+                  // future arm a compile error, forcing review of every
+                  // call site instead of silently routing the new
+                  // semantics to OAuth fallback.
+                  switch (signupResult.kind) {
+                    case 'success':
+                      auth = {
+                        idToken: signupResult.idToken,
+                        accessToken: signupResult.accessToken,
+                        refreshToken: signupResult.refreshToken,
+                        zone: signupResult.zone,
+                      };
+                      signupUserInfo = signupResult.userInfo;
+                      signupTokensObtained = true;
+                      tui.store.setSignupMagicLinkUrl(
+                        signupResult.dashboardUrl ?? null,
+                      );
+                      getUI().log.info(
+                        'Direct signup succeeded; using newly created account.',
+                      );
+                      break;
+                    case 'needs_information':
+                    case 'redirect':
+                    case 'error':
+                      // Fall through to the OAuth path below (auth stays
+                      // null). All three arms route the user to the
+                      // browser; no in-band recovery here.
+                      break;
+                    default:
+                      assertNever(signupResult);
                   }
-                  // For needs_information / redirect / error: fall through
-                  // to the OAuth path below (auth stays null).
                 } catch (err) {
                   trackSignupAttempt({ status: 'wrapper_exception', zone });
                   getUI().log.warn(
