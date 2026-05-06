@@ -694,6 +694,31 @@ export class WizardStore {
     this.emitChange();
   }
 
+  setSignupRequiredFields(fields: string[] | null): void {
+    this.$session.setKey('signupRequiredFields', fields);
+    this.emitChange();
+  }
+
+  setSignupAuth(auth: WizardSession['signupAuth']): void {
+    this.$session.setKey('signupAuth', auth);
+    this.emitChange();
+  }
+
+  setSignupAbandoned(abandoned: boolean): void {
+    this.$session.setKey('signupAbandoned', abandoned);
+    this.emitChange();
+  }
+
+  resetSignupCeremony(): void {
+    // Used by back-nav from a collection screen to the email screen, so
+    // re-submitting fires a fresh probe POST.
+    this.$session.setKey('signupRequiredFields', null);
+    this.$session.setKey('signupAuth', null);
+    this.$session.setKey('signupAbandoned', false);
+    analytics.wizardCapture('back navigation', { to: 'signup-email' });
+    this.emitChange();
+  }
+
   setAuthOnboardingPath(path: WizardSession['authOnboardingPath']): void {
     this.$session.setKey('authOnboardingPath', path);
     this.emitChange();

@@ -773,8 +773,13 @@ export const defaultCommand: CommandModule = {
                     fullName: s.signupFullName,
                     zone,
                   });
-                  if (signupResult !== null) {
-                    auth = signupResult;
+                  if (signupResult.kind === 'success') {
+                    auth = {
+                      idToken: signupResult.idToken,
+                      accessToken: signupResult.accessToken,
+                      refreshToken: signupResult.refreshToken,
+                      zone: signupResult.zone,
+                    };
                     signupUserInfo = signupResult.userInfo;
                     signupTokensObtained = true;
                     tui.store.setSignupMagicLinkUrl(
@@ -784,6 +789,8 @@ export const defaultCommand: CommandModule = {
                       'Direct signup succeeded; using newly created account.',
                     );
                   }
+                  // For needs_information / redirect / error: fall through
+                  // to the OAuth path below (auth stays null).
                 } catch (err) {
                   trackSignupAttempt({ status: 'wrapper_exception', zone });
                   getUI().log.warn(

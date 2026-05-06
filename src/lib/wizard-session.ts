@@ -784,6 +784,48 @@ export interface WizardSession {
   signupTokensObtained: boolean;
 
   /**
+   * Server-driven signup field collection state.
+   *
+   * The agentic signup endpoint can respond `needs_information` when the
+   * user is new and the request is missing fields the server requires
+   * (today: `full_name`). The TUI's signup ceremony POSTs email-only
+   * first, then writes the server's `required` array here. Downstream
+   * collection screens render iff their key is present AND the session
+   * doesn't already hold a value for it.
+   *
+   * `null` = no probe POST has fired yet (initial state) OR the server
+   * didn't ask for anything (e.g. redirect / error / success arms).
+   * Non-null = SigningUpScreen received `needs_information` and the
+   * collection-screen pipeline should advance.
+   */
+  signupRequiredFields: string[] | null;
+
+  /**
+   * Direct-signup success result, captured by SigningUpScreen on the
+   * `oauth` arm. Drives the auth-task gate: when present, the post-TUI
+   * auth flow uses these tokens directly instead of opening browser OAuth.
+   * `null` until the signup ceremony settles on success.
+   */
+  signupAuth: {
+    idToken: string;
+    accessToken: string;
+    refreshToken: string;
+    zone: import('./constants').AmplitudeZone;
+    userInfo: import('./api').AmplitudeUserInfo | null;
+    /** May contain secrets — never log or NDJSON. */
+    dashboardUrl: string | null;
+  } | null;
+
+  /**
+   * True when the signup ceremony settled on a non-success outcome
+   * (`requires_redirect` or `error`) and the wizard should fall through
+   * to the browser OAuth flow. Distinct from `signupAuth === null` so
+   * the auth-task gate can release on either "we have tokens" or "we
+   * gave up on direct signup".
+   */
+  signupAbandoned: boolean;
+
+  /**
    * Create-project flow state.
    *
    * `pending` = the user has chosen "Create new project…" from the Auth
@@ -1119,6 +1161,9 @@ export function buildSession(args: {
     tosAccepted: validated.acceptTos === true ? true : null,
     emailCaptureComplete: false,
     signupTokensObtained: false,
+    signupRequiredFields: null,
+    signupAuth: null,
+    signupAbandoned: false,
 
     createProject: {
       pending: false,

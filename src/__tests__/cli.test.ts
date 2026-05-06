@@ -220,7 +220,13 @@ vi.mock('../utils/signup-or-auth', async () => {
   >('../utils/signup-or-auth');
   return {
     ...actual,
-    performSignupOrAuth: vi.fn(),
+    // Default to the `error` arm so test paths that don't override it
+    // fall through to the mode's fallback auth flow, instead of returning
+    // `undefined` (which would crash the `tokens.kind` narrowing in the
+    // wrapper's caller). Individual tests override with
+    // `mockResolvedValueOnce` / `mockRejectedValueOnce` when they need
+    // success / redirect / throw behavior.
+    performSignupOrAuth: vi.fn().mockResolvedValue({ kind: 'error' }),
   };
 });
 vi.mock('node:os', async () => {

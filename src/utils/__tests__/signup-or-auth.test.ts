@@ -41,7 +41,7 @@ const provisionedOrgs = [
 describe('performSignupOrAuth', () => {
   beforeEach(() => vi.clearAllMocks());
 
-  it('returns null when email is missing', async () => {
+  it('returns error when email is missing', async () => {
     const { performDirectSignup } = await import('../direct-signup.js');
     const { analytics } = await import('../analytics');
 
@@ -52,16 +52,19 @@ describe('performSignupOrAuth', () => {
     });
 
     expect(performDirectSignup).not.toHaveBeenCalled();
-    expect(result).toBeNull();
+    expect(result.kind).toBe('error');
     expect(analytics.wizardCapture).not.toHaveBeenCalledWith(
       AGENTIC_SIGNUP_ATTEMPTED_EVENT,
       expect.anything(),
     );
   });
 
-  it('returns null when fullName is missing', async () => {
+  it('probes with email-only when fullName is missing (server decides)', async () => {
     const { performDirectSignup } = await import('../direct-signup.js');
-    const { analytics } = await import('../analytics');
+    vi.mocked(performDirectSignup).mockResolvedValue({
+      kind: 'needs_information',
+      requiredFields: ['full_name'],
+    });
 
     const result = await performSignupOrAuth({
       email: 'ada@example.com',
@@ -69,15 +72,19 @@ describe('performSignupOrAuth', () => {
       zone: 'us',
     });
 
-    expect(performDirectSignup).not.toHaveBeenCalled();
-    expect(result).toBeNull();
-    expect(analytics.wizardCapture).not.toHaveBeenCalledWith(
-      AGENTIC_SIGNUP_ATTEMPTED_EVENT,
-      expect.anything(),
+    // The wrapper now POSTs even without fullName, letting the server route
+    // brand-new emails to needs_information so the TUI can collect the field.
+    expect(performDirectSignup).toHaveBeenCalledOnce();
+    expect(performDirectSignup).toHaveBeenCalledWith(
+      expect.not.objectContaining({ fullName: expect.anything() }),
     );
+    expect(result.kind).toBe('needs_information');
+    if (result.kind === 'needs_information') {
+      expect(result.requiredFields).toEqual(['full_name']);
+    }
   });
 
-  it('returns null when direct signup returns requires_redirect', async () => {
+  it('returns redirect when direct signup returns requires_redirect', async () => {
     const { performDirectSignup } = await import('../direct-signup.js');
     vi.mocked(performDirectSignup).mockResolvedValue({
       kind: 'requires_redirect',
@@ -90,7 +97,7 @@ describe('performSignupOrAuth', () => {
     });
 
     expect(performDirectSignup).toHaveBeenCalledOnce();
-    expect(result).toBeNull();
+    expect(result.kind).toBe('redirect');
   });
 
   it('emits agentic signup attempted with status=requires_redirect on redirect path', async () => {
@@ -112,7 +119,7 @@ describe('performSignupOrAuth', () => {
     );
   });
 
-  it('returns null when direct signup returns error', async () => {
+  it('returns error when direct signup returns error', async () => {
     const { performDirectSignup } = await import('../direct-signup.js');
     vi.mocked(performDirectSignup).mockResolvedValue({
       kind: 'error',
@@ -125,7 +132,10 @@ describe('performSignupOrAuth', () => {
       zone: 'us',
     });
 
-    expect(result).toBeNull();
+    expect(result.kind).toBe('error');
+    if (result.kind === 'error') {
+      expect(result.message).toBe('boom');
+    }
   });
 
   it('emits agentic signup attempted with status=signup_error on error kind', async () => {
@@ -148,7 +158,7 @@ describe('performSignupOrAuth', () => {
     );
   });
 
-  it('emits agentic signup attempted with status=signup_error when performDirectSignup throws', async () => {
+  it('emits agentic signup attempted with status=wrapper_exception when performDirectSignup throws', async () => {
     const { performDirectSignup } = await import('../direct-signup.js');
     vi.mocked(performDirectSignup).mockRejectedValue(new Error('network'));
     const { analytics } = await import('../analytics');
@@ -159,9 +169,12 @@ describe('performSignupOrAuth', () => {
       zone: 'us',
     });
 
+    // Distinguishing wrapper_exception (an unexpected throw) from
+    // signup_error (an `error`-arm response) lets us tell network/transport
+    // failures apart from the server's clean error path in telemetry.
     expect(analytics.wizardCapture).toHaveBeenCalledWith(
       AGENTIC_SIGNUP_ATTEMPTED_EVENT,
-      { status: 'signup_error', zone: 'us' },
+      { status: 'wrapper_exception', zone: 'us' },
     );
   });
 
@@ -193,8 +206,8 @@ describe('performSignupOrAuth', () => {
       zone: 'us',
     });
 
-    expect(result).not.toBeNull();
     expect(result).toMatchObject({
+      kind: 'success',
       accessToken: 'direct-access',
       dashboardUrl: null,
     });
