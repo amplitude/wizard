@@ -762,7 +762,13 @@ export const defaultCommand: CommandModule = {
                 isCreateAccountOnboarding(s) &&
                 s.signupEmail &&
                 s.signupFullName &&
-                !s.signupTokensObtained
+                !s.signupTokensObtained &&
+                // SigningUpScreen already attempted the wrapper and gave up
+                // (server returned redirect / error after the user filled in
+                // their name). Re-POSTing here would burn an extra round-trip
+                // for the same redirect/error and double-count telemetry.
+                // Fall through to the OAuth path below instead.
+                !s.signupAbandoned
               ) {
                 const { performSignupOrAuth } = await import(
                   '../utils/signup-or-auth.js'
