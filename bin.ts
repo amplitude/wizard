@@ -463,9 +463,9 @@ void yargs(hideBin(process.argv))
       type: 'boolean',
     },
     // Hidden shadows of env-only flags. .env('AMPLITUDE_WIZARD') auto-maps
-    // AMPLITUDE_WIZARD_DEV / _LOG / _TOKEN / _AGENT / _INSTALL_DIR / _CLASSIC
-    // to these option names; declaring them here lets .strict() accept the
-    // env-var injection on every command (not just $0 where they're visible).
+    // AMPLITUDE_WIZARD_DEV / _LOG / _TOKEN / _AGENT / _INSTALL_DIR to these
+    // option names; declaring them here lets .strict() accept the env-var
+    // injection on every command (not just $0 where they're visible).
     dev: {
       hidden: true,
       describe: 'internal: AMPLITUDE_WIZARD_DEV env-var passthrough',
@@ -490,11 +490,6 @@ void yargs(hideBin(process.argv))
       hidden: true,
       describe: 'internal: AMPLITUDE_WIZARD_INSTALL_DIR env-var passthrough',
       type: 'string',
-    },
-    classic: {
-      hidden: true,
-      describe: 'internal: AMPLITUDE_WIZARD_CLASSIC env-var passthrough',
-      type: 'boolean',
     },
     // The `apply` subcommand spawns a child wizard process and passes the
     // validated plan ID via `AMPLITUDE_WIZARD_PLAN_ID`. Without this hidden

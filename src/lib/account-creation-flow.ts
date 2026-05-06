@@ -8,7 +8,7 @@ export type AccountCreationProvisioningSessionSlice = Pick<
 
 /**
  * True when the user is on the new-account path and both provisioning inputs
- * are present — safe to POST direct signup (agent/CI/classic).
+ * are present — safe to POST direct signup (agent/CI).
  */
 export function accountCreationProvisioningInputsReady(
   session: AccountCreationProvisioningSessionSlice,

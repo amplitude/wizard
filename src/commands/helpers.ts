@@ -663,18 +663,15 @@ export function isAuthTaskGateReady(
 }
 
 /**
- * Run the direct-signup wrapper for agent / CI / classic modes.
+ * Run the direct-signup wrapper for agent / CI modes.
  *
- * No-op when account-creation provisioning inputs aren't all
- * set. On a non-null result, optionally runs `onSuccess` (classic uses this
- * to populate `session.credentials` via `resolveCredentials`). On null or
+ * No-op when account-creation provisioning inputs aren't all set. On null or
  * thrown errors, logs a human message that points at the mode's fallback
  * path (`fallbackLabel`) and returns — the caller's own auth path runs next.
  */
 export const runDirectSignupIfRequested = async (
   session: import('../lib/wizard-session').WizardSession,
   fallbackLabel: string,
-  onSuccess?: () => Promise<void>,
 ): Promise<void> => {
   if (!accountCreationProvisioningInputsReady(session)) {
     return;
@@ -706,10 +703,6 @@ export const runDirectSignupIfRequested = async (
       zone,
     });
   } catch (err) {
-    // Only the wrapper itself threw — emit wrapper_exception and bail.
-    // Scope this catch narrowly so an `onSuccess` throw below cannot
-    // re-emit telemetry after the wrapper has already recorded a
-    // `success` / `user_fetch_failed` event internally.
     trackSignupAttempt({ status: 'wrapper_exception', zone });
     getUI().log.warn(
       `Direct signup errored: ${
@@ -729,23 +722,6 @@ export const runDirectSignupIfRequested = async (
   }
   getUI().log.info('Direct signup succeeded; using newly created account.');
   session.signupMagicLinkUrl = tokens.dashboardUrl ?? null;
-  if (onSuccess) {
-    try {
-      await onSuccess();
-    } catch (err) {
-      // Signup itself succeeded — the wrapper already emitted the
-      // `success` / `user_fetch_failed` event and persisted tokens.
-      // If the classic-mode `resolveCredentials` (or any future
-      // onSuccess caller) throws during post-signup plumbing, log it
-      // but DO NOT re-emit wrapper_exception. The caller's normal
-      // flow will see no credentials and recover via its own path.
-      getUI().log.warn(
-        `Direct signup succeeded but post-signup handling failed: ${
-          err instanceof Error ? err.message : String(err)
-        }. Continuing to ${fallbackLabel}.`,
-      );
-    }
-  }
 };
 
 /**

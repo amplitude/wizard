@@ -2088,8 +2088,8 @@ describe('WizardStore', () => {
 
     it('is a no-op for the redetector when none is registered', () => {
       const store = createStore();
-      // No setFrameworkRedetector call — simulates classic-mode or test
-      // entry points where bin.ts hasn't wired up the helper.
+      // No setFrameworkRedetector call — simulates test entry points
+      // where bin.ts hasn't wired up the helper.
       expect(() => store.changeInstallDir('/tmp/foo')).not.toThrow();
       expect(store.session.installDir).toBe('/tmp/foo');
       expect(store.session.detectionComplete).toBe(false);

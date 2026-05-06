@@ -12,8 +12,8 @@
  *   2. Cap the size at 64 KB so a runaway dump can't bloat every turn.
  *   3. Strip a UTF-8 BOM if present (editors silently insert one).
  *   4. Return a clean error envelope on failure so the CLI can decide
- *      whether to abort (TUI / classic) or emit `auth_required`-style
- *      structured rejection (agent / CI).
+ *      whether to abort (TUI) or emit `auth_required`-style structured
+ *      rejection (agent / CI).
  *
  * Env-var fallback: if the user passes BOTH `--context-file` and
  * `AMPLITUDE_WIZARD_CONTEXT`, the CLI flag wins (consistent with the
