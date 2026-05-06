@@ -26,6 +26,7 @@ import {
   storeToken,
   replaceStoredUser,
   clearStoredCredentials,
+  AMPLI_CONFIG_PATH,
   type StoredUser,
   type StoredOAuthToken,
 } from '../ampli-settings.js';
@@ -588,5 +589,55 @@ describe('Phase G-1: legacy ~/.ampli.json writes are disabled', () => {
     expect(user?.id).toBe('legacy-only');
     const token = getStoredToken('legacy-only');
     expect(token?.accessToken).toBe('a');
+  });
+
+  // Regression: clearStoredCredentials followed by getStoredUser/getStoredToken
+  // must return nothing — even if a stale legacy `~/.ampli.json` is still on
+  // disk. Before the read-side fix, `readConfig` fell through to legacy
+  // whenever canonical was empty (`{}`), so logout silently leaked the prior
+  // user's tokens back in.
+  it('clearStoredCredentials hides stale legacy OAuth data on next read', () => {
+    // Path-aware mock so the canonical and legacy files have independent
+    // contents — the global fsStore can't represent two files at once.
+    const files = new Map<string, string>();
+    const legacyData = {
+      'User-stale': {
+        User: {
+          id: 'stale',
+          firstName: 'Stale',
+          lastName: 'User',
+          email: 'stale@example.com',
+          zone: 'us',
+        },
+        OAuthAccessToken: 'leaked-access',
+        OAuthIdToken: 'leaked-id',
+        OAuthRefreshToken: 'leaked-refresh',
+        OAuthExpiresAt: FUTURE,
+      },
+    };
+    mockReadFileSync.mockImplementation((p) => {
+      const stored = files.get(String(p));
+      if (stored !== undefined) return stored as unknown as Buffer;
+      // Mimic ENOENT for unwritten paths so readConfigFileDisk returns {}.
+      throw Object.assign(new Error('ENOENT'), { code: 'ENOENT' });
+    });
+    mockWriteFileSync.mockImplementation((p, data) => {
+      files.set(String(p), data as string);
+    });
+    mockExistsSync.mockImplementation((p) => files.has(String(p)));
+
+    // Seed: the legacy `~/.ampli.json` already has a logged-in user. The
+    // canonical file does not yet exist (pre-G-1 state).
+    files.set(AMPLI_CONFIG_PATH, JSON.stringify(legacyData));
+
+    // Logout: clear credentials. This writes `{}` to canonical.
+    clearStoredCredentials();
+
+    // After logout, neither getStoredUser nor getStoredToken should surface
+    // the stale legacy entry. The canonical file exists (even if empty), so
+    // it's authoritative.
+    expect(getStoredUser()).toBeUndefined();
+    expect(getStoredToken('stale')).toBeUndefined();
+    expect(getStoredToken(undefined, 'us')).toBeUndefined();
   });
 });

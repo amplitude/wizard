@@ -248,57 +248,49 @@ function readAmpliConfigFile(filePath: string): AmpliConfigParseResult {
 }
 
 /**
- * Read project binding from `.amplitude/project-binding.json`, falling back to
- * legacy root `ampli.json`, merging when both exist (binding overrides).
+ * Read project binding from `.amplitude/project-binding.json`. The canonical
+ * binding file is authoritative once it exists on disk — keys absent from
+ * the binding (e.g. `OrgId`, `ProjectId`, `Zone` after `clearAuthFieldsInAmpliConfig`)
+ * are treated as deliberately cleared, NOT merged from legacy. Falling back
+ * to legacy only happens for true legacy-only installs where the binding is
+ * missing entirely (Phase G-1 read-side back-compat).
  */
 export function readAmpliConfig(dir: string): AmpliConfigParseResult {
   const bindingPath = getProjectBindingFile(dir);
-  const legacyPath = ampliConfigPath(dir);
   const bindingResult = readAmpliConfigFile(bindingPath);
-  const legacyResult = readAmpliConfigFile(legacyPath);
 
-  let merged: AmpliConfig | undefined;
-
-  if (legacyResult.ok) {
-    merged = legacyResult.config;
-  }
+  // Canonical binding exists (parsed cleanly) → it's the source of truth.
+  // Don't merge legacy in; deleted keys must stay deleted.
   if (bindingResult.ok) {
-    merged = merged
-      ? mergeAmpliConfig(merged, bindingResult.config)
-      : bindingResult.config;
+    return bindingResult;
   }
 
-  if (merged !== undefined) {
-    if (
-      legacyResult.ok &&
-      !bindingResult.ok &&
-      bindingResult.error === 'not_found'
-    ) {
-      try {
-        ensureDir(getProjectMetaDir(dir));
-        atomicWriteJSON(bindingPath, merged, 0o644);
-      } catch (err) {
-        log.debug('readAmpliConfig: could not migrate binding file forward', {
-          'error message': err instanceof Error ? err.message : String(err),
-        });
-      }
+  // Binding had a hard error (e.g. invalid JSON) — surface it instead of
+  // silently masking the bad file with legacy data.
+  if (bindingResult.error !== 'not_found') {
+    return bindingResult;
+  }
+
+  // Binding is missing → fall back to legacy `ampli.json` for back-compat
+  // with pre-G-1 installs. The `WorkspaceId → ProjectId` migration in
+  // parseAmpliConfig fires at the read boundary, and we migrate the file
+  // forward best-effort so the next read goes straight to canonical.
+  const legacyPath = ampliConfigPath(dir);
+  const legacyResult = readAmpliConfigFile(legacyPath);
+  if (legacyResult.ok) {
+    try {
+      ensureDir(getProjectMetaDir(dir));
+      atomicWriteJSON(bindingPath, legacyResult.config, 0o644);
+    } catch (err) {
+      log.debug('readAmpliConfig: could not migrate binding file forward', {
+        'error message': err instanceof Error ? err.message : String(err),
+      });
     }
-    return { ok: true, config: merged };
-  }
-
-  if (
-    !bindingResult.ok &&
-    bindingResult.error === 'not_found' &&
-    !legacyResult.ok &&
-    legacyResult.error === 'not_found'
-  ) {
-    return { ok: false, error: 'not_found' };
-  }
-  if (!legacyResult.ok && legacyResult.error !== 'not_found') {
     return legacyResult;
   }
-  if (!bindingResult.ok && bindingResult.error !== 'not_found') {
-    return bindingResult;
+
+  if (legacyResult.error !== 'not_found') {
+    return legacyResult;
   }
   return { ok: false, error: 'not_found' };
 }

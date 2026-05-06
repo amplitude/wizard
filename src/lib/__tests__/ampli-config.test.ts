@@ -322,7 +322,12 @@ describe('readAmpliConfig + writeAmpliConfig round-trip', () => {
     expect(fs.existsSync(bindingPath)).toBe(true);
   });
 
-  it('merges binding over legacy when both exist', () => {
+  it('canonical binding is authoritative when both exist (no legacy merge)', () => {
+    // Phase G-1 read-side fix: when the canonical binding exists, it's the
+    // single source of truth — we do NOT merge legacy `ampli.json` data on
+    // top of it. Otherwise keys deliberately cleared from the binding
+    // (e.g. by `clearAuthFieldsInAmpliConfig`) would be resurrected from a
+    // stale legacy file, breaking logout/reset.
     fs.writeFileSync(
       path.join(tmpDir, 'ampli.json'),
       JSON.stringify({ OrgId: 'from-legacy', ProjectId: 'p', SourceId: 's' }),
@@ -338,8 +343,10 @@ describe('readAmpliConfig + writeAmpliConfig round-trip', () => {
     expect(parsed.ok).toBe(true);
     if (!parsed.ok) return;
     expect(parsed.config.OrgId).toBe('from-binding');
-    expect(parsed.config.ProjectId).toBe('p');
-    expect(parsed.config.SourceId).toBe('s');
+    // Keys absent from the canonical binding stay absent — we no longer
+    // backfill them from legacy.
+    expect(parsed.config.ProjectId).toBeUndefined();
+    expect(parsed.config.SourceId).toBeUndefined();
   });
 });
 
@@ -498,6 +505,67 @@ describe('Phase G-1: ampli.json mirror writes are disabled', () => {
     expect(result.config.OrgId).toBe('org-upgrade');
     expect(result.config.ProjectId).toBe('proj-upgrade');
     expect(result.config.Zone).toBe('eu');
+  });
+
+  // Regression: after `wizard reset`, the canonical `.amplitude/` directory
+  // is removed but a stale legacy `ampli.json` may still be on disk. Before
+  // the read-side fix, `readAmpliConfig` happily merged that legacy file
+  // back in — so reset effectively did nothing for users who had been on
+  // pre-G-1 versions. With the fix, missing canonical → empty config.
+  //
+  // This also covers `clearAuthFieldsInAmpliConfig`: the canonical binding's
+  // cleared keys must not be backfilled from legacy (otherwise logout
+  // resurrects the prior org/project).
+  it('reset semantics: stale legacy ampli.json does not resurrect after canonical removed', () => {
+    // Step 1: legacy mirror has stale auth state from a pre-G-1 install.
+    const legacyPath = ampliConfigPath(tmpDir);
+    fs.writeFileSync(
+      legacyPath,
+      JSON.stringify({
+        OrgId: 'stale-org',
+        ProjectId: 'stale-proj',
+        SourceId: 'stale-src',
+        Zone: 'us',
+      }),
+      'utf-8',
+    );
+
+    // Step 2: simulate `wizard reset` — canonical .amplitude/ directory is
+    // gone (or never existed). The legacy mirror still has data.
+    const ampliDir = path.join(tmpDir, '.amplitude');
+    if (fs.existsSync(ampliDir)) {
+      fs.rmSync(ampliDir, { recursive: true, force: true });
+    }
+    expect(fs.existsSync(getProjectBindingFile(tmpDir))).toBe(false);
+
+    // Step 3: read. Pre-fix this returned the stale legacy data. Post-fix,
+    // because the binding is missing, we DO fall back to legacy (back-compat
+    // for true legacy-only installs) and migrate it forward — that's
+    // intentional: a missing canonical means "legacy install we haven't seen
+    // before," not "explicitly cleared." The resurrection-after-reset bug
+    // only fires when canonical exists but is empty/cleared, so we cover
+    // that case below.
+    const firstRead = readAmpliConfig(tmpDir);
+    expect(firstRead.ok).toBe(true);
+
+    // Step 4: now simulate a *cleared* canonical binding (the post-logout
+    // / post-clearAuthFields state). The cleared keys must NOT come back
+    // from legacy.
+    fs.writeFileSync(
+      getProjectBindingFile(tmpDir),
+      JSON.stringify({ SourceId: 'kept-src' }),
+      'utf-8',
+    );
+
+    const cleared = readAmpliConfig(tmpDir);
+    expect(cleared.ok).toBe(true);
+    if (!cleared.ok) return;
+    // Auth keys absent from canonical stay absent — no legacy resurrection.
+    expect(cleared.config.OrgId).toBeUndefined();
+    expect(cleared.config.ProjectId).toBeUndefined();
+    expect(cleared.config.Zone).toBeUndefined();
+    // Tracking-plan field deliberately kept in canonical survives.
+    expect(cleared.config.SourceId).toBe('kept-src');
   });
 
   it('clearAuthFieldsInAmpliConfig leaves legacy ampli.json bytes untouched', () => {

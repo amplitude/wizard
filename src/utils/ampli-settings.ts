@@ -64,38 +64,49 @@ function oauthEntriesPresent(config: Record<string, unknown>): boolean {
 
 /**
  * When `explicitPath` is set, only that file is read (tests / special cases).
- * Otherwise merge canonical + legacy: prefer canonical when it already holds
- * OAuth user keys; otherwise load legacy, migrate forward best-effort.
+ * Otherwise: the canonical file is authoritative once it exists on disk —
+ * even an empty `{}` means "explicitly cleared" (e.g. by
+ * `clearStoredCredentials`) and legacy data must not be resurrected. Only
+ * fall back to / migrate from legacy when the canonical file is *missing*,
+ * i.e. a true legacy-only install that hasn't yet been migrated.
  */
 function readConfig(explicitPath?: string): Record<string, unknown> {
   if (explicitPath) {
     return readConfigFileDisk(explicitPath);
   }
   const primaryPath = getOAuthSettingsFile();
-  const legacyPath = getLegacyAmpliHomeOAuthPath();
   const primary = readConfigFileDisk(primaryPath);
-  const legacy = readConfigFileDisk(legacyPath);
 
+  // Fast path: canonical already has OAuth user keys — return it directly,
+  // no need to stat or touch legacy.
   if (oauthEntriesPresent(primary)) {
     return primary;
   }
-  // Only migrate from legacy when the primary file doesn't exist on disk.
-  // If primary exists (even as `{}`), it was written intentionally (e.g. by
-  // clearStoredCredentials) and legacy data must not be resurrected.
+
+  // Canonical lacks OAuth entries. Distinguish "canonical exists but is
+  // explicitly cleared (e.g. logout)" from "canonical never existed yet
+  // (true pre-G-1 legacy install)". In the former case we MUST NOT fall
+  // back to legacy — that's the read-side fix that makes logout/reset
+  // actually stick. In the latter case we migrate legacy forward.
   const primaryFileExists = fs.existsSync(primaryPath);
-  if (!primaryFileExists && oauthEntriesPresent(legacy)) {
-    const merged: Record<string, unknown> = { ...legacy, ...primary };
+  if (primaryFileExists) {
+    return primary;
+  }
+
+  const legacyPath = getLegacyAmpliHomeOAuthPath();
+  const legacy = readConfigFileDisk(legacyPath);
+  if (oauthEntriesPresent(legacy)) {
     try {
       ensureDir(getCacheRoot());
-      atomicWriteJSON(primaryPath, merged, 0o600);
+      atomicWriteJSON(primaryPath, legacy, 0o600);
     } catch (err) {
       log.debug('readConfig: could not migrate legacy OAuth file forward', {
         'error message': err instanceof Error ? err.message : String(err),
       });
     }
-    return merged;
+    return legacy;
   }
-  return Object.keys(primary).length > 0 ? primary : legacy;
+  return primary;
 }
 
 function writeConfig(
