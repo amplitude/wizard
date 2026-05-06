@@ -940,6 +940,14 @@ describe('WizardStore', () => {
       store.session.signupEmail = 'x@y.co';
       store.session.signupFullName = 'X Y';
       store.session.signupTokensObtained = true;
+      // Pre-seed ceremony state that a real session might have at the
+      // moment the user hits Esc back to Welcome — server returned
+      // needs_information, signupAuth never settled, signupAbandoned
+      // false. backToWelcome must clear all three so the next forward
+      // pass through the create-account section starts fresh.
+      store.session.signupRequiredFields = ['full_name'];
+      store.session.signupAuth = null;
+      store.session.signupAbandoned = false;
 
       store.backToWelcome();
 
@@ -950,9 +958,45 @@ describe('WizardStore', () => {
       expect(store.session.signupEmail).toBeNull();
       expect(store.session.signupFullName).toBeNull();
       expect(store.session.signupTokensObtained).toBe(false);
+      // Ceremony state must be wiped — mirroring `setSignupEmail(null)`'s
+      // contract. Without this, a second-time-around user re-typing the
+      // same email would skip the probe POST and consume the cached
+      // needs_information response.
+      expect(store.session.signupRequiredFields).toBeNull();
+      expect(store.session.signupAuth).toBeNull();
+      expect(store.session.signupAbandoned).toBe(false);
       expect(wizardCaptureMock).toHaveBeenCalledWith('back navigation', {
         to: 'welcome',
       });
+    });
+
+    it('clears ceremony state populated by a successful signup before backToWelcome', () => {
+      // Edge case the bound-to-setSignupEmail contract was meant to
+      // catch: signup succeeded (signupAuth populated, server account
+      // exists), user hits Esc back to Welcome before the auth task
+      // finishes resolving creds. Without the ceremony reset, the next
+      // forward pass would release the auth gate on stale tokens.
+      const store = createStore();
+      store.session.authOnboardingPath = AuthOnboardingPath.CreateAccount;
+      store.session.introConcluded = true;
+      store.session.region = 'us';
+      store.session.signupEmail = 'ada@example.com';
+      store.session.signupFullName = 'Ada Lovelace';
+      store.session.signupRequiredFields = ['full_name'];
+      store.session.signupAuth = {
+        idToken: 'i',
+        accessToken: 'a',
+        refreshToken: 'r',
+        zone: 'us',
+        userInfo: null,
+        dashboardUrl: null,
+      };
+
+      store.backToWelcome();
+
+      expect(store.session.signupRequiredFields).toBeNull();
+      expect(store.session.signupAuth).toBeNull();
+      expect(store.session.signupAbandoned).toBe(false);
     });
 
     it('keeps create-account onboarding path after rewind', () => {

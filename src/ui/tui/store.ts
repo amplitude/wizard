@@ -872,6 +872,15 @@ export class WizardStore {
       this.$session.setKey('tosAccepted', null);
       this.$session.setKey('signupEmail', null);
       this.$session.setKey('signupFullName', null);
+      // Mirror `setSignupEmail(null)`'s ceremony-reset contract: clearing
+      // signupEmail must invalidate the prior probe response so the next
+      // forward pass starts fresh. We can't *call* `setSignupEmail` here
+      // — backToWelcome batches multiple raw `setKey` writes and emits
+      // one change at the end — so the reset is inlined. Keep this in
+      // sync with `setSignupEmail` if its contract evolves.
+      this.$session.setKey('signupRequiredFields', null);
+      this.$session.setKey('signupAuth', null);
+      this.$session.setKey('signupAbandoned', false);
       this.$session.setKey('signupTokensObtained', false);
       this.$session.setKey('signupMagicLinkUrl', null);
       this.$session.setKey('pendingAuthAccessToken', null);
