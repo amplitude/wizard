@@ -228,15 +228,18 @@ The combination of caching + tiering + structured outputs is where the real cost
 
 ## 7. Eval strategy and AI-SDK cutover gate
 
-PR #537 lands the `evals/` skeleton: NDJSON contract, fs-snapshot, scorer registry, layer-0/1 example scorers, 7 ring-1 scenarios, no fixtures. This plan binds the eval surface to the AI-SDK migration as the cutover gate.
+PR #560 (`ba-104-add-eval-suite`, supersedes #537) lands the `evals/` framework: NDJSON-driven runner, layer-0/1 scorers (4 hard-fail + 7 structural), one Ring 1 fixture (Next.js App Router vanilla) scoring 50/50 end-to-end, and a 19-point quality checklist (`evals/spec/quality-criteria.md`). The wire-format boundary at `src/lib/agent-events.ts` is the eval surface — which means evals are decoupled from the inner runtime (Agent SDK now, AI SDK after D-5). This plan binds that framework to the AI-SDK migration as the cutover gate.
 
-### 7.1 Adopt the v2 + rewrite eval shapes
+### 7.1 Adopt PR #560's framework as the canonical surface
 
-`wizard-v2/evals/` (baseline.json, runner, scoring, scoring tests, fixtures) is the most mature reference. `wizard-rewrite/evals/` has the cleaner output shape (`results.json` + `results.md`). PR #537 already uses a similar split. **Do not re-architect.** The work that remains:
+PR #560 is the eval framework. **Do not fork it.** Build on top:
 
-1. Land first canonical fixture pair: `nextjs-app-router-vanilla/pristine/` + a `nextjs-app-router-existing/pristine/` baseline (tracked in PR #537's "intentionally NOT in this PR" list).
-2. Promote the L1 `confirmed-events-tracked` regex to AST via `@typescript-eslint/parser` (PR #537 acknowledges this as a follow-up).
-3. Land Layer-2 (static SDK rules), Layer-3 (`pnpm build` outcome), Layer-6 (judge) scorers in that order. Layer-4 (runtime) and Layer-5 (ingestion) are post-2.0.
+1. Land the first canonical fixture pair beyond Next.js vanilla: `nextjs-app-router-existing` (analytics already partially wired), `react-router-7-framework`, `react-vite-vanilla`, `expo-vanilla`, and the generic-probe scenario from PR #537's original ring-1 list.
+2. Promote the L1 `confirmed-events-tracked` regex (`evals/scorers/layer1-structural/confirmed-events-tracked.ts`) to AST via `@typescript-eslint/parser` — `track(eventName)` with a variable name slips past the regex today.
+3. Land Layer-2 (static SDK rules), Layer-3 (`pnpm build` outcome), Layer-6 (judge with versioned rubric) scorers in that order. Layer-4 (runtime) and Layer-5 (ingestion) are post-2.0.
+4. Resolve the four high-impact issues raised in the PR #560 review before the cutover gate hangs off this framework: gateway auth via §7.5 env vars (not `--api-key`), stderr capture + redaction, scenario schema validation, framework→SDK table for Layer 0.
+
+`wizard-v2/evals/` and `wizard-rewrite/evals/` remain reference implementations cited from in-tree code, not adoption targets — PR #560 is the canonical surface.
 
 ### 7.2 The AI-SDK cutover eval gate
 
@@ -261,14 +264,40 @@ Failing any of these for two consecutive scheduled runs reverts the default flip
 
 The §7.2 cutover gate is the ceiling test. The floor is: **every LLM call in the wizard has its own fixture and scorer**, and a new call cannot land without them. This is a binding consequence of strategic posture decisions 8 and 9.
 
-Every LLM call ships with three artifacts under `evals/call-sites/<call-site-id>/`:
+**Critical alignment with PR #560:** per-call-site coverage **shares** PR #560's runner — it is not a parallel framework. Concretely, both end-to-end scenarios (PR #560's `evals/scenarios/`) and per-call-site fixtures (this section's `evals/call-sites/`) feed the **same** `score()` function in `evals/runner/score.ts` consuming the **same** `Artifact` shape from `evals/runner/types.ts`. Only the *artifact source* differs.
+
+#### Layout (extending PR #560's tree)
+
+```
+evals/
+  runner/         <-- PR #560: as-is, shared
+    score.ts      <-- shared scoring entry point
+    types.ts      <-- shared Artifact / Scorer interfaces
+    invoke-wizard.ts <-- gains a third invocation mode: runCallSite
+  scenarios/      <-- PR #560: end-to-end Ring 1+ scenarios
+  call-sites/     <-- new in this plan
+    propose-event-plan/
+      fixture.json   <-- input context at call moment
+      golden.ndjson  <-- recorded response
+      scorer.ts      <-- exports a Scorer for runner/score.ts
+    select-skill/
+    inner-loop-streamtext/
+  scorers/        <-- PR #560: cross-cutting layer scorers
+  spec/
+```
+
+Every LLM call site ships three artifacts under `evals/call-sites/<call-site-id>/`:
 
 1. **Fixture** — the input context at the call moment: cwd snapshot (or hash), framework detection state, prior tool outputs, the prompt + system prefix at that breakpoint, the model id, the cache-control layout. Stored as JSON (or NDJSON for streaming sites).
-2. **Scorer** — asserts the output satisfies the call's contract:
+2. **Scorer** — exports a `Scorer` matching `runner/types.ts`. Asserts the output satisfies the call's contract:
    - Structured-output sites (`generateObject`): schema validation + semantic checks (e.g. `propose_event_plan` returns ≤ N events, all with snake_case names).
    - Streaming sites (`streamText`): the layered scorers from §7.1 applied to the call's slice of the run.
    - Tool-decision sites (which-tool-to-call): a deterministic check that the chosen tool matches the fixture's labeled correct tool, plus a fuzzier judge (Layer-6) for ties.
-3. **Replay harness** — runs the fixture against the live call site (no model swap) and against a recorded golden response. Drift detection runs nightly; PRs that touch the call site re-record the golden.
+3. **Golden response** — runs the fixture against the live call site (no model swap) and against the recorded golden. Drift detection runs nightly; PRs that touch the call site re-record the golden.
+
+#### Runner extension
+
+PR #560's `evals/runner/invoke-wizard.ts` exposes `runLive` and `runReplay`. This plan adds a third: **`runCallSite`**. It builds an `Artifact`-shaped envelope from a single tool call (live LLM invocation against the gateway, or golden replay) and hands it to the same `score()` function. Implementation is small: a wrapper that executes one tool call instead of spawning the wizard binary.
 
 #### Eval registry
 
@@ -282,11 +311,11 @@ PR template gains a line: *"If this PR adds, removes, or changes an LLM call sit
 
 #### CI
 
-The PR-gate (§7.3) runs the **call-site fixtures whose IDs the PR touches**, not just the two ring-1 scenarios. Touching `src/lib/wizard-tools/propose-event-plan.ts` runs the `propose-event-plan` fixture suite. Nightly runs the full call-site registry against goldens; drift opens an issue auto-tagged `eval-drift`.
+The PR-gate (§7.3) runs the **call-site fixtures whose IDs the PR touches**, not just the ring-1 scenarios. Touching `src/lib/wizard-tools/propose-event-plan.ts` runs the `propose-event-plan` fixture suite. Nightly runs the full call-site registry against goldens; drift opens an issue auto-tagged `eval-drift`.
 
 #### Boot strap
 
-1. Land the call-site registry shape on top of PR #537's `scorer-registry.ts`.
+1. PR #560 lands. Open a follow-up PR adding `runner/invoke-wizard.ts:runCallSite`, `evals/call-sites/registry.ts`, and the first three call-site fixtures.
 2. First three call sites covered as proof: `propose_event_plan` (PR #553's surface), `select_skill` (the Tier-2 `load_skill` decision from #544), and the inner-loop `streamText` site (Phase D-3).
 3. Every call site added in Phase D-3 onward lands paired. The Agent-SDK call sites get covered as they're ported to the AI-SDK runner — by D-6, every remaining call site is registered.
 
@@ -301,6 +330,13 @@ The eval harness (§7.1) and bench harness (§6.1) both need the wizard's `--age
 1. In the credential resolver (`src/lib/credential-resolution.ts` or the equivalent code path that produces `config.amplitudeBearerToken`), accept `WIZARD_OAUTH_TOKEN` from env as a *higher-priority* source than the OAuth file. If `WIZARD_EXPIRES_AT` is past, fail loudly with a remediation pointer rather than silently refreshing (CI should never refresh a long-lived org secret).
 2. Plumb `WIZARD_ZONE` into the gateway URL resolver in `src/utils/urls.ts:79` next to the existing `WIZARD_LLM_PROXY_URL` override. Zone selection is currently driven by the user's stored config; CI needs an explicit override.
 3. PR #549's `resolveWizardAnthropicAuthFromEnv` (the AI-SDK Anthropic factory) needs to read the same vars — verify the priority order matches the legacy path so D-5 cutover doesn't change auth behavior.
+
+**Eval-runner-side work (follow-up PR on top of #560):**
+
+PR #560's `runLive` (`evals/runner/invoke-wizard.ts:75-82`) currently passes `--api-key`, which routes the wizard to direct-Anthropic and **bypasses the gateway**. That defeats the parity check the cutover gate depends on (gateway-specific 400s, schema-noise issues, beta-header rejections — exactly the bug class Phase A fixes). Update `runLive` to:
+1. Default to env-var auth via the three secrets above, talking to the gateway.
+2. Allow `--direct-api-key` only as an explicit opt-out for offline development.
+3. Add an L0 scorer asserting the captured stderr never contains the literal token value (covers PR #560 review issue 2).
 
 **CI-side work (per-workflow, small):**
 
@@ -397,7 +433,7 @@ The six questions previously open in earlier drafts of this plan are decided. Ea
 1. **Land the existing stack in declared order.** #541 → #542 → #550 (Phase A close). #543 (Phase B seam). #544 → #545 → #546 (Phase C tier tools). #548 → #549 (Phase D probe + factory). #551 → #553 (Phase E start). #547/#554/#555 land independently.
 2. **Open a tracking issue per phase** mirroring the slice list in §5. PRs reference the phase issue, not this doc, so the doc stays evergreen.
 3. **Wire benchmark assertions** in CI per §6.2. Start with the cache-read warning, the bundle-size block, and the first-token-latency block. Add others as their measurements stabilize.
-4. **Land the first eval fixture** (`nextjs-app-router-vanilla/pristine/`) on top of #537. This is the gate-gate: D-5 requires the eval surface to be real.
+4. **Land the per-call-site extension** to PR #560 once it merges: `runner/invoke-wizard.ts:runCallSite`, `evals/call-sites/registry.ts`, and the first three call-site fixtures (`propose_event_plan`, `select_skill`, inner-loop `streamText`). Resolve the four high-impact PR #560 review issues in the same window. This is the gate-gate: D-5 requires the eval surface to be real.
 5. **Wire `WIZARD_OAUTH_TOKEN` / `WIZARD_EXPIRES_AT` / `WIZARD_ZONE` env-var auth** per §7.5. Single PR: extend `src/lib/credential-resolution.ts` and `src/utils/urls.ts` to read the env vars; verify PR #549's `resolveWizardAnthropicAuthFromEnv` matches the priority order; add the redaction-allowlist test. Unblocks evals and benches against the live gateway.
 6. **Open the paired `browser-sdk-2.md` dedup PR** (wizard + context-hub) once #544-#546 land. Per §10 decision 1, lands in Phase C.
 7. **Archive `wizard-rewrite` and `wizard-v2`** once D-6 ships (Agent SDK deletion). Until then, keep them as reference implementations cited from the in-tree code.
