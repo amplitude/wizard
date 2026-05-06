@@ -350,6 +350,7 @@ export function loadBundledSkillMenu(): SkillMenu {
  * id can never escape the skills root via traversal characters (`..`, `/`).
  */
 const SKILL_ID_ALLOWLIST = /^[a-z0-9][a-z0-9_-]*$/;
+const SKILL_REFERENCE_REL_PATH = /^references\/[\w.-]+\.md$/;
 
 /**
  * Check whether a bundled skill exists on disk by searching across all
@@ -408,6 +409,38 @@ export function readBundledSkillBody(skillId: string): string | null {
         fs.existsSync(skillMd)
       ) {
         return fs.readFileSync(skillMd, 'utf8');
+      }
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+/**
+ * Read a bundled skill reference markdown file by relative path.
+ * Path is restricted to `references/*.md` to avoid broad file reads.
+ */
+export function readBundledSkillReference(
+  skillId: string,
+  refPath: string,
+): string | null {
+  if (!SKILL_ID_ALLOWLIST.test(skillId)) return null;
+  if (!SKILL_REFERENCE_REL_PATH.test(refPath)) return null;
+  const skillsRoot = getSkillsRootDir();
+  try {
+    for (const category of fs.readdirSync(skillsRoot)) {
+      if (!SKILL_ID_ALLOWLIST.test(category)) continue;
+      // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
+      const candidate = path.join(skillsRoot, category, skillId);
+      // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
+      const reference = path.join(candidate, refPath);
+      if (
+        fs.existsSync(candidate) &&
+        fs.statSync(candidate).isDirectory() &&
+        fs.existsSync(reference)
+      ) {
+        return fs.readFileSync(reference, 'utf8');
       }
     }
   } catch {
@@ -1492,6 +1525,59 @@ export async function createWizardToolsServer(options: WizardToolsOptions) {
               };
             },
           ),
+          tool(
+            'load_skill_reference',
+            'Return a bundled skill reference markdown file by relative path. Path must be references/*.md. Opt-in: set AMPLITUDE_WIZARD_SKILL_TIERS=1.',
+            {
+              skillId: z
+                .string()
+                .describe(
+                  'Bundled skill folder id (e.g. add-analytics-instrumentation)',
+                ),
+              refPath: z
+                .string()
+                .regex(SKILL_REFERENCE_REL_PATH)
+                .describe(
+                  'Relative reference markdown path under the skill (e.g. references/browser-sdk-2.md)',
+                ),
+              reason: reasonField,
+            },
+            (args: { skillId: string; refPath: string; reason: string }) => {
+              void args.reason;
+              if (!bundledSkillExists(args.skillId)) {
+                return {
+                  content: [
+                    {
+                      type: 'text' as const,
+                      text: `Unknown or missing bundled skill: ${args.skillId}`,
+                    },
+                  ],
+                  isError: true,
+                };
+              }
+              const reference = readBundledSkillReference(
+                args.skillId,
+                args.refPath,
+              );
+              if (reference == null) {
+                return {
+                  content: [
+                    {
+                      type: 'text' as const,
+                      text: `Could not read reference ${args.refPath} for: ${args.skillId}`,
+                    },
+                  ],
+                  isError: true,
+                };
+              }
+              logToFile(
+                `load_skill_reference: ${args.skillId}/${args.refPath} (${reference.length} chars)`,
+              );
+              return {
+                content: [{ type: 'text' as const, text: reference }],
+              };
+            },
+          ),
         ]
       : [];
 
@@ -2040,6 +2126,7 @@ export function resolveWizardAllowedToolNames(): string[] {
   const names = [...WIZARD_TOOL_NAMES];
   if (process.env.AMPLITUDE_WIZARD_SKILL_TIERS === '1') {
     names.push(`${SERVER_NAME}:load_skill`);
+    names.push(`${SERVER_NAME}:load_skill_reference`);
   }
   return names;
 }
