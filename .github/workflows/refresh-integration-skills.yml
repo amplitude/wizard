@@ -24,6 +24,9 @@ jobs:
         run: bash scripts/refresh-integration-skills.sh
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Optional repo Actions variable: pin context-hub release (e.g. v1.2.3).
+          # When unset, script uses releases/latest (matches refresh-skills.sh).
+          CONTEXT_HUB_TAG: ${{ vars.CONTEXT_HUB_TAG }}
 
       - name: Check for changes
         id: diff
