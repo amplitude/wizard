@@ -25,6 +25,7 @@ import {
   resolveWizardAllowedToolNames,
   bundledSkillExists,
   readBundledSkillBody,
+  readBundledSkillReference,
 } from '../wizard-tools';
 import { toWizardDashboardOpenUrl } from '../../utils/dashboard-open-url';
 
@@ -973,6 +974,7 @@ describe('resolveWizardAllowedToolNames', () => {
     expect(resolveWizardAllowedToolNames()).toEqual([
       ...WIZARD_TOOL_NAMES,
       'wizard-tools:load_skill',
+      'wizard-tools:load_skill_reference',
     ]);
   });
 });
@@ -990,6 +992,33 @@ describe('readBundledSkillBody', () => {
     const body = readBundledSkillBody(id);
     expect(body).toBeTruthy();
     expect(body).toContain('---');
+  });
+});
+
+describe('readBundledSkillReference', () => {
+  it('returns null for traversal-like ids', () => {
+    expect(
+      readBundledSkillReference('../etc/passwd', 'references/a.md'),
+    ).toBeNull();
+  });
+
+  it('returns null for non-reference paths', () => {
+    expect(
+      readBundledSkillReference('wizard-prompt-supplement', 'SKILL.md'),
+    ).toBeNull();
+  });
+
+  it('returns bundled reference content when present', () => {
+    const id = 'wizard-prompt-supplement';
+    if (!bundledSkillExists(id)) {
+      return;
+    }
+    const text = readBundledSkillReference(
+      id,
+      'references/browser-sdk-init-defaults.md',
+    );
+    expect(text).toBeTruthy();
+    expect(text).toContain('Amplitude');
   });
 });
 

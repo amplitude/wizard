@@ -27,13 +27,19 @@ import type { EventPlanDecision } from '../ui/wizard-ui';
 import { wrapMcpServerWithSentry } from './observability/index';
 import { toWizardDashboardOpenUrl } from '../utils/dashboard-open-url';
 import type { SkillEntry, SkillMenu } from './wizard-tools/bundled-skills.js';
-import { readBundledSkillBody } from './wizard-tools/bundled-skills.js';
+import {
+  bundledSkillExists,
+  readBundledSkillBody,
+  readBundledSkillReference,
+  SKILL_REFERENCE_REL_PATH,
+} from './wizard-tools/bundled-skills.js';
 
 export type { SkillEntry, SkillMenu } from './wizard-tools/bundled-skills.js';
 export {
   loadBundledSkillMenu,
   bundledSkillExists,
   readBundledSkillBody,
+  readBundledSkillReference,
   preStageSkills,
   installBundledSkill,
 } from './wizard-tools/bundled-skills.js';
@@ -1265,6 +1271,59 @@ export async function createWizardToolsServer(options: WizardToolsOptions) {
               };
             },
           ),
+          tool(
+            'load_skill_reference',
+            'Return a bundled skill reference markdown file by relative path. Path must be references/*.md. Opt-in: set AMPLITUDE_WIZARD_SKILL_TIERS=1.',
+            {
+              skillId: z
+                .string()
+                .describe(
+                  'Bundled skill folder id (e.g. add-analytics-instrumentation)',
+                ),
+              refPath: z
+                .string()
+                .regex(SKILL_REFERENCE_REL_PATH)
+                .describe(
+                  'Relative reference markdown path under the skill (e.g. references/browser-sdk-2.md)',
+                ),
+              reason: reasonField,
+            },
+            (args: { skillId: string; refPath: string; reason: string }) => {
+              void args.reason;
+              if (!bundledSkillExists(args.skillId)) {
+                return {
+                  content: [
+                    {
+                      type: 'text' as const,
+                      text: `Unknown or missing bundled skill: ${args.skillId}`,
+                    },
+                  ],
+                  isError: true,
+                };
+              }
+              const reference = readBundledSkillReference(
+                args.skillId,
+                args.refPath,
+              );
+              if (reference == null) {
+                return {
+                  content: [
+                    {
+                      type: 'text' as const,
+                      text: `Could not read reference ${args.refPath} for: ${args.skillId}`,
+                    },
+                  ],
+                  isError: true,
+                };
+              }
+              logToFile(
+                `load_skill_reference: ${args.skillId}/${args.refPath} (${reference.length} chars)`,
+              );
+              return {
+                content: [{ type: 'text' as const, text: reference }],
+              };
+            },
+          ),
         ]
       : [];
 
@@ -1813,6 +1872,7 @@ export function resolveWizardAllowedToolNames(): string[] {
   const names = [...WIZARD_TOOL_NAMES];
   if (process.env.AMPLITUDE_WIZARD_SKILL_TIERS === '1') {
     names.push(`${SERVER_NAME}:load_skill`);
+    names.push(`${SERVER_NAME}:load_skill_reference`);
   }
   return names;
 }
