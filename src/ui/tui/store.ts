@@ -373,7 +373,7 @@ export class WizardStore {
     this.$session.setKey('credentials', credentials);
     const session = this.$session.get();
     // readDisk: true — setCredentials may be called from paths (agent mode,
-    // classic UI, token refresh) that run before / around RegionSelect.
+    // token refresh) that run before / around RegionSelect.
     const zone = resolveZone(session, DEFAULT_AMPLITUDE_ZONE, {
       readDisk: true,
     });
@@ -473,8 +473,8 @@ export class WizardStore {
   /**
    * Re-detection callback registered by bin.ts. Returning `null` from
    * `changeInstallDir` would cause it to no-op when the detector
-   * isn't wired up (e.g. tests, classic mode), which we want — the
-   * directory change still applies, we just skip the redetect.
+   * isn't wired up (e.g. tests), which we want — the directory change
+   * still applies, we just skip the redetect.
    */
   private _redetect:
     | ((installDir: string, signal: AbortSignal) => Promise<unknown>)

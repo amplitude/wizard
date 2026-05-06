@@ -27,8 +27,8 @@ import {
 /**
  * Load `--context-file` (or `AMPLITUDE_WIZARD_CONTEXT`) and stamp the
  * resulting string onto `session.orchestratorContext`. Centralized here
- * so all four mode branches (agent / CI / classic / TUI) share one
- * read+validate path and emit one consistent error envelope.
+ * so all three mode branches (agent / CI / TUI) share one read+validate
+ * path and emit one consistent error envelope.
  *
  * On failure: emits a structured NDJSON event in agent mode, plain
  * stderr in every other mode, then exits with INVALID_ARGS so the
@@ -126,10 +126,10 @@ export const defaultCommand: CommandModule = {
         // Required for --auth-onboarding create-account in non-TUI modes: the backend does
         // not route across regions, so the client must POST to the
         // correct provisioning endpoint (us or eu). In the TUI this
-        // is covered by the RegionSelect screen; agent/CI/classic
-        // have no prompt, so this flag is the only way to signal
-        // regional intent on a first-time signup. When provided in
-        // TUI mode, pre-populates the region and skips RegionSelect.
+        // is covered by the RegionSelect screen; agent/CI have no
+        // prompt, so this flag is the only way to signal regional
+        // intent on a first-time signup. When provided in TUI mode,
+        // pre-populates the region and skips RegionSelect.
         // `--zone` is accepted as an alias for consistency with the
         // `wizard login` subcommand.
         describe:
@@ -190,11 +190,6 @@ export const defaultCommand: CommandModule = {
         describe: 'emit structured NDJSON output for automation',
         type: 'boolean',
       },
-      classic: {
-        default: false,
-        describe: 'use the classic prompt-based UI',
-        type: 'boolean',
-      },
       'context-file': {
         // Lets an outer agent / CI pipeline inject team conventions
         // ("we use snake_case for events", existing taxonomy snippets,
@@ -251,8 +246,6 @@ export const defaultCommand: CommandModule = {
         // NOT be auto-promoted to agent mode (which would otherwise
         // route through resolveMode's --agent back-compat path).
         !options['auto-approve'] &&
-        !options.classic &&
-        process.env.AMPLITUDE_WIZARD_CLASSIC !== '1' &&
         isNonInteractiveEnvironment())
     ) {
       // Agent mode (explicit --agent or auto-detected non-TTY)
@@ -323,38 +316,6 @@ export const defaultCommand: CommandModule = {
           options as Parameters<typeof lazyRunWizard>[0],
           session,
           () => session.additionalFeatureQueue,
-        );
-      })();
-    } else if (
-      options.classic ||
-      process.env.AMPLITUDE_WIZARD_CLASSIC === '1'
-    ) {
-      // Classic mode: interactive prompts without the rich TUI
-      void (async () => {
-        const session = await buildSessionFromOptions(options);
-        applyOrchestratorContext(session, options, false);
-        await selfHealIfNeeded(session);
-
-        // Attempt direct signup before falling through to OAuth browser
-        // flow. On success, run resolveCredentials so agent-runner's
-        // !session.credentials guard skips the OAuth call. On null/failure,
-        // classic mode proceeds normally — getOrAskForProjectData calls
-        // performAmplitudeAuth, which opens a browser (valid for classic).
-        //
-        // requireOrgId: false — classic has no AuthScreen to recover from
-        // the TUI-only safety check that clears credentials when no org is
-        // selected. Without this, a successful signup would get silently
-        // cleared and the browser would open anyway, defeating the point.
-        await runDirectSignupIfRequested(session, 'OAuth', async () => {
-          const { resolveCredentials } = await import(
-            '../lib/credential-resolution.js'
-          );
-          await resolveCredentials(session, { requireOrgId: false });
-        });
-
-        await lazyRunWizard(
-          options as Parameters<typeof lazyRunWizard>[0],
-          session,
         );
       })();
     } else {
