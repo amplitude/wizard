@@ -111,16 +111,20 @@ describe('performDirectSignup', () => {
   });
 
   it('returns needs_information with the server-requested required fields', async () => {
+    // Shape mirrors the live server response — JSON-Schema is wrapped in
+    // an extra `schema` field. Verified via direct curl on 2026-05-06.
     server.use(
       http.post(PROVISIONING_URL, () =>
         HttpResponse.json({
           type: 'needs_information',
           needs_information: {
-            type: 'object',
-            properties: {
-              full_name: { type: 'string', description: 'Full Name' },
+            schema: {
+              type: 'object',
+              properties: {
+                full_name: { type: 'string', description: 'Full Name' },
+              },
+              required: ['full_name'],
             },
-            required: ['full_name'],
           },
         }),
       ),
@@ -145,9 +149,11 @@ describe('performDirectSignup', () => {
         return HttpResponse.json({
           type: 'needs_information',
           needs_information: {
-            type: 'object',
-            properties: { full_name: { type: 'string' } },
-            required: ['full_name'],
+            schema: {
+              type: 'object',
+              properties: { full_name: { type: 'string' } },
+              required: ['full_name'],
+            },
           },
         });
       }),
