@@ -1,22 +1,61 @@
 /**
- * event-plan-parser — covers `readLocalEventPlan`, the disk reader the
- * Event Verification screen uses to surface the agent's tracking plan.
- *
- * The parser side of the module is implicitly exercised by tests that
- * read from disk; we don't add a separate suite for the pure JSON parser
- * because every observed-in-the-wild input shape is documented in the
- * inline schema and any drift would surface here too.
- *
- * Tests use a per-test tmp dir so file-system state is hermetic across
- * the suite — important because the reader picks the freshest mtime when
- * both the canonical and legacy paths exist.
+ * event-plan-parser — disk reader for the Event Verification screen plus
+ * direct coverage of {@link parseEventPlanContent} so wild agent JSON shapes
+ * regress with a fast, hermetic suite (no filesystem).
  */
 
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { readLocalEventPlan } from '../event-plan-parser.js';
+import { parseEventPlanContent, readLocalEventPlan } from '../event-plan-parser.js';
+
+describe('parseEventPlanContent', () => {
+  it('returns null for invalid JSON', () => {
+    expect(parseEventPlanContent('not json')).toBeNull();
+  });
+
+  it('returns null when the document is not an array and has no events array', () => {
+    expect(parseEventPlanContent(JSON.stringify({ foo: [] }))).toBeNull();
+    expect(parseEventPlanContent(JSON.stringify({ events: {} }))).toBeNull();
+  });
+
+  it('returns an empty array for []', () => {
+    expect(parseEventPlanContent(JSON.stringify([]))).toEqual([]);
+  });
+
+  it('unwraps { events: [...] } the same way as the disk reader tests', () => {
+    expect(
+      parseEventPlanContent(
+        JSON.stringify({
+          events: [{ name: 'A', description: 'one' }],
+        }),
+      ),
+    ).toEqual([{ name: 'A', description: 'one' }]);
+  });
+
+  it('maps event_name to name', () => {
+    expect(
+      parseEventPlanContent(
+        JSON.stringify([{ event_name: 'Tracked', description: 'd' }]),
+      ),
+    ).toEqual([{ name: 'Tracked', description: 'd' }]);
+  });
+
+  it('prefers description over eventDescriptionAndReasoning when both exist', () => {
+    expect(
+      parseEventPlanContent(
+        JSON.stringify([
+          {
+            name: 'N',
+            description: 'short',
+            eventDescriptionAndReasoning: 'long verbose',
+          },
+        ]),
+      ),
+    ).toEqual([{ name: 'N', description: 'short' }]);
+  });
+});
 
 describe('readLocalEventPlan', () => {
   let installDir: string;
