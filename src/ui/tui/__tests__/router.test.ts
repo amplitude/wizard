@@ -548,6 +548,62 @@ describe('WizardRouter', () => {
       });
       expect(new WizardRouter().resolve(session)).toBe(Screen.Auth);
     });
+
+    it('Esc on Auth in the abandon path walks past skipped signup screens to SignupEmail', () => {
+      // After requires_redirect → signupAbandoned → browser OAuth, the
+      // user is on Auth. Pressing Esc must NOT trap on SignupFullName /
+      // ToS (which are isComplete=true via "screen was skipped" arms but
+      // have nothing meaningful to revert). The walk should continue to
+      // SignupEmail's revert, which clears email + ceremony state, so
+      // the user lands on SignupEmail and can retype.
+      const router = new WizardRouter();
+      const session = signupBase({
+        signupEmail: 'existing@acme.com',
+        signupAbandoned: true,
+      });
+      expect(router.resolve(session)).toBe(Screen.Auth);
+
+      const { stub, ref } = makeStubStore(session);
+      const ok = router.goBack(ref.session, stub as never);
+      expect(ok).toBe(true);
+      expect(ref.session.signupEmail).toBeNull();
+      // Ceremony state cleared by setSignupEmail(null) → next forward
+      // resolve lands on SignupEmail.
+      expect(ref.session.signupAbandoned).toBe(false);
+      expect(new WizardRouter().resolve(ref.session)).toBe(Screen.SignupEmail);
+    });
+
+    it('Esc on Auth in the success path walks back to SignupFullName (when name was collected)', () => {
+      // Post-success, SignupFullName.revert IS meaningful (signupFullName
+      // was actually set by the user typing it). Walk lands here. This
+      // is the known leaky case — the server account exists and re-typing
+      // the name doesn't undo it — but at least back-nav is responsive.
+      // Tracked as a separate concern.
+      const router = new WizardRouter();
+      const session = signupBase({
+        signupEmail: 'ada@example.com',
+        signupRequiredFields: ['full_name'],
+        tosAccepted: true,
+        signupFullName: 'Ada Lovelace',
+        signupAuth: {
+          idToken: 'i',
+          accessToken: 'a',
+          refreshToken: 'r',
+          zone: 'us',
+          userInfo: null,
+          dashboardUrl: null,
+        },
+      });
+      expect(router.resolve(session)).toBe(Screen.Auth);
+
+      const { stub, ref } = makeStubStore(session);
+      const ok = router.goBack(ref.session, stub as never);
+      expect(ok).toBe(true);
+      expect(ref.session.signupFullName).toBeNull();
+      expect(new WizardRouter().resolve(ref.session)).toBe(
+        Screen.SignupFullName,
+      );
+    });
   });
 
   // ── 3. Overlay stack ──────────────────────────────────────────────
@@ -944,6 +1000,23 @@ describe('WizardRouter', () => {
       resetSlack: () => mutate({ slackComplete: false, slackOutcome: null }),
       resetEmailCapture: () => mutate({ emailCaptureComplete: false }),
       resetToS: () => mutate({ tosAccepted: null }),
+      // Mirror the production store's setSignupEmail(null) ceremony reset
+      // so the stub stays faithful to the back-nav contract: clearing
+      // email also wipes signupRequiredFields / signupAuth /
+      // signupAbandoned.
+      setSignupEmail: (email: string | null) =>
+        mutate(
+          email === null
+            ? {
+                signupEmail: null,
+                signupRequiredFields: null,
+                signupAuth: null,
+                signupAbandoned: false,
+              }
+            : { signupEmail: email },
+        ),
+      setSignupFullName: (fullName: string | null) =>
+        mutate({ signupFullName: fullName }),
       rewindIntro: () => mutate({ introConcluded: false }),
       cancelCreateProject: () =>
         mutate({

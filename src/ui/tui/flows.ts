@@ -184,8 +184,15 @@ export const FLOWS: Record<Flow, FlowEntry[]> = {
         !isCreateAccountOnboarding(s) ||
         s.signupRequiredFields === null ||
         s.tosAccepted === true,
+      // Returning false when the screen was *skipped* (server never asked,
+      // or ToS was never accepted) is critical: `isComplete` returns true
+      // via the "screen was skipped" arm too, and a blind `resetToS` would
+      // be a no-op that nonetheless stops the back-nav walk — leaving the
+      // user on Auth pressing Esc with nothing visibly happening.
       revert: (store) => {
         if (!isCreateAccountOnboarding(store.session)) return false;
+        if (store.session.signupRequiredFields === null) return false;
+        if (store.session.tosAccepted === null) return false;
         store.resetToS();
       },
     },
@@ -204,8 +211,18 @@ export const FLOWS: Record<Flow, FlowEntry[]> = {
         s.signupRequiredFields === null ||
         !s.signupRequiredFields.includes('full_name') ||
         s.signupFullName !== null,
+      // Same reasoning as ToS above: `isComplete` returns true via "I was
+      // skipped" arms (no needs_information, server didn't ask for
+      // full_name, or signupFullName never set). Calling
+      // `setSignupFullName(null)` in those cases is a no-op that traps
+      // back-nav. Return false so the walk continues to entries that can
+      // actually do something.
       revert: (store) => {
         if (!isCreateAccountOnboarding(store.session)) return false;
+        if (store.session.signupRequiredFields === null) return false;
+        if (!store.session.signupRequiredFields.includes('full_name'))
+          return false;
+        if (store.session.signupFullName === null) return false;
         store.setSignupFullName(null);
       },
     },
