@@ -1,0 +1,17 @@
+{
+  "name": "nextjs-app-router/vanilla",
+  "ring": 1,
+  "integrationHint": "nextjs",
+  "buildCommand": ["pnpm", "build"],
+  "expectedEnvPrefix": "NEXT_PUBLIC_",
+  "expectedInitFile": "src/app/AmplitudeProvider.tsx",
+  "expectedEvents": ["Page Viewed", "Sign Up", "Sign In"],
+  "forbiddenPaths": [
+    "next.config.js",
+    "next.config.mjs",
+    "next.config.ts",
+    "webpack.config.js",
+    "babel.config.js"
+  ],
+  "notes": "Canonical App Router scenario. Catches server/client boundary regressions. Mirrors e2e-tests/test-applications/nextjs-app-router-test-app source-only. SDK family defaults from FRAMEWORK_TO_SDK; no override needed."
+}

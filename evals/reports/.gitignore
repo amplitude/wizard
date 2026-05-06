@@ -1,0 +1,4 @@
+# Eval reports are generated artifacts — never commit them.
+# Keep this file so the directory exists in the tree.
+*
+!.gitignore

@@ -10,6 +10,8 @@ export default defineConfig({
       'src/**/*.test.tsx',
       'src/**/*.spec.ts',
       'src/**/*.spec.tsx',
+      'evals/**/*.test.ts',
+      'evals/**/*.spec.ts',
     ],
     exclude: ['dist/**', 'node_modules/**', 'e2e-tests/**', '**/proxy.test.ts'],
     coverage: {
