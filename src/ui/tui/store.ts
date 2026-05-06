@@ -653,15 +653,34 @@ export class WizardStore {
 
   setSignupEmail(email: string | null): void {
     this.$session.setKey('signupEmail', email);
-    analytics.wizardCapture('signup email captured', { 'has email': !!email });
+    // Clearing the email means the user backed out of (or rewound past)
+    // the signup ceremony — invalidate every piece of ceremony state
+    // that was keyed to the previous email. Without this, a subsequent
+    // forward pass consumes a stale `signupRequiredFields` from the
+    // prior probe POST and routes the user back through ToS/name
+    // collection with the wrong response cached. Bound here (not in a
+    // separate `resetSignupCeremony` helper that callers might forget)
+    // so every revert path lands in a consistent state.
+    if (email === null) {
+      this.$session.setKey('signupRequiredFields', null);
+      this.$session.setKey('signupAuth', null);
+      this.$session.setKey('signupAbandoned', false);
+    } else {
+      // Only fire on positive captures. Back-nav reverts call this
+      // setter with `null` and must not pollute the funnel with false
+      // "captured" events — caught by Cursor Bugbot on PR #539.
+      analytics.wizardCapture('signup email captured');
+    }
     this.emitChange();
   }
 
   setSignupFullName(fullName: string | null): void {
     this.$session.setKey('signupFullName', fullName);
-    analytics.wizardCapture('signup full name captured', {
-      'has name': !!fullName,
-    });
+    // Same reasoning as `setSignupEmail` for the analytics gate — only
+    // fire on positive captures.
+    if (fullName !== null) {
+      analytics.wizardCapture('signup full name captured');
+    }
     this.emitChange();
   }
 
@@ -706,16 +725,6 @@ export class WizardStore {
 
   setSignupAbandoned(abandoned: boolean): void {
     this.$session.setKey('signupAbandoned', abandoned);
-    this.emitChange();
-  }
-
-  resetSignupCeremony(): void {
-    // Used by back-nav from a collection screen to the email screen, so
-    // re-submitting fires a fresh probe POST.
-    this.$session.setKey('signupRequiredFields', null);
-    this.$session.setKey('signupAuth', null);
-    this.$session.setKey('signupAbandoned', false);
-    analytics.wizardCapture('back navigation', { to: 'signup-email' });
     this.emitChange();
   }
 

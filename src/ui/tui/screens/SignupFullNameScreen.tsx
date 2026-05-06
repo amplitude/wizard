@@ -42,14 +42,13 @@ export const SignupFullNameScreen = ({ store }: SignupFullNameScreenProps) => {
   useScreenHints(hints);
 
   // Esc rewinds to the email screen so the user can correct a typo.
-  // resetSignupCeremony also clears `signupRequiredFields` so the
-  // SigningUpScreen will fire a fresh probe rather than re-rendering
-  // this screen with stale required-fields state.
+  // `setSignupEmail(null)` also resets the ceremony state internally,
+  // so the SigningUpScreen will fire a fresh probe rather than
+  // re-rendering this screen with stale required-fields state.
   useScreenInput((_input, key) => {
     if (!key.escape) return;
     analytics.wizardCapture('signup full name screen back', {});
     store.setSignupEmail(null);
-    store.resetSignupCeremony();
   });
 
   const handleSubmit = (value: string) => {

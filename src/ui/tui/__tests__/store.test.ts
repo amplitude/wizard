@@ -1992,6 +1992,103 @@ describe('WizardStore', () => {
     });
   });
 
+  // ── Signup setter side-effects ──────────────────────────────────
+  //
+  // `setSignupEmail` and `setSignupFullName` are reused on both the
+  // happy "user submitted a value" path and the back-nav "revert
+  // cleared the value" path. The setters need to:
+  //   1. Only fire `'signup ... captured'` analytics on positive
+  //      captures (back-nav clears must NOT pollute the funnel).
+  //   2. On `setSignupEmail(null)`, also reset the ceremony state
+  //      (`signupRequiredFields` / `signupAuth` / `signupAbandoned`)
+  //      so a forward pass after back-nav fires a fresh probe POST
+  //      against whatever email the user types next.
+  describe('signup setter side-effects', () => {
+    it('setSignupEmail with a string fires analytics and sets the value', () => {
+      const store = createStore();
+      const wizardCapture = analytics.wizardCapture as Mock;
+      wizardCapture.mockClear();
+
+      store.setSignupEmail('ada@example.com');
+
+      expect(store.session.signupEmail).toBe('ada@example.com');
+      expect(wizardCapture).toHaveBeenCalledWith('signup email captured');
+    });
+
+    it('setSignupEmail(null) does NOT fire the captured analytics event', () => {
+      const store = createStore();
+      const wizardCapture = analytics.wizardCapture as Mock;
+      wizardCapture.mockClear();
+
+      store.setSignupEmail(null);
+
+      expect(store.session.signupEmail).toBeNull();
+      expect(wizardCapture).not.toHaveBeenCalledWith(
+        'signup email captured',
+        expect.anything(),
+      );
+      expect(wizardCapture).not.toHaveBeenCalledWith('signup email captured');
+    });
+
+    it('setSignupEmail(null) resets ceremony state (required fields, auth, abandoned)', () => {
+      // Pre-seed a session that's mid-ceremony: probe POST returned
+      // needs_information, ToS was accepted, signupAuth is set from a
+      // success arm. Going back to the email screen must invalidate
+      // every piece of that state so the next forward pass starts
+      // fresh — otherwise the user re-types email and the wizard
+      // routes them through ToS/name with the previous response
+      // cached against the new email.
+      const store = createStore();
+      const internal = store as unknown as {
+        $session: { setKey: (k: string, v: unknown) => void };
+      };
+      internal.$session.setKey('signupRequiredFields', ['full_name']);
+      internal.$session.setKey('signupAbandoned', false);
+      internal.$session.setKey('signupAuth', {
+        idToken: 'i',
+        accessToken: 'a',
+        refreshToken: 'r',
+        zone: 'us',
+        userInfo: null,
+        dashboardUrl: null,
+      });
+
+      store.setSignupEmail(null);
+
+      expect(store.session.signupRequiredFields).toBeNull();
+      expect(store.session.signupAuth).toBeNull();
+      expect(store.session.signupAbandoned).toBe(false);
+    });
+
+    it('setSignupFullName with a string fires analytics and sets the value', () => {
+      const store = createStore();
+      const wizardCapture = analytics.wizardCapture as Mock;
+      wizardCapture.mockClear();
+
+      store.setSignupFullName('Ada Lovelace');
+
+      expect(store.session.signupFullName).toBe('Ada Lovelace');
+      expect(wizardCapture).toHaveBeenCalledWith('signup full name captured');
+    });
+
+    it('setSignupFullName(null) does NOT fire the captured analytics event', () => {
+      const store = createStore();
+      const wizardCapture = analytics.wizardCapture as Mock;
+      wizardCapture.mockClear();
+
+      store.setSignupFullName(null);
+
+      expect(store.session.signupFullName).toBeNull();
+      expect(wizardCapture).not.toHaveBeenCalledWith(
+        'signup full name captured',
+      );
+      expect(wizardCapture).not.toHaveBeenCalledWith(
+        'signup full name captured',
+        expect.anything(),
+      );
+    });
+  });
+
   // ── Inline directory change ──────────────────────────────────────
   //
   // The IntroScreen "Change directory" flow runs through
