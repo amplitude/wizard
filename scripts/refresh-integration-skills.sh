@@ -9,7 +9,8 @@
 #   Pulls integration-*.zip from an amplitude/context-hub GitHub release.
 #   Requires the GitHub CLI (gh) to be installed and authenticated.
 #
-#   Pin for reproducible CI or release branches:
+#   By default uses the repository's latest release. Pin for reproducible CI
+#   or release branches:
 #     CONTEXT_HUB_TAG=v1.2.3 pnpm skills:refresh:integration
 #
 # Usage:
