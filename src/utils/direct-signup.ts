@@ -37,12 +37,31 @@ const RedirectSchema = z.object({
 // know which fields to collect next; `properties` is preserved as opaque so a
 // future server-side addition (e.g. a new field with extra metadata) doesn't
 // fail-closed the parse.
+//
+// The server wraps the JSON-Schema in an extra `schema` field — verified via
+// direct curl against `https://app.amplitude.com/t/agentic/signup/v1`:
+//
+//   { "type": "needs_information",
+//     "needs_information": {
+//       "schema": {
+//         "type": "object",
+//         "properties": { "full_name": { ... } },
+//         "required": ["full_name"]
+//       }
+//     } }
+//
+// An earlier version put `type`/`properties`/`required` directly on
+// `needs_information`, which made every probe POST fall through to the
+// generic "unrecognized response shape" error and silently route users to
+// OAuth.
 const NeedsInformationSchema = z.object({
   type: z.literal('needs_information'),
   needs_information: z.object({
-    type: z.literal('object'),
-    properties: z.record(z.string(), z.unknown()),
-    required: z.array(z.string()).min(1),
+    schema: z.object({
+      type: z.literal('object'),
+      properties: z.record(z.string(), z.unknown()),
+      required: z.array(z.string()).min(1),
+    }),
   }),
 });
 
@@ -156,7 +175,7 @@ export async function performDirectSignup(
   if (parsedNeeds.success) {
     return {
       kind: 'needs_information',
-      requiredFields: parsedNeeds.data.needs_information.required,
+      requiredFields: parsedNeeds.data.needs_information.schema.required,
     };
   }
 
