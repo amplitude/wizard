@@ -58,6 +58,22 @@ describe('createWizardUiInstallPresentation', () => {
     expect(line).toContain('failed step');
   });
 
+  it('appendToolResult honors ok=false on string form (regression)', () => {
+    const ui = new LoggingUI();
+    const stepSpy = vi.spyOn(ui.log, 'step');
+    const warnSpy = vi.spyOn(ui.log, 'warn');
+    const sut = createWizardUiInstallPresentation(ui, 'test-surface');
+
+    sut.appendToolResult('deploy', 'broke', false);
+
+    expect(stepSpy).not.toHaveBeenCalled();
+    expect(warnSpy).toHaveBeenCalledTimes(1);
+    const line = warnSpy.mock.calls[0]?.[0] as string;
+    expect(line).toContain('✖');
+    expect(line).toContain('deploy');
+    expect(line).toContain('broke');
+  });
+
   it('appendToolResult uses summary on object form when ok=true', () => {
     const ui = new LoggingUI();
     const stepSpy = vi.spyOn(ui.log, 'step');

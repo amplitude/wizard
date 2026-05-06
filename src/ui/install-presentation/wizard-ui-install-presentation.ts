@@ -134,8 +134,16 @@ export function createWizardUiInstallPresentation(
       ok?: boolean,
     ): void {
       if (typeof toolOrOpts === 'string') {
+        // String branch must route failures to `warn()` so they surface as
+        // failures instead of plain progress steps — match the object branch
+        // below, which already routes `ok === false` to `ui.log.warn()`.
         const label = ok === false ? '✖' : '✔';
-        ui.log.step(`${label} ${toolOrOpts}${summary ? ` ${summary}` : ''}`);
+        const line = `${label} ${toolOrOpts}${summary ? ` ${summary}` : ''}`;
+        if (ok === false) {
+          ui.log.warn(line);
+        } else {
+          ui.log.step(line);
+        }
         return;
       }
       // Object branch must honor `ok` and `summary` the same way the string
