@@ -103,9 +103,34 @@ export const SigningUpScreen = ({ store }: SigningUpScreenProps) => {
           // EmailCaptureScreen contract).
           store.markSignupTokensObtained();
           return;
-        case 'needs_information':
+        case 'needs_information': {
+          // Defensive guard against a stuck-spinner deadlock: if the
+          // server is asking for a field we already populated, the
+          // ceremony can't make progress — `useAsyncEffect`'s deps
+          // (`[email, fullName]`) won't change on the next
+          // `setSignupRequiredFields` write, the screen won't re-mount,
+          // and no further effect will fire. Without this guard the
+          // user wedges on the spinner forever with no escape besides
+          // Ctrl+C.
+          //
+          // Today this can only fire as a server bug (we just sent
+          // `full_name` and the server is still asking for it), but
+          // the cost of the guard is one branch and the failure mode
+          // it prevents has zero in-band recovery.
+          const alreadySatisfied = result.requiredFields.every((field) =>
+            field === 'full_name' ? fullName !== null : false,
+          );
+          if (alreadySatisfied) {
+            log.warn(
+              'signup: server re-requested already-provided fields; abandoning',
+              { requiredFields: result.requiredFields },
+            );
+            store.setSignupAbandoned(true);
+            return;
+          }
           store.setSignupRequiredFields(result.requiredFields);
           return;
+        }
         case 'redirect':
         case 'error':
           // Fall through to browser OAuth via signupAbandoned. The auth
