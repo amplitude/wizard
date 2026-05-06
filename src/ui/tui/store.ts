@@ -678,6 +678,13 @@ export class WizardStore {
     // semantics on the next forward pass).
     this.$session.setKey('signupFullName', null);
     this.$session.setKey('tosAccepted', null);
+    // `signupTokensObtained` gates whether the post-TUI auth task
+    // hydrates from disk vs. opens browser OAuth. If we leave a stale
+    // `true` after a ceremony reset, the next forward pass would
+    // silently re-use the prior user's tokens from `~/.ampli.json`
+    // even though the user explicitly backed out and is starting
+    // fresh. Reset alongside the rest of the ceremony state.
+    this.$session.setKey('signupTokensObtained', false);
   }
 
   setSignupEmail(email: string | null): void {
@@ -888,7 +895,6 @@ export class WizardStore {
       // matched" comment.
       this._resetCeremonyKeys();
       this.$session.setKey('signupEmail', null);
-      this.$session.setKey('signupTokensObtained', false);
       this.$session.setKey('signupMagicLinkUrl', null);
       this.$session.setKey('pendingAuthAccessToken', null);
       this.$session.setKey('pendingAuthIdToken', null);

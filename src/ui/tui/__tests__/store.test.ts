@@ -2105,6 +2105,7 @@ describe('WizardStore', () => {
       internal.$session.setKey('signupAbandoned', false);
       internal.$session.setKey('signupFullName', 'Ada Lovelace');
       internal.$session.setKey('tosAccepted', true);
+      internal.$session.setKey('signupTokensObtained', true);
       internal.$session.setKey('signupAuth', {
         idToken: 'i',
         accessToken: 'a',
@@ -2121,6 +2122,11 @@ describe('WizardStore', () => {
       expect(store.session.signupAbandoned).toBe(false);
       expect(store.session.signupFullName).toBeNull();
       expect(store.session.tosAccepted).toBeNull();
+      // signupTokensObtained gates the post-TUI auth task's "hydrate
+      // from disk" branch — leaving it true after a ceremony reset
+      // would silently re-use the prior user's tokens on the next
+      // forward pass.
+      expect(store.session.signupTokensObtained).toBe(false);
     });
 
     it('setSignupFullName with a string fires analytics and sets the value', () => {
