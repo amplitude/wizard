@@ -10,17 +10,49 @@ import type { SkillEntry, SkillMenu } from './skill-remote.js';
 /**
  * Bundled `skills/` repo root (integration, instrumentation, …).
  * Exported for `wizard-tools.ts` path helpers that stay in the main module.
+ *
+ * Walk up to the nearest `package.json` for `@amplitude/wizard` and resolve
+ * `skills/` relative to that. Falls back to a bounded parent walk that looks
+ * for any sibling `skills/` directory. We avoid `process.cwd()` because
+ * that's the user's project — a `skills/` dir there would silently shadow
+ * the bundled one.
  */
 export function getBundledSkillsRootDir(): string {
-  // Walk up from this file to find the wizard repo root (where skills/ lives)
+  // 1. Find the wizard package root (closest package.json with the right name).
   let dir = __dirname;
-  for (let i = 0; i < 5; i++) {
+  for (let i = 0; i < 12; i++) {
+    const pkgPath = path.join(dir, 'package.json');
+    if (fs.existsSync(pkgPath)) {
+      try {
+        const pkg = JSON.parse(fs.readFileSync(pkgPath, 'utf8')) as {
+          name?: string;
+        };
+        if (pkg.name === '@amplitude/wizard') {
+          const skillsRoot = path.join(dir, 'skills');
+          if (fs.existsSync(skillsRoot)) return skillsRoot;
+        }
+      } catch {
+        // ignore unreadable package.json and keep walking
+      }
+    }
+    const parent = path.dirname(dir);
+    if (parent === dir) break;
+    dir = parent;
+  }
+  // 2. Fallback: bounded parent walk for a sibling `skills/` directory.
+  // Bumped from 5 to 6 levels because skill-bundled.ts now lives one level
+  // deeper than the original wizard-tools.ts location.
+  dir = __dirname;
+  for (let i = 0; i < 6; i++) {
     if (fs.existsSync(path.join(dir, 'skills'))) {
       return path.join(dir, 'skills');
     }
     dir = path.dirname(dir);
   }
-  // Fallback: relative to cwd
+  // 3. Last-ditch fallback. Logged so deeply nested monorepos can spot it.
+  logToFile(
+    `getBundledSkillsRootDir: package.json walk failed; falling back to cwd ${process.cwd()}`,
+  );
   return path.join(process.cwd(), 'skills');
 }
 
