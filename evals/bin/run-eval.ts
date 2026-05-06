@@ -108,8 +108,10 @@ async function main() {
     process.exit(2);
   }
 
-  // Build the artifact.
-  const artifact = useLive
+  // Build the artifact. The runner returns the workingDir alongside
+  // it so we don't reconstruct the path here; live runs land under
+  // os.tmpdir() per runId, replays under golden/working.
+  const result = useLive
     ? await runLive({
         scenario,
         scenarioDir,
@@ -119,6 +121,7 @@ async function main() {
           process.env.AMPLITUDE_WIZARD_API_KEY,
       })
     : runReplay({ scenario, scenarioDir });
+  const { artifact, workingDir } = result;
 
   // Re-parse the run log + assert contract on the assembled artifact.
   // (parseStream + assertContract is also called inside the runner, but
@@ -128,10 +131,7 @@ async function main() {
   const parsed = parseStream(ndjson);
   const contract = assertContract(parsed, artifact.exitCode);
 
-  // Score.
-  const workingDir = useLive
-    ? join(scenarioDir, 'working')
-    : join(scenarioDir, 'golden', 'working');
+  // Score against the workingDir the runner returned.
   const report = score({ artifact, scenario, workingDir });
 
   // Write the report.
