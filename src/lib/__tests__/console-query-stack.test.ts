@@ -3,9 +3,7 @@ import { describe, it, expect, afterEach } from 'vitest';
 import { getConsoleQueryStack } from '../agent/console-query-stack.js';
 import type { AgentRunConfig } from '../agent-interface.js';
 
-function baseConfig(
-  overrides: Partial<AgentRunConfig> = {},
-): AgentRunConfig {
+function baseConfig(overrides: Partial<AgentRunConfig> = {}): AgentRunConfig {
   return {
     workingDirectory: '/tmp',
     mcpServers: {},

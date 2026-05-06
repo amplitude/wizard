@@ -113,9 +113,7 @@ function buildHistoryBlock(history: ConversationTurn[]): string {
   return (
     '\n\n--- Conversation history ---\n' +
     history
-      .map(
-        (t) => `${t.role === 'user' ? 'User' : 'Assistant'}: ${t.content}`,
-      )
+      .map((t) => `${t.role === 'user' ? 'User' : 'Assistant'}: ${t.content}`)
       .join('\n') +
     '\n--- End of history ---'
   );
