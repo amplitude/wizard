@@ -271,6 +271,32 @@ function emitDecisionAuto(data: {
   });
 }
 
+/**
+ * Lazily-resolved string redactor. Pulled lazily because the observability
+ * module imports `process.env` at load time to capture redaction values, and
+ * we don't want to force that load order at module init.
+ *
+ * Used as a final wire-boundary scrub: every emitted NDJSON line gets a pass
+ * through `redactString` so a misbehaving caller that put `WIZARD_OAUTH_TOKEN`
+ * (or any other tracked env-value secret) into a free-form `message` field
+ * can't leak it to stdout. Redaction is idempotent and safe on already-clean
+ * lines.
+ */
+let _ndjsonRedactor: ((s: string) => string) | null = null;
+function getNdjsonRedactor(): (s: string) => string {
+  if (_ndjsonRedactor) return _ndjsonRedactor;
+  try {
+    const mod = require('../lib/observability/redact') as {
+      redactString: (s: string) => string;
+    };
+    _ndjsonRedactor = mod.redactString;
+  } catch {
+    // Fallback identity — never crash the emitter on a missing redactor.
+    _ndjsonRedactor = (s: string) => s;
+  }
+  return _ndjsonRedactor;
+}
+
 function emit(
   type: AgentEventType,
   message: string,
@@ -305,10 +331,19 @@ function emit(
     // omits anyway, but keeping the key absent is clearer in tests).
     ...(data_version !== undefined ? { data_version } : {}),
   };
+  // Final wire-boundary scrub: redact env-value secrets (notably
+  // WIZARD_OAUTH_TOKEN, supplied as a CI org secret) from anywhere in
+  // the serialized line. Cheap on clean lines (a single `includes`
+  // check per tracked value), idempotent, and the last line of defense
+  // before stdout. Per-callsite redaction in the structured logger
+  // already handles most cases; this catches free-form `message`
+  // strings and ad-hoc `data` payloads that don't go through the
+  // logger.
+  const line = getNdjsonRedactor()(JSON.stringify(event)) + '\n';
   // safePipeWrite swallows EPIPE-class errors so a closed receiver
   // doesn't crash the wizard mid-run. The data is silently dropped —
   // there's nothing on the other end to receive it. See pipe-errors.ts.
-  safePipeWrite(process.stdout, JSON.stringify(event) + '\n');
+  safePipeWrite(process.stdout, line);
 }
 
 // ── Implementation ──────────────────────────────────────────────────
