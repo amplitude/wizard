@@ -989,9 +989,14 @@ describe('resolveWizardAllowedToolNames', () => {
     delete process.env[envKey];
   });
 
-  it('matches WIZARD_TOOL_NAMES when tiers flag unset', () => {
+  it('appends load_skill by default (tiers default-on)', () => {
     delete process.env[envKey];
-    expect(resolveWizardAllowedToolNames()).toEqual(WIZARD_TOOL_NAMES);
+    expect(resolveWizardAllowedToolNames()).toEqual([
+      ...WIZARD_TOOL_NAMES,
+      'wizard-tools:load_skill_menu',
+      'wizard-tools:load_skill',
+      'wizard-tools:load_skill_reference',
+    ]);
   });
 
   it('appends load_skill when AMPLITUDE_WIZARD_SKILL_TIERS=1', () => {
@@ -1002,6 +1007,11 @@ describe('resolveWizardAllowedToolNames', () => {
       'wizard-tools:load_skill',
       'wizard-tools:load_skill_reference',
     ]);
+  });
+
+  it('matches WIZARD_TOOL_NAMES exactly when AMPLITUDE_WIZARD_SKILL_TIERS=0 (escape hatch)', () => {
+    process.env[envKey] = '0';
+    expect(resolveWizardAllowedToolNames()).toEqual(WIZARD_TOOL_NAMES);
   });
 });
 

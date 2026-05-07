@@ -6,7 +6,7 @@ describe('buildSkillTierSystemPromptAppend', () => {
     vi.resetModules();
   });
 
-  it('returns empty string when tier flag is off', async () => {
+  it('returns empty string when tier flag is opted-out (=0)', async () => {
     vi.stubEnv('AMPLITUDE_WIZARD_SKILL_TIERS', '0');
     const { buildSkillTierSystemPromptAppend } = await import(
       '../skill-tier-prompt.js'
@@ -14,7 +14,20 @@ describe('buildSkillTierSystemPromptAppend', () => {
     expect(buildSkillTierSystemPromptAppend()).toBe('');
   });
 
-  it('returns a fenced JSON block when tier flag is on', async () => {
+  it('returns a fenced JSON block by default (tiers default-on)', async () => {
+    vi.stubEnv('AMPLITUDE_WIZARD_SKILL_TIERS', '');
+    const { buildSkillTierSystemPromptAppend } = await import(
+      '../skill-tier-prompt.js'
+    );
+    const out = buildSkillTierSystemPromptAppend();
+    expect(out).toContain('## Bundled skill menu');
+    expect(out).toContain('```json');
+    expect(out).toContain('"categories"');
+    // The new commandment must instruct lazy loading.
+    expect(out.toLowerCase()).toContain('not pre-loaded');
+  });
+
+  it('returns a fenced JSON block when tier flag is on (=1)', async () => {
     vi.stubEnv('AMPLITUDE_WIZARD_SKILL_TIERS', '1');
     const { buildSkillTierSystemPromptAppend } = await import(
       '../skill-tier-prompt.js'
@@ -46,6 +59,10 @@ describe('buildSkillTierSystemPromptAppend', () => {
     };
     vi.doMock('../../wizard-tools.js', () => ({
       loadBundledSkillMenu: () => huge,
+      // Default-on flag check; mirror the real helper so the prompt
+      // builder doesn't bail out early on the mocked import.
+      isSkillTiersEnabled: () =>
+        process.env.AMPLITUDE_WIZARD_SKILL_TIERS !== '0',
     }));
     const { buildSkillTierSystemPromptAppend } = await import(
       '../skill-tier-prompt.js'

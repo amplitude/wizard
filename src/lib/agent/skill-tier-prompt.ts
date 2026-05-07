@@ -1,15 +1,20 @@
 /**
- * Optional system-prompt slice for AMPLITUDE_WIZARD_SKILL_TIERS=1 (Phase C).
- * Surfaces a compact id/name menu so the model can call load_skill without
+ * System-prompt slice for tiered skill delivery (Phase C). Surfaces a
+ * compact id/name menu so the model can call `load_skill` without
  * discovering paths on disk first.
+ *
+ * Tiered delivery is default-on; opt out with
+ * `AMPLITUDE_WIZARD_SKILL_TIERS=0` to restore eager pre-staging.
  */
-import { loadBundledSkillMenu } from '../wizard-tools.js';
+import { isSkillTiersEnabled } from '../wizard-tools.js';
+import {
+  buildSkillMenuFileContent,
+  type SkillMenuFileContent,
+} from '../wizard-tools/bundled-skills.js';
 
 const MAX_SKILL_MENU_PROMPT_CHARS = 12_000;
 
-type SkillMenuPayload = {
-  categories: Record<string, { id: string; name: string }[]>;
-};
+type SkillMenuPayload = SkillMenuFileContent;
 
 function renderMenu(payload: SkillMenuPayload): string {
   return JSON.stringify(payload);
@@ -80,20 +85,13 @@ function fitMenuToBudget(payload: SkillMenuPayload): string | null {
 
 /**
  * Returns text to append after {@link buildSystemPromptAppend} when tiered
- * skills are enabled; empty string otherwise.
+ * skills are enabled; empty string when the user has opted out via
+ * `AMPLITUDE_WIZARD_SKILL_TIERS=0`.
  */
 export function buildSkillTierSystemPromptAppend(): string {
-  if (process.env.AMPLITUDE_WIZARD_SKILL_TIERS !== '1') return '';
+  if (!isSkillTiersEnabled()) return '';
   try {
-    const menu = loadBundledSkillMenu();
-    const payload: SkillMenuPayload = {
-      categories: Object.fromEntries(
-        Object.entries(menu.categories).map(([name, entries]) => [
-          name,
-          entries.map((s) => ({ id: s.id, name: s.name })),
-        ]),
-      ),
-    };
+    const payload: SkillMenuPayload = buildSkillMenuFileContent();
     // Truncating the JSON mid-token (the previous behaviour) produced
     // syntactically invalid JSON inside a fenced code block, which made the
     // model hallucinate ids. Instead, drop entries until the menu fits, and
@@ -102,14 +100,15 @@ export function buildSkillTierSystemPromptAppend(): string {
     if (rendered == null) {
       return (
         `\n\n## Bundled skill menu (tiered loading)\n\n` +
-        `Skill menu too large to inline; call \`wizard-tools:load_skill_menu\` to discover ids before \`wizard-tools:load_skill\`.\n`
+        `Skill bodies are NOT pre-loaded. Call \`wizard-tools:load_skill_menu\` to discover ids, then \`wizard-tools:load_skill\` to fetch a body.\n` +
+        `Do not call \`load_skill\` more than twice for the same skillId in a phase — bodies are cached, repeat calls are denied.\n`
       );
     }
     return (
       `\n\n## Bundled skill menu (tiered loading)\n\n` +
-      `Use \`wizard-tools:load_skill\` for full SKILL.md bodies and ` +
-      `\`wizard-tools:load_skill_reference\` for paths under \`references/\` only. ` +
-      `Ids must match this menu.\n\n` +
+      `Skill bodies are NOT pre-loaded. Use \`wizard-tools:load_skill\` to fetch a skill's full SKILL.md body when you need it, ` +
+      `and \`wizard-tools:load_skill_reference\` for paths under \`references/\` only. Ids must match this menu. ` +
+      `Do not call \`load_skill\` more than twice for the same skillId in a phase — repeat calls are denied.\n\n` +
       `\`\`\`json\n${rendered}\n\`\`\`\n`
     );
   } catch {
