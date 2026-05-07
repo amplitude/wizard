@@ -2,58 +2,67 @@
  * Self-heal stale per-project state on startup.
  *
  * The bug this guards against: after a `git reset` (or manual deletion of
- * `<installDir>/ampli.json`), the wizard's per-project caches are still
- * pointing at the prior org/project/API key.
+ * the wizard's project binding), the wizard's per-project caches can still
+ * point at the prior org/project/API key. The classic symptom is a stored
+ * API key for an install dir that has no binding at all — we want to clear
+ * that key so the user re-authenticates against whichever project they pick
+ * next.
  *
- *   - `<installDir>/ampli.json`  ── source of truth for "this codebase is
- *     bound to an Amplitude project". Tracked in git, so `git reset` wipes
- *     it whenever the user resets past the commit that introduced it.
+ *   - `<installDir>/.amplitude/project-binding.json` ── canonical wizard
+ *     binding (org/project/source/zone/app id). Gitignored. Survives
+ *     `git reset` on its own, but the user often nukes `.amplitude/`
+ *     manually when "starting fresh".
  *
- *   - `<installDir>/.amplitude/` ── gitignored. Survives `git reset`.
- *     Holds `events.json` (approved event plan) and `dashboard.json`
- *     (created dashboard URL).
+ *   - `<installDir>/ampli.json` ── legacy binding mirror. Tracked in git
+ *     historically; Phase G-1 (#573) stopped writing it for fresh projects,
+ *     so its absence is now the NORMAL state for any project initialized
+ *     post-G1. **Bare absence is no longer a self-heal signal.**
+ *
+ *   - `<installDir>/.amplitude/events.json` / `dashboard.json` ──
+ *     gitignored per-project artifacts (approved event plan, dashboard URL).
+ *     We deliberately preserve these so users can resume an aborted run.
  *
  *   - `~/.amplitude/wizard/runs/<sha256(installDir)>/checkpoint.json` ──
- *     per-user cache. Survives `git reset`. Holds region, selected org/
- *     project IDs, framework detection, intro state.
+ *     per-user cache: region, selected org/project IDs, framework detection.
  *
  *   - `~/.amplitude/wizard/credentials.json` ── per-user, keyed by
- *     install-dir hash. Survives `git reset`. Holds the API key used for
- *     the prior project.
+ *     install-dir hash. Holds the API key for the prior project.
  *
- * Without healing, `bin.ts` does:
- *   1. `loadCheckpoint()` → `Object.assign(session, checkpoint)`
- *      (now `session.selectedOrgId/ProjectId/region/introConcluded` are
- *      pre-populated from the stale checkpoint)
- *   2. `resolveCredentials()` reads the stale API key from credentials.json
- *      and wires `session.credentials` from it. The safety check at
- *      `credential-resolution.ts:576` does NOT fire because `selectedOrgId`
- *      is set (from the checkpoint).
- *   3. `requiresAccountConfirmation` is true, so the user lands on
- *      "Continue with this Amplitude project?" pointing at a project they
- *      thought they wiped — or worse, the OAuth flow is skipped entirely
- *      and the wizard silently routes them past auth.
+ *   - Legacy `.amplitude-events.json` / `.amplitude-dashboard.json` dotfiles
+ *     in the project root — pre-`<installDir>/.amplitude/` layout. Real
+ *     `git reset` artifacts when paired with a stale credential.
  *
- * The user's mental model is "git reset = clean slate". This module makes
- * the wizard agree with that mental model.
+ * Heuristic (post-G1, tightened in this commit):
  *
- * Heuristic: ampli.json missing AND any per-project cache present →
- * inconsistent state, wipe per-project caches. User-level state
- * (`~/.ampli.json` OAuth tokens, credentials for OTHER install dirs) is
- * never touched — the user stays signed in, they just have to re-pick a
- * project for this codebase.
+ *   - Healthy when EITHER `project-binding.json` OR `ampli.json` exists.
+ *     No-op.
+ *
+ *   - When neither binding exists AND a stored API key for this install
+ *     dir is still in `credentials.json`, that's an orphaned credential —
+ *     a real `git reset` symptom. Clear the credential entry only;
+ *     `.amplitude/events.json` is preserved so the user can resume.
+ *
+ *   - When neither binding exists AND legacy `.amplitude-events.json` /
+ *     `.amplitude-dashboard.json` dotfiles exist AND a stored API key is
+ *     present, also wipe the legacy dotfiles (they're real `git reset`
+ *     artifacts in the pre-`.amplitude/` layout).
+ *
+ *   - Otherwise (no binding, no stored key) → no-op. Bare ampli.json
+ *     absence on a fresh-cloned project is the post-G1 default and must
+ *     not nuke the user's events/checkpoint.
+ *
+ * User-level state (`~/.ampli.json` OAuth tokens, credentials for OTHER
+ * install dirs) is never touched — the user stays signed in and other
+ * projects' bindings stay intact.
  */
 
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 
-import { ampliConfigExists } from './ampli-config.js';
+import { AMPLI_CONFIG_FILENAME } from './ampli-config.js';
 import { logToFile } from '../utils/debug.js';
 import { clearApiKey, readApiKey } from '../utils/api-key-store.js';
-import {
-  getCheckpointFile,
-  getProjectMetaDir,
-} from '../utils/storage-paths.js';
+import { getProjectBindingFile } from '../utils/storage-paths.js';
 
 export interface SelfHealResult {
   healed: boolean;
@@ -65,8 +74,9 @@ export interface SelfHealResult {
 
 /**
  * Detect and fix inconsistent per-project state caused by a `git reset` or
- * manual deletion of `<installDir>/ampli.json`. Safe to call unconditionally
- * at startup — no-ops on fresh projects and on healthy projects.
+ * manual deletion of the wizard's project binding. Safe to call
+ * unconditionally at startup — no-ops on fresh projects and on healthy
+ * projects.
  *
  * Synchronous so the startup path doesn't have to await a microtask before
  * `loadCheckpoint`/`resolveCredentials` run.
@@ -83,38 +93,23 @@ export function selfHealStaleProjectState(installDir: string): SelfHealResult {
     };
   }
 
-  // Healthy state: ampli.json present means this project IS bound to an
-  // Amplitude project and the per-project caches are still authoritative.
-  if (ampliConfigExists(installDir)) {
+  const bindingFile = getProjectBindingFile(installDir);
+  const legacyAmpliJson = path.join(installDir, AMPLI_CONFIG_FILENAME);
+  const hasBinding = safeExists(bindingFile) || safeExists(legacyAmpliJson);
+
+  // Healthy state: at least one binding source is present.
+  if (hasBinding) {
     return {
       healed: false,
-      reason: 'ampli.json present — caches are consistent',
+      reason:
+        'project-binding.json or ampli.json present — caches are consistent',
       artifactsRemoved: [],
     };
   }
 
-  // ampli.json is missing. Look for stale caches that would silently feed
-  // the wizard the prior project's identity.
-  const checkpointPath = getCheckpointFile(installDir);
-  const metaDir = getProjectMetaDir(installDir);
-  const legacyEvents = path.join(installDir, '.amplitude-events.json');
-  const legacyDashboard = path.join(installDir, '.amplitude-dashboard.json');
-
-  const candidateTargets: Array<{ path: string; kind: 'file' | 'dir' }> = [
-    { path: checkpointPath, kind: 'file' },
-    { path: metaDir, kind: 'dir' },
-    { path: legacyEvents, kind: 'file' },
-    { path: legacyDashboard, kind: 'file' },
-  ];
-  const fileTargets = candidateTargets.filter((t) => {
-    try {
-      return fs.existsSync(t.path);
-    } catch {
-      return false;
-    }
-  });
-
-  // Detect a stored API key for this install dir.
+  // Detect a stored API key for this install dir. This is the load-bearing
+  // signal post-G1 — bare ampli.json absence is no longer a signal because
+  // the wizard hasn't written ampli.json on healthy projects since #573.
   let hasStoredKey = false;
   try {
     hasStoredKey = readApiKey(installDir) !== null;
@@ -122,47 +117,60 @@ export function selfHealStaleProjectState(installDir: string): SelfHealResult {
     // If we can't read the credentials file, treat as "no stored key".
   }
 
-  if (fileTargets.length === 0 && !hasStoredKey) {
+  if (!hasStoredKey) {
     return {
       healed: false,
       reason:
-        'ampli.json missing, but no per-project cache to heal — fresh project',
+        'no project binding and no stored API key — fresh / post-G1 project, nothing to heal',
       artifactsRemoved: [],
     };
   }
 
+  // From here on: no binding + stored API key. That's the real `git reset`
+  // (or manual-cleanup) symptom we want to fix. Clear the orphan credential
+  // entry so the user re-authenticates against whichever project they pick
+  // next. Crucially we do NOT touch `.amplitude/events.json` / `dashboard.json`
+  // / the user's checkpoint — preserving them lets the user resume an
+  // aborted run after a transient crash, and they're harmless without a
+  // matching credential.
   const removed: string[] = [];
-  for (const target of fileTargets) {
+
+  // Legacy dotfile mirrors only get cleared when paired with a stale
+  // credential. Otherwise they could just be leftovers that the user
+  // committed in the pre-`.amplitude/` era.
+  const legacyEvents = path.join(installDir, '.amplitude-events.json');
+  const legacyDashboard = path.join(installDir, '.amplitude-dashboard.json');
+  for (const target of [legacyEvents, legacyDashboard]) {
+    if (!safeExists(target)) continue;
     try {
-      fs.rmSync(target.path, { recursive: true, force: true });
-      removed.push(target.path);
+      fs.rmSync(target, { force: true });
+      removed.push(target);
     } catch (err) {
       logToFile(
-        `[self-heal] failed to remove ${target.path}: ${
-          err instanceof Error ? err.message : String(err)
-        }`,
-      );
-    }
-  }
-  if (hasStoredKey) {
-    try {
-      clearApiKey(installDir);
-      // The credentials file is shared across install dirs — we only
-      // cleared this install dir's entry. Mark it symbolically so the
-      // log shows what happened without leaking the path of a file
-      // that holds OTHER projects' keys.
-      removed.push('credentials.json[this install dir]');
-    } catch (err) {
-      logToFile(
-        `[self-heal] failed to clear stored API key: ${
+        `[self-heal] failed to remove ${target}: ${
           err instanceof Error ? err.message : String(err)
         }`,
       );
     }
   }
 
+  try {
+    clearApiKey(installDir);
+    // The credentials file is shared across install dirs — we only
+    // cleared this install dir's entry. Mark it symbolically so the
+    // log shows what happened without leaking the path of a file that
+    // holds OTHER projects' keys.
+    removed.push('credentials.json[this install dir]');
+  } catch (err) {
+    logToFile(
+      `[self-heal] failed to clear stored API key: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
+  }
+
   const reason =
-    'ampli.json missing but per-project state present (likely git reset)';
+    'project binding missing but stored API key present (likely git reset); cleared orphan credential';
   logToFile(
     `[self-heal] ${reason}; removed: ${
       removed.length > 0
@@ -176,4 +184,12 @@ export function selfHealStaleProjectState(installDir: string): SelfHealResult {
     reason,
     artifactsRemoved: removed,
   };
+}
+
+function safeExists(p: string): boolean {
+  try {
+    return fs.existsSync(p);
+  } catch {
+    return false;
+  }
 }
