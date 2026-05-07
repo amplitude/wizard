@@ -485,35 +485,25 @@ export async function runAgentWizard(
     });
   };
 
-  // Wire BOTH report-recovery helpers into every teardown path:
+  // Wire report restoration into every teardown path.
   //
-  //   1. restoreSetupReportIfMissing — if the run never reaches the
-  //      conclude phase, restore the archived prior report so the user
-  //      gets back what they had before this run touched anything.
-  //   2. writeFallbackReportIfMissing — if there was no prior report
-  //      AND the agent never wrote one, synthesize a minimal report so
-  //      the outro always has something to surface.
-  //
-  // ORDERING INVARIANT: restore MUST run before fallback. Both helpers
-  // existsSync-gate the canonical path, so if fallback fired first it
-  // would land a stub at canonical, restore would then see
-  // canonical-exists and bail, and the user's prior real report would
-  // stay permanently buried in `.previous.md`. Restore goes through
+  // restoreSetupReportIfMissing — if the run never reaches the conclude
+  // phase, restore the archived prior report so the user gets back what
+  // they had before this run touched anything. Goes through
   // `registerPriorityCleanup` (unshifts onto the cleanup queue) so it
   // ALWAYS runs before any code that may write a fresh canonical
   // report, regardless of registration order.
   //
-  // Registered as cleanups so wizardAbort() triggers them before
-  // process.exit. The success-path re-fires below catch the two failure
-  // modes that bypass wizardAbort (non-throwing return false, raw
-  // throw).
-  const { registerCleanup, registerPriorityCleanup } = await import(
-    '../utils/wizard-abort.js'
-  );
+  // The fallback writer (writeFallbackReportIfMissing) is intentionally
+  // NOT registered here. Cancel / failure paths must not pollute the
+  // user's repo with a stub `amplitude-setup-report.md` when no prior
+  // report existed and the agent never reached its conclude phase. The
+  // success path below still calls the fallback as a safety net for the
+  // rare case where a successful run skips the conclude-phase write.
+  const { registerPriorityCleanup } = await import('../utils/wizard-abort.js');
   registerPriorityCleanup(() =>
     restoreSetupReportIfMissing(session.installDir),
   );
-  registerCleanup(tryWriteFallback);
 
   // Cleanup runs ONLY on the success path. Cancel / error / Ctrl+C all
   // preserve the wizard's working artifacts (`.amplitude/` metadata,
@@ -541,13 +531,15 @@ export async function runAgentWizard(
     // Cover the two failure paths that bypass wizardAbort's cleanup hook:
     //   - body returns false  (non-throwing early return, e.g. version check)
     //   - body throws         (uncaught exception propagates to caller)
-    // Run restore first (recovers the archived prior report), then
-    // fallback (synthesizes a minimal report only if neither agent nor
-    // restore produced one). Both helpers existsSync-gate the canonical
-    // path, so they're idempotent if wizardAbort already fired them.
+    // Restore the archived prior report so a cancelled / errored run
+    // leaves the user's previous setup report at the canonical filename.
+    // The fallback writer is intentionally NOT called here: a stub
+    // `amplitude-setup-report.md` synthesized on cancel pollutes the
+    // user's working tree with a file they never asked for. If a prior
+    // report existed, restore handles it; otherwise the canonical path
+    // stays absent and the OutroScreen hides "View setup report".
     if (!success) {
       restoreSetupReportIfMissing(session.installDir);
-      tryWriteFallback();
     }
   }
   // Cleanup runs only when the body explicitly signals success. Other

