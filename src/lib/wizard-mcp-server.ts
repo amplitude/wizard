@@ -32,6 +32,12 @@ import {
   type PlanResult,
   type VerifyResult,
 } from './agent-ops.js';
+import {
+  readDashboardPlan,
+  writeDashboardPlan,
+  DashboardPlanInputSchema,
+  type DashboardPlanInput,
+} from './dashboard-plan.js';
 import { wrapMcpServerWithSentry } from './observability/index.js';
 
 const SERVER_NAME = 'amplitude-wizard';
@@ -209,6 +215,81 @@ export function registerWizardTools(server: WizardMcpToolRegistrar): void {
     () => {
       const result: AuthTokenResult = getAuthToken();
       return jsonContent(result);
+    },
+  );
+
+  // -- record_dashboard_plan ----------------------------------------------
+  // Mirrors the in-process `wizard-tools:record_dashboard_plan` so a host AI
+  // agent driving the wizard via stdio MCP can persist the same artifact.
+  // PR 2 of DEFER_DASHBOARD_PLAN.md introduces this; PR 3 adds the
+  // `wizard dashboard` command that consumes it. Additive — no behavior
+  // change for existing flows.
+  server.registerTool(
+    'record_dashboard_plan',
+    {
+      title: 'Record a dashboard plan',
+      description:
+        'Persist a dashboard plan (charts + dashboard wrapper + the events ' +
+        'they reference) to `<installDir>/.amplitude/dashboard-plan.json`. ' +
+        'A separate `wizard dashboard` command reads this file later to ' +
+        'create the actual charts and dashboard in Amplitude once event ' +
+        'ingestion has caught up. `planId` and `createdAt` are stamped by ' +
+        'the wizard. Returns the persisted plan on success.',
+      inputSchema: {
+        installDir: z
+          .string()
+          .optional()
+          .describe(
+            'Absolute path to the project to write the plan into. Defaults to the current working directory.',
+          ),
+        plan: DashboardPlanInputSchema.describe(
+          'The plan body. Must include orgId, projectId, events, charts, and dashboard. `version`, `planId`, and `createdAt` are stamped by the writer.',
+        ),
+      },
+    },
+    (args: unknown) => {
+      const { installDir, plan } = (args ?? {}) as {
+        installDir?: string;
+        plan: DashboardPlanInput;
+      };
+      const persisted = writeDashboardPlan(installDir ?? process.cwd(), plan);
+      if (!persisted) {
+        return jsonContent({
+          ok: false,
+          error:
+            'failed to persist dashboard plan — see wizard log for details',
+        });
+      }
+      return jsonContent({ ok: true, plan: persisted });
+    },
+  );
+
+  // -- get_dashboard_plan -------------------------------------------------
+  // Read-only counterpart to `record_dashboard_plan`. Lets the host agent
+  // inspect the persisted plan (e.g. to decide whether to invoke the
+  // deferred `wizard dashboard` command) without parsing the file itself.
+  server.registerTool(
+    'get_dashboard_plan',
+    {
+      title: 'Get the persisted dashboard plan',
+      description:
+        'Read `<installDir>/.amplitude/dashboard-plan.json` if it exists. ' +
+        'Returns `{ plan }` on success, `{ plan: null }` if the file is ' +
+        'missing, unreadable, or fails schema validation. Safe to call ' +
+        'repeatedly — does not write anything.',
+      inputSchema: {
+        installDir: z
+          .string()
+          .optional()
+          .describe(
+            'Absolute path to the project to inspect. Defaults to the current working directory.',
+          ),
+      },
+    },
+    (args: unknown) => {
+      const { installDir } = (args ?? {}) as { installDir?: string };
+      const plan = readDashboardPlan(installDir ?? process.cwd());
+      return jsonContent({ plan });
     },
   );
 }

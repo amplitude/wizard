@@ -172,7 +172,7 @@ describe('redact (property-based)', () => {
   });
 });
 
-// ── WIZARD_OAUTH_TOKEN env-value redaction (FINAL_NEW_MIGRATION_PLAN §7.5) ──
+// ── WIZARD_OAUTH_TOKEN env-value redaction (MIGRATION_PLAN §7.5) ──
 //
 // The CI org secret carrying the gateway bearer must never reach stdout, log
 // files, or NDJSON output. The value is captured at module load (env vars

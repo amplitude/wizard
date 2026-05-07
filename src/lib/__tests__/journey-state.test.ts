@@ -213,6 +213,48 @@ describe('classifyToolEvent', () => {
       ).toEqual({ stepId: 'dashboard', status: 'completed' });
     });
 
+    it.each([
+      'query_dataset',
+      'save_chart_edits',
+      'get_chart_definition_params',
+      'verify_chart_definition',
+    ])(
+      'flags chart-building tool %s as dashboard in_progress',
+      (toolBareName) => {
+        expect(
+          classifyToolEvent({
+            phase: 'pre',
+            toolName: `mcp__amplitude__${toolBareName}`,
+            toolInput: {},
+          }),
+        ).toEqual({ stepId: 'dashboard', status: 'in_progress' });
+      },
+    );
+
+    it('keeps dashboard in_progress across a sequence of chart-building tools', () => {
+      // The agent typically chains query_dataset → get_chart_definition_params
+      // → verify_chart_definition → save_chart_edits → create_chart while
+      // building a chart. Each call should land on `in_progress` — never
+      // null, never oscillate to a different step.
+      const sequence = [
+        'query_dataset',
+        'get_chart_definition_params',
+        'verify_chart_definition',
+        'save_chart_edits',
+        'create_chart',
+      ];
+      for (const bare of sequence) {
+        expect(
+          classifyToolEvent({
+            phase: 'pre',
+            toolName: `mcp__amplitude__${bare}`,
+            toolInput: {},
+            prevDerived: { plan: 'completed', dashboard: 'in_progress' },
+          }),
+        ).toEqual({ stepId: 'dashboard', status: 'in_progress' });
+      }
+    });
+
     it('ignores read-only Amplitude MCP probes', () => {
       // list_*, search_*, get_* are agent browsing — not load-bearing
       // signals for the dashboard step.

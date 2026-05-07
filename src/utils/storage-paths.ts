@@ -188,7 +188,7 @@ export function getOAuthSettingsFile(): string {
 /**
  * Legacy per-user OAuth file. Read for one-shot migration only — Phase G-1
  * stopped writing this path. Reads remain for one minor cycle so existing
- * installs migrate forward on first launch (per FINAL_NEW_MIGRATION_PLAN.md
+ * installs migrate forward on first launch (per MIGRATION_PLAN.md
  * §10 decision 7).
  */
 export function getLegacyAmpliHomeOAuthPath(): string {
@@ -219,6 +219,17 @@ export function getEventsFile(installDir: string): string {
 /** Dashboard URL JSON written by the agent after dashboard creation. */
 export function getDashboardFile(installDir: string): string {
   return join(getProjectMetaDir(installDir), 'dashboard.json');
+}
+
+/**
+ * Dashboard-plan artifact written at the end of the agent's plan phase.
+ * Sibling of `events.json` and `dashboard.json`. Read by the deferred
+ * `wizard dashboard` command (PR 3) to actually create charts + dashboards
+ * in Amplitude once event ingestion catches up. See `src/lib/dashboard-plan.ts`
+ * for the schema + reader/writer.
+ */
+export function getDashboardPlanFile(installDir: string): string {
+  return join(getProjectMetaDir(installDir), 'dashboard-plan.json');
 }
 
 /**

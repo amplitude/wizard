@@ -319,7 +319,7 @@ describe('resolveCredentials — silent token refresh', () => {
   });
 });
 
-// ── CI env-var auth path (FINAL_NEW_MIGRATION_PLAN.md §7.5) ────────────────
+// ── CI env-var auth path (MIGRATION_PLAN.md §7.5) ────────────────
 //
 // `WIZARD_OAUTH_TOKEN` + `WIZARD_EXPIRES_AT` + `WIZARD_ZONE` are the org-secret
 // env vars that let the eval / bench harness hit the wizard gateway without

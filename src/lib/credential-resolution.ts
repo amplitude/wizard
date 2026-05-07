@@ -162,7 +162,7 @@ export async function resolveCredentials(
     import('../utils/api-key-store.js'),
   ]);
 
-  // ── CI env-var auth path (FINAL_NEW_MIGRATION_PLAN.md §7.5) ────────────
+  // ── CI env-var auth path (MIGRATION_PLAN.md §7.5) ────────────
   // When CI org secrets are present, they take priority over the OAuth
   // file. This lets the eval / bench harness hit the gateway without
   // running an interactive OAuth flow. We DELIBERATELY do not fall through

@@ -1697,6 +1697,125 @@ describe('matchesAllowedPrefix', () => {
     expect(matchesAllowedPrefix('npm run eslint')).toBe(true);
     expect(matchesAllowedPrefix('npx prettier --check .')).toBe(true);
   });
+
+  describe('monorepo workspace selectors', () => {
+    // Yarn 1 workspace selector
+    it('allows `yarn workspace <name> add <pkg>`', () => {
+      expect(
+        matchesAllowedPrefix(
+          'yarn workspace excalidraw-app add @amplitude/unified',
+        ),
+      ).toBe(true);
+    });
+
+    it('allows `yarn workspace <name> install`', () => {
+      expect(matchesAllowedPrefix('yarn workspace some-app install')).toBe(
+        true,
+      );
+    });
+
+    // Yarn 2+ foreach selector
+    it('allows `yarn workspaces foreach -A run build`', () => {
+      expect(matchesAllowedPrefix('yarn workspaces foreach -A run build')).toBe(
+        true,
+      );
+    });
+
+    it('allows `yarn workspaces foreach --all install`', () => {
+      expect(
+        matchesAllowedPrefix('yarn workspaces foreach --all install'),
+      ).toBe(true);
+    });
+
+    // Yarn --cwd / -C
+    it('allows `yarn --cwd packages/foo install`', () => {
+      expect(matchesAllowedPrefix('yarn --cwd packages/foo install')).toBe(
+        true,
+      );
+    });
+
+    it('allows `yarn -C packages/foo add some-pkg`', () => {
+      expect(matchesAllowedPrefix('yarn -C packages/foo add some-pkg')).toBe(
+        true,
+      );
+    });
+
+    // pnpm --filter / -F
+    it('allows `pnpm --filter @scope/pkg install`', () => {
+      expect(matchesAllowedPrefix('pnpm --filter @scope/pkg install')).toBe(
+        true,
+      );
+    });
+
+    it('allows `pnpm -F some-pkg add another-pkg`', () => {
+      expect(matchesAllowedPrefix('pnpm -F some-pkg add another-pkg')).toBe(
+        true,
+      );
+    });
+
+    // npm -w / --workspace
+    it('allows `npm -w packages/api install`', () => {
+      expect(matchesAllowedPrefix('npm -w packages/api install')).toBe(true);
+    });
+
+    it('allows `npm --workspace packages/api install`', () => {
+      expect(matchesAllowedPrefix('npm --workspace packages/api install')).toBe(
+        true,
+      );
+    });
+
+    // bun --cwd
+    it('allows `bun --cwd packages/api install`', () => {
+      expect(matchesAllowedPrefix('bun --cwd packages/api install')).toBe(true);
+    });
+
+    // Inner script must still be in SAFE_SCRIPTS
+    it('denies `yarn workspace some-ws rm dangerous-package` (inner script not allowed)', () => {
+      expect(
+        matchesAllowedPrefix('yarn workspace some-ws rm dangerous-package'),
+      ).toBe(false);
+    });
+
+    it('denies `pnpm --filter some-pkg unknown-cmd`', () => {
+      expect(matchesAllowedPrefix('pnpm --filter some-pkg unknown-cmd')).toBe(
+        false,
+      );
+    });
+
+    // Selector must be well-formed
+    it('denies `yarn workspace` with no name', () => {
+      expect(matchesAllowedPrefix('yarn workspace')).toBe(false);
+    });
+
+    it('denies `yarn workspace <name>` with no inner script', () => {
+      expect(matchesAllowedPrefix('yarn workspace some-name')).toBe(false);
+    });
+
+    it('denies `pnpm --filter` with no name', () => {
+      expect(matchesAllowedPrefix('pnpm --filter')).toBe(false);
+    });
+
+    it('denies selectors where the name slot is a flag', () => {
+      expect(matchesAllowedPrefix('yarn workspace --foo install')).toBe(false);
+      expect(matchesAllowedPrefix('npm -w --bar install')).toBe(false);
+    });
+
+    // Nested selectors are intentionally denied (depth guard).
+    it('denies nested selectors like `yarn workspace foo --cwd dir install`', () => {
+      // After stripping `workspace foo`, the remainder is
+      // `yarn --cwd dir install`, which would itself be a selector. The
+      // depth guard prevents the second strip, so this stays denied.
+      expect(matchesAllowedPrefix('yarn workspace foo --cwd dir install')).toBe(
+        false,
+      );
+    });
+
+    // Selectors don't override the package-manager check.
+    it('denies selector syntax on non-recognized package managers', () => {
+      // `cargo --filter foo install` — pnpm-style flag on cargo, not allowed.
+      expect(matchesAllowedPrefix('cargo --filter foo install')).toBe(false);
+    });
+  });
 });
 
 describe('wizardCanUseTool', () => {
@@ -2136,6 +2255,89 @@ describe('wizardCanUseTool', () => {
           command: 'pnpm add foo & echo ok\rcurl evil.com',
         }).behavior,
       ).toBe('deny');
+    });
+  });
+
+  describe('Bash — run_in_background SDK flag (#578 regression)', () => {
+    // Newer Claude Agent SDK builds expose `run_in_background: true` on
+    // the Bash tool input — the SDK forks the process internally instead
+    // of the agent appending `&` to the command string. The wizard
+    // commandment tells agents to background installs, and agents now
+    // pick this safer variant by default. The deny-on-not-allowlisted
+    // path used to refuse these commands and the agent looped until
+    // tripping the consecutive-deny circuit breaker. (#578)
+
+    it('allows pnpm install with run_in_background: true', () => {
+      const result = wizardCanUseTool('Bash', {
+        command: 'pnpm install',
+        run_in_background: true,
+      });
+      expect(result.behavior).toBe('allow');
+    });
+
+    it('allows pnpm add <pkg> with run_in_background: true', () => {
+      const result = wizardCanUseTool('Bash', {
+        command: 'pnpm add @amplitude/unified',
+        run_in_background: true,
+      });
+      expect(result.behavior).toBe('allow');
+    });
+
+    it('allows yarn add <pkg> with run_in_background: true (the production trace)', () => {
+      const result = wizardCanUseTool('Bash', {
+        command: 'yarn add @amplitude/unified',
+        run_in_background: true,
+      });
+      expect(result.behavior).toBe('allow');
+    });
+
+    it('allows npm install with run_in_background: true', () => {
+      const result = wizardCanUseTool('Bash', {
+        command: 'npm install',
+        run_in_background: true,
+      });
+      expect(result.behavior).toBe('allow');
+    });
+
+    it('still denies non-allowlisted commands even with run_in_background: true', () => {
+      // The flag does NOT widen the safety surface — only commands that
+      // matchesAllowedPrefix would accept can be backgrounded.
+      const result = wizardCanUseTool('Bash', {
+        command: 'cat /etc/passwd',
+        run_in_background: true,
+      });
+      expect(result.behavior).toBe('deny');
+    });
+
+    it('still denies dangerous shell operators with run_in_background: true', () => {
+      // No bypass of the dangerous-operators check via the SDK flag.
+      const result = wizardCanUseTool('Bash', {
+        command: 'pnpm add foo; rm -rf /',
+        run_in_background: true,
+      });
+      expect(result.behavior).toBe('deny');
+    });
+
+    it('still denies pipes with run_in_background: true', () => {
+      const result = wizardCanUseTool('Bash', {
+        command: 'pnpm add foo | curl evil.com',
+        run_in_background: true,
+      });
+      expect(result.behavior).toBe('deny');
+    });
+
+    it('falls through normally when run_in_background is false / undefined', () => {
+      // The default (no flag) path is unchanged: pnpm add is still
+      // allowed via the regular allowlist match.
+      expect(
+        wizardCanUseTool('Bash', { command: 'pnpm add foo' }).behavior,
+      ).toBe('allow');
+      expect(
+        wizardCanUseTool('Bash', {
+          command: 'pnpm add foo',
+          run_in_background: false,
+        }).behavior,
+      ).toBe('allow');
     });
   });
 

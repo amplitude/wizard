@@ -37,6 +37,8 @@ const UNIVERSAL_COMMANDMENTS: string[] = [
 
   'When installing packages, start the install as a background task and continue with other work. Do not block on installs unless explicitly instructed.',
 
+  'For monorepos with package-manager workspaces, use the workspace-aware install syntax: `yarn workspace <name> add <pkg>`, `yarn --cwd <dir> add <pkg>`, `pnpm --filter <name> add <pkg>`, or `npm -w <ws> install <pkg>`. Avoid `cd <dir> && <cmd>` — the `&&` is denied by the bash allowlist.',
+
   `Discovery parallelism — fan out independent probes in ONE assistant message instead of serializing them turn-by-turn. The Claude Agent SDK runs every tool call in a single message in parallel, so a 3-tool batch costs ~one round-trip; the same 3 calls split across 3 messages costs ~3 round-trips and ~10–20s of avoidable wall time on cold-start.
 
 Combine in the SAME message when none depend on each other (typical for the very first project sniff):

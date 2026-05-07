@@ -133,7 +133,10 @@ function readStringField(value: unknown, key: string): string | undefined {
  *      multi-file instrumentation continued). The store's sequential cascade
  *      in `renderJourneyTasks` rolls wire up to `completed` when step 5 starts.
  *   5. **dashboard** — Amplitude MCP `create_chart` / `create_dashboard` /
- *      `update_chart` / `update_dashboard` tools (in_progress) and
+ *      `update_chart` / `update_dashboard` tools, plus the chart-building
+ *      pipeline that feeds them (`query_dataset`, `save_chart_edits`,
+ *      `get_chart_definition_params`, `verify_chart_definition`), all
+ *      flip dashboard to `in_progress`. Completion remains
  *      `mcp__wizard-tools__record_dashboard` (Post → completed).
  *
  * Ordering is sequential — when step N's trigger fires, the renderer
@@ -167,6 +170,14 @@ export function classifyToolEvent(
       bare === 'update_dashboard' ||
       bare === 'add_chart_to_dashboard' ||
       bare === 'attach_chart_to_dashboard' ||
+      // Chart-building pipeline that precedes create_chart. Without
+      // these the journey UI sat on `wire = in_progress` for ~3 minutes
+      // while the agent was actually doing dashboard work (audit
+      // finding from run aeef7c6e). See DEFER_DASHBOARD_PLAN.md PR 1.
+      bare === 'query_dataset' ||
+      bare === 'save_chart_edits' ||
+      bare === 'get_chart_definition_params' ||
+      bare === 'verify_chart_definition' ||
       (bare === 'record_dashboard' && isWizardTool(toolName, bare)))
   ) {
     return { stepId: 'dashboard', status: 'in_progress' };
