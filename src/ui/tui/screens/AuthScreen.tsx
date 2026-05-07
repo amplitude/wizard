@@ -510,9 +510,20 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
   // coming) was the P0 symptom that looked like a hang. The auth task
   // signals 'verifying-session' before performAmplitudeAuth and switches
   // to 'opening-browser' once a fresh OAuth flow is actually starting.
+  //
+  // `idle` covers the brief window between AuthScreen mounting and the
+  // authTask waking up from its gate (`introConcluded` + `region` set).
+  // For users with a stored token + region, that window resolves into
+  // 'verifying-session' within milliseconds — but if the gate is parked
+  // (e.g. region just got cleared by `/region`, or the user is mid-
+  // signup), the screen used to fall through to "Preparing your sign-in
+  // link" with no browser actually being prepared, repeating the same
+  // misleading-copy hang #611 fixed. Treat `idle` like `verifying-session`
+  // because that's the most likely next phase for any returning user.
   const oauthWaitPreparingLine = isCreateAccountOnboarding(session)
     ? 'Opening your Amplitude sign-in page'
-    : session.authPhase === 'verifying-session'
+    : session.authPhase === 'verifying-session' ||
+      session.authPhase === 'idle'
     ? 'Verifying your session'
     : 'Preparing your sign-in link';
   const { tier: oauthCoachingTier } = useTimedCoaching({
