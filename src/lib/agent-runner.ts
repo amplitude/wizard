@@ -23,10 +23,10 @@ import { analytics, captureWizardError } from '../utils/analytics';
 import { getUI } from '../ui';
 import {
   getAgent,
-  runAgent,
   AgentErrorType,
   buildWizardMetadata,
 } from './agent-interface';
+import { runAgentDispatch } from './agent/run-agent-dispatch.js';
 import { getLlmGatewayUrlFromHost, getMcpUrlFromZone } from '../utils/urls';
 import { DEFAULT_AMPLITUDE_ZONE, OUTBOUND_URLS } from './constants.js';
 import { resolveZone } from './zone-resolution.js';
@@ -1113,7 +1113,13 @@ async function runAgentWizardBody(
         retryMiddleware,
       ]);
 
-  const agentResult = await runAgent(
+  // Dispatch through the AI-SDK runner shim — when
+  // `AMPLITUDE_WIZARD_AI_SDK_INNER_LOOP=1` the new `runAiSdkAgent`
+  // executes; otherwise the legacy Agent-SDK `runAgent` runs verbatim.
+  // Phase D-3: foundation only, default-off. D-5 flips the default,
+  // D-6 deletes the legacy path. See `src/lib/agent/run-agent.ts` for
+  // the full parity matrix.
+  const agentResult = await runAgentDispatch(
     agent,
     integrationPrompt,
     sessionToOptions(session),
