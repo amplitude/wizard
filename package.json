@@ -55,7 +55,6 @@
     "@modelcontextprotocol/sdk": "1.29.0",
     "@pavus/snake-game": "1.1.1",
     "@sentry/node": "10.47.0",
-    "@types/diff": "^8.0.0",
     "adm-zip": "~0.5.17",
     "ai": "^6.0.175",
     "axios": "1.16.0",
