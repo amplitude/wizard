@@ -69,12 +69,21 @@ export const SigningUpScreen = ({ store }: SigningUpScreenProps) => {
       // the user backed out before the success arm settled. Without
       // this, an abandoned ceremony can still leak tokens to disk and
       // make the next launch think the user is signed in.
-      const result = await performSignupOrAuth({
-        email,
-        fullName,
-        zone,
-        signal,
-      });
+      //
+      // `store.runSignupAttempt` toggles `signupInFlight` for the
+      // duration of the call (try/finally — clears even on
+      // signal-driven aborts). The signup-ceremony FlowEntries gate
+      // `isWall` on that flag so Esc cannot reset ceremony state
+      // mid-POST; otherwise the response could land on a session
+      // that's been wiped.
+      const result = await store.runSignupAttempt(() =>
+        performSignupOrAuth({
+          email,
+          fullName,
+          zone,
+          signal,
+        }),
+      );
 
       if (signal.aborted) return;
 
