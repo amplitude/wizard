@@ -80,8 +80,8 @@ export function summarizeDiff(
       newLines: h.newLines,
     });
     for (const line of h.lines) {
-      if (line.startsWith('+') && !line.startsWith('+++')) additions++;
-      else if (line.startsWith('-') && !line.startsWith('---')) deletions++;
+      if (line.startsWith('+')) additions++;
+      else if (line.startsWith('-')) deletions++;
     }
   }
   return { additions, deletions, hunks };
