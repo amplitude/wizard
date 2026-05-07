@@ -1,20 +1,25 @@
 /**
- * Canonical wizard tasks — the five user-visible progress steps.
+ * Canonical wizard tasks — the four user-visible progress steps.
  *
  * The agent commandment in `src/lib/commandments.ts` instructs the LLM
  * to emit TodoWrite using these exact labels in this order. The TUI
  * store (`syncTodos` in `store.ts`) treats this list as the source of
- * truth for the rendered checklist: it pre-populates these five rows
+ * truth for the rendered checklist: it pre-populates these four rows
  * on `RunPhase.Running`, matches incoming TodoWrite entries by exact
  * label, and drops anything that doesn't match. That keeps LLM drift
- * (a renamed step on retry, a stray sixth todo) from reordering or
+ * (a renamed step on retry, a stray fifth todo) from reordering or
  * regressing the user-visible journey.
  *
- * Order matters — index 0 is the first step shown, index 4 is the last.
+ * History: this list was 5 steps until DEFER_DASHBOARD_PLAN.md PR 4
+ * removed `dashboard` — dashboard creation now happens in the deferred
+ * `amplitude-wizard dashboard` command, which runs once event ingestion
+ * has caught up. `wire` is the terminal step of the main run.
+ *
+ * Order matters — index 0 is the first step shown, index 3 is the last.
  */
 export interface CanonicalStep {
   /** Stable identifier; index in CANONICAL_STEPS == step order. */
-  readonly id: 'detect' | 'install' | 'plan' | 'wire' | 'dashboard';
+  readonly id: 'detect' | 'install' | 'plan' | 'wire';
   /** User-visible label shown in the progress list. Must match the agent commandment exactly. */
   readonly label: string;
   /** Default activeForm shown when the step is in_progress and the agent has not provided one. */
@@ -41,11 +46,6 @@ export const CANONICAL_STEPS: readonly CanonicalStep[] = [
     id: 'wire',
     label: 'Wire up event tracking',
     defaultActiveForm: 'Wiring up event tracking',
-  },
-  {
-    id: 'dashboard',
-    label: 'Build your starter dashboard',
-    defaultActiveForm: 'Building your starter dashboard',
   },
 ] as const;
 

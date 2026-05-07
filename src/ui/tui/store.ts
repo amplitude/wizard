@@ -136,7 +136,7 @@ export class WizardStore {
   /**
    * Per-step journey status derived from deterministic tool-call signals
    * (see `src/lib/journey-state.ts`). This is the source of truth for the
-   * canonical 5-step progress UI; `syncTodos` only updates each step's
+   * canonical 4-step progress UI; `syncTodos` only updates each step's
    * `activeForm` flavor text. Initialised on first `applyJourneyTransition`
    * call — until then each step is treated as `pending`.
    */
@@ -315,7 +315,7 @@ export class WizardStore {
     // unmounts inactive tabs).
     if (phase === RunPhase.Running && prevPhase !== RunPhase.Running) {
       this.$session.setKey('runStartedAt', Date.now());
-      // Pre-populate the canonical 5 tasks so the user sees "0 done · 5
+      // Pre-populate the canonical 4 tasks so the user sees "0 done · 4
       // to go" from frame 1, not an empty list while the agent loads.
       // The renderer derives rows from $derivedJourney + $journeyActiveForms;
       // calling it on every Running entry is idempotent and preserves
@@ -1993,7 +1993,7 @@ export class WizardStore {
    *
    * Safe fallback: when no journey transition has fired yet (early in a
    * run, or in tests that exercise syncTodos directly), the renderer
-   * still seeds the canonical 5 rows as `pending` so the user-visible
+   * still seeds the canonical 4 rows as `pending` so the user-visible
    * list is never empty.
    */
   syncTodos(
@@ -2015,7 +2015,7 @@ export class WizardStore {
   }
 
   /**
-   * Re-render the canonical 5-row task list from the derived journey
+   * Re-render the canonical 4-row task list from the derived journey
    * status + per-step activeForms. Sequential-ordering cascade applied
    * here: when step N is in_progress or completed, every step before
    * N rolls up to completed (the agent has demonstrably moved past

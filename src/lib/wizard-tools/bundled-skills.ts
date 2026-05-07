@@ -289,7 +289,12 @@ export function preStageSkills(
     // `discover-event-surfaces` skills as well, so pre-staging avoids
     // a missing-skill error if those sub-skills run.
     'discover-analytics-patterns',
-    'amplitude-chart-dashboard-plan',
+    // `amplitude-chart-dashboard-plan` is intentionally NOT pre-staged for
+    // the main run — chart and dashboard creation moved to the deferred
+    // `amplitude-wizard dashboard` command in DEFER_DASHBOARD_PLAN PR 4.
+    // The deferred command loads the skill explicitly when it runs (see
+    // `src/commands/dashboard.ts`). The skill source still lives under
+    // `skills/taxonomy/` so it can be resolved at that time.
   ];
   const staged: string[] = [];
   for (const id of constantSkills) {

@@ -18,13 +18,12 @@ import { vi } from 'vitest';
 import {
   agentArtifactsLookComplete,
   agentEventsInstrumented,
+  buildDashboardDeferredMessage,
   classifyAgentOutcome,
   classifyApiErrorSubtype,
   refreshTokenIfStale,
   POST_AGENT_STEP_COMMIT_EVENTS,
-  POST_AGENT_STEP_CREATE_DASHBOARD,
 } from '../agent-runner.js';
-import { STEP_ID as CREATE_DASHBOARD_STEP_ID } from '../../steps/create-dashboard.js';
 import { AgentErrorType } from '../agent-interface.js';
 import { buildSession } from '../wizard-session.js';
 
@@ -55,16 +54,17 @@ vi.mock('../../utils/oauth', () => ({
 // AND by each step file (`setPostAgentStep` calls). They must stay
 // equal — the FinalizingPanel finds rows by id and the patch is a no-op
 // for unknown ids. This test catches a rename of either constant.
+//
+// History: a `POST_AGENT_STEP_CREATE_DASHBOARD` constant lived here until
+// DEFER_DASHBOARD_PLAN PR 4 — chart and dashboard creation moved to the
+// deferred `amplitude-wizard dashboard` command, so the post-agent queue
+// only seeds the events-commit step now. The legacy `STEP_ID` export on
+// `src/steps/create-dashboard.ts` survives one release for backwards
+// compat with stale skill expectations and is removed in PR 5.
 describe('post-agent step id constants', () => {
-  it('agent-runner POST_AGENT_STEP_CREATE_DASHBOARD matches create-dashboard STEP_ID', () => {
-    expect(POST_AGENT_STEP_CREATE_DASHBOARD).toBe(CREATE_DASHBOARD_STEP_ID);
-  });
-
-  it('the two step ids are stable strings, not symbols / non-enumerable', () => {
+  it('the events-commit step id is a stable, non-empty string', () => {
     expect(typeof POST_AGENT_STEP_COMMIT_EVENTS).toBe('string');
     expect(POST_AGENT_STEP_COMMIT_EVENTS.length).toBeGreaterThan(0);
-    expect(typeof POST_AGENT_STEP_CREATE_DASHBOARD).toBe('string');
-    expect(POST_AGENT_STEP_CREATE_DASHBOARD.length).toBeGreaterThan(0);
   });
 });
 
@@ -457,5 +457,199 @@ describe('refreshTokenIfStale', () => {
     });
     mockRefreshAccessToken.mockRejectedValue(new Error('network'));
     expect(await refreshTokenIfStale('fallback', 'post-run')).toBe('stored');
+  });
+});
+
+// ── buildDashboardDeferredMessage ─────────────────────────────────────────
+//
+// DEFER_DASHBOARD_PLAN PR 4: dashboard creation moved to a separate
+// command, so the main run's success state is "events instrumented." This
+// helper builds the user-facing copy shown in both the live status ticker
+// and the OutroScreen changes list. Two shapes — with or without a
+// `dashboard-plan.json` artifact path. Locking the wording in keeps a
+// future copy edit from accidentally breaking the contract analytics +
+// CI orchestrators look for ("Run `npx @amplitude/wizard dashboard`").
+
+describe('buildDashboardDeferredMessage', () => {
+  it('mentions the deferred command in both shapes', () => {
+    const withPlan = buildDashboardDeferredMessage({
+      planPath: '/p/.amplitude/dashboard-plan.json',
+    });
+    const withoutPlan = buildDashboardDeferredMessage({ planPath: null });
+
+    // The command name MUST appear verbatim in both shapes — the
+    // user-facing instruction is the load-bearing piece.
+    expect(withPlan).toContain('npx @amplitude/wizard dashboard');
+    expect(withoutPlan).toContain('npx @amplitude/wizard dashboard');
+  });
+
+  it('starts with "Events instrumented!" so the success framing reads cleanly', () => {
+    // The terminal-step success bar collapses from "Build your starter
+    // dashboard" (formerly step 5) to "Wire up event tracking" (the new
+    // terminal step). The outro copy should advertise that explicit
+    // success ("Events instrumented!") instead of leading with the
+    // deferred-dashboard ask, so users don't read it as a partial
+    // failure.
+    expect(buildDashboardDeferredMessage({ planPath: null })).toMatch(
+      /^Events instrumented!/,
+    );
+    expect(
+      buildDashboardDeferredMessage({
+        planPath: '/p/.amplitude/dashboard-plan.json',
+      }),
+    ).toMatch(/^Events instrumented!/);
+  });
+
+  it('cites the plan path when an artifact was persisted', () => {
+    const planPath = '/some/install/dir/.amplitude/dashboard-plan.json';
+    const message = buildDashboardDeferredMessage({ planPath });
+    expect(message).toContain(planPath);
+  });
+
+  it('omits the plan path entirely when no artifact was persisted', () => {
+    // No empty "saved at " trailing fragment — the no-plan branch is a
+    // distinct copy. (Prevents a regression where a `null` ever got
+    // template-stringified into the message as "saved at null".)
+    const message = buildDashboardDeferredMessage({ planPath: null });
+    expect(message).not.toContain('saved at');
+    expect(message).not.toContain('null');
+  });
+
+  it('does not falsely claim "Events instrumented!" when events.json was not written', () => {
+    // Soft-error path: agent stream terminated, dashboard-plan.json may
+    // exist (from a checkpoint replay) but events.json does not. The
+    // status ticker / outro must not announce "Events instrumented!" in
+    // that case — wire is not marked completed either.
+    const message = buildDashboardDeferredMessage({
+      planPath: null,
+      eventsInstrumented: false,
+    });
+    expect(message).not.toMatch(/^Events instrumented!/);
+    expect(message).toContain('npx @amplitude/wizard dashboard');
+  });
+});
+
+// ── DEFER_DASHBOARD_PLAN PR 4: regression guards on the agent system prompt
+// ── + commandments contract.
+//
+// `record_dashboard`, `create_chart`, `create_dashboard`, `query_dataset`,
+// and the `amplitude-chart-dashboard-plan` skill are all owned by the
+// deferred command from PR 4 onwards. The main wizard run must NOT
+// instruct the agent to call them; that's how we eliminate the 185s
+// dashboard phase + 119s compaction stall the audit measured.
+//
+// We can't easily run `buildIntegrationPrompt` here without a full
+// FrameworkConfig, so instead we lock the contract via the commandments
+// helper (which is the durable cross-cutting prompt the audit traced
+// the dashboard work to). Combined with the negative tests in
+// `journey-state.test.ts` and `commandments.test.ts`, this gives us a
+// three-layer guard against accidental re-introduction.
+
+describe('agent system prompt no longer references dashboard MCP tools (DEFER_DASHBOARD_PLAN PR 4)', () => {
+  it('commandments do not promote the inline chart/dashboard MCP tools as something to call', async () => {
+    const { getWizardCommandments } = await import('../commandments');
+    const text = getWizardCommandments({ targetsBrowser: true });
+
+    // Each mention (if any) must sit alongside a "do not" / "deferred"
+    // / "MUST NOT" cue — same shape as the regression guard in
+    // commandments.test.ts. Belt-and-suspenders.
+    const sentinels = [
+      'create_chart',
+      'create_dashboard',
+      'query_dataset',
+      'save_chart_edits',
+    ];
+    for (const phrase of sentinels) {
+      const occurrences = text.match(new RegExp(phrase, 'g')) ?? [];
+      // The negative-mention guard from commandments.test.ts covers
+      // record_dashboard. For these chart-builder tools we lock down a
+      // stricter rule: the static commandments must not name them at
+      // all in a positive call-this context. (They're allowed to
+      // appear in a single negative clause that lists "do not call" —
+      // which is exactly how `commandments.ts` words it now.)
+      if (occurrences.length === 0) continue;
+      // Same window-based negative-cue check as commandments.test.ts.
+      const allMentionsAreNegative = text
+        .split(new RegExp(phrase))
+        .slice(0, -1)
+        .every((preceding, idx) => {
+          const after = text.split(new RegExp(phrase))[idx + 1] ?? '';
+          const window = `${preceding.slice(-200)}${phrase}${after.slice(
+            0,
+            200,
+          )}`;
+          return /(do not|MUST NOT|deferred|do NOT)/i.test(window);
+        });
+      expect(
+        allMentionsAreNegative,
+        `commandments mention of ${phrase} must sit in a "do not call" / "deferred" clause`,
+      ).toBe(true);
+    }
+  });
+
+  it('commandments do not pre-stage or promote amplitude-chart-dashboard-plan for the main run', async () => {
+    const { getWizardCommandments } = await import('../commandments');
+    const text = getWizardCommandments({ targetsBrowser: true });
+    expect(text).not.toContain('amplitude-chart-dashboard-plan');
+  });
+});
+
+// ── End-of-run flow: events-only success path
+//
+// The main success contract post-DEFER_DASHBOARD_PLAN PR 4 is:
+//   - agent reaches the post-instrument boundary
+//   - events.json artifact lands
+//   - wire flips to completed (no dashboard cascade)
+//   - outro shows the deferred-dashboard message
+// We can't drive the full runAgentWizardBody from a unit test (it owns
+// auth, the SDK, MCP config, etc.), but we CAN exercise the
+// `agentEventsInstrumented` + `buildDashboardDeferredMessage` glue that
+// the outro path now hinges on. These tests pin the new terminal-step
+// signals.
+
+describe('events-only success path (DEFER_DASHBOARD_PLAN PR 4)', () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'defer-dashboard-pr4-'));
+    fs.mkdirSync(path.join(tmpDir, '.amplitude'), { recursive: true });
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('agentEventsInstrumented is true once events.json lands — no dashboard URL needed', () => {
+    fs.writeFileSync(
+      path.join(tmpDir, '.amplitude', 'events.json'),
+      JSON.stringify([{ name: 'X', description: 'Y' }]),
+    );
+    const session = buildSession({ installDir: tmpDir });
+    expect(agentEventsInstrumented(session)).toBe(true);
+    // No checklistDashboardUrl is set — and the main run will no longer
+    // call `record_dashboard`, so this is the steady-state success
+    // shape post-PR4.
+    expect(session.checklistDashboardUrl).toBeNull();
+  });
+
+  it('outro message hand-off cites the plan file when record_dashboard_plan persisted one', () => {
+    // Simulate the agent calling `record_dashboard_plan` — the wizard
+    // tool writes to `<installDir>/.amplitude/dashboard-plan.json`.
+    // The outro builder must surface that path so the user can find
+    // (and inspect) the strategy before running `wizard dashboard`.
+    const planPath = path.join(tmpDir, '.amplitude', 'dashboard-plan.json');
+    fs.writeFileSync(planPath, JSON.stringify({ version: 1 }));
+    const message = buildDashboardDeferredMessage({ planPath });
+    expect(message).toContain(planPath);
+    expect(message).toContain('saved at');
+  });
+
+  it('outro message has no plan reference when the agent skipped record_dashboard_plan', () => {
+    // Existing-project flow: no taxonomy work was needed, so no plan
+    // gets persisted. The deferred message must not invent a path or
+    // mention a missing artifact.
+    const message = buildDashboardDeferredMessage({ planPath: null });
+    expect(message).not.toContain('saved at');
+    expect(message).not.toContain('dashboard-plan.json');
   });
 });

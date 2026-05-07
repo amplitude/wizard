@@ -2604,7 +2604,7 @@ export async function runAgent(
                   );
                 } catch (err) {
                   // Classifier errors are non-fatal — the user-visible
-                  // checklist falls back to the canonical 5 pending rows
+                  // checklist falls back to the canonical 4 pending rows
                   // until the next valid signal lands.
                   logToFile('journey classifier threw:', err);
                 }
