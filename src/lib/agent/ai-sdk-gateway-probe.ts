@@ -14,7 +14,6 @@
  * runs — `agent-interface.ts` calls this on every wizard run, but the env-var
  * gate short-circuits well before any AI SDK code is touched.
  */
-import { sanitizingFetch } from '../gateway-request-sanitize.js';
 import { logToFile } from '../../utils/debug.js';
 import { resolveAnthropicAuth } from './anthropic-auth.js';
 
@@ -61,17 +60,16 @@ export async function maybeRunAiSdkGatewayProbe(args: {
 
   try {
     // Dynamic imports keep these substantial packages out of every wizard run;
-    // they only load once the env-var gate above lets us through.
-    const [{ createAnthropic }, { streamText }] = await Promise.all([
-      import('@ai-sdk/anthropic'),
+    // they only load once the env-var gate above lets us through. The shared
+    // factory is also dynamically imported so the static `@ai-sdk/anthropic`
+    // import in `wizard-ai-sdk-anthropic.ts` only runs when the probe path is
+    // exercised.
+    const [{ streamText }, { createWizardAiSdkAnthropic }] = await Promise.all([
       import('ai'),
+      import('./wizard-ai-sdk-anthropic.js'),
     ]);
 
-    const provider = createAnthropic({
-      ...(baseURL ? { baseURL } : {}),
-      ...auth,
-      fetch: sanitizingFetch,
-    });
+    const provider = createWizardAiSdkAnthropic();
 
     const result = streamText({
       model: provider(args.model),
