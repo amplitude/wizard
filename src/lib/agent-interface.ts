@@ -143,6 +143,13 @@ type SDKQueryOptions = {
   mcpServers?: McpServersConfig;
   settingSources?: string[];
   allowedTools?: string[];
+  /**
+   * Tool names removed from the model's prompt entirely (schema not loaded).
+   * Used by the Amplitude MCP tool-surface cap to drop ~60 unused tools'
+   * JSONSchema (~15-18K tokens) from every turn's prefix. See
+   * `AMPLITUDE_MCP_TOOL_ALLOWLIST` and `buildAmplitudeMcpDisallowedTools`.
+   */
+  disallowedTools?: string[];
   systemPrompt?: unknown;
   env?: Record<string, string | undefined>;
   canUseTool?: (toolName: string, input: unknown) => Promise<unknown>;
@@ -969,6 +976,15 @@ export function createPostToolUseHook(state: AgentState): HookCallback {
 export type AgentRunConfig = {
   workingDirectory: string;
   mcpServers: McpServersConfig;
+  /**
+   * Tool names to drop from the model's prompt entirely. Threaded through
+   * to the SDK's `disallowedTools` option so the JSONSchema for unused
+   * Amplitude MCP tools never lands in the system prefix. Built from
+   * `AMPLITUDE_MCP_TOOL_ALLOWLIST` at agent-init time; pass-through here so
+   * downstream code (and tests) can inspect the resolved list without
+   * re-reading env vars.
+   */
+  disallowedTools?: string[];
   model: string;
   wizardFlags?: Record<string, string>;
   wizardMetadata?: Record<string, string>;
@@ -1184,6 +1200,152 @@ export async function initializeAgent(
       };
     }
 
+    // Curated allowlist of Amplitude MCP tools the wizard actually uses
+    // during a normal run (instrumentation + chart/dashboard authoring +
+    // ingestion checks). The Amplitude MCP server exposes ~70 tools; loading
+    // every tool's JSONSchema into the prompt costs ~300 tokens × 70 = ~21K
+    // tokens of dead schema in every turn's prefix, and pushes runs into
+    // mid-dashboard context-compaction stalls (audit dated 2026-05-07,
+    // run `0f618bd49e0a`: pre_tokens 168,943 at compaction trigger; only
+    // 4 distinct Amplitude MCP tools were actually invoked across the run).
+    //
+    // Adding a new tool? Set `AMPLITUDE_WIZARD_MCP_TOOL_FILTER=full` for one
+    // run to opt out of the cap, then check
+    // `~/.amplitude/wizard/runs/<sha>/log.ndjson` for the
+    // `mcp__amplitude-wizard__*` tool_use blocks and append the bare tool
+    // name here. When in doubt, keep — false negatives are runtime errors.
+    const AMPLITUDE_MCP_TOOL_ALLOWLIST: ReadonlySet<string> = new Set([
+      // Chart authoring + validation pipeline
+      'query_dataset',
+      'get_chart_definition_params',
+      'save_chart_edits',
+      'verify_chart_definition',
+      'create_chart',
+      'update_chart',
+      'query_chart',
+      // Dashboard authoring
+      'create_dashboard',
+      'update_dashboard',
+      'edit_dashboard',
+      'replace_dashboard_properties',
+      // Project + event discovery (start-of-session + ingestion polling)
+      'get_context',
+      'get_project_context',
+      'get_events',
+      'get_event_properties',
+      'get_properties',
+      // Event-plan annotation (planned-events.ts -> update_event)
+      'update_event',
+    ]);
+
+    // Full set of tools the Amplitude MCP server is known to expose, taken
+    // from the SDK's `system.init` envelope on a recent run. We use this as
+    // the deny universe so the SDK strips schemas before they reach the
+    // prompt — `disallowedTools` is the SDK option that drops schemas, not
+    // `canUseTool` (which only gates runtime invocation after schemas have
+    // already been embedded). Keep this list in sync with the production
+    // Amplitude MCP surface; new tools the wizard does NOT use should be
+    // added here, new tools it DOES use should go in the allowlist above.
+    const AMPLITUDE_MCP_KNOWN_TOOLS: readonly string[] = [
+      'add_comment',
+      'create_chart',
+      'create_cohort',
+      'create_dashboard',
+      'create_metric',
+      'create_notebook',
+      'describe_tool',
+      'edit_dashboard',
+      'edit_notebook',
+      'get_agent_analytics_conversation',
+      'get_agent_analytics_schema',
+      'get_agent_results',
+      'get_ai_visibility_aliases',
+      'get_ai_visibility_competitors',
+      'get_ai_visibility_models',
+      'get_ai_visibility_pages',
+      'get_ai_visibility_prompt_responses',
+      'get_ai_visibility_prompts',
+      'get_ai_visibility_reports',
+      'get_ai_visibility_scores',
+      'get_ai_visibility_scores_over_time',
+      'get_ai_visibility_sentiment',
+      'get_ai_visibility_sources',
+      'get_ai_visibility_topics',
+      'get_category_tools',
+      'get_chart_definition_params',
+      'get_charts',
+      'get_cohorts',
+      'get_comments',
+      'get_context',
+      'get_custom_or_labeled_events',
+      'get_dashboard',
+      'get_deployments',
+      'get_event_properties',
+      'get_events',
+      'get_experiments',
+      'get_feedback_comments',
+      'get_feedback_insights',
+      'get_feedback_mentions',
+      'get_feedback_sources',
+      'get_feedback_trends',
+      'get_flags',
+      'get_from_url',
+      'get_group_types',
+      'get_project_context',
+      'get_properties',
+      'get_session_replay_duration',
+      'get_session_replay_events',
+      'get_session_replay_stream',
+      'get_session_replay_timeline',
+      'get_session_replays',
+      'get_transformations',
+      'get_users',
+      'get_workspace_settings',
+      'list_ai_visibility_org_brands',
+      'list_session_replays',
+      'list_tool_categories',
+      'query_agent_analytics_metrics',
+      'query_agent_analytics_sessions',
+      'query_agent_analytics_spans',
+      'query_chart',
+      'query_charts',
+      'query_dataset',
+      'query_experiment',
+      'render_session_replay',
+      'replace_dashboard_properties',
+      'save_chart_edits',
+      'search',
+      'search_agent_analytics_conversations',
+      'track_ui_render_response',
+      'update_chart',
+      'update_custom_or_labeled_events',
+      'update_dashboard',
+      'update_event',
+      'update_properties',
+      'verify_chart_definition',
+    ];
+
+    // Build the disallow list. When `AMPLITUDE_WIZARD_MCP_TOOL_FILTER=full`
+    // we skip filtering entirely (escape hatch for debugging or for runs
+    // that need a tool not in the curated allowlist). Default = capped.
+    const filterMode = process.env.AMPLITUDE_WIZARD_MCP_TOOL_FILTER;
+    const disallowedAmplitudeTools: string[] =
+      config.skipAmplitudeMcp || filterMode === 'full'
+        ? []
+        : AMPLITUDE_MCP_KNOWN_TOOLS.filter(
+            (bare) => !AMPLITUDE_MCP_TOOL_ALLOWLIST.has(bare),
+          ).map((bare) => `mcp__amplitude-wizard__${bare}`);
+
+    if (disallowedAmplitudeTools.length > 0) {
+      logToFile(
+        `Amplitude MCP tool surface capped: allow ${AMPLITUDE_MCP_TOOL_ALLOWLIST.size}, disallow ${disallowedAmplitudeTools.length} (set AMPLITUDE_WIZARD_MCP_TOOL_FILTER=full to opt out)`,
+      );
+    } else if (filterMode === 'full') {
+      logToFile(
+        'Amplitude MCP tool surface uncapped (AMPLITUDE_WIZARD_MCP_TOOL_FILTER=full)',
+      );
+    }
+
     for (const [name, { url }] of Object.entries(
       config.additionalMcpServers ?? {},
     )) {
@@ -1203,6 +1365,10 @@ export async function initializeAgent(
     const agentRunConfig: AgentRunConfig = {
       workingDirectory: config.workingDirectory,
       mcpServers,
+      disallowedTools:
+        disallowedAmplitudeTools.length > 0
+          ? disallowedAmplitudeTools
+          : undefined,
       // Mode → model alias. Default 'standard' = current behavior;
       // see `docs/internal/agent-mode-flag.md` for the full mapping.
       // Gateway expects the `anthropic/<alias>` prefix; direct API expects
@@ -2187,6 +2353,14 @@ export async function runAgent(
             cwd: agentConfig.workingDirectory,
             permissionMode: 'acceptEdits',
             mcpServers: agentConfig.mcpServers,
+            // Drop unused Amplitude MCP tools from the prompt entirely.
+            // Built in `initializeAgent` from `AMPLITUDE_MCP_TOOL_ALLOWLIST`;
+            // saves ~15-18K tokens of dead JSONSchema per turn. Opt out via
+            // `AMPLITUDE_WIZARD_MCP_TOOL_FILTER=full`.
+            ...(agentConfig.disallowedTools &&
+            agentConfig.disallowedTools.length > 0
+              ? { disallowedTools: agentConfig.disallowedTools }
+              : {}),
             // Safety nets: cap runaway tool loops and token spend.
             // AMPLITUDE_WIZARD_MAX_TURNS env var overrides the default
             // (useful for evals + quick iteration). Invalid values fall back.
