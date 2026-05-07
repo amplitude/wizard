@@ -44,11 +44,11 @@ export class InkUI implements WizardUI {
         message: stripAnsi(message),
       });
     } else {
-      // Re-emit existing outroData so subscribers (OutroScreen) re-render.
-      // Business-logic callers that direct-mutate `session.outroData` don't
-      // fire change events, so without this the OutroScreen could miss the
-      // updated state. Mirrors the same defensive re-emit in `cancel()`.
-      this.store.setOutroData(this.store.session.outroData);
+      // Defensive re-emit so subscribers (OutroScreen) re-render. Use
+      // emitChange() rather than setOutroData() — the caller already invoked
+      // setOutroData() (which fires the 'outro reached' analytics), and
+      // re-calling it here would double-fire that event on every completion.
+      this.store.emitChange();
     }
 
     // Signal that the main work is done — router resolves to mcp or outro
@@ -152,11 +152,12 @@ export class InkUI implements WizardUI {
         docsUrl: options?.docsUrl,
       });
     } else {
-      // Re-emit existing outroData so subscribers (OutroScreen) re-render.
-      // Business-logic callers that direct-mutate `session.outroData` don't
-      // fire change events, so without this the OutroScreen could miss the
-      // updated state when cancel() is called immediately after.
-      this.store.setOutroData(this.store.session.outroData);
+      // Defensive re-emit so subscribers (OutroScreen) re-render. Use
+      // emitChange() rather than setOutroData() — the caller already invoked
+      // setOutroData() (which fires the 'outro reached' analytics), and
+      // re-calling it here would double-fire that event (e.g. on the
+      // bash-deny circuit-breaker → wizardAbort → cancel() path).
+      this.store.emitChange();
     }
 
     // Advance past Run screen (RunPhase.Error also skips MCP screen)
