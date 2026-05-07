@@ -83,18 +83,21 @@ function stripPatchHeader(patch: string): string[] {
 export function classifyPatchLine(
   line: string,
 ): { color: string; line: string } {
+  // `stripPatchHeader` removes everything before the first `@@`, so the
+  // `+++`/`---` file-header lines never reach this point. Inside hunks,
+  // every '+' / '-' prefix is a real addition or deletion — including
+  // lines whose CONTENT begins with `++` or `--` (e.g. C++ `++i;` →
+  // `+++i;` or SQL/Lua `-- comment` → `--- comment`). The previous
+  // `!startsWith('+++') / !startsWith('---')` guards mis-classified
+  // those as context.
   if (line.startsWith('@@')) return { color: Colors.accent, line };
-  if (line.startsWith('+') && !line.startsWith('+++')) {
-    return { color: Colors.success, line };
-  }
-  if (line.startsWith('-') && !line.startsWith('---')) {
-    return { color: Colors.error, line };
-  }
   if (line.startsWith('\\ No newline')) {
     // jsdiff emits this trailer when a file lacks a final newline. It's
     // metadata, not content — render dimmed and small.
     return { color: Colors.subtle, line };
   }
+  if (line.startsWith('+')) return { color: Colors.success, line };
+  if (line.startsWith('-')) return { color: Colors.error, line };
   return { color: Colors.muted, line };
 }
 

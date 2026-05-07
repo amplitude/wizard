@@ -73,9 +73,15 @@ describe('classifyPatchLine', () => {
     expect(classifyPatchLine('-old line').color).toBe(Colors.error);
   });
 
-  it('does NOT mis-classify the +++ / --- file header rows as content', () => {
-    expect(classifyPatchLine('+++ b.txt').color).not.toBe(Colors.success);
-    expect(classifyPatchLine('--- a.txt').color).not.toBe(Colors.error);
+  it('correctly classifies content lines whose body starts with ++ / --', () => {
+    // C++ `++i;` at column 0 → hunk line `+++i;`. SQL `-- comment`
+    // at column 0 → hunk line `--- comment`. Both are real
+    // additions/deletions inside hunks, NOT file headers (which
+    // `stripPatchHeader` already removed). Pre-fix, the
+    // `!startsWith('+++') / !startsWith('---')` guards mis-classified
+    // these as muted context.
+    expect(classifyPatchLine('+++i;').color).toBe(Colors.success);
+    expect(classifyPatchLine('--- select * from t').color).toBe(Colors.error);
   });
 
   it('marks "no newline at end" trailers with the subtle colour', () => {

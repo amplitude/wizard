@@ -266,6 +266,23 @@ const FileWriteRow = ({
   // touched more than once, suffix the size hint with `× N` so the
   // user sees both the latest result and the fact that the agent
   // revisited the file.
+  //
+  // The diff summary is computed via `structuredPatch` + `createPatch`
+  // — expensive enough that we MUST NOT re-run it on every spinner
+  // tick. Memoize on (path, completedAt) so the row only diffs once
+  // per applied write. While `status !== 'applied'`, getDiff isn't
+  // called at all (the memo dep keeps the result `null`).
+  // We deliberately key on `completedAt` so a re-applied write (rare,
+  // but the ledger supports it) re-computes the summary.
+  const diffSummary = useMemo(() => {
+    if (status !== 'applied') return null;
+    try {
+      return summarizeLedgerPath(getFileChangeLedger(), entry.path);
+    } catch {
+      return null;
+    }
+  }, [status, entry.path, entry.completedAt]);
+
   let detail: string;
   if (status === 'applied') {
     const dur =
@@ -273,20 +290,15 @@ const FileWriteRow = ({
         ? formatDuration(entry.completedAt - entry.startedAt)
         : '';
     let sizeHint: string;
-    try {
-      const summary = summarizeLedgerPath(getFileChangeLedger(), entry.path);
-      if (summary && (summary.additions > 0 || summary.deletions > 0)) {
-        sizeHint = `+${summary.additions}/-${summary.deletions}`;
-      } else if (typeof entry.bytes === 'number') {
-        sizeHint = `${entry.bytes.toLocaleString()} bytes`;
-      } else {
-        sizeHint = 'edited';
-      }
-    } catch {
-      sizeHint =
-        typeof entry.bytes === 'number'
-          ? `${entry.bytes.toLocaleString()} bytes`
-          : 'edited';
+    if (
+      diffSummary &&
+      (diffSummary.additions > 0 || diffSummary.deletions > 0)
+    ) {
+      sizeHint = `+${diffSummary.additions}/-${diffSummary.deletions}`;
+    } else if (typeof entry.bytes === 'number') {
+      sizeHint = `${entry.bytes.toLocaleString()} bytes`;
+    } else {
+      sizeHint = 'edited';
     }
     const sizeHintWithCount =
       editCount > 1 ? `${sizeHint} ${editCount}×` : sizeHint;
