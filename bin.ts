@@ -524,6 +524,46 @@ void yargs(hideBin(process.argv))
       describe: 'internal: AMPLITUDE_WIZARD_SKILL_TIERS env-var passthrough',
       type: 'boolean',
     },
+    // Same passthrough pattern as `--skill-tiers`: yargs auto-maps the
+    // AMPLITUDE_WIZARD_AI_SDK_PROBE / _PROBE_STRICT / _CONSOLE /
+    // _INNER_LOOP env vars (and the COMPACTION_WINDOW perf knob) to
+    // these flag names; without these declarations `.strict()` rejects
+    // the inferred flags with "Unknown argument: aiSdkProbe" etc. The
+    // actual features read the env vars directly via `process.env` —
+    // these declarations exist solely so the strict yargs parser
+    // accepts the auto-injected flags. Source-of-truth env-var names
+    // verified against:
+    //   src/lib/agent/ai-sdk-gateway-probe.ts (PROBE / PROBE_STRICT)
+    //   src/lib/agent/console-query-stack.ts  (CONSOLE)
+    //   src/lib/agent/run-agent-feature-flag.ts (INNER_LOOP)
+    'ai-sdk-probe': {
+      hidden: true,
+      describe: 'internal: AMPLITUDE_WIZARD_AI_SDK_PROBE env-var passthrough',
+      type: 'boolean',
+    },
+    'ai-sdk-probe-strict': {
+      hidden: true,
+      describe:
+        'internal: AMPLITUDE_WIZARD_AI_SDK_PROBE_STRICT env-var passthrough',
+      type: 'boolean',
+    },
+    'ai-sdk-console': {
+      hidden: true,
+      describe: 'internal: AMPLITUDE_WIZARD_AI_SDK_CONSOLE env-var passthrough',
+      type: 'boolean',
+    },
+    'ai-sdk-inner-loop': {
+      hidden: true,
+      describe:
+        'internal: AMPLITUDE_WIZARD_AI_SDK_INNER_LOOP env-var passthrough',
+      type: 'boolean',
+    },
+    'compaction-window': {
+      hidden: true,
+      describe:
+        'internal: AMPLITUDE_WIZARD_COMPACTION_WINDOW env-var passthrough',
+      type: 'string',
+    },
     // Force the env-selection prompt to emit a `needs_input` for
     // `app_selection` even when there's a single match. The skill
     // always passes this so the user gets to confirm which app the
