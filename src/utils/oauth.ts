@@ -410,6 +410,13 @@ async function performAmplitudeAuthInner(options: {
   addBreadcrumb('auth', 'Starting fresh OAuth flow', { zone });
 
   // ── 2. Fresh OAuth flow ──────────────────────────────────────────
+  // Signal to the TUI that we're now constructing the OAuth URL and about
+  // to open the browser — the AuthScreen placeholder flips from
+  // "Verifying your session…" (the cached-token path above, which never
+  // reaches here) to "Preparing your sign-in link…" (which IS accurate
+  // here, briefly, until setLoginUrl() lands).
+  getUI().setAuthPhase?.('opening-browser');
+
   const codeVerifier = generateCodeVerifier();
   const codeChallenge = generateCodeChallenge(codeVerifier);
   const state = generateState();

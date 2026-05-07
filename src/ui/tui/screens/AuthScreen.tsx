@@ -504,8 +504,16 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
   const oauthWaitHeadline = isCreateAccountOnboarding(session)
     ? 'Complete sign-in in your browser'
     : 'Signing you in';
+  // Choose the placeholder message based on what the auth task is actually
+  // doing right now. Showing "Preparing your sign-in link…" while the
+  // wizard is reusing a stored OAuth token (no browser opening, no URL
+  // coming) was the P0 symptom that looked like a hang. The auth task
+  // signals 'verifying-session' before performAmplitudeAuth and switches
+  // to 'opening-browser' once a fresh OAuth flow is actually starting.
   const oauthWaitPreparingLine = isCreateAccountOnboarding(session)
     ? 'Opening your Amplitude sign-in page'
+    : session.authPhase === 'verifying-session'
+    ? 'Verifying your session'
     : 'Preparing your sign-in link';
   const { tier: oauthCoachingTier } = useTimedCoaching({
     thresholds: [15],

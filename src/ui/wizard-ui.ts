@@ -187,6 +187,14 @@ export interface WizardUI {
   setLoginUrl(url: string | null): void;
 
   /**
+   * Update the AuthScreen's sub-phase while it's waiting for a loginUrl /
+   * pendingOrgs. Lets callers signal "I am about to verify a stored token"
+   * vs "I am about to launch the browser" so the placeholder copy matches
+   * what's actually happening. Default behaviour is a no-op for non-TUI UIs.
+   */
+  setAuthPhase?(phase: string): void;
+
+  /**
    * Record the user's data-center region after OAuth. Advances past RegionSelect in TUI.
    * Called by agent-runner after credentials are obtained.
    */

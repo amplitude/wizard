@@ -30,6 +30,7 @@ const {
     session: {} as Record<string, unknown>,
     subscribe: vi.fn(() => vi.fn()),
     setLoginUrl: vi.fn(),
+    setAuthPhase: vi.fn(),
     setOAuthComplete: vi.fn(),
     setFrameworkConfig: vi.fn(),
     setDetectedFramework: vi.fn(),

@@ -86,6 +86,14 @@ export class InkUI implements WizardUI {
     this.store.setLoginUrl(url);
   }
 
+  setAuthPhase(phase: string): void {
+    // Cast: the WizardUI interface widens phase to `string` so non-TUI UIs
+    // don't have to import the AuthPhase enum. Store accepts the typed enum.
+    this.store.setAuthPhase(
+      phase as Parameters<typeof this.store.setAuthPhase>[0],
+    );
+  }
+
   setRegion(region: string): void {
     this.store.setRegion(region);
   }

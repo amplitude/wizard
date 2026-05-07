@@ -14,6 +14,7 @@ import { atom, map } from 'nanostores';
 import { TaskStatus, type EventPlanDecision } from '../wizard-ui.js';
 import {
   AuthOnboardingPath,
+  AuthPhase,
   isCreateAccountOnboarding,
   type WizardSession,
   type OutroData,
@@ -592,6 +593,24 @@ export class WizardStore {
 
   setLoginUrl(url: string | null): void {
     this.$session.setKey('loginUrl', url);
+    // Setting a non-null URL is the canonical signal that we've reached the
+    // browser-handoff stage of fresh OAuth. Flip authPhase so AuthScreen's
+    // placeholder copy stops saying "Verifying your session…" the moment we
+    // know we're actually opening a browser.
+    if (url) {
+      this.$session.setKey('authPhase', AuthPhase.AwaitingCallback);
+    }
+    this.emitChange();
+  }
+
+  /**
+   * Update the auth sub-phase (AuthPhase). Drives the AuthScreen Step 1
+   * placeholder copy when we don't yet have a loginUrl or pendingOrgs.
+   * Distinct from `setLoginUrl(null)` so we don't clobber the URL slot when
+   * we just want to mark "wizard is verifying a stored token now".
+   */
+  setAuthPhase(phase: AuthPhase): void {
+    this.$session.setKey('authPhase', phase);
     this.emitChange();
   }
 

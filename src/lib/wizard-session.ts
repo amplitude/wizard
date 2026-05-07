@@ -35,6 +35,31 @@ export function isCreateAccountOnboarding(session: {
   return session.authOnboardingPath === AuthOnboardingPath.CreateAccount;
 }
 
+/**
+ * Sub-phase of the AuthScreen Step 1 (browser sign-in wait). Drives which
+ * placeholder text the screen renders while it has no `loginUrl` and no
+ * `pendingOrgs` yet.
+ *
+ *   - `idle`              — auth task hasn't started (initial state).
+ *   - `verifying-session` — wizard is reusing a stored OAuth token and
+ *                            running fetchAmplitudeUser to validate it. The
+ *                            browser is NOT being opened. Showing
+ *                            "Preparing your sign-in link…" here is wrong.
+ *   - `opening-browser`   — wizard is constructing the Hydra auth URL and
+ *                            about to call opn(). Brief; usually flips to
+ *                            `awaiting-callback` within milliseconds.
+ *   - `awaiting-callback` — browser launch attempted, waiting for the local
+ *                            callback server to receive the auth code. The
+ *                            login URL is set so the user can copy/paste it.
+ */
+export const AuthPhase = {
+  Idle: 'idle',
+  VerifyingSession: 'verifying-session',
+  OpeningBrowser: 'opening-browser',
+  AwaitingCallback: 'awaiting-callback',
+} as const;
+export type AuthPhase = (typeof AuthPhase)[keyof typeof AuthPhase];
+
 // ── Branded ID types ─────────────────────────────────────────────────────
 //
 // Why brand: prior bugs (see PR #62, "org data mapping") were caused by
@@ -625,6 +650,13 @@ export interface WizardSession {
    */
   runStartedAt: number | null;
   loginUrl: string | null;
+  /**
+   * Sub-phase of the auth task while AuthScreen Step 1 is rendering. Lets
+   * the screen distinguish "verifying a stored OAuth token" (no browser
+   * opening, no URL coming) from "constructing fresh OAuth + opening
+   * browser" — the placeholder copy is different. See `AuthPhase` enum.
+   */
+  authPhase: AuthPhase;
 
   // Feature discovery
   discoveredFeatures: DiscoveredFeature[];
@@ -1045,6 +1077,7 @@ export function buildSession(args: {
     selectedEnvName: null,
     selectedAppId: null,
     loginUrl: null,
+    authPhase: AuthPhase.Idle,
     credentials: null,
     apiKeyNotice: null,
     serviceStatus: null,

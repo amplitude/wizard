@@ -77,6 +77,42 @@ describe('AuthScreen — browser-fallback coaching', () => {
     expect(frame).toContain('Cancel');
   });
 
+  // P0 hotfix regression: while the wizard is reusing a stored OAuth token
+  // (no browser opening, no URL coming) the placeholder used to read
+  // "Preparing your sign-in link…" — which looked like a hang because
+  // there was no link being prepared. AuthPhase=verifying-session swaps
+  // it for accurate copy.
+  it('shows "Verifying your session" copy when authPhase is verifying-session', () => {
+    const store = makeStoreForSnapshot({
+      introConcluded: true,
+      region: 'us',
+      loginUrl: null,
+      pendingOrgs: null,
+      authPhase: 'verifying-session',
+    });
+    const { lastFrame } = render(<AuthScreen store={store} />);
+    const frame = lastFrame() ?? '';
+    expect(frame).toContain('Verifying your session');
+    expect(frame).not.toContain('Preparing your sign-in link');
+    // Manual fallback + cancel must remain reachable from this state.
+    expect(frame).toContain('Enter API key manually');
+    expect(frame).toContain('Cancel');
+  });
+
+  it('reverts to "Preparing your sign-in link" copy when authPhase is opening-browser', () => {
+    const store = makeStoreForSnapshot({
+      introConcluded: true,
+      region: 'us',
+      loginUrl: null,
+      pendingOrgs: null,
+      authPhase: 'opening-browser',
+    });
+    const { lastFrame } = render(<AuthScreen store={store} />);
+    const frame = lastFrame() ?? '';
+    expect(frame).toContain('Preparing your sign-in link');
+    expect(frame).not.toContain('Verifying your session');
+  });
+
   it('uses signup-aware placeholder before loginUrl exists', () => {
     const store = makeStoreForSnapshot({
       introConcluded: true,
