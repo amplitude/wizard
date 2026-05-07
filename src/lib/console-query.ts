@@ -22,6 +22,7 @@ import { resolveWizardAllowedToolNames } from './wizard-tools.js';
 import { getConsoleQueryStack } from './agent/console-query-stack.js';
 import { parseAnthropicCustomHeaderBlock } from '../utils/custom-headers.js';
 import { sanitizingFetch } from './gateway-request-sanitize.js';
+import { resolveAnthropicAuth } from './agent/anthropic-auth.js';
 
 export type ConsoleCredentials =
   | { kind: 'gateway'; baseUrl: string; apiKey: string }
@@ -98,14 +99,6 @@ export function buildSessionContext(session: WizardSession): string {
 export interface ConversationTurn {
   role: 'user' | 'assistant';
   content: string;
-}
-
-function resolveAnthropicAuth(): { apiKey?: string; authToken?: string } {
-  const apiKey = process.env.ANTHROPIC_API_KEY?.trim();
-  if (apiKey) return { apiKey };
-  const authToken = process.env.ANTHROPIC_AUTH_TOKEN?.trim();
-  if (authToken) return { authToken };
-  return {};
 }
 
 function buildHistoryBlock(history: ConversationTurn[]): string {
