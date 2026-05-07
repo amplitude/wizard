@@ -31,24 +31,67 @@ describe('transient-llm-retry', () => {
     expect(GATEWAY_INVALID_REQUEST_MARKER).toContain('model provider');
   });
 
-  it('isThrownErrorCountedAsUpstreamGatewayFailure', () => {
+  it('isThrownErrorCountedAsUpstreamGatewayFailure includes 400 / 408 / DEADLINE_EXCEEDED', () => {
+    // The "gateway storm" detection drives the GATEWAY_DOWN exit-code
+    // path with the actionable "set ANTHROPIC_API_KEY" copy. 408 was
+    // missing from this set, so timeout-only storms exited as generic
+    // API_ERROR and missed the remediation.
     expect(isThrownErrorCountedAsUpstreamGatewayFailure('API Error: 400')).toBe(
+      true,
+    );
+    expect(isThrownErrorCountedAsUpstreamGatewayFailure('API Error: 408')).toBe(
       true,
     );
     expect(
       isThrownErrorCountedAsUpstreamGatewayFailure('DEADLINE_EXCEEDED'),
     ).toBe(true);
+    // 5xx must NOT count as a "gateway down" signal — that's a Vertex
+    // backend issue the proxy is already retrying. Conflating the two
+    // would misattribute Vertex outages to the gateway.
+    expect(isThrownErrorCountedAsUpstreamGatewayFailure('API Error: 502')).toBe(
+      false,
+    );
     expect(isThrownErrorCountedAsUpstreamGatewayFailure('API Error: 503')).toBe(
+      false,
+    );
+    expect(isThrownErrorCountedAsUpstreamGatewayFailure('API Error: 504')).toBe(
       false,
     );
   });
 
-  it('isTransientThrownSdkErrorMessage covers tool and stream cases', () => {
+  it('isTransientThrownSdkErrorMessage covers tool, stream, and 5xx cases', () => {
     expect(isTransientThrownSdkErrorMessage('tool_use without result')).toBe(
       true,
     );
     expect(isTransientThrownSdkErrorMessage('Stream closed')).toBe(true);
+    // 502 / 504 were missing — without them, an SDK that exhausted its
+    // internal retries on a Vertex frontend-hop failure would exit as
+    // generic API_ERROR with no outer-loop retry. Pin all five 5xx
+    // statuses we care about.
+    expect(isTransientThrownSdkErrorMessage('API Error: 502 Bad Gateway')).toBe(
+      true,
+    );
+    expect(isTransientThrownSdkErrorMessage('API Error: 503')).toBe(true);
+    expect(
+      isTransientThrownSdkErrorMessage('API Error: 504 Gateway Timeout'),
+    ).toBe(true);
+    expect(isTransientThrownSdkErrorMessage('API Error: 529')).toBe(true);
     expect(isTransientThrownSdkErrorMessage('unrelated')).toBe(false);
+  });
+
+  it('findTransientSdkOutputPattern matches each 5xx status by exact label', () => {
+    // The label is what `upstreamGatewayFailures` keys on for storm
+    // attribution and what telemetry tags by `pattern_label`. Pin them
+    // so a refactor that renames a label silently breaks dashboards.
+    expect(findTransientSdkOutputPattern('API Error: 502')?.label).toBe(
+      'api_502',
+    );
+    expect(findTransientSdkOutputPattern('API Error: 504')?.label).toBe(
+      'api_504',
+    );
+    expect(findTransientSdkOutputPattern('API Error: 408')?.label).toBe(
+      'api_408',
+    );
   });
 });
 

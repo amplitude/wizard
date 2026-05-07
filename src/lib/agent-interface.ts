@@ -3314,10 +3314,19 @@ export async function runAgent(
         // is what lets the post-loop classifier compare
         // `upstreamGatewayFailures === attemptCount` to detect
         // GATEWAY_DOWN.
+        //
+        // Mirrors `isThrownErrorCountedAsUpstreamGatewayFailure` for the
+        // thrown-error branch — keep the two label sets in sync. 408 is
+        // counted here so a pure request-timeout storm arriving via
+        // stream output (rather than as a thrown SDK error) still
+        // triggers the GATEWAY_DOWN remediation copy. 5xx is intentionally
+        // excluded — see the rationale on
+        // `isThrownErrorCountedAsUpstreamGatewayFailure`.
         if (
           !receivedSuccessResult &&
           matchedTransientError &&
           (matchedTransientError.label === 'api_400' ||
+            matchedTransientError.label === 'api_408' ||
             matchedTransientError.label === 'deadline_exceeded')
         ) {
           upstreamGatewayFailures++;

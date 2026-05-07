@@ -906,6 +906,43 @@ describe('runAgent', () => {
       expect(result.message).toContain('400 terminated');
     });
 
+    it('classifies all-attempts-failed-with-408-terminated as GATEWAY_DOWN (post-stream path)', async () => {
+      // Regression test: a pure 408 (request timeout) storm arriving via
+      // the post-stream `result` branch must increment `upstreamGatewayFailures`
+      // so it lands in the GATEWAY_DOWN classification, not generic API_ERROR.
+      // The thrown-error branch already handled 408 via
+      // `isThrownErrorCountedAsUpstreamGatewayFailure`; this asserts the
+      // post-stream branch matches.
+      vi.useFakeTimers();
+
+      let queryCallCount = 0;
+      mockQuery.mockImplementation(() => {
+        queryCallCount++;
+        return (async function* () {
+          yield {
+            type: 'result',
+            subtype: 'success',
+            is_error: true,
+            result: 'API Error: 408 request timeout',
+          };
+        })();
+      });
+
+      const runPromise = runAgent(
+        defaultAgentConfig,
+        'test prompt',
+        defaultOptions,
+        mockSpinner as unknown as SpinnerHandle,
+        { successMessage: 'Done', errorMessage: 'Failed' },
+      );
+
+      await vi.advanceTimersByTimeAsync(200_000);
+      const result = await runPromise;
+
+      expect(queryCallCount).toBe(6);
+      expect(result.error).toBe(AgentErrorType.GATEWAY_DOWN);
+    });
+
     it('does not classify mixed errors as GATEWAY_DOWN', async () => {
       // If even one attempt fails for a different reason (e.g. stall),
       // we should NOT surface GATEWAY_DOWN — that's reserved for the

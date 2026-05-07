@@ -142,7 +142,15 @@ export function isPayloadShapeRejection(err: StructuredUpstreamError): boolean {
 export const AGENT_TRANSIENT_SDK_OUTPUT_PATTERNS = [
   { pattern: 'API Error: 400', label: 'api_400' },
   { pattern: 'API Error: 408', label: 'api_408' },
+  // 502 / 504 are transient gateway-frontend failures (Vertex backend hop
+  // dies, regional saturation). The proxy retries Vertex 5xx server-side,
+  // but if the SDK's internal retry budget exhausts before recovery, the
+  // wizard's outer loop must pick up where it left off. Without these
+  // entries, a sustained 502/504 storm exits as a generic API_ERROR
+  // instead of triggering a fresh-conversation retry.
+  { pattern: 'API Error: 502', label: 'api_502' },
   { pattern: 'API Error: 503', label: 'api_503' },
+  { pattern: 'API Error: 504', label: 'api_504' },
   { pattern: 'API Error: 529', label: 'api_529' },
   { pattern: 'DEADLINE_EXCEEDED', label: 'deadline_exceeded' },
 ] as const;
@@ -172,12 +180,26 @@ export function extractHttpStatusLooseFromMessage(msg: string): number | null {
   return m ? Number(m[1]) : null;
 }
 
-/** Thrown-error branch: count toward upstream 400 / deadline storm detection. */
+/**
+ * Thrown-error branch: count toward upstream-gateway-storm detection.
+ *
+ * Hits in this set drive the `GATEWAY_DOWN` exit-code path with the
+ * actionable "set ANTHROPIC_API_KEY to bypass the wizard gateway" copy.
+ * Without 408 here, a pure timeout-storm coming back from the proxy
+ * would exit as a generic API_ERROR and miss that remediation hint.
+ *
+ * 5xx is intentionally NOT in this set: the proxy itself retries Vertex
+ * 5xx server-side, and "the gateway is down" is the wrong diagnosis for
+ * a Vertex-side regional outage. Those still get a normal transient
+ * retry via `isTransientThrownSdkErrorMessage`.
+ */
 export function isThrownErrorCountedAsUpstreamGatewayFailure(
   errMsg: string,
 ): boolean {
   return (
-    errMsg.includes('API Error: 400') || errMsg.includes('DEADLINE_EXCEEDED')
+    errMsg.includes('API Error: 400') ||
+    errMsg.includes('API Error: 408') ||
+    errMsg.includes('DEADLINE_EXCEEDED')
   );
 }
 
@@ -191,7 +213,9 @@ export function isTransientThrownSdkErrorMessage(errMsg: string): boolean {
     errMsg.includes('tool_result') ||
     errMsg.includes('API Error: 400') ||
     errMsg.includes('API Error: 408') ||
+    errMsg.includes('API Error: 502') ||
     errMsg.includes('API Error: 503') ||
+    errMsg.includes('API Error: 504') ||
     errMsg.includes('API Error: 529') ||
     errMsg.includes('DEADLINE_EXCEEDED') ||
     errMsg.includes('Stream closed') ||
