@@ -2046,8 +2046,10 @@ For codebases with >50 events the wizard runs the WRITE phase in chunks of ~25 e
         if (!isFirstBatch) {
           // Merge with existing on-disk plan so we don't lose earlier batches.
           // Use the rich reader that preserves callsites so annotations from
-          // prior batches accumulate across compaction boundaries.
-          const existing = readLocalEventPlanRich(workingDirectory);
+          // prior batches accumulate across compaction boundaries. `null`
+          // means missing/unparseable on disk — in that case there's nothing
+          // to merge and we just persist the new batch on its own.
+          const existing = readLocalEventPlanRich(workingDirectory) ?? [];
           const byName = new Map<
             string,
             {
