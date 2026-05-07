@@ -28,6 +28,13 @@ export const REDACTED = {
 /**
  * UUID v4-ish pattern. Matches both canonical UUIDs and the wizard's
  * shorter randomBytes-derived run/session IDs.
+ *
+ * Note for future test authors: this redacts EVERY UUID-shaped string in
+ * any payload field. If a future event introduces a stable deterministic
+ * value that happens to match the UUID shape (e.g. a content-addressed
+ * hash) and a test needs to assert on it, capture it before redacting —
+ * once `redactNdjsonStream` runs, all UUIDs become `<UUID>` and become
+ * indistinguishable.
  */
 const UUID_RE =
   /[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}/gi;
@@ -116,6 +123,13 @@ function redactDataPayload(
 }
 
 function normalizeString(s: string, options: RedactOptions): string {
+  // Order matters and is intentional: install-dir replacement runs FIRST
+  // (most specific — prefix-anchored, exact match). Reordering would let
+  // the UUID pass partially redact an install-dir path that contains a
+  // UUID (e.g. `/tmp/wizard-a1b2c3d4-1111-4222-8333-abcdef012345/`),
+  // breaking the install-dir replacement and producing a mid-path
+  // `<UUID>` token that no test asserts on. Keep most-specific → least-
+  // specific.
   let out = s;
   if (options.installDir && options.installDir.length > 0) {
     // Replace the absolute prefix wherever it appears (file paths, resume
