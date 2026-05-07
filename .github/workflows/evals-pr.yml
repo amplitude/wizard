@@ -52,7 +52,11 @@ jobs:
       - name: Set up Node
         uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
         with:
-          node-version-file: 'package.json'
+          # Pin to 22 (LTS) to match the unit-tests matrix middle value.
+          # `node-version-file: 'package.json'` was resolving to a Node
+          # 20.x where vitest 4 / vite 7 hit `ERR_REQUIRE_ESM` loading
+          # `vitest.config.ts`.
+          node-version: 22
           cache: 'pnpm'
       - name: Install dependencies with pnpm
         run: pnpm install --frozen-lockfile

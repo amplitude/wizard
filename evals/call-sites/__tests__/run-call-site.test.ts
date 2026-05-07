@@ -90,7 +90,14 @@ describe('runCallSite', () => {
       delete process.env.WIZARD_OAUTH_TOKEN;
     });
     afterEach(() => {
-      if (savedToken !== undefined) process.env.WIZARD_OAUTH_TOKEN = savedToken;
+      // Restore the original env value or unset entirely if it didn't
+      // exist before. Without the `delete` branch, a test that sets
+      // WIZARD_OAUTH_TOKEN leaks the value to subsequent tests.
+      if (savedToken !== undefined) {
+        process.env.WIZARD_OAUTH_TOKEN = savedToken;
+      } else {
+        delete process.env.WIZARD_OAUTH_TOKEN;
+      }
     });
 
     it('refuses to run live without WIZARD_OAUTH_TOKEN', async () => {
