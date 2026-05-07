@@ -93,6 +93,51 @@ export function parseEventPlanContent(
 }
 
 /**
+ * Find the freshest event-plan file among canonical and legacy paths,
+ * read it, and return its raw content. Returns `null` when no candidate
+ * exists or the read fails.
+ */
+function readFreshestEventPlanFile(
+  installDir: string,
+  caller: string,
+): string | null {
+  const candidates = [
+    getEventsFile(installDir),
+    path.join(installDir, '.amplitude-events.json'),
+  ];
+
+  let winner: string | null = null;
+  let winnerMtime = -Infinity;
+  for (const candidate of candidates) {
+    try {
+      const stat = fs.statSync(candidate);
+      const mtime = stat.mtimeMs;
+      if (mtime > winnerMtime) {
+        winner = candidate;
+        winnerMtime = mtime;
+      }
+    } catch (e) {
+      const err = e as NodeJS.ErrnoException;
+      if (err.code !== 'ENOENT') {
+        logToFile(
+          `[${caller}] stat ${candidate} failed: ${err.message ?? err}`,
+        );
+      }
+    }
+  }
+
+  if (!winner) return null;
+
+  try {
+    return fs.readFileSync(winner, 'utf8');
+  } catch (e) {
+    const err = e as NodeJS.ErrnoException;
+    logToFile(`[${caller}] read ${winner} failed: ${err.message ?? err}`);
+    return null;
+  }
+}
+
+/**
  * Read the agent-written event plan from a project's install dir.
  *
  * Tries the canonical path first (`<installDir>/.amplitude/events.json`),
@@ -112,51 +157,12 @@ export function parseEventPlanContent(
 export function readLocalEventPlan(
   installDir: string,
 ): Array<{ name: string; description: string }> {
-  const candidates = [
-    getEventsFile(installDir),
-    path.join(installDir, '.amplitude-events.json'),
-  ];
-
-  let winner: string | null = null;
-  let winnerMtime = -Infinity;
-  for (const candidate of candidates) {
-    try {
-      const stat = fs.statSync(candidate);
-      const mtime = stat.mtimeMs;
-      if (mtime > winnerMtime) {
-        winner = candidate;
-        winnerMtime = mtime;
-      }
-    } catch (e) {
-      const err = e as NodeJS.ErrnoException;
-      if (err.code !== 'ENOENT') {
-        logToFile(
-          `[readLocalEventPlan] stat ${candidate} failed: ${
-            err.message ?? err
-          }`,
-        );
-      }
-    }
-  }
-
-  if (!winner) return [];
-
-  let raw: string;
-  try {
-    raw = fs.readFileSync(winner, 'utf8');
-  } catch (e) {
-    const err = e as NodeJS.ErrnoException;
-    logToFile(
-      `[readLocalEventPlan] read ${winner} failed: ${err.message ?? err}`,
-    );
-    return [];
-  }
+  const raw = readFreshestEventPlanFile(installDir, 'readLocalEventPlan');
+  if (raw === null) return [];
 
   const parsed = parseEventPlanContent(raw);
   if (parsed === null) {
-    logToFile(
-      `[readLocalEventPlan] ${winner} could not be parsed as an event plan`,
-    );
+    logToFile(`[readLocalEventPlan] event plan file could not be parsed`);
     return [];
   }
 
@@ -173,51 +179,16 @@ export function readLocalEventPlanRich(installDir: string): Array<{
   description: string;
   callsites?: Array<{ filePath: string; anchor?: string }>;
 }> {
-  const candidates = [
-    getEventsFile(installDir),
-    path.join(installDir, '.amplitude-events.json'),
-  ];
-
-  let winner: string | null = null;
-  let winnerMtime = -Infinity;
-  for (const candidate of candidates) {
-    try {
-      const stat = fs.statSync(candidate);
-      const mtime = stat.mtimeMs;
-      if (mtime > winnerMtime) {
-        winner = candidate;
-        winnerMtime = mtime;
-      }
-    } catch (e) {
-      const err = e as NodeJS.ErrnoException;
-      if (err.code !== 'ENOENT') {
-        logToFile(
-          `[readLocalEventPlanRich] stat ${candidate} failed: ${
-            err.message ?? err
-          }`,
-        );
-      }
-    }
-  }
-
-  if (!winner) return [];
-
-  let raw: string;
-  try {
-    raw = fs.readFileSync(winner, 'utf8');
-  } catch (e) {
-    const err = e as NodeJS.ErrnoException;
-    logToFile(
-      `[readLocalEventPlanRich] read ${winner} failed: ${err.message ?? err}`,
-    );
-    return [];
-  }
+  const raw = readFreshestEventPlanFile(installDir, 'readLocalEventPlanRich');
+  if (raw === null) return [];
 
   let parsed: unknown;
   try {
     parsed = JSON.parse(raw);
   } catch {
-    logToFile(`[readLocalEventPlanRich] ${winner} could not be parsed as JSON`);
+    logToFile(
+      `[readLocalEventPlanRich] event plan file could not be parsed as JSON`,
+    );
     return [];
   }
 
