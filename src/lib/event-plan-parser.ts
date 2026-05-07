@@ -209,19 +209,22 @@ export function readLocalEventPlanRich(installDir: string): Array<{
 
   if (!Array.isArray(parsed)) return [];
 
+  const str = (v: unknown): string | undefined =>
+    typeof v === 'string' ? v : undefined;
+
   return (parsed as Array<Record<string, unknown>>)
     .map((e) => {
       const name =
-        (e.name as string) ??
-        (e.event as string) ??
-        (e.eventName as string) ??
-        (e.event_name as string) ??
+        str(e.name) ??
+        str(e.event) ??
+        str(e.eventName) ??
+        str(e.event_name) ??
         '';
       const description =
-        (e.description as string) ??
-        (e.event_description as string) ??
-        (e.eventDescription as string) ??
-        (e.eventDescriptionAndReasoning as string) ??
+        str(e.description) ??
+        str(e.event_description) ??
+        str(e.eventDescription) ??
+        str(e.eventDescriptionAndReasoning) ??
         '';
       const result: {
         name: string;
@@ -232,9 +235,12 @@ export function readLocalEventPlanRich(installDir: string): Array<{
         description,
       };
       if (Array.isArray(e.callsites) && e.callsites.length > 0) {
-        result.callsites = (
+        const filtered = (
           e.callsites as Array<{ filePath: string; anchor?: string }>
         ).filter((c) => c && typeof c.filePath === 'string');
+        if (filtered.length > 0) {
+          result.callsites = filtered;
+        }
       }
       return result;
     })
