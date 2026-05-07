@@ -25,8 +25,8 @@ on:
       - 'src/lib/commandments.ts'
       # Skills the agent can pick up
       - 'skills/integration/**/SKILL.md'
-      - 'skills/instrumentation/**/SKILL.md'
-      - 'skills/taxonomy/**/SKILL.md'
+      - 'skills/instrumentation/**'
+      - 'skills/taxonomy/**'
       # The eval framework itself
       - 'evals/call-sites/**'
       - 'evals/runner/**'
