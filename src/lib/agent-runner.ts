@@ -35,7 +35,7 @@ import { getVersionCheckInfo, getVersionWarning } from './version-check';
 import * as fsSync from 'fs';
 import path from 'path';
 import { saveCheckpoint } from './session-checkpoint.js';
-import { getEventsFile } from '../utils/storage-paths.js';
+import { getDashboardPlanFile, getEventsFile } from '../utils/storage-paths.js';
 import {
   resolveDataIngestionMaxWaitMs,
   nextDataIngestionPollWaitMs,
@@ -1420,7 +1420,6 @@ async function runAgentWizardBody(
   // `record_dashboard_plan` (when the agent emits one) writes the plan
   // file directly — we don't synthesize one here from `plannedEvents`,
   // we just observe whether it landed.
-  const { getDashboardPlanFile } = await import('../utils/storage-paths.js');
   const dashboardPlanPath = getDashboardPlanFile(session.installDir);
   const dashboardPlanWritten = fsSync.existsSync(dashboardPlanPath);
   analytics.wizardCapture('dashboard deferred', {
@@ -1797,7 +1796,7 @@ function buildIntegrationPrompt(
     ? `STEP 1: Load \`.claude/skills/${preStagedIntegrationSkillId}/SKILL.md\` via the Skill tool. The wizard already resolved a single integration skill id (\`${preStagedIntegrationSkillId}\`) for this ${config.metadata.name} run (bundled pre-stage when possible, otherwise a deterministic on-disk resolver — not Glob-based disambiguation). Do NOT call load_skill_menu or install_skill (they are not available on the wizard-tools server).`
     : `STEP 1: Integration workflow — wizard-tools \`load_skill_menu\` / \`install_skill\` are **not registered** in this CLI; do not call them (they will fail or be absent from the tool list).
 
-   The taxonomy, instrumentation, and chart-plan skills are already under \`.claude/skills/\` for this run, but the runner could not resolve any \`integration-*\` skill id for ${config.metadata.name} (nothing bundled/pre-staged and no matching \`.claude/skills/integration-*/SKILL.md\` on disk).
+   The taxonomy and instrumentation skills are already under \`.claude/skills/\` for this run, but the runner could not resolve any \`integration-*\` skill id for ${config.metadata.name} (nothing bundled/pre-staged and no matching \`.claude/skills/integration-*/SKILL.md\` on disk).
 
    Call \`report_status\` with kind="error", code="RESOURCE_MISSING", detail="No integration skill could be resolved for this framework." and halt.`;
 
