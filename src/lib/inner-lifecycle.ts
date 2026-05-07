@@ -45,6 +45,7 @@ import {
 import type { HookCallback } from './agent-hooks.js';
 import { getFileChangeLedger } from './file-change-ledger.js';
 import { formatToolCallLabel } from './tool-call-label.js';
+import { summarizeLedgerPath } from './file-change-diff.js';
 
 /**
  * Type guard: returns the UI cast to AgentUI if we're in agent mode,
@@ -185,8 +186,9 @@ export function createInnerLifecycleHooks(config: InnerLifecycleConfig): {
           // when inner-lifecycle hooks fire from a probe call). Swallow —
           // a missing pre-event is harmless, the apply-side handles it.
         }
-        // Capture the pre-write content into the rollback ledger so a
-        // cancelled / errored run can revert this file. No-op when no
+        // Capture the pre-write content into the canonical ledger so a
+        // cancelled / errored run can revert this file AND the diff viewer
+        // / `/diff` slash command have a source of truth. No-op when no
         // ledger has been initialised (probe calls, unit tests).
         try {
           getFileChangeLedger()?.recordPreWrite(path);
@@ -225,6 +227,37 @@ export function createInnerLifecycleHooks(config: InnerLifecycleConfig): {
         : null;
     if (path) {
       const content = typeof obj.content === 'string' ? obj.content : null;
+      // Finalise the canonical ledger entry first — both rollback and the
+      // diff viewer read from this ledger. `recordPostWrite` is a no-op
+      // when no ledger is initialised. For Edit/MultiEdit/NotebookEdit
+      // `obj.content` will be null and the ledger re-reads from disk to
+      // capture the final form.
+      try {
+        getFileChangeLedger()?.recordPostWrite(path, content);
+      } catch {
+        // Ledger capture must never break the agent loop. Swallow.
+      }
+      // Emit per-write `file_changed` NDJSON event in agent mode so
+      // ambient orchestrators see the additions/deletions/hunks without
+      // having to compute the diff themselves. Pulls from the canonical
+      // ledger so we don't double-snapshot.
+      try {
+        const ui = getAgentUI();
+        if (ui) {
+          const summary = summarizeLedgerPath(getFileChangeLedger(), path);
+          if (summary) {
+            ui.emitFileChanged({
+              path,
+              operation,
+              additions: summary.additions,
+              deletions: summary.deletions,
+              hunks: summary.hunks,
+            });
+          }
+        }
+      } catch {
+        // NDJSON emission must never break the agent run.
+      }
       // Use `content !== null` not `content` — empty string `''` is falsy
       // and would drop `bytes` from the event. Outer agents need to
       // distinguish "byte count unknown" (no content captured) from
@@ -239,16 +272,6 @@ export function createInnerLifecycleHooks(config: InnerLifecycleConfig): {
         });
       } catch {
         // See preToolUse — same defensive swallow.
-      }
-      // Finalise the rollback ledger entry with the new on-disk content.
-      // For Edit/MultiEdit/NotebookEdit `obj.content` will be null and
-      // the ledger re-reads from disk to capture the final form. The
-      // ledger's `recordPostWrite` is a no-op when no ledger is
-      // initialised.
-      try {
-        getFileChangeLedger()?.recordPostWrite(path, content);
-      } catch {
-        // Ledger capture must never break the agent loop. Swallow.
       }
     }
     return Promise.resolve({});

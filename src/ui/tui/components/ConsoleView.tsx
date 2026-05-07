@@ -32,10 +32,16 @@ import {
   checkCommandBlockedByRun,
   getWhoamiText,
   getDiagnosticsText,
+  getHelpText,
   isKnownCommand,
+  parseDiffSlashInput,
   parseFeedbackSlashInput,
   parseCreateProjectSlashInput,
 } from '../console-commands.js';
+import { getFileChangeLedger } from '../../../lib/file-change-ledger.js';
+import { summarizeLedgerDiffs } from '../../../lib/file-change-diff.js';
+import { formatChangeCounts } from './DiffViewer.js';
+import path from 'node:path';
 import { analytics } from '../../../utils/analytics.js';
 import { trackWizardFeedback } from '../../../utils/track-wizard-feedback.js';
 import { collectDiagnostics } from '../../../lib/diagnostics-collector.js';
@@ -283,6 +289,64 @@ function executeCommand(raw: string, store: WizardStore): string | void {
           );
         }
       })();
+      break;
+    }
+    case '/diff': {
+      // The slash console is a single-line feedback channel — full
+      // unified-diff rendering belongs in the DiffViewer component the
+      // outro mounts. Here we surface the most actionable information:
+      // a tree of touched files with +N/-M counts (no path arg) or
+      // the additions/deletions for one file (path arg).
+      const arg = parseDiffSlashInput(raw) ?? '';
+      const diffs = summarizeLedgerDiffs(getFileChangeLedger());
+      if (diffs.length === 0) {
+        store.setCommandFeedback(
+          'No file changes captured yet — the agent has not written anything in this session.',
+          15_000,
+        );
+        break;
+      }
+      if (!arg) {
+        const totalAdd = diffs.reduce((s, d) => s + d.additions, 0);
+        const totalDel = diffs.reduce((s, d) => s + d.deletions, 0);
+        const lines = diffs.map((d) => {
+          const rel = d.path.startsWith(store.session.installDir + '/')
+            ? path.relative(store.session.installDir, d.path)
+            : d.path;
+          return `${d.operation.toUpperCase().padEnd(6)} ${rel}  ${formatChangeCounts(d.additions, d.deletions)}`;
+        });
+        const summary = `${diffs.length} file${
+          diffs.length === 1 ? '' : 's'
+        } changed (+${totalAdd}/-${totalDel})\n${lines.join('\n')}`;
+        store.setCommandFeedback(summary, 30_000);
+        break;
+      }
+      // Resolve relative paths against installDir so users can type
+      // `/diff src/amplitude.ts` instead of pasting an absolute path.
+      const target = path.isAbsolute(arg)
+        ? arg
+        : path.resolve(store.session.installDir, arg);
+      const found =
+        diffs.find((d) => d.path === target) ??
+        diffs.find((d) => d.path.endsWith('/' + arg));
+      if (!found) {
+        store.setCommandFeedback(
+          `No diff captured for "${arg}". Try /diff with no argument to see all changed files.`,
+          15_000,
+        );
+        break;
+      }
+      // Surface the patch body in the feedback channel. The slash console
+      // can't easily render syntax-coloured diffs inline, but the unified
+      // patch text is itself readable and copy-pasteable.
+      store.setCommandFeedback(
+        `${found.operation.toUpperCase()} ${found.path}  ${formatChangeCounts(found.additions, found.deletions)}\n\n${found.patch}`,
+        60_000,
+      );
+      break;
+    }
+    case '/help': {
+      store.setCommandFeedback(getHelpText(), 30_000);
       break;
     }
     case '/exit':

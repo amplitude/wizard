@@ -37,6 +37,8 @@ import path from 'path';
 import { Colors, Icons } from '../styles.js';
 import { BrailleSpinner } from './BrailleSpinner.js';
 import type { FileWriteEntry } from '../store.js';
+import { getFileChangeLedger } from '../../../lib/file-change-ledger.js';
+import { summarizeLedgerPath } from '../../../lib/file-change-diff.js';
 
 /**
  * Per-path aggregation produced by `dedupeByPath` below. Carries the
@@ -191,6 +193,18 @@ export const FileWritesPanel = ({
             ? `${completedCount}/${totalCount} written`
             : `${totalCount} written`}
         </Text>
+        {/* Discoverability hint for the /diff slash command — addresses the
+            user's "what actually changed?" question right at the moment
+            they're watching files fly by. Only surfaces once at least one
+            write has applied so we don't spam the hint mid-planning. */}
+        {completedCount > 0 && (
+          <>
+            <Text color={Colors.subtle}> {Icons.dot} </Text>
+            <Text color={Colors.muted}>
+              type <Text color={Colors.accent}>/diff</Text> to review
+            </Text>
+          </>
+        )}
       </Box>
       {visible.map(({ entry, editCount }) => (
         <FileWriteRow
@@ -245,8 +259,10 @@ const FileWriteRow = ({
 
   // Trailing detail column. While the row is still planned we show
   // "generating…" with elapsed seconds so a stuck write is visible
-  // (instead of a dead spinner). On apply we show bytes/lines + total
-  // duration so the user can see throughput. When the same path was
+  // (instead of a dead spinner). On apply we prefer the +N/-M diff
+  // counts from the FileChangeLedger (per-write toast surface — see
+  // user request) and fall back to bytes/lines if the ledger has no
+  // record (binary file, capture race, etc.). When the same path was
   // touched more than once, suffix the size hint with `× N` so the
   // user sees both the latest result and the fact that the agent
   // revisited the file.
@@ -256,10 +272,22 @@ const FileWriteRow = ({
       entry.completedAt !== undefined
         ? formatDuration(entry.completedAt - entry.startedAt)
         : '';
-    const sizeHint =
-      typeof entry.bytes === 'number'
-        ? `${entry.bytes.toLocaleString()} bytes`
-        : 'edited';
+    let sizeHint: string;
+    try {
+      const summary = summarizeLedgerPath(getFileChangeLedger(), entry.path);
+      if (summary && (summary.additions > 0 || summary.deletions > 0)) {
+        sizeHint = `+${summary.additions}/-${summary.deletions}`;
+      } else if (typeof entry.bytes === 'number') {
+        sizeHint = `${entry.bytes.toLocaleString()} bytes`;
+      } else {
+        sizeHint = 'edited';
+      }
+    } catch {
+      sizeHint =
+        typeof entry.bytes === 'number'
+          ? `${entry.bytes.toLocaleString()} bytes`
+          : 'edited';
+    }
     const sizeHintWithCount =
       editCount > 1 ? `${sizeHint} ${editCount}×` : sizeHint;
     detail = dur ? `${sizeHintWithCount}  ${dur}` : sizeHintWithCount;

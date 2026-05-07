@@ -23,6 +23,9 @@ import {
   TerminalLink,
 } from '../primitives/index.js';
 import { buildChangedFileList } from '../primitives/ChangedFilesView.js';
+import { DiffViewer } from '../components/DiffViewer.js';
+import { getFileChangeLedger } from '../../../lib/file-change-ledger.js';
+import { summarizeLedgerDiffs } from '../../../lib/file-change-diff.js';
 import { peekSetupComplete } from '../../../lib/setup-complete-registry.js';
 import { useScreenInput } from '../hooks/useScreenInput.js';
 import {
@@ -588,6 +591,27 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
               </Box>
             </Box>
           )}
+
+          {/* Per-file diff summary — additive, complements the
+              setup-report. Shows +N/-M counts so users see the
+              magnitude of each change at a glance. Sourced from the
+              session-scoped FileChangeLedger; empty when capture
+              didn't fire (probe runs, full-activation re-runs). */}
+          {(() => {
+            const diffs = summarizeLedgerDiffs(getFileChangeLedger());
+            const meaningful = diffs.filter(
+              (d) => d.additions > 0 || d.deletions > 0 || d.operation !== 'modify',
+            );
+            if (meaningful.length === 0) return null;
+            return (
+              <Box marginTop={1}>
+                <DiffViewer
+                  diffs={meaningful}
+                  installDir={installDir}
+                />
+              </Box>
+            );
+          })()}
 
           {/* Single-line review note — only when a fresh report was actually
               written this run. Without the existence check, a stale report
