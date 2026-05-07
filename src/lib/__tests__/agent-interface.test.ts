@@ -1697,6 +1697,125 @@ describe('matchesAllowedPrefix', () => {
     expect(matchesAllowedPrefix('npm run eslint')).toBe(true);
     expect(matchesAllowedPrefix('npx prettier --check .')).toBe(true);
   });
+
+  describe('monorepo workspace selectors', () => {
+    // Yarn 1 workspace selector
+    it('allows `yarn workspace <name> add <pkg>`', () => {
+      expect(
+        matchesAllowedPrefix(
+          'yarn workspace excalidraw-app add @amplitude/unified',
+        ),
+      ).toBe(true);
+    });
+
+    it('allows `yarn workspace <name> install`', () => {
+      expect(matchesAllowedPrefix('yarn workspace some-app install')).toBe(
+        true,
+      );
+    });
+
+    // Yarn 2+ foreach selector
+    it('allows `yarn workspaces foreach -A run build`', () => {
+      expect(matchesAllowedPrefix('yarn workspaces foreach -A run build')).toBe(
+        true,
+      );
+    });
+
+    it('allows `yarn workspaces foreach --all install`', () => {
+      expect(
+        matchesAllowedPrefix('yarn workspaces foreach --all install'),
+      ).toBe(true);
+    });
+
+    // Yarn --cwd / -C
+    it('allows `yarn --cwd packages/foo install`', () => {
+      expect(matchesAllowedPrefix('yarn --cwd packages/foo install')).toBe(
+        true,
+      );
+    });
+
+    it('allows `yarn -C packages/foo add some-pkg`', () => {
+      expect(matchesAllowedPrefix('yarn -C packages/foo add some-pkg')).toBe(
+        true,
+      );
+    });
+
+    // pnpm --filter / -F
+    it('allows `pnpm --filter @scope/pkg install`', () => {
+      expect(matchesAllowedPrefix('pnpm --filter @scope/pkg install')).toBe(
+        true,
+      );
+    });
+
+    it('allows `pnpm -F some-pkg add another-pkg`', () => {
+      expect(matchesAllowedPrefix('pnpm -F some-pkg add another-pkg')).toBe(
+        true,
+      );
+    });
+
+    // npm -w / --workspace
+    it('allows `npm -w packages/api install`', () => {
+      expect(matchesAllowedPrefix('npm -w packages/api install')).toBe(true);
+    });
+
+    it('allows `npm --workspace packages/api install`', () => {
+      expect(matchesAllowedPrefix('npm --workspace packages/api install')).toBe(
+        true,
+      );
+    });
+
+    // bun --cwd
+    it('allows `bun --cwd packages/api install`', () => {
+      expect(matchesAllowedPrefix('bun --cwd packages/api install')).toBe(true);
+    });
+
+    // Inner script must still be in SAFE_SCRIPTS
+    it('denies `yarn workspace some-ws rm dangerous-package` (inner script not allowed)', () => {
+      expect(
+        matchesAllowedPrefix('yarn workspace some-ws rm dangerous-package'),
+      ).toBe(false);
+    });
+
+    it('denies `pnpm --filter some-pkg unknown-cmd`', () => {
+      expect(matchesAllowedPrefix('pnpm --filter some-pkg unknown-cmd')).toBe(
+        false,
+      );
+    });
+
+    // Selector must be well-formed
+    it('denies `yarn workspace` with no name', () => {
+      expect(matchesAllowedPrefix('yarn workspace')).toBe(false);
+    });
+
+    it('denies `yarn workspace <name>` with no inner script', () => {
+      expect(matchesAllowedPrefix('yarn workspace some-name')).toBe(false);
+    });
+
+    it('denies `pnpm --filter` with no name', () => {
+      expect(matchesAllowedPrefix('pnpm --filter')).toBe(false);
+    });
+
+    it('denies selectors where the name slot is a flag', () => {
+      expect(matchesAllowedPrefix('yarn workspace --foo install')).toBe(false);
+      expect(matchesAllowedPrefix('npm -w --bar install')).toBe(false);
+    });
+
+    // Nested selectors are intentionally denied (depth guard).
+    it('denies nested selectors like `yarn workspace foo --cwd dir install`', () => {
+      // After stripping `workspace foo`, the remainder is
+      // `yarn --cwd dir install`, which would itself be a selector. The
+      // depth guard prevents the second strip, so this stays denied.
+      expect(matchesAllowedPrefix('yarn workspace foo --cwd dir install')).toBe(
+        false,
+      );
+    });
+
+    // Selectors don't override the package-manager check.
+    it('denies selector syntax on non-recognized package managers', () => {
+      // `cargo --filter foo install` — pnpm-style flag on cargo, not allowed.
+      expect(matchesAllowedPrefix('cargo --filter foo install')).toBe(false);
+    });
+  });
 });
 
 describe('wizardCanUseTool', () => {
