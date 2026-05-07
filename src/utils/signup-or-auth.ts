@@ -257,6 +257,13 @@ export async function performSignupOrAuth(
         message: result.message,
         code: result.code,
       });
+      // Caller cancelled the in-flight request (Esc, /exit, screen
+      // unmount). Surface as a clean `error` arm but don't emit
+      // signup_error telemetry — user-initiated aborts aren't funnel
+      // failures and would inflate signup_error counts otherwise.
+      if (result.code === 'aborted') {
+        return { kind: 'error', message: result.message };
+      }
       // The schema's `.refine()` on `required` rejects shapes the wizard
       // can't act on, and `direct-signup.ts` surfaces that with
       // `code: 'unsupported_required_shape'`. Emit a distinct telemetry

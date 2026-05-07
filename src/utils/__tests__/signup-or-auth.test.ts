@@ -491,6 +491,33 @@ describe('performSignupOrAuth', () => {
     }
   });
 
+  it('does not emit signup_error telemetry when direct signup reports caller abort', async () => {
+    // User-initiated cancels (Esc, /exit, screen unmount) surface as
+    // `code: 'aborted'` from performDirectSignup. The wrapper must
+    // pass them through as a clean error arm but skip the
+    // signup_error telemetry — aborts aren't funnel failures and
+    // would otherwise inflate the signup_error counter.
+    const { performDirectSignup } = await import('../direct-signup.js');
+    vi.mocked(performDirectSignup).mockResolvedValue({
+      kind: 'error',
+      code: 'aborted',
+      message: 'aborted',
+    });
+    const { analytics } = await import('../analytics');
+
+    const result = await performSignupOrAuth({
+      email: 'ada@example.com',
+      fullName: 'Ada Lovelace',
+      zone: 'us',
+    });
+
+    expect(result).toEqual({ kind: 'error', message: 'aborted' });
+    expect(analytics.wizardCapture).not.toHaveBeenCalledWith(
+      AGENTIC_SIGNUP_ATTEMPTED_EVENT,
+      { status: 'signup_error', zone: 'us' },
+    );
+  });
+
   it('retries fetchAmplitudeUser when the new account has no env with an API key yet', async () => {
     vi.useFakeTimers();
     try {
