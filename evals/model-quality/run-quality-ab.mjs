@@ -29,7 +29,11 @@ import { dirname, join, resolve as pathResolve } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { fileURLToPath } from 'node:url';
 
-import { runPrompt, resolveHarnessAuth } from './lib/run-prompt.mjs';
+import {
+  runPrompt,
+  resolveHarnessAuth,
+  authToRunnerShape,
+} from './lib/run-prompt.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -172,17 +176,6 @@ async function main() {
   );
   writeFileSync(outPath, lines.join('\n') + '\n', 'utf8');
   process.stdout.write(`${outPath}\n`);
-}
-
-function authToRunnerShape(auth) {
-  if (!auth) return {};
-  if (auth.kind === 'oauth')
-    return { baseURL: auth.baseURL, authToken: auth.authToken };
-  if (auth.kind === 'api-key')
-    return auth.baseURL
-      ? { baseURL: auth.baseURL, apiKey: auth.apiKey }
-      : { apiKey: auth.apiKey };
-  return {};
 }
 
 function fmtMs(ms) {

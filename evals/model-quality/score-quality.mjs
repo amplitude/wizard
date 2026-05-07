@@ -32,7 +32,10 @@ import {
   gatewayModelString,
   median,
 } from './lib/scorers.mjs';
-import { resolveHarnessAuth } from './lib/run-prompt.mjs';
+import {
+  resolveHarnessAuth,
+  authToRunnerShape,
+} from './lib/run-prompt.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 
@@ -132,17 +135,6 @@ async function judge({
     haikuPosition: haikuIsA ? 'A' : 'B',
     rawJudgeText: raw,
   };
-}
-
-function authToRunnerShape(auth) {
-  if (!auth) return {};
-  if (auth.kind === 'oauth')
-    return { baseURL: auth.baseURL, authToken: auth.authToken };
-  if (auth.kind === 'api-key')
-    return auth.baseURL
-      ? { baseURL: auth.baseURL, apiKey: auth.apiKey }
-      : { apiKey: auth.apiKey };
-  return {};
 }
 
 async function main() {

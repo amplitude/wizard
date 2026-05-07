@@ -156,3 +156,23 @@ export function resolveHarnessAuth() {
   }
   return null;
 }
+
+/**
+ * Reshape a `resolveHarnessAuth` result into the loose
+ * `{ baseURL?, authToken?, apiKey? }` shape expected by the runner's
+ * call-site invokers (the runner doesn't care about the discriminated
+ * `kind` tag — it just needs the credentials in flat form).
+ *
+ * Returns `{}` for null/undefined input or unknown `kind` so callers
+ * can spread it unconditionally without a per-call branch.
+ */
+export function authToRunnerShape(auth) {
+  if (!auth) return {};
+  if (auth.kind === 'oauth')
+    return { baseURL: auth.baseURL, authToken: auth.authToken };
+  if (auth.kind === 'api-key')
+    return auth.baseURL
+      ? { baseURL: auth.baseURL, apiKey: auth.apiKey }
+      : { apiKey: auth.apiKey };
+  return {};
+}

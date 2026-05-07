@@ -13,7 +13,7 @@
 import { describe, it, expect } from 'vitest';
 
 // @ts-expect-error — .mjs import path; vitest resolves via Node ESM loader.
-import { runPrompt } from '../lib/run-prompt.mjs';
+import { runPrompt, authToRunnerShape } from '../lib/run-prompt.mjs';
 // @ts-expect-error — .mjs import path; vitest resolves via Node ESM loader.
 import { MODEL_ALIASES } from '../lib/scorers.mjs';
 
@@ -148,6 +148,38 @@ describe('runPrompt', () => {
 
     expect(row.error).toMatch(/streamText boom/);
     expect(row.text).toBe('');
+  });
+
+  it('authToRunnerShape: oauth → baseURL + authToken', () => {
+    expect(
+      authToRunnerShape({
+        kind: 'oauth',
+        baseURL: 'http://gw',
+        authToken: 'tok',
+      }),
+    ).toEqual({ baseURL: 'http://gw', authToken: 'tok' });
+  });
+
+  it('authToRunnerShape: api-key with baseURL → both fields', () => {
+    expect(
+      authToRunnerShape({
+        kind: 'api-key',
+        baseURL: 'http://x',
+        apiKey: 'sk',
+      }),
+    ).toEqual({ baseURL: 'http://x', apiKey: 'sk' });
+  });
+
+  it('authToRunnerShape: api-key without baseURL → apiKey only', () => {
+    expect(authToRunnerShape({ kind: 'api-key', apiKey: 'sk' })).toEqual({
+      apiKey: 'sk',
+    });
+  });
+
+  it('authToRunnerShape: null / unknown → empty object', () => {
+    expect(authToRunnerShape(null)).toEqual({});
+    expect(authToRunnerShape(undefined)).toEqual({});
+    expect(authToRunnerShape({ kind: 'mystery' })).toEqual({});
   });
 
   it('forwards system + maxOutputTokens when provided', async () => {
