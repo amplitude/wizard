@@ -43,7 +43,7 @@ jobs:
         run: node scripts/refresh-wizard-oauth-token.mjs
         env:
           WIZARD_REFRESH_TOKEN: ${{ secrets.WIZARD_REFRESH_TOKEN }}
-          WIZARD_ZONE: ${{ vars.WIZARD_ZONE }}
+          WIZARD_ZONE: ${{ secrets.WIZARD_ZONE }}
 
       - name: Update repository secrets
         if: steps.refresh.outputs.refresh != 'failed'
@@ -65,7 +65,7 @@ jobs:
           echo "Rotated WIZARD_OAUTH_TOKEN; new expiry: $NEW_EXPIRES_AT"
 
       - name: Surface refresh failure
-        if: steps.refresh.outputs.refresh == 'failed'
+        if: always() && steps.refresh.outputs.refresh == 'failed'
         run: |
           echo "::error::OAuth refresh failed. Re-run \`amplitude-wizard ci-bootstrap\` to re-seed WIZARD_REFRESH_TOKEN."
           exit 1

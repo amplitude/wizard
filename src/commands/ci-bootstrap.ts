@@ -138,16 +138,12 @@ async function defaultLoadSession(): Promise<CiBootstrapSession | null> {
 
 /** Default secret writer: shells out to `gh secret set`. */
 function defaultSetSecret(name: string, value: string, repo: string): void {
-  // `gh secret set NAME --repo OWNER/REPO --body VALUE`. We pass the
-  // value via stdin (`-`) to avoid leaking it into the OS process listing.
-  const result = spawnSync(
-    'gh',
-    ['secret', 'set', name, '--repo', repo, '--body', '-'],
-    {
-      input: value,
-      stdio: ['pipe', 'inherit', 'inherit'],
-    },
-  );
+  // `gh secret set NAME --repo OWNER/REPO`. We pass the value via stdin
+  // to avoid leaking it into the OS process listing.
+  const result = spawnSync('gh', ['secret', 'set', name, '--repo', repo], {
+    input: value,
+    stdio: ['pipe', 'inherit', 'inherit'],
+  });
   if (result.error) {
     if ((result.error as NodeJS.ErrnoException).code === 'ENOENT') {
       throw new Error(
