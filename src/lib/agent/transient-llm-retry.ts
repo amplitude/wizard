@@ -4,10 +4,9 @@
  */
 
 /**
- * Verbatim error wrapper Thunder's `wizard-proxy` returns when Vertex AI
- * rejects the upstream request body (see Thunder's
- * `src/wizard-proxy/router.ts:917-974` — the proxy clamps every 400 from
- * the model provider to this exact string and hides the real reason).
+ * Verbatim error wrapper the gateway's `wizard-proxy` returns when Vertex AI
+ * rejects the upstream request body (the proxy clamps every 400 from the
+ * model provider to this exact string and hides the real reason).
  */
 export const GATEWAY_INVALID_REQUEST_MARKER =
   'Invalid request sent to model provider';
