@@ -74,6 +74,19 @@ export interface FlowEntry {
    * successful revert.
    */
   revert?: (store: WizardStore) => boolean | void;
+  /**
+   * State-driven hard wall. When true on a completed entry, back-nav
+   * past this entry is blocked outright (`canGoBack` / `goBack` return
+   * `false`). Checked BEFORE `revert` so a wall takes precedence over
+   * a defined revert callback.
+   *
+   * Use for committed states the user cannot honestly undo — e.g. a
+   * server account created during signup. Distinct from "no `revert`
+   * defined" (a flow-definition-time wall): `isWall` is a runtime
+   * decision based on session state, so the same entry can revert
+   * normally in one state and be a hard wall in another.
+   */
+  isWall?: (session: WizardSession) => boolean;
 }
 
 /**
