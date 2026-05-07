@@ -36,6 +36,12 @@ import {
   readBundledSkillReference,
   SKILL_REFERENCE_REL_PATH,
 } from './wizard-tools/bundled-skills.js';
+import { toWizardToolErrorContent } from './wizard-tools/types.js';
+export type { WizardToolErrorResponse } from './wizard-tools/types.js';
+export {
+  toWizardToolErrorContent,
+  toWizardToolDenyMessage,
+} from './wizard-tools/types.js';
 
 export type { SkillEntry, SkillMenu } from './wizard-tools/bundled-skills.js';
 export {
@@ -1253,8 +1259,30 @@ export async function createWizardToolsServer(options: WizardToolsOptions) {
       reason: reasonField,
     },
     (args: { filePath: string; keys: string[]; reason: string }) => {
-      const resolved = resolveEnvPath(workingDirectory, args.filePath);
+      let resolved: string;
+      try {
+        resolved = resolveEnvPath(workingDirectory, args.filePath);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        logToFile(`check_env_keys: path rejected: ${msg}`);
+        return toWizardToolErrorContent({
+          error: `path rejected: ${msg}`,
+          guidance: `Pass a path RELATIVE to the project root (e.g. ".env.local"), not an absolute path or one with "..". Try filePath: ".env.local" or ".env" instead.`,
+          suggestedTool: 'mcp__wizard-tools__check_env_keys',
+          context: `installDir: ${workingDirectory}; rejected filePath: ${args.filePath}`,
+        });
+      }
       logToFile(`check_env_keys: ${resolved}, keys: ${args.keys.join(', ')}`);
+
+      if (args.keys.length === 0) {
+        return toWizardToolErrorContent({
+          error: 'no keys requested',
+          guidance:
+            'Pass at least one env-var name in `keys`. If you do not yet know which keys to check, the canonical Amplitude browser key is AMPLITUDE_API_KEY (server) or NEXT_PUBLIC_AMPLITUDE_API_KEY / VITE_AMPLITUDE_API_KEY (browser, framework-specific).',
+          suggestedTool: 'mcp__wizard-tools__check_env_keys',
+          context: `filePath: ${args.filePath}`,
+        });
+      }
 
       const existingKeys: Set<string> = fs.existsSync(resolved)
         ? parseEnvKeys(fs.readFileSync(resolved, 'utf8'))
@@ -1292,12 +1320,34 @@ export async function createWizardToolsServer(options: WizardToolsOptions) {
       values: Record<string, string>;
       reason: string;
     }) => {
-      const resolved = resolveEnvPath(workingDirectory, args.filePath);
+      let resolved: string;
+      try {
+        resolved = resolveEnvPath(workingDirectory, args.filePath);
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        logToFile(`set_env_values: path rejected: ${msg}`);
+        return toWizardToolErrorContent({
+          error: `path rejected: ${msg}`,
+          guidance: `Pass a path RELATIVE to the project root (e.g. ".env.local"), not an absolute path or one with "..". Retry with filePath: ".env.local".`,
+          suggestedTool: 'mcp__wizard-tools__set_env_values',
+          context: `installDir: ${workingDirectory}; rejected filePath: ${args.filePath}`,
+        });
+      }
       logToFile(
         `set_env_values: ${resolved}, keys: ${Object.keys(args.values).join(
           ', ',
         )}`,
       );
+
+      if (Object.keys(args.values).length === 0) {
+        return toWizardToolErrorContent({
+          error: 'no values to set',
+          guidance:
+            'Pass at least one key/value pair in `values` (e.g. {"AMPLITUDE_API_KEY": "<key>"}). If the key is already correct, skip this call.',
+          suggestedTool: 'mcp__wizard-tools__set_env_values',
+          context: `filePath: ${args.filePath}`,
+        });
+      }
 
       const existing = fs.existsSync(resolved)
         ? fs.readFileSync(resolved, 'utf8')
@@ -1306,11 +1356,33 @@ export async function createWizardToolsServer(options: WizardToolsOptions) {
 
       // Ensure parent directory exists
       const dir = path.dirname(resolved);
-      if (!fs.existsSync(dir)) {
-        fs.mkdirSync(dir, { recursive: true });
+      try {
+        if (!fs.existsSync(dir)) {
+          fs.mkdirSync(dir, { recursive: true });
+        }
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        logToFile(`set_env_values: mkdir failed for ${dir}: ${msg}`);
+        return toWizardToolErrorContent({
+          error: `cannot create parent directory for env file: ${msg}`,
+          guidance: `The parent directory of "${args.filePath}" cannot be created. Use a simpler path at the project root (e.g. ".env.local") instead of a nested directory.`,
+          suggestedTool: 'mcp__wizard-tools__set_env_values',
+          suggestedArgs: { filePath: '.env.local', values: args.values },
+          context: `parent dir: ${dir}; installDir: ${workingDirectory}`,
+        });
       }
 
-      fs.writeFileSync(resolved, content, 'utf8');
+      try {
+        fs.writeFileSync(resolved, content, 'utf8');
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        logToFile(`set_env_values: writeFile failed for ${resolved}: ${msg}`);
+        return toWizardToolErrorContent({
+          error: `cannot write env file: ${msg}`,
+          guidance: `The env file at "${args.filePath}" is not writable. Note this in the setup report and proceed — do NOT retry the same path.`,
+          context: `resolved path: ${resolved}; installDir: ${workingDirectory}`,
+        });
+      }
 
       // Ensure .gitignore coverage for this env file (skipped for shared
       // committed templates like .env.development — see ensureGitignoreCoverage).
@@ -1367,11 +1439,40 @@ export async function createWizardToolsServer(options: WizardToolsOptions) {
         });
       }
 
-      const result = await detectPMCache;
+      let result: Awaited<ReturnType<typeof detectPackageManager>>;
+      try {
+        result = await detectPMCache;
+      } catch (err) {
+        const msg = err instanceof Error ? err.message : String(err);
+        logToFile(`detect_package_manager: scan failed: ${msg}`);
+        return toWizardToolErrorContent({
+          error: `package-manager detection failed: ${msg}`,
+          guidance: `Ask the user which package manager to use via the \`choose\` tool with options like ["npm", "pnpm", "yarn", "bun"], or skip the SDK install step and document the limitation in the setup report.`,
+          suggestedTool: 'mcp__wizard-tools__choose',
+          suggestedArgs: {
+            message: 'Which package manager does this project use?',
+            options: ['npm', 'pnpm', 'yarn', 'bun'],
+          },
+          context: `workingDirectory: ${workingDirectory}`,
+        });
+      }
 
       logToFile(
         `detect_package_manager: detected ${result.detected.length} package manager(s)`,
       );
+
+      if (result.detected.length === 0) {
+        return toWizardToolErrorContent({
+          error: 'no recognized package manager / lockfile in this project',
+          guidance: `Ask the user which package manager to use via the \`choose\` tool, or skip the SDK install step and document the limitation in the setup report. Do NOT call detect_package_manager again — the result is cached.`,
+          suggestedTool: 'mcp__wizard-tools__choose',
+          suggestedArgs: {
+            message: 'Which package manager does this project use?',
+            options: ['npm', 'pnpm', 'yarn', 'bun'],
+          },
+          context: `workingDirectory: ${workingDirectory}; checked for package.json, lockfiles, requirements.txt, etc.`,
+        });
+      }
 
       return {
         content: [
@@ -1411,15 +1512,15 @@ export async function createWizardToolsServer(options: WizardToolsOptions) {
             if (args.category) {
               const list = categories[args.category];
               if (!list || list.length === 0) {
-                return {
-                  content: [
-                    {
-                      type: 'text' as const,
-                      text: `No bundled skills found for category: ${args.category}`,
-                    },
-                  ],
-                  isError: true,
-                };
+                const known = Object.keys(categories);
+                return toWizardToolErrorContent({
+                  error: `unknown skill category: ${args.category}`,
+                  guidance: `Call load_skill_menu with no category to see all available categories, or pick one of: ${known.join(
+                    ', ',
+                  )}.`,
+                  suggestedTool: 'mcp__wizard-tools__load_skill_menu',
+                  context: `requested category: ${args.category}`,
+                });
               }
               return {
                 content: [
@@ -1471,15 +1572,12 @@ export async function createWizardToolsServer(options: WizardToolsOptions) {
             // bundledSkillExists() probe just doubles the disk work.
             const body = readBundledSkillBody(args.skillId);
             if (body == null) {
-              return {
-                content: [
-                  {
-                    type: 'text' as const,
-                    text: `Unknown or missing bundled skill: ${args.skillId}`,
-                  },
-                ],
-                isError: true,
-              };
+              return toWizardToolErrorContent({
+                error: `unknown or missing bundled skill: ${args.skillId}`,
+                guidance: `Call load_skill_menu (no category) to list every bundled skill id, then retry load_skill with a valid id. Skills already pre-staged at .claude/skills/ can be invoked via the Skill tool directly without going through this MCP.`,
+                suggestedTool: 'mcp__wizard-tools__load_skill_menu',
+                context: `requested skillId: ${args.skillId}`,
+              });
             }
             logToFile(`load_skill: ${args.skillId} (${body.length} chars)`);
             return {
@@ -1507,30 +1605,25 @@ export async function createWizardToolsServer(options: WizardToolsOptions) {
           (args: { skillId: string; refPath: string; reason: string }) => {
             void args.reason;
             if (!bundledSkillExists(args.skillId)) {
-              return {
-                content: [
-                  {
-                    type: 'text' as const,
-                    text: `Unknown or missing bundled skill: ${args.skillId}`,
-                  },
-                ],
-                isError: true,
-              };
+              return toWizardToolErrorContent({
+                error: `unknown or missing bundled skill: ${args.skillId}`,
+                guidance: `Call load_skill_menu (no category) to list every bundled skill id, then retry. Skill ids look like "amplitude-quickstart-taxonomy-agent" — not framework names like "next.js".`,
+                suggestedTool: 'mcp__wizard-tools__load_skill_menu',
+                context: `requested skillId: ${args.skillId}; refPath: ${args.refPath}`,
+              });
             }
             const reference = readBundledSkillReference(
               args.skillId,
               args.refPath,
             );
             if (reference == null) {
-              return {
-                content: [
-                  {
-                    type: 'text' as const,
-                    text: `Could not read reference ${args.refPath} for: ${args.skillId}`,
-                  },
-                ],
-                isError: true,
-              };
+              return toWizardToolErrorContent({
+                error: `reference not found in skill: ${args.refPath}`,
+                guidance: `Load the skill body first via load_skill ({ skillId: "${args.skillId}" }) to see which references it lists. The refPath must match a file under references/ in that skill's bundle.`,
+                suggestedTool: 'mcp__wizard-tools__load_skill',
+                suggestedArgs: { skillId: args.skillId },
+                context: `skillId: ${args.skillId}; refPath: ${args.refPath}`,
+              });
             }
             logToFile(
               `load_skill_reference: ${args.skillId}/${args.refPath} (${reference.length} chars)`,
@@ -1848,14 +1941,11 @@ Returns: "approved", "skipped", or "feedback: <user message>"`,
         logToFile(
           `report_status rate-limited: ${key} (${fresh.length} calls in ${RATE_LIMIT_WINDOW_MS}ms)`,
         );
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: `rate_limited: pause before reporting ${key} again`,
-            },
-          ],
-        };
+        return toWizardToolErrorContent({
+          error: `rate-limited: too many ${key} reports in ${RATE_LIMIT_WINDOW_MS}ms`,
+          guidance: `Stop reporting the same ${args.kind}/${args.code}. Move on to the next step — the wizard already received your earlier report. If the situation has materially changed, use a different code.`,
+          context: `kind: ${args.kind}; code: ${args.code}; window: ${RATE_LIMIT_WINDOW_MS}ms; cap: ${RATE_LIMIT_MAX}`,
+        });
       }
       fresh.push(now);
       reportHistory.set(key, fresh);
@@ -1960,14 +2050,11 @@ Returns: "ok" on successful persistence, an error string otherwise. Idempotent �
       }
 
       if (!persistedCanonical) {
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: 'error: failed to persist dashboard to disk — see wizard log',
-            },
-          ],
-        };
+        return toWizardToolErrorContent({
+          error: 'failed to persist dashboard to disk',
+          guidance: `The wizard could not write .amplitude/dashboard.json. The dashboard URL has already been surfaced to the UI, so do NOT call record_dashboard again — note the persistence failure in the setup report and proceed.`,
+          context: `dashboardUrl: ${args.dashboardUrl}; workingDirectory: ${workingDirectory}`,
+        });
       }
       return { content: [{ type: 'text' as const, text: 'ok' }] };
     },
@@ -2087,14 +2174,11 @@ Returns: "ok: <planId>" on successful persistence, an error string otherwise. Id
       );
 
       if (!persisted) {
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: 'error: failed to persist dashboard plan to disk — see wizard log',
-            },
-          ],
-        };
+        return toWizardToolErrorContent({
+          error: 'failed to persist dashboard plan to disk',
+          guidance: `The wizard could not write .amplitude/dashboard-plan.json. Do NOT call record_dashboard_plan again with the same payload — note the persistence failure in the setup report and proceed; the user can re-run the deferred dashboard command later.`,
+          context: `workingDirectory: ${workingDirectory}; charts: ${args.charts.length}; events: ${args.events.length}`,
+        });
       }
       return {
         content: [{ type: 'text' as const, text: `ok: ${persisted.planId}` }],

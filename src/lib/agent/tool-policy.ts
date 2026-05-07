@@ -9,6 +9,7 @@ import { analytics, captureWizardError } from '../../utils/analytics';
 import type { HookCallback } from '../agent-hooks';
 import { LINTING_TOOLS } from '../safe-tools';
 import { scanBashCommandForDestructive } from '../safety-scanner';
+import { toWizardToolDenyMessage } from '../wizard-tools/types';
 
 /**
  * Maximum number of seconds the agent may sleep in a single Bash call.
@@ -495,7 +496,16 @@ export function wizardCanUseTool(
       logToFile(`Denying ${toolName} on env file: ${filePath}`);
       return {
         behavior: 'deny',
-        message: `Direct ${toolName} of ${basename} is not allowed. Use the wizard-tools MCP server (check_env_keys / set_env_values) to read or modify environment variables.`,
+        message: toWizardToolDenyMessage({
+          error: `Direct ${toolName} of ${basename} is not allowed. Use the wizard-tools MCP server (check_env_keys / set_env_values) to read or modify environment variables.`,
+          guidance: isReadTool
+            ? `Call mcp__wizard-tools__check_env_keys with { filePath: "${basename}", keys: ["AMPLITUDE_API_KEY", ...] } to verify env-var presence without exposing values.`
+            : `Call mcp__wizard-tools__set_env_values with { filePath: "${basename}", values: { "<KEY>": "<value>" } } to write env vars. The wizard manages .gitignore coverage and atomic merging for you.`,
+          suggestedTool: isReadTool
+            ? 'mcp__wizard-tools__check_env_keys'
+            : 'mcp__wizard-tools__set_env_values',
+          context: `denied tool: ${toolName}; denied path: ${filePath}`,
+        }),
       };
     }
     // Block direct writes to the wizard-managed event-plan and dashboard
@@ -514,8 +524,6 @@ export function wizardCanUseTool(
       const lower = basename.toLowerCase();
       const isEventsFile =
         lower === '.amplitude-events.json' || lower === 'events.json';
-      const isDashboardFile =
-        lower === '.amplitude-dashboard.json' || lower === 'dashboard.json';
       // For the bare `events.json` / `dashboard.json` cases, only deny
       // when the path is inside `.amplitude/` (the wizard's metadata
       // dir). A user codebase might legitimately have an unrelated
@@ -534,19 +542,26 @@ export function wizardCanUseTool(
         const tool =
           which === 'event plan'
             ? 'mcp__wizard-tools__confirm_event_plan'
+            : 'mcp__wizard-tools__record_dashboard';
+        const humanTool =
+          which === 'event plan'
+            ? 'mcp__wizard-tools__confirm_event_plan'
             : 'the dashboard watcher (which mirrors writes from the Amplitude MCP `create_dashboard` call)';
         logToFile(
           `Denying ${toolName} on wizard-managed ${which} file: ${filePath}`,
         );
+        const guidance =
+          which === 'event plan'
+            ? `Call mcp__wizard-tools__confirm_event_plan with the proposed events; it persists the canonical file shape so the wizard UI and manifest stay in sync. If a stale ${basename} is on disk from a prior run, ignore it — confirm_event_plan atomically replaces it.`
+            : `Call mcp__wizard-tools__record_dashboard with the dashboard URL after the Amplitude MCP \`create_dashboard\` returns. The wizard mirrors the file write for you.`;
         return {
           behavior: 'deny',
-          message: `Direct ${toolName} of ${basename} is not allowed. The ${which} file is owned by ${tool}. Call that tool with the proposed plan instead — it persists the file in the canonical shape the wizard UI expects, so the manifest never drifts from real track() calls. ${
-            isDashboardFile
-              ? ''
-              : 'If a stale ' +
-                basename +
-                ' is on disk from a prior run, ignore it and call confirm_event_plan; the wizard atomically replaces it.'
-          }`,
+          message: toWizardToolDenyMessage({
+            error: `Direct ${toolName} of ${basename} is not allowed. The ${which} file is owned by ${humanTool}.`,
+            guidance,
+            suggestedTool: tool,
+            context: `denied tool: ${toolName}; denied path: ${filePath}`,
+          }),
         };
       }
     }
@@ -559,12 +574,16 @@ export function wizardCanUseTool(
   if (toolName === 'Grep') {
     const grepPath = typeof input.path === 'string' ? input.path : '';
     if (grepPath && path.basename(grepPath).startsWith('.env')) {
+      const grepBasename = path.basename(grepPath);
       logToFile(`Denying Grep on env file: ${grepPath}`);
       return {
         behavior: 'deny',
-        message: `Grep on ${path.basename(
-          grepPath,
-        )} is not allowed. Use the wizard-tools MCP server (check_env_keys) to check environment variables.`,
+        message: toWizardToolDenyMessage({
+          error: `Grep on ${grepBasename} is not allowed.`,
+          guidance: `Call mcp__wizard-tools__check_env_keys with { filePath: "${grepBasename}", keys: ["<KEY>", ...] } to verify presence without exposing values.`,
+          suggestedTool: 'mcp__wizard-tools__check_env_keys',
+          context: `denied path: ${grepPath}`,
+        }),
       };
     }
     return { behavior: 'allow', updatedInput: input };
@@ -638,7 +657,12 @@ export function wizardCanUseTool(
     );
     return {
       behavior: 'deny',
-      message: `Bash command denied by wizard policy: shell operators ; \` $ ( ) are not permitted on this run, and no rephrasing will change that. DO NOT retry the same goal with a different command — see the retry-budget commandment. If you were verifying env vars, use the wizard-tools \`check_env_keys\` MCP tool. If you were inspecting a file, use the \`Read\` tool. If you cannot accomplish the goal with the allowed tools, document the limitation in the setup report and proceed.`,
+      message: toWizardToolDenyMessage({
+        error: `Bash command denied by wizard policy: shell operators ; \` $ ( ) are not permitted on this run, and no rephrasing will change that.`,
+        guidance: `DO NOT retry the same goal with a different command — see the retry-budget commandment. If you were verifying env vars, use mcp__wizard-tools__check_env_keys. If you were inspecting a file, use the Read tool. If you cannot accomplish the goal with the allowed tools, document the limitation in the setup report and proceed.`,
+        suggestedTool: 'Read',
+        context: `denied command: ${command}`,
+      }),
     };
   }
 
@@ -662,7 +686,12 @@ export function wizardCanUseTool(
       );
       return {
         behavior: 'deny',
-        message: `Bash command denied by wizard policy: only a single pipe to tail/head is permitted (no chained pipes). This is a fixed policy — DO NOT retry the same goal with a re-ordered or differently-piped command. Use one allowed package-manager subcommand at a time, or document the limitation in the setup report and move on.`,
+        message: toWizardToolDenyMessage({
+          error: `Bash command denied by wizard policy: only a single pipe to tail/head is permitted (no chained pipes).`,
+          guidance: `This is a fixed policy — DO NOT retry the same goal with a re-ordered or differently-piped command. Use one allowed package-manager subcommand at a time. For substring filtering, capture the output and use the Grep tool on the file instead.`,
+          suggestedTool: 'Grep',
+          context: `denied command: ${command}`,
+        }),
       };
     }
 
@@ -685,7 +714,11 @@ export function wizardCanUseTool(
     );
     return {
       behavior: 'deny',
-      message: `Bash command denied by wizard policy: pipes are only permitted as \`<allowed-command> | tail/head <args>\` for output limiting; \`&\` (background) and other pipe forms are not permitted. DO NOT retry with a re-piped variant. If you cannot accomplish the goal with allowed tools, document the limitation in the setup report and proceed.`,
+      message: toWizardToolDenyMessage({
+        error: `Bash command denied by wizard policy: pipes are only permitted as \`<allowed-command> | tail/head <args>\` for output limiting; \`&\` (background) and other pipe forms are not permitted.`,
+        guidance: `DO NOT retry with a re-piped variant. Run the package-manager subcommand by itself, or pipe to a single \`| tail -50\` / \`| head -30\` for output limiting. If you cannot accomplish the goal with allowed tools, document the limitation in the setup report and proceed.`,
+        context: `denied command: ${command}`,
+      }),
     };
   }
 
@@ -706,7 +739,12 @@ export function wizardCanUseTool(
   );
   return {
     behavior: 'deny',
-    message: `Bash command denied by wizard policy: only package-manager subcommands (install / add / build / test / typecheck / lint / format / etc.) and Amplitude skill installs are permitted. DO NOT retry the same goal with a different shell command — \`node -e\`, \`node --eval\`, \`printenv\`, \`echo $VAR\`, \`cat .env\`, \`bash -c '...'\`, etc. will all be denied. To verify env vars, use the wizard-tools \`check_env_keys\` MCP tool (it reports key presence without exposing values). To inspect a file, use the \`Read\` tool. To inspect a directory, use \`Glob\`. To search code, use \`Grep\`. If you cannot accomplish the goal with the allowed tools, document the limitation in the setup report and proceed.`,
+    message: toWizardToolDenyMessage({
+      error: `Bash command denied by wizard policy: only package-manager subcommands (install / add / build / test / typecheck / lint / format / etc.) and Amplitude skill installs are permitted.`,
+      guidance: `DO NOT retry the same goal with a different shell command — \`node -e\`, \`node --eval\`, \`printenv\`, \`echo $VAR\`, \`cat .env\`, \`bash -c '...'\`, etc. will all be denied. To verify env vars use mcp__wizard-tools__check_env_keys; to inspect a file use Read; to inspect a directory use Glob; to search code use Grep. If you cannot accomplish the goal with the allowed tools, document the limitation in the setup report and proceed.`,
+      suggestedTool: 'Read',
+      context: `denied command: ${command}`,
+    }),
   };
 }
 
@@ -893,13 +931,18 @@ export function createPreToolUseHook(
             'createPreToolUseHook',
             { 'rule id': scan.rule.id, command },
           );
+          const structured = toWizardToolDenyMessage({
+            error: `Destructive bash command blocked (rule: ${scan.rule.label}).`,
+            guidance: scan.rule.message,
+            context: `denied command: ${command}; rule id: ${scan.rule.id}`,
+          });
           return Promise.resolve(
             trackBashDeny(
               {
                 hookSpecificOutput: {
                   hookEventName: 'PreToolUse',
                   permissionDecision: 'deny',
-                  permissionDecisionReason: scan.rule.message,
+                  permissionDecisionReason: structured,
                 },
               },
               command,
@@ -914,13 +957,18 @@ export function createPreToolUseHook(
         logToFile('Destructive-bash scanner threw; failing closed:', err);
         const reason =
           'Bash command blocked by safety scanner due to an internal error. Re-attempting with the same command will produce the same result. Skip this step or take a different approach.';
+        const structured = toWizardToolDenyMessage({
+          error: 'Bash command blocked by safety scanner (internal error).',
+          guidance: reason,
+          context: `denied command: ${command}`,
+        });
         return Promise.resolve(
           trackBashDeny(
             {
               hookSpecificOutput: {
                 hookEventName: 'PreToolUse',
                 permissionDecision: 'deny',
-                permissionDecisionReason: reason,
+                permissionDecisionReason: structured,
               },
             },
             command,
@@ -949,13 +997,19 @@ export function createPreToolUseHook(
             { 'sleep seconds': seconds, command },
           );
           const reason = `Bash sleep > ${MAX_BASH_SLEEP_SECONDS}s is not permitted. Long sleeps idle the upstream API stream and trigger "API Error: 400 terminated" cascades. If a service appears unavailable, do NOT wait — proceed with the next step or report the failure.`;
+          const structured = toWizardToolDenyMessage({
+            error: `Bash sleep > ${MAX_BASH_SLEEP_SECONDS}s is not permitted.`,
+            guidance: `Long sleeps idle the upstream API stream and trigger "API Error: 400 terminated" cascades. If a service appears unavailable, do NOT wait — proceed with the next step or call mcp__wizard-tools__report_status with kind="error" and an appropriate code.`,
+            suggestedTool: 'mcp__wizard-tools__report_status',
+            context: `denied command: ${command}; sleep seconds: ${seconds}; cap: ${MAX_BASH_SLEEP_SECONDS}s`,
+          });
           return Promise.resolve(
             trackBashDeny(
               {
                 hookSpecificOutput: {
                   hookEventName: 'PreToolUse',
                   permissionDecision: 'deny',
-                  permissionDecisionReason: reason,
+                  permissionDecisionReason: structured,
                 },
               },
               command,
@@ -974,6 +1028,23 @@ export function createPreToolUseHook(
         typeof toolInput.command === 'string' ? toolInput.command : '';
       const decision = wizardCanUseTool(toolName, toolInput);
       if (decision.behavior === 'deny') {
+        // `decision.message` is a JSON-shaped structured deny envelope
+        // (see toWizardToolDenyMessage). The structured payload is
+        // correct for the agent (`permissionDecisionReason`), but the
+        // circuit-breaker / analytics `lastDenyReason` wants a plain
+        // human-readable string. Extract `guidance` (or fall back to
+        // `error`) so analytics see the same shape the other three
+        // trackBashDeny call sites use.
+        let humanReason = decision.message;
+        try {
+          const parsed = JSON.parse(decision.message) as {
+            guidance?: string;
+            error?: string;
+          };
+          humanReason = parsed.guidance ?? parsed.error ?? decision.message;
+        } catch {
+          // Not JSON — keep the raw message.
+        }
         return Promise.resolve(
           trackBashDeny(
             {
@@ -984,7 +1055,7 @@ export function createPreToolUseHook(
               },
             },
             command,
-            decision.message,
+            humanReason,
           ),
         );
       }

@@ -28,7 +28,10 @@ import {
   bundledSkillExists,
   readBundledSkillBody,
   readBundledSkillReference,
+  toWizardToolErrorContent,
+  toWizardToolDenyMessage,
 } from '../wizard-tools';
+import type { WizardToolErrorResponse } from '../wizard-tools';
 import { toWizardDashboardOpenUrl } from '../../utils/dashboard-open-url';
 
 function makeTmpDir(): string {
@@ -1390,5 +1393,358 @@ describe('writeFallbackReportIfMissing', () => {
     const written = fs.readFileSync(reportPathFor(tmpDir), 'utf8');
     expect(written).toContain('<wizard-report>');
     expect(written).toContain('nextjs');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Structured tool-error helpers
+//
+// Pin down the recovery-guidance contract every wizard tool returns on its
+// failure paths. The agent SDK forwards `content[0].text` to the model
+// verbatim, so the JSON shape here is the model's only signal that the
+// failure is recoverable. If a future refactor breaks this shape, the
+// agent silently falls back to the "retry the same broken approach 5 times
+// → trip the consecutive-deny circuit breaker" behavior these helpers were
+// added to fix.
+// ---------------------------------------------------------------------------
+
+describe('toWizardToolErrorContent', () => {
+  it('emits an MCP content payload with isError set and a JSON body', () => {
+    const result = toWizardToolErrorContent({
+      error: 'no env file found',
+      guidance: 'Create the env file first, then call set_env_values.',
+    });
+    expect(result.isError).toBe(true);
+    expect(result.content).toHaveLength(1);
+    expect(result.content[0].type).toBe('text');
+
+    const parsed = JSON.parse(
+      result.content[0].text,
+    ) as WizardToolErrorResponse;
+    expect(parsed.success).toBe(false);
+    expect(parsed.error).toBe('no env file found');
+    expect(parsed.guidance).toContain('Create the env file');
+  });
+
+  it('preserves optional suggestedTool and suggestedArgs', () => {
+    const result = toWizardToolErrorContent({
+      error: 'no recognized lockfile',
+      guidance: 'Ask the user.',
+      suggestedTool: 'mcp__wizard-tools__choose',
+      suggestedArgs: { message: 'pick one', options: ['npm', 'pnpm'] },
+      context: 'cwd: /tmp/proj',
+    });
+    const parsed = JSON.parse(
+      result.content[0].text,
+    ) as WizardToolErrorResponse;
+    expect(parsed.suggestedTool).toBe('mcp__wizard-tools__choose');
+    expect(parsed.suggestedArgs).toEqual({
+      message: 'pick one',
+      options: ['npm', 'pnpm'],
+    });
+    expect(parsed.context).toBe('cwd: /tmp/proj');
+  });
+
+  it('always sets success:false (load-bearing for string-matchers in the agent SDK)', () => {
+    const result = toWizardToolErrorContent({
+      error: 'x',
+      guidance: 'y',
+    });
+    const parsed = JSON.parse(
+      result.content[0].text,
+    ) as WizardToolErrorResponse;
+    // Tests that legacy bundled skills which grep for `success":false` or the
+    // word "error" inside a tool-result still see those substrings even
+    // though the wrapper is now structured JSON.
+    expect(parsed.success).toBe(false);
+    expect(result.content[0].text).toContain('"success": false');
+    expect(result.content[0].text).toContain('"error":');
+  });
+});
+
+describe('toWizardToolDenyMessage', () => {
+  it('returns a JSON-encoded structured payload as a single string', () => {
+    const message = toWizardToolDenyMessage({
+      error: 'Bash command denied',
+      guidance: 'Use mcp__wizard-tools__check_env_keys.',
+      suggestedTool: 'mcp__wizard-tools__check_env_keys',
+      context: 'denied command: cat .env',
+    });
+    // The PreToolUse hook contract requires a string for
+    // permissionDecisionReason, not an object. We pre-serialize so the agent
+    // sees the same shape on a deny as it does on a tool error.
+    expect(typeof message).toBe('string');
+    const parsed = JSON.parse(message) as WizardToolErrorResponse;
+    expect(parsed.success).toBe(false);
+    expect(parsed.error).toContain('Bash command denied');
+    expect(parsed.guidance).toContain('check_env_keys');
+    expect(parsed.suggestedTool).toBe('mcp__wizard-tools__check_env_keys');
+    expect(parsed.context).toBe('denied command: cat .env');
+  });
+
+  it('produces a parseable JSON string even when guidance contains quotes', () => {
+    // Regression for the obvious failure mode: deny messages contain shell
+    // commands ("cat .env"), single quotes (don't), and code spans
+    // (`check_env_keys`). The wrapper must escape them correctly so the
+    // agent's JSON.parse() doesn't choke.
+    const message = toWizardToolDenyMessage({
+      error: 'denied: cat .env',
+      guidance: `Use \`check_env_keys\`. Don't retry with "different" quoting.`,
+    });
+    expect(() => JSON.parse(message)).not.toThrow();
+    const parsed = JSON.parse(message) as WizardToolErrorResponse;
+    expect(parsed.guidance).toContain('check_env_keys');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Tool error-path integration
+//
+// The agent SDK exposes tool definitions as `{name, description, inputSchema,
+// handler}` records. We call the handler directly with the same args the
+// model would emit, then parse the structured response. This is the
+// regression test for the "agent gets actionable guidance" contract.
+// ---------------------------------------------------------------------------
+
+interface ToolResult {
+  content: Array<{ type: 'text'; text: string }>;
+  isError?: boolean;
+}
+
+interface ToolDef {
+  name: string;
+  handler: (args: Record<string, unknown>, extra?: unknown) => unknown;
+}
+
+async function callTool(
+  tool: ToolDef,
+  args: Record<string, unknown>,
+): Promise<ToolResult> {
+  const out = await Promise.resolve(tool.handler(args));
+  return out as ToolResult;
+}
+
+async function getTools(workingDirectory: string): Promise<ToolDef[]> {
+  // The wizard-tools server is built lazily from the SDK's dynamic ESM
+  // import. Reach into the unwrapped raw server (Sentry wrapper preserves
+  // the `instance` field) to get the underlying tool definitions.
+  const { createWizardToolsServer } = await import('../wizard-tools');
+  const server = (await createWizardToolsServer({
+    workingDirectory,
+    detectPackageManager: async (cwd: string) => ({
+      detected: [],
+      installDir: cwd,
+    }),
+  })) as { instance?: { _registeredTools?: Record<string, ToolDef> } };
+
+  // The McpServer instance from the SDK exposes registered tools via an
+  // internal map. The structure is `_registeredTools[name] = ToolDef`.
+  const registered = server.instance?._registeredTools ?? {};
+  return Object.values(registered);
+}
+
+function findTool(tools: ToolDef[], name: string): ToolDef {
+  const t = tools.find((x) => x.name === name);
+  if (!t) {
+    throw new Error(
+      `Tool ${name} not registered; have: ${tools
+        .map((x) => x.name)
+        .join(', ')}`,
+    );
+  }
+  return t;
+}
+
+function parseToolError(result: ToolResult): WizardToolErrorResponse {
+  expect(result.isError).toBe(true);
+  return JSON.parse(result.content[0].text) as WizardToolErrorResponse;
+}
+
+describe('wizard-tools error responses', () => {
+  let tmpDir: string;
+  beforeEach(() => {
+    tmpDir = makeTmpDir();
+  });
+  afterEach(() => cleanup(tmpDir));
+
+  it('check_env_keys returns structured guidance on path traversal', async () => {
+    const tools = await getTools(tmpDir);
+    const tool = findTool(tools, 'check_env_keys');
+    const result = await callTool(tool, {
+      filePath: '../etc/passwd',
+      keys: ['AMPLITUDE_API_KEY'],
+      reason: 'verifying api key',
+    });
+    const parsed = parseToolError(result);
+    expect(parsed.success).toBe(false);
+    expect(parsed.error).toContain('path rejected');
+    expect(parsed.guidance).toContain('RELATIVE');
+    expect(parsed.suggestedTool).toBe('mcp__wizard-tools__check_env_keys');
+  });
+
+  it('check_env_keys returns structured guidance when keys is empty', async () => {
+    const tools = await getTools(tmpDir);
+    const tool = findTool(tools, 'check_env_keys');
+    const result = await callTool(tool, {
+      filePath: '.env.local',
+      keys: [],
+      reason: 'sanity check',
+    });
+    const parsed = parseToolError(result);
+    expect(parsed.error).toContain('no keys requested');
+    expect(parsed.guidance).toContain('AMPLITUDE_API_KEY');
+  });
+
+  it('set_env_values returns structured guidance on path traversal', async () => {
+    const tools = await getTools(tmpDir);
+    const tool = findTool(tools, 'set_env_values');
+    const result = await callTool(tool, {
+      filePath: '../../etc/passwd',
+      values: { FOO: 'bar' },
+      reason: 'writing env',
+    });
+    const parsed = parseToolError(result);
+    expect(parsed.error).toContain('path rejected');
+    expect(parsed.guidance).toContain('RELATIVE');
+    expect(parsed.suggestedTool).toBe('mcp__wizard-tools__set_env_values');
+  });
+
+  it('set_env_values returns structured guidance when values is empty', async () => {
+    const tools = await getTools(tmpDir);
+    const tool = findTool(tools, 'set_env_values');
+    const result = await callTool(tool, {
+      filePath: '.env.local',
+      values: {},
+      reason: 'no-op call',
+    });
+    const parsed = parseToolError(result);
+    expect(parsed.error).toContain('no values to set');
+    expect(parsed.guidance).toContain('key/value pair');
+  });
+
+  it('detect_package_manager returns structured guidance when nothing detected', async () => {
+    const { createWizardToolsServer } = await import('../wizard-tools');
+    const server = (await createWizardToolsServer({
+      workingDirectory: tmpDir,
+      // Empty detection result — simulates a project with no recognized
+      // lockfile / package.json / pyproject.toml.
+      detectPackageManager: async (cwd: string) => ({
+        detected: [],
+        installDir: cwd,
+      }),
+    })) as { instance?: { _registeredTools?: Record<string, ToolDef> } };
+    const tools = Object.values(server.instance?._registeredTools ?? {});
+    const tool = findTool(tools, 'detect_package_manager');
+    const result = await callTool(tool, { reason: 'before install' });
+    const parsed = parseToolError(result);
+    expect(parsed.error).toContain('no recognized package manager');
+    expect(parsed.guidance).toContain('user');
+    expect(parsed.suggestedTool).toBe('mcp__wizard-tools__choose');
+    expect(parsed.suggestedArgs).toMatchObject({
+      options: expect.arrayContaining(['npm', 'pnpm']),
+    });
+  });
+
+  it('detect_package_manager surfaces detector errors with recovery guidance', async () => {
+    const { createWizardToolsServer } = await import('../wizard-tools');
+    const server = (await createWizardToolsServer({
+      workingDirectory: tmpDir,
+      detectPackageManager: async () => {
+        throw new Error('disk read failed');
+      },
+    })) as { instance?: { _registeredTools?: Record<string, ToolDef> } };
+    const tools = Object.values(server.instance?._registeredTools ?? {});
+    const tool = findTool(tools, 'detect_package_manager');
+    const result = await callTool(tool, { reason: 'before install' });
+    const parsed = parseToolError(result);
+    expect(parsed.error).toContain('disk read failed');
+    expect(parsed.guidance).toContain('user');
+    expect(parsed.suggestedTool).toBe('mcp__wizard-tools__choose');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Policy denials → structured guidance
+//
+// The PreToolUse hook (createPreToolUseHook) and canUseTool gate
+// (wizardCanUseTool) both receive denied tool calls. They now emit the same
+// structured payload as the in-process tools, so the "follow guidance, do not
+// retry" commandment is uniform across the deny + error paths.
+// ---------------------------------------------------------------------------
+
+describe('wizardCanUseTool — structured deny payload', () => {
+  let wizardCanUseTool: typeof import('../agent/tool-policy').wizardCanUseTool;
+
+  beforeEach(async () => {
+    ({ wizardCanUseTool } = await import('../agent/tool-policy'));
+  });
+
+  function parseDeny(message: string): WizardToolErrorResponse {
+    return JSON.parse(message) as WizardToolErrorResponse;
+  }
+
+  it('Read on .env returns structured deny guidance pointing at check_env_keys', () => {
+    const result = wizardCanUseTool('Read', { file_path: '/project/.env' });
+    expect(result.behavior).toBe('deny');
+    if (result.behavior !== 'deny') return;
+    const parsed = parseDeny(result.message);
+    expect(parsed.success).toBe(false);
+    expect(parsed.suggestedTool).toBe('mcp__wizard-tools__check_env_keys');
+    expect(parsed.guidance).toContain('check_env_keys');
+    expect(parsed.context).toContain('/project/.env');
+  });
+
+  it('Write on .env.local returns structured deny guidance pointing at set_env_values', () => {
+    const result = wizardCanUseTool('Write', {
+      file_path: '/project/.env.local',
+    });
+    expect(result.behavior).toBe('deny');
+    if (result.behavior !== 'deny') return;
+    const parsed = parseDeny(result.message);
+    expect(parsed.suggestedTool).toBe('mcp__wizard-tools__set_env_values');
+    expect(parsed.guidance).toContain('set_env_values');
+  });
+
+  it('Write on .amplitude/events.json returns confirm_event_plan guidance', () => {
+    const result = wizardCanUseTool('Write', {
+      file_path: '/project/.amplitude/events.json',
+    });
+    expect(result.behavior).toBe('deny');
+    if (result.behavior !== 'deny') return;
+    const parsed = parseDeny(result.message);
+    expect(parsed.suggestedTool).toBe('mcp__wizard-tools__confirm_event_plan');
+    expect(parsed.guidance).toContain('confirm_event_plan');
+  });
+
+  it('Bash with dangerous operators returns structured deny', () => {
+    const result = wizardCanUseTool('Bash', {
+      command: 'echo $(whoami)',
+    });
+    expect(result.behavior).toBe('deny');
+    if (result.behavior !== 'deny') return;
+    const parsed = parseDeny(result.message);
+    expect(parsed.error).toContain('shell operators');
+    expect(parsed.guidance).toContain('check_env_keys');
+    expect(parsed.context).toContain('echo $(whoami)');
+  });
+
+  it('Bash not in allowlist returns structured deny with suggested fallback', () => {
+    const result = wizardCanUseTool('Bash', {
+      command: 'cat /etc/passwd',
+    });
+    expect(result.behavior).toBe('deny');
+    if (result.behavior !== 'deny') return;
+    const parsed = parseDeny(result.message);
+    expect(parsed.error).toContain('package-manager subcommands');
+    expect(parsed.guidance).toContain('Read');
+    expect(parsed.suggestedTool).toBe('Read');
+  });
+
+  it('Grep on .env returns check_env_keys guidance', () => {
+    const result = wizardCanUseTool('Grep', { path: '/project/.env' });
+    expect(result.behavior).toBe('deny');
+    if (result.behavior !== 'deny') return;
+    const parsed = parseDeny(result.message);
+    expect(parsed.suggestedTool).toBe('mcp__wizard-tools__check_env_keys');
   });
 });
