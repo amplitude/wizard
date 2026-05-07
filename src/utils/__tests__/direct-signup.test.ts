@@ -1,6 +1,15 @@
-import { describe, it, expect, beforeAll, afterAll, afterEach } from 'vitest';
+import {
+  describe,
+  it,
+  expect,
+  beforeAll,
+  afterAll,
+  afterEach,
+  vi,
+} from 'vitest';
 import { setupServer } from 'msw/node';
 import { http, HttpResponse } from 'msw';
+import axios from 'axios';
 import { performDirectSignup } from '../direct-signup';
 
 const PROVISIONING_URL = 'https://app.amplitude.com/t/agentic/signup/v1';
@@ -499,6 +508,100 @@ describe('performDirectSignup', () => {
     const result = await performDirectSignup(INPUT);
 
     expect(result.kind).toBe('error');
+  });
+
+  // ── Inner abort guards ────────────────────────────────────────────────
+  //
+  // `performDirectSignup` has two `if (input.signal?.aborted)` guards
+  // that fire AFTER axios resolves successfully but BEFORE the next
+  // step runs:
+  //   1. After the provisioning POST — bails before token-exchange.
+  //   2. After the token-exchange POST — bails before parsing tokens
+  //      and returning a `success` arm.
+  // These cover the race where the caller aborts (Esc back, /exit) just
+  // as the response lands on the wire: axios has already resolved, so
+  // the catch-block path doesn't fire, but the user has navigated away
+  // and the result must not feed into downstream side effects (token
+  // persistence). Tests stub `axios.post` so the abort lands
+  // deterministically between resolve and the guard — MSW can't
+  // synchronize that window because it operates below axios.
+
+  it('post-provisioning guard: aborts after first POST resolves and before token exchange', async () => {
+    const controller = new AbortController();
+    let provisioningCalled = false;
+    let tokenCalled = false;
+    vi.spyOn(axios, 'post').mockImplementation(async (url: string) => {
+      if (url.includes('/t/agentic/signup/v1')) {
+        provisioningCalled = true;
+        // Abort synchronously before returning. By the time
+        // `await axios.post(...)` unwraps in performDirectSignup,
+        // signal.aborted is already true and the guard fires on the
+        // next line — token exchange must not run.
+        controller.abort();
+        return {
+          status: 200,
+          data: { type: 'oauth', oauth: { code: 'auth-code-xyz' } },
+        };
+      }
+      if (url.includes('/oauth2/token')) {
+        tokenCalled = true;
+        return { status: 200, data: VALID_TOKEN_RESPONSE };
+      }
+      throw new Error(`unexpected url ${url}`);
+    });
+
+    try {
+      const result = await performDirectSignup({
+        ...INPUT,
+        signal: controller.signal,
+      });
+
+      expect(provisioningCalled).toBe(true);
+      expect(tokenCalled).toBe(false);
+      expect(result.kind).toBe('error');
+      if (result.kind === 'error') {
+        expect(result.code).toBe('aborted');
+        expect(result.message).toBe('aborted');
+      }
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
+
+  it('post-token-exchange guard: aborts after token POST resolves and before returning success', async () => {
+    const controller = new AbortController();
+    vi.spyOn(axios, 'post').mockImplementation(async (url: string) => {
+      if (url.includes('/t/agentic/signup/v1')) {
+        return {
+          status: 200,
+          data: { type: 'oauth', oauth: { code: 'auth-code-xyz' } },
+        };
+      }
+      if (url.includes('/oauth2/token')) {
+        // Same pattern as the post-provisioning guard test, but for the
+        // second guard: abort after the token-exchange resolves so the
+        // function bails to error{code:'aborted'} instead of returning
+        // a success arm whose tokens would be persisted to disk.
+        controller.abort();
+        return { status: 200, data: VALID_TOKEN_RESPONSE };
+      }
+      throw new Error(`unexpected url ${url}`);
+    });
+
+    try {
+      const result = await performDirectSignup({
+        ...INPUT,
+        signal: controller.signal,
+      });
+
+      expect(result.kind).toBe('error');
+      if (result.kind === 'error') {
+        expect(result.code).toBe('aborted');
+        expect(result.message).toBe('aborted');
+      }
+    } finally {
+      vi.restoreAllMocks();
+    }
   });
 
   it('honors AMPLITUDE_WIZARD_SIGNUP_URL override', async () => {
