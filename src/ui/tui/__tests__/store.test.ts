@@ -2190,6 +2190,42 @@ describe('WizardStore', () => {
       expect(store.session.signupAuth).toBeNull();
       expect(store.session.signupTokensObtained).toBe(false);
     });
+
+    it('switchToLogin resets the entire ceremony alongside the path flip', () => {
+      // The signup→login switch is conceptually the same kind of reset
+      // as `setSignupEmail(null)`: every piece of ceremony state keyed
+      // to the previous email must be invalidated so nothing leaks
+      // through into the SignIn path. Pin that contract so a future
+      // ceremony field added to `_resetCeremonyKeys` doesn't silently
+      // drift past `switchToLogin`.
+      const store = createStore();
+      const internal = store as unknown as {
+        $session: { setKey: (k: string, v: unknown) => void };
+      };
+      internal.$session.setKey('signupEmail', 'ada@example.com');
+      internal.$session.setKey('signupFullName', 'Ada Lovelace');
+      internal.$session.setKey('signupRequiredFields', ['full_name']);
+      internal.$session.setKey('tosAccepted', true);
+      internal.$session.setKey('signupTokensObtained', true);
+      internal.$session.setKey('signupAuth', {
+        idToken: 'i',
+        accessToken: 'a',
+        refreshToken: 'r',
+        zone: 'us',
+        userInfo: null,
+        dashboardUrl: null,
+      });
+
+      store.switchToLogin();
+
+      expect(store.session.authOnboardingPath).toBe(AuthOnboardingPath.SignIn);
+      expect(store.session.signupEmail).toBeNull();
+      expect(store.session.signupFullName).toBeNull();
+      expect(store.session.signupRequiredFields).toBeNull();
+      expect(store.session.tosAccepted).toBeNull();
+      expect(store.session.signupTokensObtained).toBe(false);
+      expect(store.session.signupAuth).toBeNull();
+    });
   });
 
   // ── Inline directory change ──────────────────────────────────────

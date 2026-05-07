@@ -767,7 +767,14 @@ export class WizardStore {
   switchToLogin(): void {
     this.$session.setKey('authOnboardingPath', AuthOnboardingPath.SignIn);
     this.$session.setKey('signupEmail', null);
-    this.$session.setKey('signupFullName', null);
+    // Funnel the rest of the ceremony cleanup through the shared helper
+    // so any future ceremony field added to `_resetCeremonyKeys` gets
+    // cleared on the signup→login switch automatically. The inline
+    // `signupFullName = null` we used to do here was already a subset
+    // of the helper's reset; the previous shape would silently drift
+    // (leaving e.g. `signupRequiredFields` or `signupTokensObtained`
+    // populated) the moment a new ceremony field appeared.
+    this._resetCeremonyKeys();
     analytics.wizardCapture('signup switched to login', {
       reason: 'existing user',
     });
