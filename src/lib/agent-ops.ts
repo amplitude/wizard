@@ -311,6 +311,24 @@ export async function runVerify(installDir: string): Promise<VerifyResult> {
   };
 }
 
+// ── event plan (read-only) ───────────────────────────────────────────
+
+export interface EventPlanReadResult {
+  installDir: string;
+  events: Array<{ name: string; description: string }>;
+  count: number;
+}
+
+/**
+ * Read the persisted event plan (`confirm_event_plan`) from canonical or
+ * legacy paths. Read-only — safe for external coding agents to align
+ * instrumentation with the approved taxonomy.
+ */
+export function runGetEventPlan(installDir: string): EventPlanReadResult {
+  const events = readLocalEventPlan(installDir);
+  return { installDir, events, count: events.length };
+}
+
 // ── projects list ───────────────────────────────────────────────────
 
 export interface ProjectChoice {

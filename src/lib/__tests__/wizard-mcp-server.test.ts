@@ -9,6 +9,7 @@ vi.mock('../agent-ops.js', () => ({
   runStatus: vi.fn(),
   runPlan: vi.fn(),
   runVerify: vi.fn(),
+  runGetEventPlan: vi.fn(),
   getAuthStatus: vi.fn(),
   getAuthToken: vi.fn(),
 }));
@@ -19,6 +20,7 @@ import {
   runStatus,
   runPlan,
   runVerify,
+  runGetEventPlan,
   getAuthStatus,
   getAuthToken,
 } from '../agent-ops.js';
@@ -27,6 +29,7 @@ const mockedRunDetect = vi.mocked(runDetect);
 const mockedRunStatus = vi.mocked(runStatus);
 const mockedRunPlan = vi.mocked(runPlan);
 const mockedRunVerify = vi.mocked(runVerify);
+const mockedRunGetEventPlan = vi.mocked(runGetEventPlan);
 const mockedGetAuthStatus = vi.mocked(getAuthStatus);
 const mockedGetAuthToken = vi.mocked(getAuthToken);
 
@@ -75,19 +78,21 @@ describe('registerWizardTools', () => {
     mockedRunStatus.mockReset();
     mockedRunPlan.mockReset();
     mockedRunVerify.mockReset();
+    mockedRunGetEventPlan.mockReset();
     mockedGetAuthStatus.mockReset();
     mockedGetAuthToken.mockReset();
     fake = makeFakeServer();
     registerWizardTools(fake);
   });
 
-  it('registers exactly the eight expected tools by name', () => {
+  it('registers exactly the nine expected tools by name', () => {
     const names = fake.tools.map((t) => t.name).sort();
     expect(names).toEqual([
       'detect_framework',
       'get_auth_status',
       'get_auth_token',
       'get_dashboard_plan',
+      'get_event_plan',
       'get_project_status',
       'plan_setup',
       'record_dashboard_plan',
@@ -102,8 +107,12 @@ describe('registerWizardTools', () => {
     }
   });
 
-  it('detect_framework and get_project_status accept optional installDir', () => {
-    for (const name of ['detect_framework', 'get_project_status']) {
+  it('detect_framework, get_project_status, and get_event_plan accept optional installDir', () => {
+    for (const name of [
+      'detect_framework',
+      'get_project_status',
+      'get_event_plan',
+    ]) {
       const tool = fake.tools.find((t) => t.name === name);
       expect(tool).toBeDefined();
       expect(tool!.config.inputSchema).toBeDefined();
@@ -398,5 +407,36 @@ describe('registerWizardTools', () => {
       ) as { plan: unknown };
       expect(parsed.plan).toBeNull();
     });
+  });
+
+  // ── get_event_plan ────────────────────────────────────────────────────
+
+  it('get_event_plan forwards installDir to runGetEventPlan', () => {
+    mockedRunGetEventPlan.mockReturnValue({
+      installDir: '/tmp/example',
+      events: [{ name: 'Button Clicked', description: 'User tapped CTA' }],
+      count: 1,
+    });
+
+    const tool = fake.tools.find((t) => t.name === 'get_event_plan')!;
+    const parsed = parseToolResult(
+      tool.handler({ installDir: '/tmp/example' }),
+    ) as { count: number; events: unknown[] };
+
+    expect(mockedRunGetEventPlan).toHaveBeenCalledWith('/tmp/example');
+    expect(parsed.count).toBe(1);
+    expect(parsed.events).toHaveLength(1);
+  });
+
+  it('get_event_plan defaults to process.cwd() when installDir is omitted', () => {
+    mockedRunGetEventPlan.mockReturnValue({
+      installDir: process.cwd(),
+      events: [],
+      count: 0,
+    });
+
+    const tool = fake.tools.find((t) => t.name === 'get_event_plan')!;
+    tool.handler({});
+    expect(mockedRunGetEventPlan).toHaveBeenCalledWith(process.cwd());
   });
 });
