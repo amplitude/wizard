@@ -19,11 +19,7 @@ import {
   loadOrchestratorContext,
   resolveOrchestratorContextPath,
 } from '../utils/orchestrator-context';
-import {
-  type WizardSession,
-  isCreateAccountOnboarding,
-} from '../lib/wizard-session';
-import { assertNever } from '../utils/assert-never';
+import { type WizardSession } from '../lib/wizard-session';
 
 /**
  * Load `--context-file` (or `AMPLITUDE_WIZARD_CONTEXT`) and stamp the
@@ -730,7 +726,7 @@ export const defaultCommand: CommandModule = {
               let auth: Awaited<
                 ReturnType<typeof performAmplitudeAuth>
               > | null = null;
-              let signupUserInfo: Awaited<
+              const signupUserInfo: Awaited<
                 ReturnType<typeof fetchAmplitudeUser>
               > | null = null;
               // True iff direct signup produced fresh tokens in this run.
@@ -743,72 +739,14 @@ export const defaultCommand: CommandModule = {
                 '../utils/signup-or-auth.js'
               );
               const s = tui.store.session;
-              if (
-                isCreateAccountOnboarding(s) &&
-                s.signupEmail &&
-                s.signupFullName &&
-                !s.signupTokensObtained &&
-                // SigningUpScreen already attempted the wrapper and gave up
-                // (server returned redirect / error after the user filled in
-                // their name). Re-POSTing here would burn an extra round-trip
-                // for the same redirect/error and double-count telemetry.
-                // Fall through to the OAuth path below instead.
-                !s.signupAbandoned
-              ) {
-                const { performSignupOrAuth } = await import(
-                  '../utils/signup-or-auth.js'
-                );
-                try {
-                  const signupResult = await performSignupOrAuth({
-                    email: s.signupEmail,
-                    fullName: s.signupFullName,
-                    zone,
-                  });
-                  // Exhaustive switch — `default: assertNever` makes a
-                  // future arm a compile error, forcing review of every
-                  // call site instead of silently routing the new
-                  // semantics to OAuth fallback.
-                  switch (signupResult.kind) {
-                    case 'success':
-                      auth = {
-                        idToken: signupResult.idToken,
-                        accessToken: signupResult.accessToken,
-                        refreshToken: signupResult.refreshToken,
-                        zone: signupResult.zone,
-                      };
-                      signupUserInfo = signupResult.userInfo;
-                      signupTokensObtained = true;
-                      tui.store.setSignupMagicLinkUrl(
-                        signupResult.dashboardUrl ?? null,
-                      );
-                      getUI().log.info(
-                        'Direct signup succeeded; using newly created account.',
-                      );
-                      break;
-                    case 'needs_information':
-                    case 'redirect':
-                    case 'error':
-                      // Fall through to the OAuth path below (auth stays
-                      // null). All three arms route the user to the
-                      // browser; no in-band recovery here.
-                      break;
-                    default:
-                      assertNever(signupResult);
-                  }
-                } catch (err) {
-                  trackSignupAttempt({ status: 'wrapper_exception', zone });
-                  getUI().log.warn(
-                    `Direct signup errored: ${
-                      err instanceof Error ? err.message : String(err)
-                    }. Falling back to OAuth.`,
-                  );
-                  auth = null;
-                }
-              } else if (s.signupTokensObtained) {
-                // EmailCaptureScreen already called replaceStoredUser + set
-                // signupTokensObtained. Without hydrating `auth` here,
-                // performAmplitudeAuth({ forceFresh }) runs on a fresh install
-                // dir and skips ~/.ampli.json — spurious browser OAuth.
+              if (s.signupTokensObtained) {
+                // SigningUpScreen settled the ceremony successfully and
+                // called `replaceStoredUser` + `markSignupTokensObtained`.
+                // Hydrate `auth` from disk here so
+                // `performAmplitudeAuth({ forceFresh })` below doesn't run
+                // on a fresh install dir and skip `~/.ampli.json` — that
+                // would open a spurious browser OAuth even though we
+                // already have valid tokens.
                 signupTokensObtained = true;
                 const fromDisk = getStoredToken(undefined, zone);
                 if (fromDisk) {
@@ -819,7 +757,7 @@ export const defaultCommand: CommandModule = {
                     zone,
                   };
                   getUI().log.info(
-                    'Using signup tokens obtained during email capture.',
+                    'Using signup tokens obtained during the signup ceremony.',
                   );
                 } else {
                   getUI().log.warn(
@@ -827,6 +765,10 @@ export const defaultCommand: CommandModule = {
                   );
                 }
               }
+              // Otherwise: ceremony abandoned (`signupAbandoned=true`) or
+              // sign-in path. Auth gate would not have released without
+              // one of those; `auth === null` falls through to the
+              // browser OAuth call below.
 
               if (auth === null) {
                 auth = await performAmplitudeAuth({ zone, forceFresh });
