@@ -22,7 +22,7 @@ const SENSITIVE_KEYS = new Set([
   'password',
   'secret',
   'cookie',
-  // CI org secret carrying the gateway bearer (FINAL_NEW_MIGRATION_PLAN
+  // CI org secret carrying the gateway bearer (MIGRATION_PLAN
   // §7.5). Match by both env-var-shape (`WIZARD_OAUTH_TOKEN`) and
   // common camelCase variants so structured log payloads can't leak it
   // when callers pass it through verbatim.

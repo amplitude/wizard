@@ -501,7 +501,7 @@ describe('clearAuthFieldsInAmpliConfig', () => {
 
 // ── Phase G-1: ampli.json mirror writes are disabled ─────────────────────────
 //
-// Per FINAL_NEW_MIGRATION_PLAN.md §5 Phase G-1, the wizard no longer writes
+// Per MIGRATION_PLAN.md §5 Phase G-1, the wizard no longer writes
 // the legacy `<installDir>/ampli.json` mirror. Reads still work for
 // back-compat (one minor cycle), but writes target only the canonical
 // `.amplitude/project-binding.json`.

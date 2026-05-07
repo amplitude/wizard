@@ -188,7 +188,7 @@ export function getOAuthSettingsFile(): string {
 /**
  * Legacy per-user OAuth file. Read for one-shot migration only — Phase G-1
  * stopped writing this path. Reads remain for one minor cycle so existing
- * installs migrate forward on first launch (per FINAL_NEW_MIGRATION_PLAN.md
+ * installs migrate forward on first launch (per MIGRATION_PLAN.md
  * §10 decision 7).
  */
 export function getLegacyAmpliHomeOAuthPath(): string {

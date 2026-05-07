@@ -298,7 +298,7 @@ export function readAmpliConfig(dir: string): AmpliConfigParseResult {
 /**
  * Write an AmpliConfig to the canonical binding path.
  *
- * Phase G-1 (FINAL_NEW_MIGRATION_PLAN.md §5): the legacy `ampli.json` mirror
+ * Phase G-1 (MIGRATION_PLAN.md §5): the legacy `ampli.json` mirror
  * write was removed. Reads from `ampli.json` still work via `readAmpliConfig`
  * for one minor cycle (per §10 decision 7) but nothing else writes the file.
  *

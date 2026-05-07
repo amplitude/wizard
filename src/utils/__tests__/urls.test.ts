@@ -135,7 +135,7 @@ describe('getLlmGatewayUrlFromHost', () => {
     );
   });
 
-  // ── WIZARD_ZONE precedence (FINAL_NEW_MIGRATION_PLAN.md §7.5) ──────────
+  // ── WIZARD_ZONE precedence (MIGRATION_PLAN.md §7.5) ──────────
   //
   // CI / harness path: an explicit zone selector that bypasses host-based
   // derivation. Lets the eval / bench harness target a specific gateway
