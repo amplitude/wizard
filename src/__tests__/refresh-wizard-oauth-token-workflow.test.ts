@@ -45,9 +45,14 @@ describe('refresh-wizard-oauth-token workflow', () => {
     expect(yaml).toMatch(/gh secret set WIZARD_OAUTH_TOKEN/);
     expect(yaml).toMatch(/gh secret set WIZARD_REFRESH_TOKEN/);
     expect(yaml).toMatch(/gh secret set WIZARD_EXPIRES_AT/);
-    // WIZARD_ZONE is read as a `vars.` value (set once via ci-bootstrap),
-    // not rotated by the cron — assert the input side instead.
-    expect(yaml).toMatch(/WIZARD_ZONE: \$\{\{ vars\.WIZARD_ZONE \}\}/);
+    // WIZARD_ZONE is read as a static input on every run (set once via
+    // ci-bootstrap, not rotated by the cron). Accept either `vars.` or
+    // `secrets.` — operators may store the zone as either depending on
+    // their org policy. Both behave identically at runtime; the wizard
+    // doesn't treat the value as sensitive (it's just `us` / `eu`).
+    expect(yaml).toMatch(
+      /WIZARD_ZONE: \$\{\{ (vars|secrets)\.WIZARD_ZONE \}\}/,
+    );
   });
 
   it('uses the dedicated PAT for secrets:write — GITHUB_TOKEN cannot rotate secrets', () => {
