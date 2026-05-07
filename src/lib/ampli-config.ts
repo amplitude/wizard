@@ -302,13 +302,66 @@ export function readAmpliConfig(dir: string): AmpliConfigParseResult {
  * write was removed. Reads from `ampli.json` still work via `readAmpliConfig`
  * for one minor cycle (per §10 decision 7) but nothing else writes the file.
  *
+ * Partial-binding guard: if a caller hands in a config that has `OrgId`
+ * set but `ProjectId` empty (or vice-versa) — which happens e.g. when
+ * AuthScreen's "create project" handler resolves an org before the user
+ * has picked a project — skip the write entirely. A
+ * `{OrgId: "21", ProjectId: "", Zone: "us"}` artifact on disk poisons the
+ * next run's credential resolution (the empty ProjectId looks deliberately
+ * bound, not "never set") and creates a `.amplitude/` directory in the
+ * user's repo even when setup never completed. Callers that legitimately
+ * want to clear auth fields go through `clearAuthFieldsInAmpliConfig`,
+ * which deletes both keys together.
+ *
  * @returns true if the canonical binding was written successfully.
  */
 export function writeAmpliConfig(dir: string, config: AmpliConfig): boolean {
+  // Normalize empty-string OrgId / ProjectId to undefined so a "start
+  // over" caller passing `{id: '', name: ''}` never persists empty IDs
+  // to disk. The downstream readers treat absent and empty-string the
+  // same way, but an explicit empty string in `project-binding.json`
+  // looks deliberately bound to a non-existent project on inspection
+  // and confuses both `/whoami` output and bug reports.
+  const normalized: AmpliConfig = { ...config };
+  if (typeof normalized.OrgId === 'string' && normalized.OrgId.length === 0) {
+    delete normalized.OrgId;
+  }
+  if (
+    typeof normalized.ProjectId === 'string' &&
+    normalized.ProjectId.length === 0
+  ) {
+    delete normalized.ProjectId;
+  }
+
+  // Reject partial bindings: either both org+project are present (real
+  // binding) or both are absent (cleared). An empty-string for one with a
+  // value for the other is a bug in the caller — log and no-op so the
+  // partial state never reaches disk. This protects against
+  // `{OrgId: "21", ProjectId: ""}` artifacts that poison the next run's
+  // credential resolution and create a `.amplitude/` directory in the
+  // user's repo even when setup never completed.
+  //
+  // Legacy `WorkspaceId` is accepted as the project token for callers
+  // that haven't yet migrated through `parseAmpliConfig` — the field is
+  // round-tripped to ProjectId on read, so a write carrying only
+  // WorkspaceId is functionally a project-bound write.
+  const orgIsSet = typeof normalized.OrgId === 'string';
+  const projectIsSet =
+    typeof normalized.ProjectId === 'string' ||
+    (typeof normalized.WorkspaceId === 'string' &&
+      normalized.WorkspaceId.length > 0);
+  if (orgIsSet !== projectIsSet) {
+    log.debug('writeAmpliConfig: skipping partial-binding write', {
+      'org id present': orgIsSet,
+      'project id present': projectIsSet,
+    });
+    return false;
+  }
+
   const bindingPath = getProjectBindingFile(dir);
   try {
     ensureDir(getProjectMetaDir(dir));
-    atomicWriteJSON(bindingPath, config, 0o644);
+    atomicWriteJSON(bindingPath, normalized, 0o644);
     return true;
   } catch (err) {
     log.warn('writeAmpliConfig: canonical binding write failed', {
