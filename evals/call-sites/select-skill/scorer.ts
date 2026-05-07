@@ -80,7 +80,7 @@ export const scorer: CallSiteScorer = {
     // phase+framework pair, missing/null is the right answer.
     const plausibleMatches = menu.filter((m) => {
       if (!m.id.startsWith(`${phase}/`)) return false;
-      if (framework && !m.id.endsWith(`/${framework}`)) return false;
+      if (framework && m.id.slice(phase.length + 1) !== framework) return false;
       return true;
     });
     const hasPlausibleMatch = plausibleMatches.length > 0;
