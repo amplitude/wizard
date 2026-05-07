@@ -69,6 +69,36 @@ describe('collapseSdkStreamClosedNoise', () => {
     ).toBeNull();
   });
 
+  it('preserves genuine errors that ride alongside SDK noise in the same chunk', () => {
+    // Regression: chunk-level collapse used to swallow co-batched
+    // genuine error lines. The line-level partition keeps them in
+    // `passthrough` so the caller can still log them.
+    const blob = `TypeError: cannot read properties of null
+error: Stream closed
+      at sendRequest (/$bunfs/root/src/entrypoints/cli.js:9212:133)
+      at next (1:11)
+RangeError: maximum call stack exceeded
+`;
+    const result = collapseSdkStreamClosedNoise(blob);
+    expect(result).not.toBeNull();
+    if (!result) return;
+    // SDK lines were collapsed.
+    expect(result.suppressedLines).toBe(3);
+    // Genuine errors survived in passthrough.
+    expect(result.passthrough).toContain('TypeError: cannot read properties');
+    expect(result.passthrough).toContain('RangeError: maximum call stack');
+    // Passthrough must NOT contain any SDK noise lines.
+    expect(result.passthrough).not.toContain('Stream closed');
+    expect(result.passthrough).not.toContain('cli.js:9212');
+  });
+
+  it('passthrough is empty when the chunk is pure SDK noise', () => {
+    const result = collapseSdkStreamClosedNoise(SAMPLE_BLOB);
+    expect(result).not.toBeNull();
+    if (!result) return;
+    expect(result.passthrough).toBe('');
+  });
+
   it('collapses the full SDK race blob to a single line', () => {
     const result = collapseSdkStreamClosedNoise(SAMPLE_BLOB);
     expect(result).not.toBeNull();

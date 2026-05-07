@@ -697,6 +697,38 @@ function detectSdkStreamClosedContext(
 }
 
 /**
+ * Per-line matchers for the SDK race noise. Mirrors
+ * `partitionHookBridgeRace` / `stripStreamEventNoise`: chunk-level
+ * matching would drop genuine errors that happen to ride alongside the
+ * SDK noise in a single batched stderr chunk, so we identify only the
+ * noise lines and let everything else pass through.
+ *
+ * - `Error: Stream closed` (the trigger line)
+ * - stack-frame lines pointing at `cli.js:9NNN` or naming `sendRequest`
+ * - `at next (1:11)` / `at <anonymous> ...` continuation frames
+ * - decompiled-source dump lines `9NNN | ...`
+ * - the `Error in hook callback hook_<n>:` originator line that
+ *   precedes the dump
+ */
+const SDK_STREAM_CLOSED_TRIGGER_LINE_RE =
+  /\b(?:error|Error):\s*Stream closed\b/;
+const SDK_STREAM_CLOSED_SDK_FRAME_RE =
+  /(?:cli\.js:9\d{3}|\bsendRequest\b|\btask_notification\b)/i;
+const SDK_STREAM_CLOSED_STACK_FRAME_RE =
+  /^\s*at\s+(?:[\w$<>.]+\s+\([^)]*cli\.js:\d+:\d+\)|<anonymous>\s+\([^)]*cli\.js:\d+:\d+\)|next\s+\(\d+:\d+\)|[\w$]+\s+\([^)]*cli\.js:\d+:\d+\))\s*$/;
+const SDK_STREAM_CLOSED_DECOMPILED_LINE_RE = /^\s*9\d{3}\s*\|/;
+const SDK_STREAM_CLOSED_HOOK_ORIGIN_RE = /^Error in hook callback\s+hook_\d+:/;
+
+function isSdkStreamClosedNoiseLine(line: string): boolean {
+  return (
+    SDK_STREAM_CLOSED_TRIGGER_LINE_RE.test(line) ||
+    SDK_STREAM_CLOSED_STACK_FRAME_RE.test(line) ||
+    SDK_STREAM_CLOSED_DECOMPILED_LINE_RE.test(line) ||
+    SDK_STREAM_CLOSED_HOOK_ORIGIN_RE.test(line)
+  );
+}
+
+/**
  * Detect (and collapse) a CLI-stderr block dominated by the SDK's
  * `task_notification` → `Stream closed` race (see `SDK_STREAM_CLOSED_RE`).
  * When matched, the multi-line stack-trace + decompiled-source dump is
@@ -708,6 +740,12 @@ function detectSdkStreamClosedContext(
  * error — the SDK-side throw is harmless to the run, the wizard
  * recovers transparently.
  *
+ * Splits line-by-line (NOT chunk-level) so a genuine error riding in
+ * the same batched stderr write as the SDK noise is preserved in the
+ * passthrough. The returned `collapsedLine` replaces only the noise
+ * lines; the caller is responsible for emitting the passthrough lines
+ * separately if any survive.
+ *
  * Returns `null` if the chunk does not contain the SDK race, so the
  * caller can fall through to its existing logging path unchanged.
  *
@@ -717,19 +755,52 @@ export function collapseSdkStreamClosedNoise(data: string): {
   collapsedLine: string;
   suppressedLines: number;
   context: 'task_notification' | 'unknown';
+  passthrough: string;
 } | null {
+  // Cheap chunk-level guard: must contain BOTH the trigger and an SDK
+  // signal somewhere in the chunk. Avoids walking lines for every
+  // unrelated stderr write.
   if (!SDK_STREAM_CLOSED_RE.test(data)) return null;
-  // Count the lines we're collapsing for observability — the suppressed
-  // count appears in the replacement line and lets us spot regressions
-  // (a sudden 10× increase signals upstream behavior change).
-  const lineCount = data.split('\n').filter((l) => l.length > 0).length;
+  if (data.length === 0) return null;
+
+  const hadTrailingNewline = data.endsWith('\n');
+  const lines = data.split('\n');
+  if (hadTrailingNewline) lines.pop();
+
+  let suppressed = 0;
+  let sawSdkFrame = false;
+  const kept: string[] = [];
+  for (const line of lines) {
+    if (isSdkStreamClosedNoiseLine(line)) {
+      suppressed++;
+      if (SDK_STREAM_CLOSED_SDK_FRAME_RE.test(line)) sawSdkFrame = true;
+      continue;
+    }
+    kept.push(line);
+  }
+
+  // Confirm the noise window itself contained an SDK frame — otherwise
+  // a bare "Error: Stream closed" line from userland accidentally
+  // caught by the cheap chunk-level RE should NOT be collapsed.
+  if (suppressed === 0 || !sawSdkFrame) return null;
+
   const context = detectSdkStreamClosedContext(data);
+  // Drop blank/whitespace-only lines from the passthrough — they're
+  // typically the formatting separators inside the SDK dump itself
+  // (between the decompiled-source block and the stack trace) and
+  // would otherwise leak through as a stray empty log line.
+  const meaningfulKept = kept.filter((l) => l.trim().length > 0);
+  const passthrough =
+    meaningfulKept.length === 0
+      ? ''
+      : meaningfulKept.join('\n') + (hadTrailingNewline ? '\n' : '');
   return {
-    collapsedLine: `[CLI stderr] SDK stream-closed race during ${context} (suppressed ${lineCount} stack-trace line${
-      lineCount === 1 ? '' : 's'
+    collapsedLine: `[CLI stderr] SDK stream-closed race during ${context} (suppressed ${suppressed} stack-trace line${
+      suppressed === 1 ? '' : 's'
     }; benign — run continues)`,
-    suppressedLines: lineCount,
+    suppressedLines: suppressed,
     context,
+    passthrough,
   };
 }
 
@@ -2977,9 +3048,15 @@ export async function runAgent(
                   }
                   return result;
                 },
+                // Pass the original input through as `updatedInput` —
+                // the SDK uses this as the actual arguments when it
+                // executes the tool. An empty object would strip
+                // `command` / `file_path` / etc. on the rare race where
+                // the SDK still dispatches a tool whose canUseTool was
+                // submitted before the stream closed.
                 {
                   behavior: 'allow',
-                  updatedInput: {},
+                  updatedInput: input as Record<string, unknown>,
                 } as ReturnType<typeof wizardCanUseTool>,
                 () => {
                   logToFile(
@@ -3036,6 +3113,18 @@ export async function runAgent(
                   });
                 } catch {
                   // Analytics must never break the stderr pipeline.
+                }
+                // Any genuine error lines that rode alongside the SDK
+                // noise in the same batched chunk survive in
+                // `passthrough` — emit them so we don't swallow real
+                // errors. (`partitionHookBridgeRace` /
+                // `stripStreamEventNoise` already enforce the same
+                // line-level invariant upstream.)
+                if (sdkRace.passthrough.length > 0) {
+                  logToFile('CLI stderr:', sdkRace.passthrough);
+                  if (options.debug) {
+                    debug('CLI stderr:', sdkRace.passthrough);
+                  }
                 }
                 return;
               }
