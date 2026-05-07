@@ -481,6 +481,25 @@ export function wizardCanUseTool(
     return { behavior: 'allow', updatedInput: input };
   }
 
+  // Newer Claude Agent SDK builds expose `run_in_background: true` as a
+  // first-class Bash tool input — the SDK forks the process in the
+  // background instead of the agent appending `&` to the command string.
+  // This is the SAFER variant of the same idiom (no shell metacharacter,
+  // no echo trailer with `$!`) and the commandment explicitly tells
+  // agents to background installs. When the agent picks this path, treat
+  // it as if it had emitted `<command> &` and run the same allow-list
+  // check we use for the explicit-`&` form.
+  if (
+    input.run_in_background === true &&
+    matchesAllowedPrefix(command) &&
+    !DANGEROUS_OPERATORS.test(command) &&
+    !/[|&]/.test(command.replace(/\s*\d*>&\d+\s*/g, ' '))
+  ) {
+    logToFile(`Allowing run_in_background package-manager command: ${command}`);
+    debug(`Allowing run_in_background package-manager command: ${command}`);
+    return { behavior: 'allow', updatedInput: input };
+  }
+
   // Block definitely dangerous operators: ; ` $ ( )
   if (DANGEROUS_OPERATORS.test(command)) {
     logToFile(`Denying bash command with dangerous operators: ${command}`);

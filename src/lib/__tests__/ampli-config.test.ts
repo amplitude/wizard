@@ -350,6 +350,103 @@ describe('readAmpliConfig + writeAmpliConfig round-trip', () => {
   });
 });
 
+// ── writeAmpliConfig partial-binding guard (#578 regression) ─────────────────
+
+describe('writeAmpliConfig partial-binding guard', () => {
+  let tmpDir: string;
+
+  beforeEach(() => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ampli-config-partial-'));
+  });
+
+  afterEach(() => {
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('refuses to persist {OrgId: "21", ProjectId: ""} (the bug 2 shape)', () => {
+    // Regression: AuthScreen's "create project" handler used to call
+    // setOrgAndProject with an org but an empty project, which wrote
+    // `{OrgId: "21", ProjectId: "", Zone: "us"}` to project-binding.json.
+    // The partial state poisoned the next run's credential resolution.
+    const ok = writeAmpliConfig(tmpDir, {
+      OrgId: '21',
+      ProjectId: '',
+      Zone: 'us',
+    });
+    expect(ok).toBe(false);
+    expect(fs.existsSync(getProjectBindingFile(tmpDir))).toBe(false);
+  });
+
+  it('refuses to persist {OrgId: "", ProjectId: "p1"} (inverse partial)', () => {
+    const ok = writeAmpliConfig(tmpDir, {
+      OrgId: '',
+      ProjectId: 'p1',
+      Zone: 'us',
+    });
+    expect(ok).toBe(false);
+    expect(fs.existsSync(getProjectBindingFile(tmpDir))).toBe(false);
+  });
+
+  it('refuses to persist OrgId without ProjectId (undefined variant)', () => {
+    // Same shape `wizard-abort.ts` could produce when only orgId is in
+    // setupComplete.amplitude.
+    const ok = writeAmpliConfig(tmpDir, {
+      OrgId: '21',
+      Zone: 'us',
+    });
+    expect(ok).toBe(false);
+    expect(fs.existsSync(getProjectBindingFile(tmpDir))).toBe(false);
+  });
+
+  it('persists when both OrgId and ProjectId are set (happy path)', () => {
+    const ok = writeAmpliConfig(tmpDir, {
+      OrgId: '21',
+      ProjectId: 'p1',
+      Zone: 'us',
+    });
+    expect(ok).toBe(true);
+    const json = JSON.parse(
+      fs.readFileSync(getProjectBindingFile(tmpDir), 'utf-8'),
+    ) as Record<string, unknown>;
+    expect(json.OrgId).toBe('21');
+    expect(json.ProjectId).toBe('p1');
+  });
+
+  it('persists when neither OrgId nor ProjectId is set (cleared binding)', () => {
+    // Happens after `clearAuthFieldsInAmpliConfig` — both are deleted but
+    // SourceId / other tracking-plan fields remain.
+    const ok = writeAmpliConfig(tmpDir, {
+      SourceId: 's1',
+      Branch: 'main',
+    });
+    expect(ok).toBe(true);
+    const json = JSON.parse(
+      fs.readFileSync(getProjectBindingFile(tmpDir), 'utf-8'),
+    ) as Record<string, unknown>;
+    expect(json.SourceId).toBe('s1');
+    expect(json.OrgId).toBeUndefined();
+    expect(json.ProjectId).toBeUndefined();
+  });
+
+  it('normalizes empty-string OrgId/ProjectId to undefined on the wire', () => {
+    // "Start over" callers pass {id: '', name: ''} for both. Persist it
+    // (both empty → balanced, allowed) but strip the empty strings so
+    // the on-disk JSON reads as cleared, not "deliberately bound to ''".
+    const ok = writeAmpliConfig(tmpDir, {
+      OrgId: '',
+      ProjectId: '',
+      Zone: 'us',
+    });
+    expect(ok).toBe(true);
+    const json = JSON.parse(
+      fs.readFileSync(getProjectBindingFile(tmpDir), 'utf-8'),
+    ) as Record<string, unknown>;
+    expect(json.OrgId).toBeUndefined();
+    expect(json.ProjectId).toBeUndefined();
+    expect(json.Zone).toBe('us');
+  });
+});
+
 // ── clearAuthFieldsInAmpliConfig ──────────────────────────────────────────────
 
 describe('clearAuthFieldsInAmpliConfig', () => {

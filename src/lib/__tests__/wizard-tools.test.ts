@@ -753,6 +753,27 @@ describe('restoreSetupReportIfMissing', () => {
       fs.existsSync(path.join(tmpDir, PREVIOUS_SETUP_REPORT_FILENAME)),
     ).toBe(false);
   });
+
+  it('cancel/failure on a fresh repo leaves canonical absent (#578 regression)', () => {
+    // Bug 3: a cancelled run on a fresh repo (no prior report) must NOT
+    // write a stub `amplitude-setup-report.md` to the user's project root.
+    // Before #578's fix the agent-runner registered the fallback writer as
+    // a registerCleanup, so wizardAbort() fired it on every cancel/error
+    // and polluted clean working trees. The fix removed that registration
+    // — only the priority `restoreSetupReportIfMissing` runs on failure.
+    //
+    // This test simulates the cancel cleanup queue (priority cleanup =
+    // restore; no fallback registration) and asserts the canonical path
+    // stays absent when there was nothing to restore.
+    expect(fs.readdirSync(tmpDir)).toHaveLength(0);
+    archiveSetupReportFile(tmpDir); // no-op: nothing to archive
+    // run cancels here — only restore fires (the fix); no fallback.
+    restoreSetupReportIfMissing(tmpDir);
+    expect(fs.readdirSync(tmpDir)).toHaveLength(0);
+    expect(fs.existsSync(path.join(tmpDir, 'amplitude-setup-report.md'))).toBe(
+      false,
+    );
+  });
 });
 
 // ---------------------------------------------------------------------------

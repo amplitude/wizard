@@ -399,11 +399,18 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
     // Pre-resolve the org: during the project picker, session.selectedOrgId
     // may still be null even though effectiveOrg is known. Commit it now so
     // CreateProjectScreen has the orgId it needs to POST /projects.
+    //
+    // persist:false is critical when the user hasn't picked a project yet —
+    // writeAmpliConfig now refuses partial bindings (org without project, or
+    // vice-versa) so a persisting call here would silently no-op, but the
+    // explicit flag documents the intent and avoids relying on the guard.
     if (effectiveOrg && !session.selectedOrgId) {
+      const persist = Boolean(effectiveProject);
       store.setOrgAndProject(
         effectiveOrg,
         effectiveProject ?? { id: '', name: '' },
         session.installDir,
+        { persist },
       );
     }
     analytics.wizardCapture('create project link opened', {
