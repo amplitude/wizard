@@ -605,12 +605,12 @@ describe('WizardRouter', () => {
       expect(new WizardRouter().resolve(ref.session)).toBe(Screen.SignupEmail);
     });
 
-    it('Esc on Auth in the success path walks back to SignupFullName (when name was collected)', () => {
-      // Post-success, SignupFullName.revert IS meaningful (signupFullName
-      // was actually set by the user typing it). Walk lands here. This
-      // is the known leaky case — the server account exists and re-typing
-      // the name doesn't undo it — but at least back-nav is responsive.
-      // Tracked as a separate concern.
+    it('Esc on Auth in the direct-signup success path is walled', () => {
+      // Once signupAuth lands, the server account exists — there's no
+      // honest take-back. The signup-ceremony entries' isWall predicate
+      // (`signupCommittedWall`) gates on `signupAuth !== null`, so the
+      // back-walk hits a hard wall at SignupFullName and returns false.
+      // The user must continue forward (pick org/project) or `/exit`.
       const router = new WizardRouter();
       const session = signupBase({
         signupEmail: 'ada@example.com',
@@ -628,13 +628,15 @@ describe('WizardRouter', () => {
       });
       expect(router.resolve(session)).toBe(Screen.Auth);
 
+      expect(router.canGoBack(session)).toBe(false);
+
       const { stub, ref } = makeStubStore(session);
       const ok = router.goBack(ref.session, stub as never);
-      expect(ok).toBe(true);
-      expect(ref.session.signupFullName).toBeNull();
-      expect(new WizardRouter().resolve(ref.session)).toBe(
-        Screen.SignupFullName,
-      );
+      expect(ok).toBe(false);
+      // Wall is non-mutating: ceremony state is untouched.
+      expect(ref.session.signupFullName).toBe('Ada Lovelace');
+      expect(ref.session.signupAuth).not.toBeNull();
+      expect(new WizardRouter().resolve(ref.session)).toBe(Screen.Auth);
     });
   });
 

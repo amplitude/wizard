@@ -90,6 +90,25 @@ export interface FlowEntry {
 }
 
 /**
+ * State-driven wall for the signup-ceremony entries.
+ *
+ * Once the user has committed to direct signup — either the POST is
+ * mid-flight or it landed successfully — back-nav out of the ceremony
+ * is a no-op trapdoor: the server-side account exists (success) or
+ * could land any moment (in-flight) on a session that's been wiped.
+ *
+ * `signupAuth !== null` covers the "direct-signup success" case. The
+ * `requires_redirect` arm (browser-OAuth fallback) is intentionally NOT
+ * covered here — tracked separately as BA-122.
+ *
+ * `signupInFlight` covers the in-flight POST window, written
+ * exclusively by `WizardStore.runSignupAttempt`'s try/finally.
+ */
+function signupCommittedWall(s: WizardSession): boolean {
+  return s.signupAuth !== null || s.signupInFlight;
+}
+
+/**
  * Check if the SetupScreen is needed (unresolved framework questions).
  */
 function needsSetup(session: WizardSession): boolean {
@@ -144,6 +163,7 @@ export const FLOWS: Record<Flow, FlowEntry[]> = {
         if (!isCreateAccountOnboarding(store.session)) return false;
         store.setSignupEmail(null);
       },
+      isWall: signupCommittedWall,
     },
     // 2b. Signing up — POSTs the agentic provisioning request and writes
     //     the response into session state. Show predicate gates on email
@@ -189,6 +209,7 @@ export const FLOWS: Record<Flow, FlowEntry[]> = {
       // resets the ceremony so the next forward pass fires a fresh
       // probe.
       revert: () => false,
+      isWall: signupCommittedWall,
     },
     // 2c. Terms of Service — only renders AFTER the server confirmed
     //     agentic signup is happening (signupRequiredFields was set).
@@ -224,6 +245,7 @@ export const FLOWS: Record<Flow, FlowEntry[]> = {
         if (store.session.signupAbandoned) return false;
         store.resetToS();
       },
+      isWall: signupCommittedWall,
     },
     // 2d. Signup full name — renders only when the server included
     //     'full_name' in `required` AND the session doesn't already have
@@ -262,6 +284,7 @@ export const FLOWS: Record<Flow, FlowEntry[]> = {
         if (store.session.signupAbandoned) return false;
         store.setSignupFullName(null);
       },
+      isWall: signupCommittedWall,
     },
     // 3. Authenticate (SUSI for new users, silent login check for returning users).
     //    Skipped on error so auth-failure runs route directly to Outro.
