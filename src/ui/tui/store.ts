@@ -716,11 +716,6 @@ export class WizardStore {
     this.emitChange();
   }
 
-  markSignupTokensObtained(): void {
-    this.$session.setKey('signupTokensObtained', true);
-    this.emitChange();
-  }
-
   acceptTermsOfService(): void {
     this.$session.setKey('tosAccepted', true);
     analytics.wizardCapture('terms of service accepted');
@@ -740,6 +735,22 @@ export class WizardStore {
 
   setSignupAuth(auth: WizardSession['signupAuth']): void {
     this.$session.setKey('signupAuth', auth);
+    // `signupTokensObtained` is folded in here as a single logical
+    // "ceremony settled successfully" event. The TUI auth-task gate
+    // (`isAuthTaskGateReady`) releases on `signupAuth !== null`; the
+    // post-gate hydration branch in `default.ts` reads
+    // `signupTokensObtained` to decide whether to pull tokens from
+    // disk vs. open browser OAuth. Both fields MUST land in the same
+    // synchronous block — otherwise the gate-listener's microtask
+    // continuation could fire between the two writes and read a
+    // stale `signupTokensObtained=false`, then open spurious browser
+    // OAuth even though the tokens are valid. Folding the write in
+    // here removes the load-bearing event-loop ordering that the
+    // prior `setSignupAuth → setSignupMagicLinkUrl →
+    // markSignupTokensObtained` chain quietly relied on.
+    if (auth !== null) {
+      this.$session.setKey('signupTokensObtained', true);
+    }
     this.emitChange();
   }
 

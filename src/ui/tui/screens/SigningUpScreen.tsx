@@ -87,6 +87,11 @@ export const SigningUpScreen = ({ store }: SigningUpScreenProps) => {
       // error makes the contributor pick a behavior on purpose.
       switch (result.kind) {
         case 'success':
+          // `setSignupAuth` folds in `signupTokensObtained=true`
+          // atomically — the TUI auth-task gate releases on
+          // `signupAuth` and reads `signupTokensObtained`; both must
+          // land together so the gate-listener doesn't see a half-set
+          // state and open browser OAuth despite valid tokens.
           store.setSignupAuth({
             idToken: result.idToken,
             accessToken: result.accessToken,
@@ -97,11 +102,9 @@ export const SigningUpScreen = ({ store }: SigningUpScreenProps) => {
           });
           // Mirror the dashboard magic link onto the screen-managed slot
           // for parity with the legacy classic flow's outro display.
+          // Order doesn't matter here — `signupMagicLinkUrl` isn't
+          // gate-relevant.
           store.setSignupMagicLinkUrl(result.dashboardUrl);
-          // Mark signup tokens obtained so the post-TUI auth task hydrates
-          // from disk instead of opening browser OAuth (matches the old
-          // EmailCaptureScreen contract).
-          store.markSignupTokensObtained();
           return;
         case 'needs_information': {
           // Defensive guard against a stuck-spinner deadlock: if the

@@ -2156,6 +2156,40 @@ describe('WizardStore', () => {
         expect.anything(),
       );
     });
+
+    it('setSignupAuth(non-null) folds in signupTokensObtained=true atomically', () => {
+      // The auth-task gate releases on `signupAuth !== null` and the
+      // post-gate hydration branch reads `signupTokensObtained`. If the
+      // two writes were separate calls, a subscriber-fired microtask
+      // could observe `signupAuth` set with `signupTokensObtained` still
+      // false and route the user to browser OAuth despite valid tokens.
+      // This test pins the atomicity contract.
+      const store = createStore();
+      expect(store.session.signupTokensObtained).toBe(false);
+
+      store.setSignupAuth({
+        idToken: 'i',
+        accessToken: 'a',
+        refreshToken: 'r',
+        zone: 'us',
+        userInfo: null,
+        dashboardUrl: null,
+      });
+
+      expect(store.session.signupAuth).not.toBeNull();
+      expect(store.session.signupTokensObtained).toBe(true);
+    });
+
+    it('setSignupAuth(null) does NOT set signupTokensObtained', () => {
+      // Clearing auth (e.g. during a ceremony reset) must not flip the
+      // tokens-obtained gate true — only a successful settle does.
+      const store = createStore();
+
+      store.setSignupAuth(null);
+
+      expect(store.session.signupAuth).toBeNull();
+      expect(store.session.signupTokensObtained).toBe(false);
+    });
   });
 
   // ── Inline directory change ──────────────────────────────────────
