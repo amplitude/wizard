@@ -41,10 +41,12 @@ export const SignupFullNameScreen = ({ store }: SignupFullNameScreenProps) => {
   );
   useScreenHints(hints);
 
-  // Esc rewinds to the email screen so the user can correct a typo.
-  // `setSignupEmail(null)` also resets the ceremony state internally,
-  // so the SigningUpScreen will fire a fresh probe rather than
-  // re-rendering this screen with stale required-fields state.
+  // Esc clears the email entirely (not just rewinds — the prior email
+  // is forgotten) and resets the ceremony state via `setSignupEmail`'s
+  // internal `_resetCeremonyKeys` call. The user lands back on
+  // SignupEmailScreen with an empty input; on resubmit, SigningUpScreen
+  // fires a fresh probe rather than re-rendering this screen with
+  // stale required-fields state.
   useScreenInput((_input, key) => {
     if (!key.escape) return;
     analytics.wizardCapture('signup full name screen back');

@@ -40,8 +40,14 @@ describe('isAuthTaskGateReady', () => {
 
   // Regression for the create-account onboarding path: the auth task used
   // to fire as soon as Region was picked, popping the OAuth browser before
-  // the user could fill EmailCapture / accept ToS.
-  it('blocks create-account runs until ToS is accepted', () => {
+  // the user could fill EmailCapture / accept ToS. Note that the *gate
+  // itself* no longer checks `tosAccepted` — pre-PR-539 it held on
+  // `emailCaptureComplete && !tosAccepted`, but the rewire moved the
+  // gating predicate to "signup ceremony has settled"
+  // (`signupAuth !== null || signupAbandoned`). These two cases pin that
+  // various pre-ceremony `tosAccepted` values still hold the gate via the
+  // ceremony-unsettled path, not via a ToS check.
+  it('blocks create-account runs with tosAccepted=null (ceremony unsettled)', () => {
     expect(
       isAuthTaskGateReady(
         s({
@@ -54,13 +60,7 @@ describe('isAuthTaskGateReady', () => {
     ).toBe(false);
   });
 
-  it('blocks create-account runs while ToS is unaccepted', () => {
-    // Pre-PR-539 the gate held on `emailCaptureComplete && !tosAccepted`.
-    // The flow rewire dropped `emailCaptureComplete` (the new ceremony
-    // gates on `signupEmail !== null` directly), so this case is now
-    // covered by the "ceremony in flight" check below — but the ToS-
-    // unaccepted path is still meaningful in its own right when the
-    // user enters the create-account flow without `--accept-tos`.
+  it('blocks create-account runs with tosAccepted=false (ceremony unsettled)', () => {
     expect(
       isAuthTaskGateReady(
         s({

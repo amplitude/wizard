@@ -740,13 +740,14 @@ export const defaultCommand: CommandModule = {
               );
               const s = tui.store.session;
               if (s.signupTokensObtained) {
-                // SigningUpScreen settled the ceremony successfully and
-                // called `replaceStoredUser` + `markSignupTokensObtained`.
-                // Hydrate `auth` from disk here so
-                // `performAmplitudeAuth({ forceFresh })` below doesn't run
-                // on a fresh install dir and skip `~/.ampli.json` — that
-                // would open a spurious browser OAuth even though we
-                // already have valid tokens.
+                // SigningUpScreen settled the ceremony successfully:
+                // `performSignupOrAuth` called `replaceStoredUser`, and
+                // `setSignupAuth(non-null)` folded in
+                // `signupTokensObtained=true` atomically. Hydrate `auth`
+                // from disk here so `performAmplitudeAuth({ forceFresh })`
+                // below doesn't run on a fresh install dir and skip
+                // `~/.ampli.json` — that would open a spurious browser
+                // OAuth even though we already have valid tokens.
                 signupTokensObtained = true;
                 const fromDisk = getStoredToken(undefined, zone);
                 if (fromDisk) {

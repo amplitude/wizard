@@ -167,6 +167,14 @@ export const FLOWS: Record<Flow, FlowEntry[]> = {
         !isCreateAccountOnboarding(s) ||
         s.signupAuth !== null ||
         s.signupAbandoned,
+      // SigningUp has no in-band "undo": the in-flight POST to the
+      // provisioning endpoint may have already created (or abandoned)
+      // the account on the server. Returning false makes back-nav walk
+      // past this entry transparently — back-nav lands on the screen
+      // *before* SigningUp (typically SignupFullName or SignupEmail),
+      // and clearing those inputs via their own revert handlers is what
+      // resets the ceremony so the next forward pass fires a fresh
+      // probe.
       revert: () => false,
     },
     // 2c. Terms of Service — only renders AFTER the server confirmed

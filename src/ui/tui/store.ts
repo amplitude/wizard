@@ -683,7 +683,9 @@ export class WizardStore {
     // `true` after a ceremony reset, the next forward pass would
     // silently re-use the prior user's tokens from `~/.ampli.json`
     // even though the user explicitly backed out and is starting
-    // fresh. Reset alongside the rest of the ceremony state.
+    // fresh. Reset alongside the rest of the ceremony state. (Note:
+    // the forward-direction write is folded into `setSignupAuth`, not
+    // a separate setter — see that method for the atomicity rationale.)
     this.$session.setKey('signupTokensObtained', false);
   }
 
