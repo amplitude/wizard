@@ -310,7 +310,7 @@ function median(nums) {
  * env vars to test alternative aliases.
  */
 export const MODEL_ALIASES = {
-  haiku: 'claude-haiku-4-5-20251001',
+  haiku: 'claude-haiku-4-5',
   sonnet: 'claude-sonnet-4-6',
 };
 
