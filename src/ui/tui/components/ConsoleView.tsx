@@ -296,6 +296,19 @@ function executeCommand(raw: string, store: WizardStore): string | void {
   }
 }
 
+/**
+ * Maximum number of proposed events to render inline in the event-plan
+ * prompt panel. The full list is still available on the Events tab via
+ * `store.eventPlan` — capping the inline preview keeps the action hint
+ * (`[Y] approve [S] skip [F] give feedback`) on screen even when the
+ * agent proposes 13–15 events on a 24–30 row terminal. The original
+ * uncapped layout silently clipped the hint off the bottom and left
+ * the user with no way to act, hanging the run on
+ * `await getUI().promptEventPlan(events)` forever (P0 — see
+ * `event-plan-render.test.tsx`).
+ */
+const MAX_VISIBLE_PROMPT_EVENTS = 8;
+
 interface ConsoleViewProps {
   store: WizardStore;
   width: number;
@@ -582,35 +595,80 @@ export const ConsoleView = ({
                 onSelect={(v) => store.resolvePrompt(v as string)}
               />
             ) : (
-              <Box flexDirection="column" gap={1}>
-                <Text color={Colors.muted}>Suggested events for your app:</Text>
-                <Text color={Colors.heading} bold>
-                  Instrumentation Plan
-                </Text>
-                {pendingPrompt.events.map((e, i) => (
-                  <Text key={e.name || i} wrap="wrap">
-                    <Text color={Colors.accent} bold>
-                      {Icons.bullet} {e.name}
-                    </Text>
-                    {e.description ? (
-                      <Text color={Colors.secondary}> — {e.description}</Text>
-                    ) : null}
-                  </Text>
-                ))}
-                {planInputMode === 'feedback' ? (
-                  <Box gap={1}>
-                    <Text color={Colors.muted}>Feedback: </Text>
-                    <Text>
-                      {planFeedbackText}
-                      {planCursorVisible ? '▎' : ' '}
-                    </Text>
-                    <Text color={Colors.muted}>[Enter] send [Esc] cancel</Text>
-                  </Box>
-                ) : (
+              // Layout invariant: the [Y]/[S]/[F] action hint MUST stay
+              // on screen no matter how many events the agent proposes.
+              // Original layout was a single flex column with `gap={1}`
+              // and one item per event — Yoga rendered the events at
+              // their natural height, the parent's `overflow="hidden"`
+              // clipped the action line off the bottom, and on real
+              // 24–30 row terminals with 13–15 events the user saw a
+              // truncated wall of text with no way to act. The agent
+              // then waited forever on `await promptEventPlan(events)`.
+              //
+              // Fix: separate the panel into a header (fixed), a
+              // shrinkable scrolling-style events list, and a fixed
+              // action hint so the bottom row is never displaced. The
+              // events list itself caps at MAX_VISIBLE_PROMPT_EVENTS
+              // with a "+N more" tail so a runaway proposal can't
+              // crowd the rest of the panel either; the full list is
+              // still browsable on the Events tab via store.eventPlan.
+              <Box flexDirection="column" flexGrow={1}>
+                <Box flexDirection="column" flexShrink={0}>
                   <Text color={Colors.muted}>
-                    [Y] approve [S] skip [F] give feedback
+                    Suggested events for your app:
                   </Text>
-                )}
+                  <Text color={Colors.heading} bold>
+                    Instrumentation Plan
+                  </Text>
+                  <Box height={1} />
+                </Box>
+                <Box
+                  flexDirection="column"
+                  flexGrow={1}
+                  flexShrink={1}
+                  overflow="hidden"
+                >
+                  {pendingPrompt.events
+                    .slice(0, MAX_VISIBLE_PROMPT_EVENTS)
+                    .map((e, i) => (
+                      <Text key={e.name || i} wrap="truncate-end">
+                        <Text color={Colors.accent} bold>
+                          {Icons.bullet} {e.name}
+                        </Text>
+                        {e.description ? (
+                          <Text color={Colors.secondary}>
+                            {' '}
+                            — {e.description}
+                          </Text>
+                        ) : null}
+                      </Text>
+                    ))}
+                  {pendingPrompt.events.length > MAX_VISIBLE_PROMPT_EVENTS && (
+                    <Text color={Colors.muted}>
+                      … +
+                      {pendingPrompt.events.length - MAX_VISIBLE_PROMPT_EVENTS}{' '}
+                      more (switch to the Events tab to see the full list)
+                    </Text>
+                  )}
+                </Box>
+                <Box flexDirection="column" flexShrink={0} marginTop={1}>
+                  {planInputMode === 'feedback' ? (
+                    <Box gap={1}>
+                      <Text color={Colors.muted}>Feedback: </Text>
+                      <Text>
+                        {planFeedbackText}
+                        {planCursorVisible ? '▎' : ' '}
+                      </Text>
+                      <Text color={Colors.muted}>
+                        [Enter] send [Esc] cancel
+                      </Text>
+                    </Box>
+                  ) : (
+                    <Text color={Colors.muted}>
+                      [Y] approve [S] skip [F] give feedback
+                    </Text>
+                  )}
+                </Box>
               </Box>
             )}
             {pendingPrompt.kind !== 'event-plan' && (
@@ -746,8 +804,8 @@ export const ConsoleView = ({
                   ? eventPlanPromptShowing
                     ? 'Finish the plan above ([Y]/[S]/[F]) — / and Tab resume after.'
                     : visibleHistory.length > 0
-                      ? 'Press / for commands · Tab to ask · Esc to hide answer'
-                      : 'Press / for commands or Tab to ask a question'
+                    ? 'Press / for commands · Tab to ask · Esc to hide answer'
+                    : 'Press / for commands or Tab to ask a question'
                   : 'Press / for commands'}
               </Text>
             )}

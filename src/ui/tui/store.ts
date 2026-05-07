@@ -44,6 +44,7 @@ import {
 } from './router.js';
 import { analytics, sessionPropertiesCompact } from '../../utils/analytics.js';
 import { clearApiKey } from '../../utils/api-key-store.js';
+import { logToFile } from '../../utils/debug.js';
 import {
   CANONICAL_STEPS,
   matchCanonicalStep,
@@ -939,6 +940,15 @@ export class WizardStore {
 
   /** Show an event-plan confirmation. Resolves when the user approves, skips, or gives feedback. */
   promptEventPlan(events: PlannedEvent[]): Promise<EventPlanDecision> {
+    // Diagnostic breadcrumb: when this fires, the wizard-tools server is
+    // already blocked on `await getUI().promptEventPlan(events)`. If the
+    // user reports the panel never appears, the corresponding "ConsoleView
+    // rendering prompt" line confirms the React tree saw the update — the
+    // gap between this log and the user's response time is exactly the
+    // window the bug from PR #621 lives in.
+    logToFile(
+      `[event-plan] promptEventPlan called: ${events.length} events, currentScreen=${this.currentScreen}`,
+    );
     return new Promise((resolve) => {
       this.$pendingPrompt.set({ kind: 'event-plan', events, resolve });
       this.$version.set(this.$version.get() + 1);
@@ -953,6 +963,11 @@ export class WizardStore {
       'prompt kind': 'event-plan',
       response: typeof decision === 'object' ? 'feedback' : String(decision),
     });
+    logToFile(
+      `[event-plan] resolveEventPlan: decision=${
+        typeof decision === 'object' ? 'feedback' : decision
+      }`,
+    );
     this.$pendingPrompt.set(null);
     this.$version.set(this.$version.get() + 1);
     prompt.resolve(decision);
