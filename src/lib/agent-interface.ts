@@ -210,6 +210,33 @@ function getClaudeCodeExecutablePath(): string {
 
 type McpServersConfig = Record<string, unknown>;
 
+/**
+ * Mutate the Amplitude MCP server entry in an `McpServersConfig` so its
+ * `Authorization` header reflects a freshly-rotated bearer. The SDK reads
+ * `mcpServers` once per `query()` call and serializes it into the spawned
+ * subprocess's CLI args; without re-stamping the header here, a token
+ * rotation between retries leaves the subprocess pinned to the OLD bearer
+ * and every Amplitude MCP request 401s until reconnection.
+ *
+ * Idempotent and defensive: silently no-ops when the entry doesn't exist
+ * (e.g. `skipAmplitudeMcp` runs) or the shape isn't what we expect (custom
+ * test mocks, future SDK config changes). Exported only for unit testing.
+ *
+ * Returns true when a header was actually rotated — useful for tests and
+ * for asserting telemetry-worthy events.
+ */
+export function updateAmplitudeMcpBearer(
+  mcpServers: McpServersConfig,
+  newToken: string,
+): boolean {
+  const entry = mcpServers['amplitude-wizard'];
+  if (!entry || typeof entry !== 'object') return false;
+  const headers = (entry as { headers?: Record<string, unknown> }).headers;
+  if (!headers || typeof headers !== 'object') return false;
+  headers.Authorization = `Bearer ${newToken}`;
+  return true;
+}
+
 export const AgentSignals = {
   /**
    * Signal emitted when the agent provides a remark about its run.
@@ -2402,6 +2429,17 @@ export async function runAgent(
         // `process.env` on spawn, so mutating those there is sufficient
         // to make the fresh token take effect on the next `query()`
         // call below.
+        //
+        // CRITICAL: also rotate the bearer in
+        // `agentConfig.mcpServers['amplitude-wizard'].headers` — the SDK
+        // serializes the mcpServers config (built once in
+        // `initializeAgent`) and hands it to the spawned subprocess,
+        // which uses those exact headers on every request to the
+        // Amplitude MCP endpoint. Without rotating it here, the
+        // subprocess keeps sending the OLD `Authorization: Bearer
+        // <stale>` header even though the env vars are fresh, and every
+        // Amplitude MCP call 401s until the agent reconnects. Bugbot
+        // catch on PR #608.
         try {
           const { refreshTokenIfStale } = await import('./agent-runner.js');
           const currentToken = process.env.ANTHROPIC_AUTH_TOKEN ?? '';
@@ -2413,6 +2451,7 @@ export async function runAgent(
             if (refreshed && refreshed !== currentToken) {
               process.env.ANTHROPIC_AUTH_TOKEN = refreshed;
               process.env.CLAUDE_CODE_OAUTH_TOKEN = refreshed;
+              updateAmplitudeMcpBearer(agentConfig.mcpServers, refreshed);
               logToFile(
                 `Inter-attempt OAuth token rotated before attempt ${
                   attempt + 1
