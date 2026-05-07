@@ -573,6 +573,38 @@ describe('WizardRouter', () => {
       expect(new WizardRouter().resolve(ref.session)).toBe(Screen.SignupEmail);
     });
 
+    it('Esc on Auth after second-POST abandonment walks all the way to SignupEmail', () => {
+      // Edge case: second POST errored AFTER ToS + name collection, so
+      // signupAbandoned=true while signupRequiredFields, tosAccepted,
+      // and signupFullName are all populated. Without the abandonment
+      // gate on SignupFullName.revert / ToS.revert, back-nav would land
+      // on SignupFullName, the user types a new name, the next forward
+      // pass skips SigningUp (its show predicate gates on
+      // !signupAbandoned), and the user is dumped back on Auth without
+      // any retry — a confusing dead-end. The reverts must walk past on
+      // signupAbandoned so the back-walk reaches SignupEmail.revert,
+      // which clears the whole ceremony via _resetCeremonyKeys
+      // (resetting signupAbandoned alongside signupEmail).
+      const router = new WizardRouter();
+      const session = signupBase({
+        signupEmail: 'ada@example.com',
+        signupRequiredFields: ['full_name'],
+        tosAccepted: true,
+        signupFullName: 'Ada Lovelace',
+        signupAbandoned: true,
+      });
+      expect(router.resolve(session)).toBe(Screen.Auth);
+
+      const { stub, ref } = makeStubStore(session);
+      const ok = router.goBack(ref.session, stub as never);
+      expect(ok).toBe(true);
+      expect(ref.session.signupEmail).toBeNull();
+      expect(ref.session.signupAbandoned).toBe(false);
+      expect(ref.session.signupFullName).toBeNull();
+      expect(ref.session.tosAccepted).toBeNull();
+      expect(new WizardRouter().resolve(ref.session)).toBe(Screen.SignupEmail);
+    });
+
     it('Esc on Auth in the success path walks back to SignupFullName (when name was collected)', () => {
       // Post-success, SignupFullName.revert IS meaningful (signupFullName
       // was actually set by the user typing it). Walk lands here. This
@@ -999,10 +1031,14 @@ describe('WizardRouter', () => {
       resetDataIngestion: () => mutate({ dataIngestionConfirmed: false }),
       resetSlack: () => mutate({ slackComplete: false, slackOutcome: null }),
       resetToS: () => mutate({ tosAccepted: null }),
-      // Mirror the production store's setSignupEmail(null) ceremony reset
-      // so the stub stays faithful to the back-nav contract: clearing
-      // email also wipes signupRequiredFields / signupAuth /
-      // signupAbandoned.
+      // Mirror the production store's setSignupEmail(null) ceremony
+      // reset so the stub stays faithful to the back-nav contract:
+      // clearing email funnels through _resetCeremonyKeys, which wipes
+      // every ceremony field at once (signupRequiredFields, signupAuth,
+      // signupAbandoned, signupFullName, tosAccepted, signupTokensObtained).
+      // If a new ceremony field is added to _resetCeremonyKeys, mirror
+      // it here too — the stub being out of sync would silently mask
+      // back-nav bugs.
       setSignupEmail: (email: string | null) =>
         mutate(
           email === null
@@ -1011,6 +1047,9 @@ describe('WizardRouter', () => {
                 signupRequiredFields: null,
                 signupAuth: null,
                 signupAbandoned: false,
+                signupFullName: null,
+                tosAccepted: null,
+                signupTokensObtained: false,
               }
             : { signupEmail: email },
         ),

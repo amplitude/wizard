@@ -201,6 +201,14 @@ export const FLOWS: Record<Flow, FlowEntry[]> = {
         if (!isCreateAccountOnboarding(store.session)) return false;
         if (store.session.signupRequiredFields === null) return false;
         if (store.session.tosAccepted === null) return false;
+        // Walk past on abandonment: clearing tosAccepted alone leaves
+        // signupAbandoned=true, which still gates SigningUp.show off.
+        // The user would re-accept ToS and land back on Auth without
+        // any retry — a dead-end. Letting back-nav continue to
+        // SignupEmail.revert clears the whole ceremony via
+        // _resetCeremonyKeys (which resets signupAbandoned), giving
+        // the user a clean restart.
+        if (store.session.signupAbandoned) return false;
         store.resetToS();
       },
     },
@@ -231,6 +239,14 @@ export const FLOWS: Record<Flow, FlowEntry[]> = {
         if (!store.session.signupRequiredFields.includes('full_name'))
           return false;
         if (store.session.signupFullName === null) return false;
+        // Walk past on abandonment: clearing signupFullName alone
+        // leaves signupAbandoned=true, so the next forward pass
+        // skips SigningUp (its show predicate gates on
+        // !signupAbandoned) and lands the user back on Auth without
+        // re-firing the POST. Continue back-walking to SignupEmail's
+        // revert, which clears the whole ceremony via
+        // _resetCeremonyKeys (resetting signupAbandoned too).
+        if (store.session.signupAbandoned) return false;
         store.setSignupFullName(null);
       },
     },
