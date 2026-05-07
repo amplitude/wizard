@@ -159,6 +159,20 @@ describe('L2 server-sdk-usage', () => {
     );
     expect(r.pass).toBe(true);
   });
+
+  it('skips api routes whose track() call comes from a non-Amplitude SDK', () => {
+    const path = 'app/api/track/route.ts';
+    mkdirSync(join(workingDir, 'app/api/track'), { recursive: true });
+    writeFile(
+      join(workingDir, path),
+      `import { Analytics } from '@segment/analytics-node';\nconst a = new Analytics({ writeKey: 'x' });\nexport async function POST() { a.track({ event: 'hi', userId: 'u' }); return new Response(); }\n`,
+    );
+    const r = serverSdkUsage.evaluate(
+      artifactWithDiff([path]),
+      NEXTJS_SCENARIO,
+    );
+    expect(r.pass).toBe(true);
+  });
 });
 
 describe('L2 init-options-commented', () => {
@@ -204,6 +218,18 @@ describe('L2 version-range', () => {
       join(workingDir, 'package.json'),
       JSON.stringify({
         dependencies: { '@amplitude/unified': '*' },
+      }),
+    );
+    const r = versionRange.evaluate(artifactWithDiff([]), NEXTJS_SCENARIO);
+    expect(r.pass).toBe(false);
+    expect(r.detail).toMatch(/wildcard/);
+  });
+
+  it('fails on a 1.2.x patch wildcard', () => {
+    writeFile(
+      join(workingDir, 'package.json'),
+      JSON.stringify({
+        dependencies: { '@amplitude/unified': '1.2.x' },
       }),
     );
     const r = versionRange.evaluate(artifactWithDiff([]), NEXTJS_SCENARIO);
@@ -297,6 +323,20 @@ describe('L2 property-key-naming', () => {
     writeFile(
       join(workingDir, path),
       `import { track } from '@amplitude/unified';\ntrack('Page Viewed', { 'page name': '/', 'user id': 'x' });\n`,
+    );
+    const r = propertyKeyNaming.evaluate(
+      artifactWithDiff([path]),
+      NEXTJS_SCENARIO,
+    );
+    expect(r.pass).toBe(true);
+    expect(r.detail).toBeUndefined();
+  });
+
+  it('skips files that do not import Amplitude (avoids false positives on other analytics SDKs)', () => {
+    const path = 'src/segment-track.ts';
+    writeFile(
+      join(workingDir, path),
+      `import { track } from '@segment/analytics-next';\ntrack('Lead Qualified', { leadId: 'x', utmSource: 'google' });\n`,
     );
     const r = propertyKeyNaming.evaluate(
       artifactWithDiff([path]),

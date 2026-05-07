@@ -10,8 +10,11 @@
  *
  * Allowlist:
  *   - `@amplitude/*` — vendor.
- *   - Pre-existing deps unchanged or version-bumped within the
- *     same major are fine (we trust the wizard's version-bump pass).
+ *   - Pre-existing deps unchanged or version-bumped (any direction)
+ *     are fine. We trust the wizard's version-bump pass and don't
+ *     parse semver here — enforcing major-bump correctly would mean
+ *     reasoning about caret/tilde/range prefixes for marginal value
+ *     since the wizard isn't supposed to touch other deps anyway.
  *
  * Anything else added is a fail with the violator names. If the
  * pristine fixture is missing (shouldn't happen — runReplay/runLive

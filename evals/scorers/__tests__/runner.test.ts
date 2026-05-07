@@ -56,10 +56,13 @@ describe('eval runner — nextjs-app-router/vanilla golden replay', () => {
       (s) => s.layer === 1 && !s.result.pass,
     );
     expect(failures).toEqual([]);
-    // Sum-of-weights sanity floor: the four Layer 1 weighted scorers
+    // Sum-of-weights sanity floor: the seven Layer 1 weighted scorers
     // (file-touched=10, import-present=10, init-call-present=5,
     // env-var-prefix=5, setup-complete-shape=5, exit-code-matches=5,
-    // confirmed-events-tracked=10) total 50.
+    // confirmed-events-tracked=10) total 50; Layer 2 adds 35 more
+    // (criteria 2/3/7/11/12 weighted, 15 soft-warn=0). Floor stays
+    // at 45 so a single missing scorer trips the assertion without
+    // requiring this number to track every layer addition.
     expect(report.maxScore).toBeGreaterThanOrEqual(45);
     expect(report.totalScore).toBe(report.maxScore);
   });

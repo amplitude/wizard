@@ -35,7 +35,8 @@ interface PackageJsonShape {
 }
 
 const ALLOW_PROTOCOLS = ['workspace:', 'file:', 'link:', 'npm:'];
-const WILDCARD_MAJOR = /^(?:\*|x|x\.x|x\.x\.x|\d+\.x|\d+\.x\.x|latest)$/i;
+const WILDCARD_MAJOR =
+  /^(?:\*|x|x\.x|x\.x\.x|\d+\.x|\d+\.x\.x|\d+\.\d+\.x|latest)$/i;
 const PRERELEASE_TAG = /-(?:alpha|beta|rc|canary|next|preview)\b/i;
 
 function isAcceptable(

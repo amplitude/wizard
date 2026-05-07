@@ -26,7 +26,6 @@ import * as ts from 'typescript';
 
 import {
   collectImports,
-  findCallsByName,
   getDirective,
   isScannable,
   parseFile,
@@ -109,15 +108,19 @@ export const scorer: Scorer = {
       const amplitudeImport = importsAnyAmplitude(
         imports.map((i) => i.specifier),
       );
-      const hasTrackCall = findCallsByName(sf, 'track').length > 0;
-      const hasInitCall = findCallsByName(sf, 'init').length > 0;
+
+      // Gate on an Amplitude import — `track`/`init` are common
+      // function names elsewhere (other analytics SDKs, local helpers
+      // named `init`). Without this gate, a server file with an
+      // unrelated `track('lead_qualified')` call would hard-fail
+      // criterion 12 even though the wizard never touched it.
+      if (!amplitudeImport) continue;
+
       const usesServerSdk = imports.some(
         (i) =>
           i.specifier === SERVER_SDK ||
           i.specifier.startsWith(`${SERVER_SDK}/`),
       );
-
-      if (!amplitudeImport && !hasTrackCall && !hasInitCall) continue;
 
       // Server-only file with Amplitude usage — must be the server
       // SDK family. (Criterion 11 catches the wrong-import case

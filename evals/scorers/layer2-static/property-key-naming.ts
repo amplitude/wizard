@@ -20,13 +20,33 @@
 import { join } from 'node:path';
 import * as ts from 'typescript';
 
-import { findCallsByName, isScannable, parseFile } from './_ast-helpers.js';
+import {
+  collectImports,
+  findCallsByName,
+  isScannable,
+  parseFile,
+} from './_ast-helpers.js';
 import type { Artifact, Scenario, Scorer } from '../../runner/types.js';
 
-// Single-word lowercase or lowercase-with-spaces, no underscores or
-// camelCase. Allows hyphens because some legacy keys use them.
+// Single-word lowercase or lowercase-with-spaces, no underscores,
+// camelCase, or hyphens. Matches the project rule in CLAUDE.md
+// (Analytics conventions) — keys like 'org id', 'duration ms'.
 const ALLOWED_KEY = /^[a-z][a-z0-9 ]*[a-z0-9]$|^[a-z]$/;
 const ALLOWED_PREFIXES = ['$']; // Amplitude reserved (e.g. $app_name)
+const AMPLITUDE_PREFIXES = [
+  '@amplitude/unified',
+  '@amplitude/analytics-browser',
+  '@amplitude/analytics-node',
+];
+
+function importsAnyAmplitude(specifiers: string[]): boolean {
+  for (const spec of specifiers) {
+    for (const prefix of AMPLITUDE_PREFIXES) {
+      if (spec === prefix || spec.startsWith(`${prefix}/`)) return true;
+    }
+  }
+  return false;
+}
 
 function isOk(key: string): boolean {
   if (key.length === 0) return true;
@@ -58,6 +78,17 @@ export const scorer: Scorer = {
     for (const path of candidates) {
       const sf = parseFile(join(root, path));
       if (!sf) continue;
+      // Skip files that don't import Amplitude — `track(...)` is a
+      // common name in other analytics SDKs (Segment, Mixpanel) and a
+      // pristine baseline can carry pre-existing calls we shouldn't
+      // attribute to the wizard. Note: only catches the
+      // direct-call `track(name, props)` form; member-expression
+      // calls like `amplitude.track(...)` or `client.track(...)` slip
+      // through. Acceptable for a soft-warn — extend findCallsByName
+      // when this scorer needs to gate merge.
+      if (!importsAnyAmplitude(collectImports(sf).map((i) => i.specifier))) {
+        continue;
+      }
       const calls = findCallsByName(sf, 'track');
       for (const call of calls) {
         const props = call.arguments[1];
