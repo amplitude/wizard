@@ -2063,14 +2063,17 @@ For codebases with >50 events the wizard runs the WRITE phase in chunks of ~25 e
       });
       if (batchError) {
         logToFile(`confirm_event_plan: rejected batch metadata: ${batchError}`);
-        return {
-          content: [
-            {
-              type: 'text' as const,
-              text: `error: invalid batch metadata — ${batchError}. Re-call without batch fields to fall back to single-batch behavior, or fix the metadata and retry.`,
-            },
-          ],
-        };
+        return toWizardToolErrorContent({
+          error: `invalid batch metadata — ${batchError}`,
+          guidance:
+            'Re-call without batch fields (batchIndex / totalBatches / chunkSize) to fall back to single-batch behavior, or fix the metadata and retry. batchIndex must be < totalBatches; both must be present together; chunkSize must be a positive integer when supplied.',
+          suggestedTool: 'mcp__wizard-tools__confirm_event_plan',
+          context: `batchIndex: ${String(
+            args.batchIndex,
+          )}; totalBatches: ${String(args.totalBatches)}; chunkSize: ${String(
+            args.chunkSize,
+          )}; eventCount: ${args.events.length}`,
+        });
       }
       // Soft-gate the name format. Agents historically saw conflicting
       // guidance (commandments said Title Case, the tool schema said

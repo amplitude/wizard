@@ -1724,6 +1724,29 @@ describe('wizard-tools error responses', () => {
     expect(parsed.guidance).toContain('user');
     expect(parsed.suggestedTool).toBe('mcp__wizard-tools__choose');
   });
+
+  it('confirm_event_plan returns structured guidance on invalid batch metadata', async () => {
+    // Regression: the batch-metadata validation path used to return a
+    // bare-text content (no isError, no structured envelope), which
+    // tripped the agent into retrying the same malformed call until
+    // the circuit breaker fired. Now the path uses
+    // toWizardToolErrorContent so the agent gets isError=true and the
+    // standard {success,error,guidance,suggestedTool,context} shape.
+    const tools = await getTools(tmpDir);
+    const tool = findTool(tools, 'confirm_event_plan');
+    const result = await callTool(tool, {
+      events: [{ name: 'user signed up', description: 'fires on signup' }],
+      // batchIndex without totalBatches is structurally invalid.
+      batchIndex: 0,
+      reason: 'paginated submission',
+    });
+    const parsed = parseToolError(result);
+    expect(parsed.success).toBe(false);
+    expect(parsed.error).toContain('invalid batch metadata');
+    expect(parsed.guidance).toContain('Re-call without batch fields');
+    expect(parsed.suggestedTool).toBe('mcp__wizard-tools__confirm_event_plan');
+    expect(parsed.context).toContain('batchIndex');
+  });
 });
 
 // ---------------------------------------------------------------------------
