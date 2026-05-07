@@ -33,6 +33,7 @@ import {
   isStallNonProgressMessage,
   redactToolLogPayload,
 } from '../agent-interface';
+import { resetRetryBudgetForTests } from '../agent/transient-llm-retry';
 import { AgentState } from '../agent-state';
 import type { WizardOptions } from '../../utils/types';
 import type { SpinnerHandle } from '../../ui';
@@ -117,6 +118,11 @@ describe('runAgent', () => {
 
   beforeEach(() => {
     vi.clearAllMocks();
+    // The per-process retry budget is a module-singleton (so production
+    // runs share one pool across `runAgent` calls). Tests that simulate
+    // many retries would exhaust it after the first case — reset so each
+    // test starts with a fresh budget. See `transient-llm-retry.ts`.
+    resetRetryBudgetForTests();
 
     mockSpinner = {
       start: vi.fn(),
@@ -1112,8 +1118,10 @@ describe('runAgent', () => {
         { successMessage: 'Done', errorMessage: 'Failed' },
       );
 
-      // Let attempt 1 emit, then advance past the 2s backoff so attempt 2 starts.
-      await vi.advanceTimersByTimeAsync(3_000);
+      // Let attempt 1 emit, then advance past the first backoff so attempt 2
+      // starts. The full-jitter formula in `computeRetryBackoffMs` puts the
+      // first retry in [2_000, 4_000]ms, so 5_000ms is a comfortable budget.
+      await vi.advanceTimersByTimeAsync(5_000);
       const result = await runPromise;
 
       expect(result).toEqual({ plannedEvents: [] });

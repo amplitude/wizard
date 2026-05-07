@@ -427,4 +427,65 @@ export interface WizardUI {
      */
     toolCallsByTool?: Record<string, number>;
   }): void;
+
+  /**
+   * Emitted by the OUTER `runAgent` retry loop every time the wizard
+   * decides to back off and re-spawn the SDK conversation after a stall
+   * / transient SDK failure. Distinct from the SDK's own internal
+   * `api_retry` system messages (the wizard observes those passively
+   * via `setRetryState` for the UI banner) — this event fires for
+   * wizard-driven retries that re-enter the agent loop with a fresh
+   * AbortController + drained iterator.
+   *
+   * Optional; only AgentUI implements (NDJSON `progress: transient_retry`).
+   * InkUI / LoggingUI no-op — the existing `setRetryState` banner / log
+   * line already covers their UX.
+   *
+   * `reason` discriminates the trigger:
+   *   - `stall`          — the per-message stall timer fired (no SDK
+   *                        traffic for STALL_TIMEOUT_MS).
+   *   - `transient_api`  — the SDK stream surfaced a transient API
+   *                        error (4xx/5xx) and we're respawning.
+   *   - `sdk_thrown`     — the SDK threw a transient error
+   *                        (`tool_use` / `Stream closed` / 503).
+   *
+   * `retryAfterMs` is the most-recent SDK-reported `retry_delay_ms`
+   * we honoured as a floor for the next backoff. `null` when no
+   * upstream hint was observed this attempt.
+   */
+  emitTransientRetry?(data: {
+    attempt: number;
+    totalAttempts: number;
+    nextRetryInMs: number;
+    reason: 'stall' | 'transient_api' | 'sdk_thrown';
+    retryAfterMs: number | null;
+  }): void;
+
+  /**
+   * Emitted just before the Claude Agent SDK runs an auto- or manual-
+   * triggered context compaction. Pairs with `emitCompactionCompleted`
+   * so orchestrators can render a "still working — compacting context"
+   * indicator instead of a silent gap. Optional; only AgentUI emits.
+   *
+   * `trigger` mirrors the SDK's PreCompact hook value (`auto` when the
+   * SDK fired it because the context window filled; `manual` when an
+   * explicit `/compact` was issued).
+   */
+  emitCompactionStarted?(data: { trigger: 'manual' | 'auto' }): void;
+
+  /**
+   * Emitted right after the SDK finishes compacting and emits the
+   * `compact_boundary` system message. Pairs with `emitCompactionStarted`.
+   * Optional; only AgentUI emits.
+   *
+   * Token counts come straight from the `compact_metadata` payload on
+   * the SDK message — `pre_tokens` is mandatory, `post_tokens` and
+   * `duration_ms` are best-effort (SDK may omit on partial compactions).
+   */
+  emitCompactionCompleted?(data: {
+    trigger: 'manual' | 'auto';
+    preTokens: number;
+    postTokens?: number;
+    durationMs?: number;
+  }): void;
 }

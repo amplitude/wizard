@@ -25,6 +25,8 @@ import {
   isThrownErrorCountedAsUpstreamGatewayFailure,
   isTransientThrownSdkErrorMessage,
   parseStructuredUpstreamError,
+  computeRetryBackoffMs,
+  getRetryBudget,
 } from './agent/transient-llm-retry.js';
 import {
   AuthOnboardingPath,
@@ -2038,6 +2040,14 @@ export async function runAgent(
     // recovery attempt (often many minutes) even though the agent is working.
     let postStreamRetryActive = false;
 
+    // Most recent SDK-reported retry delay from `api_retry` system messages.
+    // The SDK includes `retry_delay_ms` (its own honour of the upstream's
+    // `Retry-After` / 429 hint). When the OUTER loop computes its next
+    // backoff, we clamp the result to be at least this value so the wizard
+    // never undercuts the gateway's instruction. Reset per-attempt below.
+    // See also: src/lib/middleware/retry.ts which surfaces these as UI banners.
+    let lastApiRetryDelayMs: number | null = null;
+
     // Per-attempt recovery bag: modified files + last status. PreCompact
     // persists a snapshot to disk so context dropped by compaction stays
     // recoverable by a post-compaction hydration hook.
@@ -2168,21 +2178,61 @@ export async function runAgent(
       attemptCount = attempt + 1;
       agentState.setAttemptId(`attempt-${attempt}`);
       if (attempt > 0) {
-        // Exponential backoff with jitter, cap 30s.
-        // 2s, 4s, 8s, 16s, 30s + ±25% jitter to avoid thundering herd
-        // when many wizard sessions retry against a recovering gateway.
-        const baseMs = Math.min(2_000 * Math.pow(2, attempt - 1), 30_000);
-        const jitter = baseMs * (0.75 + Math.random() * 0.5);
-        const backoffMs = Math.round(jitter);
+        // Per-process retry budget: `runAgent` may be invoked multiple times
+        // in one wizard session (integration → verify → fix). Without a
+        // shared budget each call would independently burn 5 retries against
+        // the same rate-limited window; with it, a persistent gateway 429
+        // surfaces as RATE_LIMIT after the budget is spent rather than
+        // looping further. See `getRetryBudget` in transient-llm-retry.ts.
+        if (!getRetryBudget().tryConsume()) {
+          logToFile(
+            `Agent retry budget exhausted (process limit ${
+              getRetryBudget().limit
+            }) — short-circuiting after attempt ${attempt}`,
+          );
+          analytics.wizardCapture('agent retry budget exhausted', {
+            attempt,
+            'budget limit': getRetryBudget().limit,
+          });
+          // Bail out of the loop. The post-loop classifier will surface a
+          // RATE_LIMIT / GATEWAY_DOWN remediation based on the prior
+          // attempts' partial output. Don't break inside the for-await of
+          // `sdkResponse` — we're outside the SDK call here, so a plain
+          // break is the right shape.
+          break;
+        }
+        // Additive "full-jitter" backoff with cap 30s, clamped to the most
+        // recent SDK-reported `retry_delay_ms` (honours Vertex / Anthropic
+        // `Retry-After`). Math lives in `computeRetryBackoffMs` so it stays
+        // unit-testable; see `transient-llm-retry.test.ts` for parameterised
+        // coverage of the formula + retry-after semantics.
+        const backoffMs = computeRetryBackoffMs(attempt, lastApiRetryDelayMs);
         logToFile(
           `Agent stall retry: attempt ${attempt + 1} of ${
             MAX_RETRIES + 1
-          }, backing off ${backoffMs}ms`,
+          }, backing off ${backoffMs}ms (retry_delay_ms hint=${
+            lastApiRetryDelayMs ?? 'none'
+          }, budget remaining=${getRetryBudget().remaining()})`,
         );
         analytics.wizardCapture('agent stall retry', {
           attempt,
           'backoff ms': backoffMs,
+          'retry after ms': lastApiRetryDelayMs ?? null,
+          'budget remaining': getRetryBudget().remaining(),
         });
+        // Surface the retry to orchestrators (NDJSON / agent mode). InkUI /
+        // LoggingUI implementations no-op via the optional method shape.
+        try {
+          getUI().emitTransientRetry?.({
+            attempt: attempt + 1,
+            totalAttempts: MAX_RETRIES + 1,
+            nextRetryInMs: backoffMs,
+            reason: 'stall',
+            retryAfterMs: lastApiRetryDelayMs,
+          });
+        } catch {
+          // Never let UI emit failures abort the retry loop.
+        }
         getUI().pushStatus(
           `Retrying connection (attempt ${attempt + 1} of ${
             MAX_RETRIES + 1
@@ -2195,6 +2245,10 @@ export async function runAgent(
         authErrorDetected = false;
         authRetryCount = 0;
         reportedError = null;
+        // Reset the SDK retry-delay hint at the start of every attempt so a
+        // stale value from a previous storm doesn't pin the next backoff to
+        // an old Retry-After window.
+        lastApiRetryDelayMs = null;
         // Reset the agent recovery bag too — without this, modifiedFiles /
         // lastStatus / compactionCount accumulated by a stalled attempt
         // would leak into the next attempt's snapshot. (Bugbot catch.)
@@ -2699,6 +2753,17 @@ export async function runAgent(
                 } catch (err) {
                   logToFile('PreCompact: agentState persist failed', err);
                 }
+                // Surface compaction start to orchestrators (NDJSON / agent
+                // mode). The compaction itself takes 60–120s on large
+                // contexts and was previously invisible — paired with the
+                // `compaction_completed` event from `compact_boundary` below
+                // it lets stall-visibility consumers render an accurate
+                // "compacting context" indicator instead of a silent gap.
+                try {
+                  getUI().emitCompactionStarted?.({ trigger: input.trigger });
+                } catch {
+                  // Never let UI emit failures abort compaction.
+                }
                 config?.onPreCompact?.(input);
               };
 
@@ -2866,6 +2931,67 @@ export async function runAgent(
           ) {
             authErrorDetected = true;
             logToFile('Auth error detected in result message');
+          }
+
+          // Capture the SDK-reported `retry_delay_ms` from every `api_retry`
+          // system message. The SDK already sleeps internally for this
+          // duration (it's the Vertex / Anthropic `Retry-After` honour),
+          // but if THIS attempt eventually fails and the OUTER loop has to
+          // retry, we use the most-recent value as a floor for the outer
+          // backoff via `computeRetryBackoffMs`. Without this clamp we'd
+          // happily sleep 2s after the upstream said "wait 8s." Capturing
+          // here (not just for 401s) covers 429 / 503 / generic 5xx storms.
+          if (message.type === 'system' && message.subtype === 'api_retry') {
+            const delay = (message as unknown as { retry_delay_ms?: unknown })
+              .retry_delay_ms;
+            if (
+              typeof delay === 'number' &&
+              Number.isFinite(delay) &&
+              delay > 0
+            ) {
+              lastApiRetryDelayMs = delay;
+            }
+          }
+
+          // Surface compaction completion to orchestrators. The SDK emits
+          // `compact_boundary` immediately after `PreCompact` finishes the
+          // summary; we already record the start via `emitCompactionStarted`
+          // in the PreCompact hook, so this pair brackets the silent gap
+          // for stall-visibility consumers. Best-effort field reads — the
+          // SDK guarantees `pre_tokens` but `post_tokens` / `duration_ms`
+          // are optional on partial compactions (preserved-segment shape).
+          if (
+            message.type === 'system' &&
+            message.subtype === 'compact_boundary'
+          ) {
+            const meta =
+              (
+                message as unknown as {
+                  compact_metadata?: {
+                    trigger?: 'manual' | 'auto';
+                    pre_tokens?: number;
+                    post_tokens?: number;
+                    duration_ms?: number;
+                  };
+                }
+              ).compact_metadata ?? {};
+            try {
+              getUI().emitCompactionCompleted?.({
+                trigger: meta.trigger ?? 'auto',
+                preTokens:
+                  typeof meta.pre_tokens === 'number' ? meta.pre_tokens : 0,
+                postTokens:
+                  typeof meta.post_tokens === 'number'
+                    ? meta.post_tokens
+                    : undefined,
+                durationMs:
+                  typeof meta.duration_ms === 'number'
+                    ? meta.duration_ms
+                    : undefined,
+              });
+            } catch {
+              // Never let UI emit failures abort the stream.
+            }
           }
 
           // Short-circuit the SDK's 401 retry storm. The SDK retries 401s up

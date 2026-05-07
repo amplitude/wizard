@@ -1,4 +1,4 @@
-import { describe, it, expect } from 'vitest';
+import { describe, it, expect, beforeEach } from 'vitest';
 
 import {
   findTransientSdkOutputPattern,
@@ -8,6 +8,12 @@ import {
   isThrownErrorCountedAsUpstreamGatewayFailure,
   isTransientThrownSdkErrorMessage,
   parseStructuredUpstreamError,
+  computeRetryBackoffMs,
+  RETRY_BACKOFF_BASE_MS,
+  RETRY_BACKOFF_CAP_MS,
+  RETRY_BUDGET_PER_SESSION,
+  getRetryBudget,
+  resetRetryBudgetForTests,
 } from '../transient-llm-retry.js';
 
 describe('transient-llm-retry', () => {
@@ -118,5 +124,106 @@ describe('parseStructuredUpstreamError', () => {
     // payload-shape rejection" — the legacy substring match in the caller
     // is what catches this case. Tested in agent-interface integration.
     expect(isPayloadShapeRejection(parsed!)).toBe(false);
+  });
+});
+
+describe('computeRetryBackoffMs', () => {
+  it.each([
+    // [attempt, random, expected — no retry-after]
+    // attempt 1 → exp 0 → 2000 + jitter*2000
+    [1, 0, RETRY_BACKOFF_BASE_MS],
+    [1, 0.5, RETRY_BACKOFF_BASE_MS + RETRY_BACKOFF_BASE_MS * 0.5],
+    [1, 1, RETRY_BACKOFF_BASE_MS * 2],
+    // attempt 2 → exp 1 → 4000 + jitter*2000
+    [2, 0, 4000],
+    [2, 0.25, 4000 + 500],
+    // attempt 5 → exp 4 → 32000 + jitter, but cap 30000
+    [5, 0, RETRY_BACKOFF_CAP_MS],
+    [5, 1, RETRY_BACKOFF_CAP_MS],
+  ])(
+    'attempt=%d random=%f → exact additive-jitter value',
+    (attempt, random, expected) => {
+      expect(computeRetryBackoffMs(attempt, null, () => random)).toBe(expected);
+    },
+  );
+
+  it('honors retry-after as a floor when larger than computed backoff', () => {
+    // attempt=1 with random=0 → 2000ms, but retry-after says 7000ms → 7000ms.
+    expect(computeRetryBackoffMs(1, 7_000, () => 0)).toBe(7_000);
+  });
+
+  it('ignores retry-after when smaller than computed backoff', () => {
+    // attempt=2 with random=0 → 4000ms; retry-after 100ms is below floor.
+    expect(computeRetryBackoffMs(2, 100, () => 0)).toBe(4_000);
+  });
+
+  it('clamps retry-after to the cap to defend against runaway server hints', () => {
+    // attempt=1, retry-after says 10 minutes; we still cap at 30s so the
+    // run isn't hung indefinitely on a bad gateway header.
+    expect(computeRetryBackoffMs(1, 10 * 60 * 1000, () => 0)).toBe(
+      RETRY_BACKOFF_CAP_MS,
+    );
+  });
+
+  it('treats null / non-finite retry-after as absent', () => {
+    expect(computeRetryBackoffMs(1, null, () => 0)).toBe(RETRY_BACKOFF_BASE_MS);
+    expect(computeRetryBackoffMs(1, NaN, () => 0)).toBe(RETRY_BACKOFF_BASE_MS);
+    // Negative is ignored — Retry-After cannot mean "go back in time".
+    expect(computeRetryBackoffMs(1, -500, () => 0)).toBe(RETRY_BACKOFF_BASE_MS);
+  });
+
+  it('clamps random output to [0, 1] so a misbehaving rng cannot blow the math up', () => {
+    // 1.5 should clip to 1; -0.5 should clip to 0.
+    expect(computeRetryBackoffMs(1, null, () => 1.5)).toBe(
+      RETRY_BACKOFF_BASE_MS * 2,
+    );
+    expect(computeRetryBackoffMs(1, null, () => -0.5)).toBe(
+      RETRY_BACKOFF_BASE_MS,
+    );
+  });
+
+  it('jitter spreads consecutive retries across a non-trivial window (anti-thundering-herd smoke)', () => {
+    // Eight calls at the same attempt with Math.random must not all
+    // return the same value. The window is `[base*2^exp, base*2^exp + base]`
+    // so we expect at least 2 distinct values across 8 samples.
+    const samples = new Set<number>();
+    for (let i = 0; i < 8; i++) samples.add(computeRetryBackoffMs(2));
+    expect(samples.size).toBeGreaterThan(1);
+  });
+});
+
+describe('getRetryBudget (process-scoped)', () => {
+  beforeEach(() => {
+    resetRetryBudgetForTests();
+  });
+
+  it('starts at the configured limit', () => {
+    expect(getRetryBudget().limit).toBe(RETRY_BUDGET_PER_SESSION);
+    expect(getRetryBudget().remaining()).toBe(RETRY_BUDGET_PER_SESSION);
+  });
+
+  it('tryConsume succeeds up to the limit and then fails', () => {
+    const budget = getRetryBudget();
+    for (let i = 0; i < RETRY_BUDGET_PER_SESSION; i++) {
+      expect(budget.tryConsume()).toBe(true);
+    }
+    expect(budget.tryConsume()).toBe(false);
+    expect(budget.remaining()).toBe(0);
+  });
+
+  it('budget is shared across calls to getRetryBudget (singleton)', () => {
+    const a = getRetryBudget();
+    const b = getRetryBudget();
+    expect(a.tryConsume()).toBe(true);
+    expect(b.remaining()).toBe(RETRY_BUDGET_PER_SESSION - 1);
+  });
+
+  it('resetRetryBudgetForTests restores a fresh singleton', () => {
+    const before = getRetryBudget();
+    before.tryConsume();
+    before.tryConsume();
+    expect(before.remaining()).toBe(RETRY_BUDGET_PER_SESSION - 2);
+    resetRetryBudgetForTests();
+    expect(getRetryBudget().remaining()).toBe(RETRY_BUDGET_PER_SESSION);
   });
 });

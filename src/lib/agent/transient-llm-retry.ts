@@ -1,6 +1,31 @@
 /**
- * Transient LLM / gateway error classification for {@link runAgent} retry loops.
- * Keeps pattern strings and HTTP extraction in one place (Phase D).
+ * Transient LLM / gateway error classification + backoff helpers for the
+ * {@link runAgent} retry loop. Keeps pattern strings, HTTP extraction,
+ * jittered backoff, and the per-process retry budget in one place so the
+ * outer loop in `agent-interface.ts` is small and the math is unit-testable.
+ *
+ * Two pieces of behaviour live here:
+ *
+ *   1. Pattern classifiers (Phase D) — `findTransientSdkOutputPattern`,
+ *      `extractApiErrorHttpStatusFromPattern`, etc.
+ *   2. Reliability primitives (this file) — `computeRetryBackoffMs`,
+ *      `getRetryBudget`. Used by `runAgent` to schedule the next attempt
+ *      after a transient stall / 5xx without thundering-herding the
+ *      gateway and without spending more than a per-process retry budget.
+ *
+ * Audit (May 2026) measured a 4:35 burst with 13 SDK-internal `api_retry`
+ * events totalling 41.3s of backoff. The SDK runs its own retries (we just
+ * observe `api_retry` system messages); the helpers here govern the OUTER
+ * loop — the wizard-owned retry path that re-spawns the SDK conversation
+ * after a stall or post-stream classifier-detected failure. Improvements:
+ *
+ *   - Full-jitter additive formula instead of symmetric ±25% (decorrelates
+ *     parallel sessions backing off against the same gateway window).
+ *   - `Retry-After` honoured: the most recent SDK-reported `retry_delay_ms`
+ *     becomes a floor for the next backoff so we never undercut the
+ *     server's instruction.
+ *   - Per-process retry budget (5 retries) so back-to-back `runAgent`
+ *     calls in one wizard session don't independently burn 5 retries each.
  */
 
 /**
@@ -172,4 +197,136 @@ export function isTransientThrownSdkErrorMessage(errMsg: string): boolean {
     errMsg.includes('Stream closed') ||
     errMsg.includes('invalid_request_error')
   );
+}
+
+// ── Backoff math ────────────────────────────────────────────────────
+
+/** Base unit for the outer-loop backoff curve, in milliseconds. */
+export const RETRY_BACKOFF_BASE_MS = 2_000;
+/** Cap for any single backoff sleep, in milliseconds. */
+export const RETRY_BACKOFF_CAP_MS = 30_000;
+
+/**
+ * Compute the next backoff delay using an additive "full jitter" formula:
+ *
+ *   delay = min(cap, base * 2^attempt + uniform(0, base))
+ *
+ * Then clamped to be at least `retryAfterMs` (the most recent SDK-reported
+ * `retry_delay_ms` from an `api_retry` system message, when present), and
+ * never less than `base` so an over-eager fast retry can't starve the
+ * upstream further.
+ *
+ * Pure for unit testing — pass a deterministic `random` to assert exact
+ * values. Default `random` is `Math.random` so production callers get the
+ * jittered curve for free.
+ *
+ * @param attempt           Zero-based retry index (1 ⇒ first retry, 2 ⇒ second…).
+ * @param retryAfterMs      Lower bound from the upstream's `Retry-After` /
+ *                          SDK `retry_delay_ms`, when known. Pass `null` to
+ *                          skip clamping. Negative values are ignored.
+ * @param random            Override for `Math.random` (test seam). Returns
+ *                          a number in `[0, 1)`.
+ * @param base              Override for `RETRY_BACKOFF_BASE_MS` (test seam).
+ * @param cap               Override for `RETRY_BACKOFF_CAP_MS` (test seam).
+ */
+export function computeRetryBackoffMs(
+  attempt: number,
+  retryAfterMs: number | null = null,
+  random: () => number = Math.random,
+  base: number = RETRY_BACKOFF_BASE_MS,
+  cap: number = RETRY_BACKOFF_CAP_MS,
+): number {
+  // attempt is 1-indexed in the runAgent loop (`attempt > 0` triggers the
+  // backoff branch), but the math reads cleanly with a zero-based exponent
+  // so we shift here. Clamp to non-negative so a stray 0 / negative input
+  // doesn't blow up Math.pow.
+  const exp = Math.max(0, attempt - 1);
+  const exponential = base * Math.pow(2, exp);
+  const additiveJitter = base * Math.max(0, Math.min(1, random()));
+  let delay = Math.min(cap, exponential + additiveJitter);
+  if (
+    retryAfterMs !== null &&
+    Number.isFinite(retryAfterMs) &&
+    retryAfterMs > 0
+  ) {
+    // Honour the gateway / Vertex `Retry-After` floor so we never undercut
+    // the server's instruction. Still cap at `cap` so a runaway server
+    // header can't hang the run for hours — at the cap the user gets a
+    // clean GATEWAY_DOWN classification on the next attempt instead.
+    delay = Math.min(cap, Math.max(delay, retryAfterMs));
+  }
+  return Math.round(delay);
+}
+
+// ── Per-process retry budget ───────────────────────────────────────
+
+/**
+ * Default per-process retry budget. The wizard makes at most one big
+ * agent run per session today, but `runAgent` is wrapped by integration
+ * verification flows that may invoke it again (`additionalFeatureQueue`,
+ * post-agent re-runs). Without a process-scoped budget each call would
+ * independently burn 5 retries against the same rate-limited window.
+ */
+export const RETRY_BUDGET_PER_SESSION = 5;
+
+/**
+ * Tracks how many retries the wizard has consumed across the entire
+ * process. Each `tryConsume()` returns `true` when a retry slot is
+ * available and decrements the budget; `false` once exhausted. The
+ * outer loop short-circuits on `false` and surfaces a `RATE_LIMIT` /
+ * persistent-failure error to the user instead of looping further.
+ *
+ * Process-scoped (not per-call) so a wizard session that issues
+ * multiple `runAgent()` calls (e.g. integration → verify → fix) shares
+ * a single retry pool. Reset by `reset()` from tests; production code
+ * never resets — the wizard exits on budget exhaustion.
+ */
+export interface RetryBudget {
+  /** Total budget the session started with. */
+  readonly limit: number;
+  /** Retries left. 0 means exhausted. */
+  remaining(): number;
+  /** Try to consume one retry. Returns `true` on success. */
+  tryConsume(): boolean;
+  /** Test-only: restore the budget to `limit`. */
+  reset(): void;
+}
+
+function makeRetryBudget(limit: number): RetryBudget {
+  let used = 0;
+  return {
+    limit,
+    remaining(): number {
+      return Math.max(0, limit - used);
+    },
+    tryConsume(): boolean {
+      if (used >= limit) return false;
+      used++;
+      return true;
+    },
+    reset(): void {
+      used = 0;
+    },
+  };
+}
+
+let processRetryBudget: RetryBudget | null = null;
+
+/**
+ * Singleton per-process retry budget. Lazily constructed on first call so
+ * tests that import this module before configuring `RETRY_BUDGET_PER_SESSION`
+ * still see a sensible default. Production callers (the runAgent loop)
+ * use this directly; tests should call `resetRetryBudgetForTests` between
+ * cases.
+ */
+export function getRetryBudget(): RetryBudget {
+  if (!processRetryBudget) {
+    processRetryBudget = makeRetryBudget(RETRY_BUDGET_PER_SESSION);
+  }
+  return processRetryBudget;
+}
+
+/** Test-only: reset the singleton so the next `getRetryBudget()` returns a fresh budget. */
+export function resetRetryBudgetForTests(): void {
+  processRetryBudget = null;
 }
