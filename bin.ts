@@ -152,6 +152,7 @@ import {
   authCommand,
   mcpCommand,
   manifestCommand,
+  ciBootstrapCommand,
 } from './src/commands';
 
 // ── Observability bootstrap ─────────────────────────────────────────
@@ -604,6 +605,7 @@ void yargs(hideBin(process.argv))
   .command(authCommand)
   .command(mcpCommand)
   .command(manifestCommand)
+  .command(ciBootstrapCommand)
   .example('$0', 'Run the interactive setup wizard')
   .example('$0 --ci --install-dir .', 'Run in CI mode (OAuth + auto-select)')
   .example(
