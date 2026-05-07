@@ -18,6 +18,7 @@ import { createScreens, createServices } from './screen-registry.js';
 import { CommandModeContext } from './context/CommandModeContext.js';
 import { ContentAreaContext } from './context/ContentAreaContext.js';
 import { ConsoleView } from './components/ConsoleView.js';
+import { EventPlanFullScreen } from './screens/EventPlanFullScreen.js';
 import { CtrlCHandler } from './components/CtrlCHandler.js';
 import { HeaderBar } from './components/HeaderBar.js';
 import { JourneyStepper } from './components/JourneyStepper.js';
@@ -69,6 +70,29 @@ export const App = ({ store }: AppProps) => {
   const activeScreen: ReactNode = screens[store.currentScreen] ?? null;
 
   const separator = Layout.separatorChar.repeat(Math.max(0, width - 2));
+
+  // Short-circuit the normal layout when an event-plan prompt is active.
+  // The prompt previously rendered inline inside ConsoleView, but on
+  // tighter terminal heights the parent flex column squeezed it to zero
+  // rows — invisible to the user even though the wizard server had
+  // pendingPrompt set. Hoisting it up here gives it the entire terminal,
+  // bypasses every panel that could contend for vertical space, and keeps
+  // the keyboard handler trivially reachable. The full-screen view's own
+  // useInput owns Y/S/F and the feedback flow.
+  const pendingPrompt = store.pendingPrompt;
+  if (pendingPrompt && pendingPrompt.kind === 'event-plan') {
+    return (
+      <CommandModeContext.Provider value={store.commandMode}>
+        <CtrlCHandler store={store} />
+        <EventPlanFullScreen
+          store={store}
+          events={pendingPrompt.events}
+          width={columns}
+          height={rows}
+        />
+      </CommandModeContext.Provider>
+    );
+  }
 
   return (
     <CommandModeContext.Provider value={store.commandMode}>
