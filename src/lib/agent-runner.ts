@@ -55,6 +55,11 @@ import {
 import { ExitCode } from './exit-codes';
 import { GENERIC_AGENT_CONFIG } from '../frameworks/generic/generic-wizard-agent';
 import { buildPreflightContext } from './agent/preflight-context';
+import {
+  detectProjectSize,
+  resolveThresholds,
+  shouldUseJitMode,
+} from './agent/project-size';
 
 /** Single source of truth for the support address shown in error messages. */
 const SUPPORT_EMAIL = 'wizard@amplitude.com';
@@ -1050,6 +1055,24 @@ async function runAgentWizardBody(
     value: cloudRegion.toUpperCase(),
   });
 
+  // Detect project size up-front so we can log which mode we landed on.
+  // Internal LLM-reliability research recommends a JIT-context-loading
+  // posture for medium-and-up codebases; the full pre-flight Markdown
+  // dump only pays off on small projects where it eliminates the cold-
+  // start probe without crowding out attention budget. Detection has a
+  // hard 5s wall-clock cap inside `detectProjectSize`; large projects
+  // that hit the cap are treated as "use JIT" so we don't pay a probe
+  // tax to figure out we're large.
+  const projectSize = detectProjectSize(session.installDir);
+  const thresholds = resolveThresholds();
+  const jitMode = shouldUseJitMode(projectSize, thresholds);
+  logToFile(
+    `[preflight] project size: files=${projectSize.fileCount} ` +
+      `events=${projectSize.eventCount} timedOut=${projectSize.timedOut} ` +
+      `thresholds=${thresholds.fileThreshold}/${thresholds.eventThreshold} ` +
+      `mode=${jitMode ? 'jit' : 'full'}`,
+  );
+
   const preflightBlock = buildPreflightContext({
     installDir: session.installDir,
     integration: session.integration,
@@ -1068,6 +1091,7 @@ async function runAgentWizardBody(
       path.join(session.installDir, '.amplitude', 'project-binding.json'),
     ),
     frameworkContext,
+    projectSize,
   });
 
   const integrationPrompt =

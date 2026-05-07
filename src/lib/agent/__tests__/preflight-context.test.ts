@@ -426,3 +426,149 @@ describe('buildPreflightContext', () => {
     }
   });
 });
+
+/**
+ * Gate behavior — small projects keep the full pre-flight block (PR #600
+ * cold-start probe elimination); medium-and-up projects fall back to a
+ * just-in-time exploration prompt so the structured Markdown dump doesn't
+ * crowd out attention budget the model should be spending on `read_file`
+ * / `grep` / discovery tools.
+ *
+ * The gate is keyed on file count + confirmed-event count, with both
+ * thresholds env-overridable.
+ */
+describe('buildPreflightContext — JIT gating', () => {
+  let installDir: string;
+
+  beforeEach(() => {
+    installDir = fs.mkdtempSync(path.join(os.tmpdir(), 'preflight-gate-'));
+  });
+
+  afterEach(() => {
+    try {
+      fs.rmSync(installDir, { recursive: true, force: true });
+    } catch {
+      // ignore
+    }
+  });
+
+  const baseInput = (override: Record<string, unknown> = {}) => ({
+    installDir,
+    integration: Integration.nextjs,
+    detectedFrameworkLabel: 'Next.js 15.3',
+    frameworkVersion: '15.3.0',
+    typescript: true,
+    packageManagerInfo: PNPM_INFO,
+    userEmail: 'user@example.com',
+    selectedOrgId: '21',
+    selectedOrgName: 'Amplitude',
+    selectedProjectId: '12345',
+    selectedProjectName: 'test-delete-me',
+    selectedEnvName: 'Production',
+    cloudRegion: 'us' as const,
+    projectBound: true,
+    ...override,
+  });
+
+  it('returns the JIT-mode block when file count exceeds the threshold', () => {
+    const out = buildPreflightContext(
+      baseInput({
+        projectSize: { fileCount: 5_000, eventCount: 0, timedOut: false },
+      }),
+    );
+    expect(out).toMatch(
+      /^# Pre-flight context \(large project — load on demand\)/,
+    );
+    expect(out).toMatch(/just-in-time/);
+    expect(out).toMatch(/5000 files/);
+    // Footer guidance steers the agent toward exploration tools rather
+    // than dumping the env-key inventory up front.
+    expect(out).toMatch(/`read_file`/);
+    expect(out).toMatch(/`grep`/);
+    // The full-block "do NOT re-probe" header must NOT appear.
+    expect(out).not.toMatch(/do NOT re-probe at start/);
+    // Environment dump is suppressed in JIT mode.
+    expect(out).not.toContain('## Environment');
+    // Project + Amplitude blocks remain so the agent still has the cached
+    // answers without paying the env-scan attention cost.
+    expect(out).toContain('## Project');
+    expect(out).toContain('## Amplitude state');
+  });
+
+  it('returns the JIT-mode block when event count exceeds the threshold', () => {
+    const out = buildPreflightContext(
+      baseInput({
+        projectSize: { fileCount: 50, eventCount: 200, timedOut: false },
+      }),
+    );
+    expect(out).toMatch(/load on demand/);
+    expect(out).toMatch(/200 confirmed events/);
+  });
+
+  it('treats a timed-out scan as JIT mode', () => {
+    const out = buildPreflightContext(
+      baseInput({
+        projectSize: { fileCount: 0, eventCount: 0, timedOut: true },
+      }),
+    );
+    expect(out).toMatch(/load on demand/);
+    expect(out).toMatch(/file scan exceeded 5s budget/);
+  });
+
+  it('returns the full pre-flight block when file count is at or below the threshold', () => {
+    const out = buildPreflightContext(
+      baseInput({
+        projectSize: { fileCount: 200, eventCount: 50, timedOut: false },
+      }),
+    );
+    expect(out).toMatch(
+      /^# Pre-flight context \(you have these answers; do NOT re-probe at start\)/,
+    );
+    expect(out).toContain('## Environment');
+    expect(out).not.toMatch(/load on demand/);
+  });
+
+  it('honors AMPLITUDE_WIZARD_PREFLIGHT_FILE_THRESHOLD override', () => {
+    // 100 files would normally pass (default threshold 200). With an env
+    // override of 50, it now flips into JIT mode.
+    const out = buildPreflightContext(
+      baseInput({
+        projectSize: { fileCount: 100, eventCount: 0, timedOut: false },
+        env: { AMPLITUDE_WIZARD_PREFLIGHT_FILE_THRESHOLD: '50' },
+      }),
+    );
+    expect(out).toMatch(/load on demand/);
+  });
+
+  it('honors AMPLITUDE_WIZARD_PREFLIGHT_EVENT_THRESHOLD override', () => {
+    // 10 events with default threshold 50 stays full. Lower override
+    // to 5 and we flip.
+    const out = buildPreflightContext(
+      baseInput({
+        projectSize: { fileCount: 10, eventCount: 10, timedOut: false },
+        env: { AMPLITUDE_WIZARD_PREFLIGHT_EVENT_THRESHOLD: '5' },
+      }),
+    );
+    expect(out).toMatch(/load on demand/);
+  });
+
+  it('regression: ~50-file project (Excalidraw-size) gets the full pre-flight block', () => {
+    // Materialize ~50 source files in the install dir so detection runs
+    // against a real fixture rather than a synthetic ProjectSizeReport.
+    // The default threshold is 200, so this should land squarely in
+    // "small project, full block" territory.
+    fs.mkdirSync(path.join(installDir, 'src'), { recursive: true });
+    for (let i = 0; i < 50; i += 1) {
+      fs.writeFileSync(
+        path.join(installDir, 'src', `file-${i}.ts`),
+        '// excalidraw-shaped fixture\n',
+      );
+    }
+    const out = buildPreflightContext(baseInput());
+    expect(out).toMatch(
+      /^# Pre-flight context \(you have these answers; do NOT re-probe at start\)/,
+    );
+    expect(out).toContain('## Environment');
+    expect(out).not.toMatch(/load on demand/);
+  });
+});
