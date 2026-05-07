@@ -237,6 +237,31 @@ function systemMessageWithCacheControl(content: string): {
  * middleware doesn't need to know about the legacy SDK's permission
  * envelope.
  */
+/**
+ * Translate AI-SDK tool names (snake_case, e.g. `write_file`) to the
+ * legacy Agent SDK names (`Write`, `Edit`, `Read`, `Grep`, `Bash`, ...) so
+ * `wizardCanUseTool`'s allowlist + .env / wizard-managed file guards apply
+ * uniformly across both runners. Without this, `write_file` falls through
+ * to the catch-all `toolName !== 'Bash'` allow branch and bypasses the
+ * .env protection entirely.
+ */
+function normalizeAiSdkToolName(toolName: string): string {
+  switch (toolName) {
+    case 'write_file':
+      return 'Write';
+    case 'edit_file':
+      return 'Edit';
+    case 'read_file':
+      return 'Read';
+    case 'grep':
+      return 'Grep';
+    case 'bash':
+      return 'Bash';
+    default:
+      return toolName;
+  }
+}
+
 function evaluatePreToolPolicy(args: {
   toolName: string;
   toolInput: unknown;
@@ -246,7 +271,10 @@ function evaluatePreToolPolicy(args: {
       typeof args.toolInput === 'object' && args.toolInput !== null
         ? (args.toolInput as Record<string, unknown>)
         : {};
-    const decision = wizardCanUseTool(args.toolName, input);
+    const decision = wizardCanUseTool(
+      normalizeAiSdkToolName(args.toolName),
+      input,
+    );
     if (decision.behavior === 'deny') {
       return { allowed: false, reason: decision.message };
     }
@@ -414,8 +442,14 @@ export async function runAiSdkAgent(
         // write tool the step ran. The execute path also emits;
         // duplicate emission is fine because AgentUI dedupes by
         // (path, operation) — but in practice only one path fires.
+        // AI-SDK reports tools by their registered snake_case name
+        // (e.g. `write_file`); normalize to the legacy Agent SDK name
+        // so the downstream `emitFileChangeApplied` consumer (which
+        // shares the AgentUI dedupe key shape with the legacy runner)
+        // sees consistent input.
         for (const call of step.toolCalls ?? []) {
-          const name = call.toolName ?? '';
+          const rawName = call.toolName ?? '';
+          const name = normalizeAiSdkToolName(rawName);
           if (name === 'Write' || name === 'Edit' || name === 'MultiEdit') {
             emitFileChangeApplied({
               toolName: name,
