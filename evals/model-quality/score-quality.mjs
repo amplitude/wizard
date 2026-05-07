@@ -30,6 +30,7 @@ import {
   parseJudgeVerdict,
   summariseResults,
   gatewayModelString,
+  median,
 } from './lib/scorers.mjs';
 import { resolveHarnessAuth } from './lib/run-prompt.mjs';
 
@@ -292,8 +293,10 @@ async function main() {
     })),
   };
 
-  const outPath =
-    args.outPath ?? resultsPath.replace(/\.jsonl$/, '.report.json');
+  let outPath = args.outPath ?? resultsPath.replace(/\.jsonl$/, '.report.json');
+  if (outPath === resultsPath) {
+    outPath = resultsPath + '.report.json';
+  }
   writeFileSync(outPath, JSON.stringify(report, null, 2) + '\n', 'utf8');
 
   printSummary(report);
@@ -316,15 +319,6 @@ function aggregateLatency(rows) {
     haikuMedianTtftMs: median(ttft.haiku),
     sonnetMedianTtftMs: median(ttft.sonnet),
   };
-}
-
-function median(nums) {
-  if (!nums || nums.length === 0) return null;
-  const sorted = [...nums].sort((a, b) => a - b);
-  const mid = Math.floor(sorted.length / 2);
-  return sorted.length % 2 === 0
-    ? (sorted[mid - 1] + sorted[mid]) / 2
-    : sorted[mid];
 }
 
 function printSummary(report) {

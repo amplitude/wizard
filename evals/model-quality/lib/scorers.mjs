@@ -292,7 +292,7 @@ export function summariseResults(rows) {
   return summary;
 }
 
-function median(nums) {
+export function median(nums) {
   if (!nums || nums.length === 0) return null;
   const sorted = [...nums].sort((a, b) => a - b);
   const mid = Math.floor(sorted.length / 2);
