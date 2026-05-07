@@ -13,7 +13,7 @@ describe('maybeRunAiSdkGatewayProbe', () => {
     );
     const r = await maybeRunAiSdkGatewayProbe({
       useLocalClaude: false,
-      model: 'claude-sonnet-4-6',
+      useDirectApiKey: false,
     });
     expect(r.status).toBe('skipped');
   });
@@ -25,7 +25,7 @@ describe('maybeRunAiSdkGatewayProbe', () => {
     );
     const r = await maybeRunAiSdkGatewayProbe({
       useLocalClaude: true,
-      model: 'claude-sonnet-4-6',
+      useDirectApiKey: false,
     });
     expect(r.status).toBe('skipped');
     if (r.status === 'skipped') {

@@ -1,16 +1,23 @@
-import { describe, it, expect } from 'vitest';
+import { afterEach, describe, expect, it, vi } from 'vitest';
 import {
   FALLBACK_MODEL_DIRECT,
   FALLBACK_MODEL_GATEWAY,
+  HAIKU_MODEL_DIRECT,
+  HAIKU_MODEL_GATEWAY,
   sdkStandardFallbackModel,
   selectModel,
 } from '../model-config.js';
 
 /**
- * `selectModel` is the single chokepoint that translates `WizardMode` into
- * the actual model alias on the wire. See `docs/internal/agent-mode-flag.md`.
+ * `selectModel` is the single chokepoint that translates `ModelTier` into
+ * the actual model alias on the wire. See `docs/internal/agent-mode-flag.md`
+ * and `MIGRATION_PLAN.md` strategic posture #10 (model tiering per call site).
  */
 describe('selectModel', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+  });
+
   it('returns the production-default alias for the default tier', () => {
     expect(selectModel('standard', true)).toBe('claude-sonnet-4-6');
     expect(selectModel('standard', false)).toBe('anthropic/claude-sonnet-4-6');
@@ -26,11 +33,46 @@ describe('selectModel', () => {
     expect(selectModel('thorough', false)).toBe('anthropic/claude-opus-4-7');
   });
 
+  it('returns the pinned Haiku alias for the oneshot tier', () => {
+    expect(selectModel('oneshot', true)).toBe(HAIKU_MODEL_DIRECT);
+    expect(selectModel('oneshot', false)).toBe(HAIKU_MODEL_GATEWAY);
+  });
+
   it('treats an unknown mode as the production default (defensive)', () => {
     expect(selectModel('bogus' as 'standard', true)).toBe('claude-sonnet-4-6');
     expect(selectModel('bogus' as 'standard', false)).toBe(
       'anthropic/claude-sonnet-4-6',
     );
+  });
+
+  it('honors WIZARD_CLAUDE_MODEL override on the standard tier', () => {
+    vi.stubEnv('WIZARD_CLAUDE_MODEL', 'claude-sonnet-vnext');
+    expect(selectModel('standard', true)).toBe('claude-sonnet-vnext');
+    expect(selectModel('standard', false)).toBe(
+      'anthropic/claude-sonnet-vnext',
+    );
+  });
+
+  it('honors WIZARD_HAIKU_MODEL override on the oneshot tier', () => {
+    vi.stubEnv('WIZARD_HAIKU_MODEL', 'claude-haiku-vnext');
+    expect(selectModel('oneshot', true)).toBe('claude-haiku-vnext');
+    expect(selectModel('oneshot', false)).toBe('anthropic/claude-haiku-vnext');
+  });
+
+  it('ignores empty / whitespace overrides and returns the pinned aliases', () => {
+    vi.stubEnv('WIZARD_HAIKU_MODEL', '   ');
+    expect(selectModel('oneshot', true)).toBe(HAIKU_MODEL_DIRECT);
+    vi.stubEnv('WIZARD_CLAUDE_MODEL', '');
+    expect(selectModel('standard', true)).toBe('claude-sonnet-4-6');
+  });
+
+  // The SDK rejects a fallback equal to the primary; if an operator pins
+  // WIZARD_CLAUDE_MODEL to the fallback alias, the wizard would crash on
+  // every run. Defensively ignore such overrides and keep the default.
+  it('ignores WIZARD_CLAUDE_MODEL overrides that collide with the SDK fallback', () => {
+    vi.stubEnv('WIZARD_CLAUDE_MODEL', FALLBACK_MODEL_DIRECT);
+    expect(selectModel('standard', true)).toBe('claude-sonnet-4-6');
+    expect(selectModel('standard', false)).toBe('anthropic/claude-sonnet-4-6');
   });
 
   // The Claude Agent SDK rejects a `fallbackModel` equal to the primary
@@ -45,6 +87,8 @@ describe('selectModel', () => {
     ['fast', false] as const,
     ['thorough', true] as const,
     ['thorough', false] as const,
+    ['oneshot', true] as const,
+    ['oneshot', false] as const,
   ])(
     'never returns the fallback alias for mode=%s, useDirectApiKey=%s',
     (mode, useDirectApiKey) => {
@@ -52,6 +96,21 @@ describe('selectModel', () => {
         ? FALLBACK_MODEL_DIRECT
         : FALLBACK_MODEL_GATEWAY;
       expect(selectModel(mode, useDirectApiKey)).not.toBe(fallback);
+    },
+  );
+
+  // Tier disjointness: primary (standard) !== fallback !== oneshot. This
+  // guards the post-#568 invariant that the inner-loop, gateway-fallback,
+  // and one-shot tiers are three distinct aliases on every code path.
+  it.each([[true] as const, [false] as const])(
+    'standard / fallback / oneshot are pairwise distinct (useDirectApiKey=%s)',
+    (useDirectApiKey) => {
+      const primary = selectModel('standard', useDirectApiKey);
+      const fallback = sdkStandardFallbackModel(useDirectApiKey);
+      const oneshot = selectModel('oneshot', useDirectApiKey);
+      expect(primary).not.toBe(fallback);
+      expect(primary).not.toBe(oneshot);
+      expect(fallback).not.toBe(oneshot);
     },
   );
 });
@@ -74,6 +133,8 @@ describe('sdkStandardFallbackModel', () => {
     ['fast', false] as const,
     ['thorough', true] as const,
     ['thorough', false] as const,
+    ['oneshot', true] as const,
+    ['oneshot', false] as const,
   ])(
     'is distinct from selectModel for mode=%s, useDirectApiKey=%s',
     (mode, useDirectApiKey) => {
@@ -82,4 +143,11 @@ describe('sdkStandardFallbackModel', () => {
       );
     },
   );
+});
+
+describe('HAIKU_MODEL_*', () => {
+  it('pins the Haiku alias on direct and gateway paths', () => {
+    expect(HAIKU_MODEL_DIRECT).toBe('claude-haiku-4-5-20251001');
+    expect(HAIKU_MODEL_GATEWAY).toBe('anthropic/claude-haiku-4-5-20251001');
+  });
 });

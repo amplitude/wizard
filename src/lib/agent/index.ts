@@ -1,9 +1,12 @@
 export {
   FALLBACK_MODEL_DIRECT,
   FALLBACK_MODEL_GATEWAY,
+  HAIKU_MODEL_DIRECT,
+  HAIKU_MODEL_GATEWAY,
   sdkStandardFallbackModel,
   selectModel,
 } from './model-config.js';
+export type { ModelTier } from './model-config.js';
 export {
   getConsoleQueryStack,
   type ConsoleQueryStackKind,
