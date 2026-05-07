@@ -33,6 +33,7 @@ import {
   isStallNonProgressMessage,
   redactToolLogPayload,
   EVENT_PLAN_FEEDBACK_REINJECTION_PROMPT,
+  updateAmplitudeMcpBearer,
 } from '../agent-interface';
 import {
   recordEventPlanDecision,
@@ -1366,6 +1367,117 @@ describe('runAgent', () => {
     });
   });
 
+  // Bugbot thread (PR #608): inter-attempt token refresh updated the env
+  // vars used by the SDK's auth path but left
+  // `agentConfig.mcpServers['amplitude-wizard'].headers.Authorization`
+  // pinned to the OLD bearer. Fresh subprocess from `query()` reads the
+  // mcpServers config the SDK was given and uses those exact headers when
+  // talking to the Amplitude MCP endpoint, so every Amplitude MCP call
+  // after rotation 401s until the agent reconnects. Test verifies the
+  // header is rotated alongside the env vars.
+  describe('inter-attempt token refresh: MCP Authorization header rotation', () => {
+    afterEach(() => {
+      vi.useRealTimers();
+      vi.unmock('../agent-runner.js');
+      vi.unmock('../agent-runner');
+    });
+
+    it('refreshes the MCP Authorization header when the token rotates between attempts', async () => {
+      vi.useFakeTimers();
+
+      // Mock agent-runner so the inter-attempt refresh hook returns a
+      // rotated token on the second attempt's preamble. The dynamic
+      // `await import('./agent-runner.js')` inside agent-interface
+      // resolves to this mock module.
+      vi.doMock('../agent-runner.js', () => ({
+        refreshTokenIfStale: vi.fn(async () => 'new-token'),
+      }));
+
+      const initialBearer = 'old-token';
+      process.env.ANTHROPIC_AUTH_TOKEN = initialBearer;
+      process.env.CLAUDE_CODE_OAUTH_TOKEN = initialBearer;
+
+      const mcpServers = {
+        'amplitude-wizard': {
+          type: 'http',
+          url: 'https://mcp.example.com',
+          headers: {
+            Authorization: `Bearer ${initialBearer}`,
+            'User-Agent': 'amplitude-wizard',
+          },
+        },
+      };
+
+      const observedAuthHeaders: Array<string> = [];
+      let queryCallCount = 0;
+
+      mockQuery.mockImplementation(
+        (params: { options: Record<string, unknown> }) => {
+          queryCallCount++;
+          // Capture the Authorization header the SDK would have used for
+          // the Amplitude MCP server on this attempt.
+          const servers = params.options.mcpServers as
+            | Record<string, { headers?: Record<string, string> }>
+            | undefined;
+          observedAuthHeaders.push(
+            servers?.['amplitude-wizard']?.headers?.Authorization ?? '',
+          );
+
+          if (queryCallCount === 1) {
+            // Stall the first attempt so the retry preamble runs.
+            const signal = params.options.abortSignal as AbortSignal;
+            // eslint-disable-next-line require-yield
+            return (async function* () {
+              await new Promise<never>((_, reject) => {
+                signal.addEventListener('abort', () =>
+                  reject(new Error('Stall aborted')),
+                );
+              });
+            })();
+          }
+
+          // Second attempt: succeed.
+          return (async function* () {
+            yield {
+              type: 'result',
+              subtype: 'success',
+              is_error: false,
+              result: '',
+            };
+          })();
+        },
+      );
+
+      const runPromise = runAgent(
+        { ...defaultAgentConfig, mcpServers },
+        'test prompt',
+        defaultOptions,
+        mockSpinner as unknown as SpinnerHandle,
+        { successMessage: 'Done', errorMessage: 'Failed' },
+      );
+
+      // 60s cold-start stall + jittered backoff (2-4s) = 62-64s worst case.
+      await vi.advanceTimersByTimeAsync(70_000);
+
+      const result = await runPromise;
+
+      expect(result).toEqual({ plannedEvents: [] });
+      expect(queryCallCount).toBe(2);
+      // First attempt sees the OLD bearer.
+      expect(observedAuthHeaders[0]).toBe(`Bearer ${initialBearer}`);
+      // Second attempt MUST see the rotated bearer — without the
+      // header-rotation fix the subprocess would keep sending
+      // `Bearer old-token` and the Amplitude MCP would 401.
+      expect(observedAuthHeaders[1]).toBe('Bearer new-token');
+      // The mcpServers object handed back to the caller should also
+      // reflect the rotation (defensive: callers may inspect it for
+      // diagnostics).
+      expect(mcpServers['amplitude-wizard'].headers.Authorization).toBe(
+        'Bearer new-token',
+      );
+    }, 15_000);
+  });
+
   describe('race condition handling', () => {
     it('should return success when agent completes successfully then SDK cleanup fails', async () => {
       // This test models actual SDK behavior where the SDK emits TWO result messages:
@@ -1434,6 +1546,44 @@ describe('runAgent', () => {
       // ui.log.error should NOT have been called (errors suppressed for user)
       expect(mockUIInstance.log.error).not.toHaveBeenCalled();
     });
+  });
+});
+
+describe('updateAmplitudeMcpBearer', () => {
+  it('rotates the Authorization header on the amplitude-wizard MCP entry', () => {
+    const mcpServers: Record<string, unknown> = {
+      'amplitude-wizard': {
+        type: 'http',
+        url: 'https://mcp.example.com',
+        headers: { Authorization: 'Bearer old', 'User-Agent': 'wizard' },
+      },
+    };
+    expect(updateAmplitudeMcpBearer(mcpServers, 'fresh')).toBe(true);
+    expect(
+      (mcpServers['amplitude-wizard'] as { headers: { Authorization: string } })
+        .headers.Authorization,
+    ).toBe('Bearer fresh');
+    // Other headers must not be touched.
+    expect(
+      (
+        mcpServers['amplitude-wizard'] as {
+          headers: { 'User-Agent': string };
+        }
+      ).headers['User-Agent'],
+    ).toBe('wizard');
+  });
+
+  it('no-ops (returns false) when the amplitude-wizard entry is absent', () => {
+    const mcpServers: Record<string, unknown> = { 'wizard-tools': {} };
+    expect(updateAmplitudeMcpBearer(mcpServers, 'fresh')).toBe(false);
+    expect(mcpServers).toEqual({ 'wizard-tools': {} });
+  });
+
+  it('no-ops (returns false) when the entry has no headers object', () => {
+    const mcpServers: Record<string, unknown> = {
+      'amplitude-wizard': { type: 'http', url: 'https://mcp.example.com' },
+    };
+    expect(updateAmplitudeMcpBearer(mcpServers, 'fresh')).toBe(false);
   });
 });
 
