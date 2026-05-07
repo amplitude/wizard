@@ -62,6 +62,8 @@ import { createInnerLifecycleHooks } from './inner-lifecycle';
 import { classifyWriteOperation, truncateLogMessage } from './agent-events';
 import {
   createWizardToolsServer,
+  isWizardPromptActive,
+  onWizardPromptRelease,
   persistDashboard,
   resolveWizardAllowedToolNames,
   type StatusReport,
@@ -2569,6 +2571,21 @@ export async function runAgent(
           ? STALL_TIMEOUT_MS
           : INITIAL_STALL_TIMEOUT_MS;
         staleTimer = setTimeout(() => {
+          // A wizard-tools blocking prompt (`confirm`, `choose`,
+          // `confirm_event_plan`) is currently awaiting a user decision —
+          // the agent intentionally has no SDK messages in flight while the
+          // human reads the prompt. Suppress the abort and re-arm the
+          // timer; the prompt-release listener below will reset us cleanly
+          // once the user answers and SDK messages can resume.
+          if (isWizardPromptActive()) {
+            logToFile(
+              `Agent stall heartbeat suppressed — user prompt is active (attempt ${
+                attempt + 1
+              }, last message: ${lastMessageType})`,
+            );
+            resetStaleTimer();
+            return;
+          }
           const elapsed = Math.round((Date.now() - lastMessageTime) / 1000);
           logToFile(
             `Agent stalled — no message for ${elapsed}s (attempt ${
@@ -2586,6 +2603,21 @@ export async function runAgent(
           controller.abort('stall');
         }, timeoutMs);
       };
+
+      // When a blocking user prompt resolves, reset the stall timer so the
+      // post-prompt window is timed from the user's decision — not from
+      // before the prompt opened. Without this, the timer that was paused
+      // (re-armed) while the prompt was active would still be running on
+      // its old deadline when SDK messages start flowing again, and a
+      // brief upstream lag could trip the stall right after the user
+      // answered. Subscribed before the SDK call so the listener is always
+      // active for this attempt.
+      const unsubscribePromptRelease = onWizardPromptRelease(() => {
+        // Treat the prompt response as a fresh "message" for stall-timer
+        // purposes — the user just demonstrated the run is alive.
+        lastMessageTime = Date.now();
+        resetStaleTimer();
+      });
 
       const resolvedMaxTurns = resolveMaxTurns();
       logToFile(
@@ -3360,6 +3392,7 @@ export async function runAgent(
         // Check if the agent hit a transient API error (e.g. Vertex 400)
         // that warrants a retry rather than immediately giving up.
         clearTimeout(staleTimer);
+        unsubscribePromptRelease();
         wizardSignal.removeEventListener('abort', onWizardAbort);
         const partialOutput = collectedText.join('\n');
 
@@ -3460,6 +3493,7 @@ export async function runAgent(
         break;
       } catch (innerError) {
         clearTimeout(staleTimer);
+        unsubscribePromptRelease();
         wizardSignal.removeEventListener('abort', onWizardAbort);
         signalDone(); // unblock the prompt stream for this attempt
         // Always drain the prior iterator after an exception, regardless

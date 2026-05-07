@@ -58,6 +58,116 @@ export {
   PRE_STAGED_CONSTANT_SKILLS,
 } from './wizard-tools/bundled-skills.js';
 
+// ---------------------------------------------------------------------------
+// Active user-prompt tracking
+// ---------------------------------------------------------------------------
+//
+// `confirm`, `choose`, and `confirm_event_plan` all block server-side on
+// `await getUI().promptX(...)` while the user reads the prompt and decides.
+// During that window no SDK message arrives, which the agent-interface stall
+// detector (`staleTimer` in agent-interface.ts) would otherwise interpret as a
+// hang and abort. We track in-flight prompts here so the stall detector can
+// suppress its abort when the agent is legitimately waiting on a human.
+//
+// Counter (not boolean) so concurrent / nested prompts compose correctly —
+// even though the wizard typically runs one prompt at a time, defending
+// against nesting keeps the flag honest if a future code path layers them.
+//
+// Listeners are notified each time the counter falls back to zero, so the
+// stall detector can re-arm its timer the moment the user releases the prompt
+// and the SDK starts producing messages again.
+
+let activeUserPromptCount = 0;
+const promptReleaseListeners = new Set<() => void>();
+
+/**
+ * True while at least one blocking wizard-tools user prompt
+ * (`confirm` / `choose` / `confirm_event_plan`) is awaiting a decision.
+ */
+export function isWizardPromptActive(): boolean {
+  return activeUserPromptCount > 0;
+}
+
+/**
+ * Subscribe to the edge where the active prompt count drops back to zero —
+ * i.e. the user just answered (or the prompt threw and unwound). Used by the
+ * stall detector to reset its timer so post-prompt silence is timed from the
+ * user's response, not from before the prompt opened.
+ *
+ * Returns an unsubscribe function.
+ */
+export function onWizardPromptRelease(cb: () => void): () => void {
+  promptReleaseListeners.add(cb);
+  return () => {
+    promptReleaseListeners.delete(cb);
+  };
+}
+
+/**
+ * Run a blocking user-prompt body inside the active-prompt window. Always
+ * decrements (and notifies listeners on the 1→0 edge) even if the prompt
+ * throws, so an error in the UI can't leak the flag and permanently mute the
+ * stall detector.
+ */
+async function withActiveUserPrompt<T>(fn: () => Promise<T>): Promise<T> {
+  activeUserPromptCount++;
+  try {
+    return await fn();
+  } finally {
+    if (activeUserPromptCount > 0) activeUserPromptCount--;
+    if (activeUserPromptCount === 0) {
+      for (const cb of [...promptReleaseListeners]) {
+        try {
+          cb();
+        } catch (err) {
+          logToFile(
+            `withActiveUserPrompt: release listener threw: ${
+              err instanceof Error ? err.message : String(err)
+            }`,
+          );
+        }
+      }
+    }
+  }
+}
+
+/**
+ * Test-only reset hook. Brings the counter back to zero and clears every
+ * subscriber so a leaked promise from a prior test can't bleed into the next.
+ * Not exported from a barrel — tests import it directly.
+ */
+export function __resetWizardPromptStateForTests(): void {
+  activeUserPromptCount = 0;
+  promptReleaseListeners.clear();
+}
+
+/**
+ * Test-only handle that opens an "active prompt" window without spinning up
+ * the full MCP server / UI surface. Used by `agent-interface.test.ts` to
+ * exercise the stall-suppression branch added for the false-positive 60s
+ * heartbeat fix. The returned function closes the window (decrements +
+ * notifies release listeners) — symmetric with the real
+ * `withActiveUserPrompt` wrapper. Production code must not call this.
+ */
+export function __openWizardPromptForTests(): () => void {
+  activeUserPromptCount++;
+  let closed = false;
+  return () => {
+    if (closed) return;
+    closed = true;
+    if (activeUserPromptCount > 0) activeUserPromptCount--;
+    if (activeUserPromptCount === 0) {
+      for (const cb of [...promptReleaseListeners]) {
+        try {
+          cb();
+        } catch {
+          // Swallow — production wrapper logs; tests just need the edge.
+        }
+      }
+    }
+  };
+}
+
 // Allow-listed hosts for remote skill downloads. The wizard ships skills
 // from amplitude/context-hub via GitHub Releases; nothing else should ever
 // be a download source. Any host not on this list — including raw IPs and
@@ -1765,7 +1875,11 @@ export async function createWizardToolsServer(options: WizardToolsOptions) {
     },
     async (args: { message: string; reason: string }) => {
       logToFile(`confirm: ${args.message}`);
-      const answer = await getUI().promptConfirm(args.message);
+      // Wrapped so the stall detector in agent-interface.ts knows the agent
+      // is intentionally idle while waiting on the user.
+      const answer = await withActiveUserPrompt(() =>
+        getUI().promptConfirm(args.message),
+      );
       return {
         content: [{ type: 'text' as const, text: answer ? 'true' : 'false' }],
       };
@@ -1787,7 +1901,9 @@ export async function createWizardToolsServer(options: WizardToolsOptions) {
     },
     async (args: { message: string; options: string[]; reason: string }) => {
       logToFile(`choose: ${args.message}, options: ${args.options.join(', ')}`);
-      const answer = await getUI().promptChoice(args.message, args.options);
+      const answer = await withActiveUserPrompt(() =>
+        getUI().promptChoice(args.message, args.options),
+      );
       return {
         content: [{ type: 'text' as const, text: answer }],
       };
@@ -1861,7 +1977,9 @@ Returns: "approved", "skipped", or "feedback: <user message>"`,
           DEMO_MODE ? ' (demo mode)' : ''
         }`,
       );
-      const decision: EventPlanDecision = await getUI().promptEventPlan(events);
+      const decision: EventPlanDecision = await withActiveUserPrompt(() =>
+        getUI().promptEventPlan(events),
+      );
       let text: string;
       if (decision.decision === 'revised') {
         text = `feedback: ${decision.feedback}`;
