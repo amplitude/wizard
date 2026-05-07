@@ -302,6 +302,10 @@ export class LoggingUI implements WizardUI {
     // No-op in CI/logging mode
   }
 
+  markDataIngestionConfirmed(): void {
+    // No-op in CI/logging mode — no TUI router to advance.
+  }
+
   setDashboardUrl(_url: string): void {
     // No-op in CI/logging mode
   }

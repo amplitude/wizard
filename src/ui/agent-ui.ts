@@ -1422,6 +1422,12 @@ export class AgentUI implements WizardUI {
     });
   }
 
+  markDataIngestionConfirmed(): void {
+    // No-op in --agent mode — there's no flow router to advance, and the
+    // ingestion-confirmed signal is already on the wire via the
+    // `events_detected` result event emitted from setEventIngestionDetected.
+  }
+
   setDashboardUrl(url: string): void {
     const openUrl = toWizardDashboardOpenUrl(url);
     emit('result', `dashboard_created: ${openUrl}`, {

@@ -43,6 +43,12 @@ export class InkUI implements WizardUI {
         kind: OutroKind.Success,
         message: stripAnsi(message),
       });
+    } else {
+      // Re-emit existing outroData so subscribers (OutroScreen) re-render.
+      // Business-logic callers that direct-mutate `session.outroData` don't
+      // fire change events, so without this the OutroScreen could miss the
+      // updated state. Mirrors the same defensive re-emit in `cancel()`.
+      this.store.setOutroData(this.store.session.outroData);
     }
 
     // Signal that the main work is done — router resolves to mcp or outro
@@ -291,6 +297,10 @@ export class InkUI implements WizardUI {
 
   setEventIngestionDetected(_eventNames: string[]): void {
     // In TUI mode, DataIngestionCheckScreen handles this via polling — no-op here.
+  }
+
+  markDataIngestionConfirmed(): void {
+    this.store.setDataIngestionConfirmed();
   }
 
   setDashboardUrl(url: string): void {
