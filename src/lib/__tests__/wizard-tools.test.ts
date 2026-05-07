@@ -928,6 +928,10 @@ describe('WIZARD_TOOL_NAMES', () => {
         'wizard-tools:confirm_event_plan',
         'wizard-tools:report_status',
         'wizard-tools:record_dashboard',
+        // PR 2 of DEFER_DASHBOARD_PLAN: registered (additive) so the
+        // agent CAN call it. PR 4 wires it into the prompt and retires
+        // record_dashboard.
+        'wizard-tools:record_dashboard_plan',
         'wizard-tools:wizard_feedback',
       ]),
     );
