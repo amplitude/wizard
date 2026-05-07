@@ -1407,7 +1407,7 @@ export async function initializeAgent(
 
     const aiSdkProbe = await maybeRunAiSdkGatewayProbe({
       useLocalClaude,
-      model: agentRunConfig.model,
+      useDirectApiKey,
     });
     if (aiSdkProbe.status === 'skipped') {
       logToFile('AI SDK gateway probe skipped:', aiSdkProbe.reason);

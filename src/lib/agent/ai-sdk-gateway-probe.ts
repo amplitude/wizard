@@ -16,6 +16,7 @@
  */
 import { logToFile } from '../../utils/debug.js';
 import { resolveAnthropicAuth } from './anthropic-auth.js';
+import { selectModel } from './model-config.js';
 
 export type AiSdkGatewayProbeResult =
   | { status: 'skipped'; reason: string }
@@ -24,11 +25,21 @@ export type AiSdkGatewayProbeResult =
 
 /**
  * Single short completion to validate streaming + gateway auth. Does not use tools.
+ *
+ * Per `MIGRATION_PLAN.md` strategic posture #10 the probe runs on the Haiku
+ * one-shot tier — it's a transport check, not reasoning, and we don't want
+ * to spend Sonnet tokens proving the gateway is reachable. The `model`
+ * argument is no longer threaded through; we resolve Haiku via
+ * {@link selectModel} from the wizard auth path.
  */
 export async function maybeRunAiSdkGatewayProbe(args: {
   useLocalClaude: boolean;
-  /** Same model string passed to the Agent SDK (`selectModel` output). */
-  model: string;
+  /**
+   * `true` when the wizard is talking to the Anthropic API directly
+   * (bare alias, no `anthropic/` prefix); `false` for the Amplitude LLM
+   * gateway. Mirrors the same flag {@link selectModel} takes.
+   */
+  useDirectApiKey: boolean;
 }): Promise<AiSdkGatewayProbeResult> {
   if (process.env.AMPLITUDE_WIZARD_AI_SDK_PROBE !== '1') {
     return {
@@ -70,9 +81,10 @@ export async function maybeRunAiSdkGatewayProbe(args: {
     ]);
 
     const provider = createWizardAiSdkAnthropic();
+    const probeModel = selectModel('oneshot', args.useDirectApiKey);
 
     const result = streamText({
-      model: provider(args.model),
+      model: provider(probeModel),
       maxOutputTokens: 32,
       messages: [
         {

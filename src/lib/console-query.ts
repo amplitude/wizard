@@ -20,6 +20,7 @@ import {
 import { safeParseSDKMessage } from './middleware/schemas.js';
 import { resolveWizardAllowedToolNames } from './wizard-tools.js';
 import { getConsoleQueryStack } from './agent/console-query-stack.js';
+import { selectModel } from './agent/model-config.js';
 import { getAgentDriver } from './agent-driver.js';
 import { parseAnthropicCustomHeaderBlock } from '../utils/custom-headers.js';
 
@@ -189,8 +190,18 @@ async function queryConsoleWithVercelAiSdk(
     headers: parseAnthropicCustomHeaderBlock(customHeaders),
   });
 
+  // Slash-prompt Q&A is a one-shot, no-tool-loop call. Per
+  // `MIGRATION_PLAN.md` strategic posture #10, route this through Haiku
+  // instead of inheriting the inner-loop Sonnet alias from
+  // `agentConfig.model`. The Agent SDK fallback path (below) keeps Sonnet
+  // for now — narrower blast radius if Haiku misbehaves.
+  const oneshotModel = selectModel(
+    'oneshot',
+    agentConfig.useDirectApiKey ?? false,
+  );
+
   const result = streamText({
-    model: provider(agentConfig.model),
+    model: provider(oneshotModel),
     system: systemAndHistory,
     messages: [{ role: 'user', content: userMessage }],
   });
