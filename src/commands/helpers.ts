@@ -728,6 +728,10 @@ export const runDirectSignupIfRequested = async (
   }
   let tokens: Awaited<ReturnType<typeof performSignupOrAuth>>;
   try {
+    // No `signal` here: CI / agent / classic modes have no in-band
+    // cancellation surface (no Esc handler, no unmount lifecycle), so
+    // there is nothing to thread through. The TUI path passes a signal
+    // from SigningUpScreen's useAsyncEffect; this entry point doesn't.
     tokens = await performSignupOrAuth({
       email: session.signupEmail,
       fullName: session.signupFullName,
