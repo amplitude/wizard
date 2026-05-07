@@ -54,6 +54,7 @@ import {
 } from '../utils/wizard-abort';
 import { ExitCode } from './exit-codes';
 import { GENERIC_AGENT_CONFIG } from '../frameworks/generic/generic-wizard-agent';
+import { buildPreflightContext } from './agent/preflight-context';
 
 /** Single source of truth for the support address shown in error messages. */
 const SUPPORT_EMAIL = 'wizard@amplitude.com';
@@ -917,7 +918,53 @@ async function runAgentWizardBody(
     integrationSkillIdForPrompt = resolved?.skillId ?? null;
   }
 
+  // Pre-flight context block — gives the agent every piece of state the
+  // wizard already discovered (cwd, framework, package manager, env files,
+  // org/project, region, project-binding) so it doesn't reflexively burn
+  // ~30s of cold-start probing for things we can hand it directly. The
+  // discovery tools (`detect_package_manager`, `check_env_keys`, etc.)
+  // remain registered for genuine mid-run verification — only the
+  // start-of-run probe is suppressed (see commandments). Best-effort:
+  // the package-manager scan is wrapped so a slow / failing detector
+  // can't block the agent from starting.
+  let packageManagerInfo: Awaited<
+    ReturnType<typeof config.detection.detectPackageManager>
+  > | null = null;
+  try {
+    packageManagerInfo = await config.detection.detectPackageManager(
+      session.installDir,
+    );
+  } catch (err) {
+    logToFile(
+      `[preflight] detectPackageManager failed: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
+  }
+
+  const preflightBlock = buildPreflightContext({
+    installDir: session.installDir,
+    integration: session.integration,
+    detectedFrameworkLabel: session.detectedFrameworkLabel,
+    frameworkVersion: frameworkVersion ?? null,
+    typescript: typeScriptDetected,
+    packageManagerInfo,
+    userEmail: session.userEmail,
+    selectedOrgId: session.selectedOrgId,
+    selectedOrgName: session.selectedOrgName,
+    selectedProjectId: session.selectedProjectId,
+    selectedProjectName: session.selectedProjectName,
+    selectedEnvName: session.selectedEnvName,
+    cloudRegion,
+    projectBound: fsSync.existsSync(
+      path.join(session.installDir, '.amplitude', 'project-binding.json'),
+    ),
+    frameworkContext,
+  });
+
   const integrationPrompt =
+    preflightBlock +
+    '\n' +
     buildIntegrationPrompt(
       config,
       {
@@ -931,7 +978,8 @@ async function runAgentWizardBody(
       frameworkContext,
       skipAmplitudeMcp,
       integrationSkillIdForPrompt,
-    ) + buildInlineFeatureSection(session.additionalFeatureQueue);
+    ) +
+    buildInlineFeatureSection(session.additionalFeatureQueue);
 
   // Initialize and run agent
   const spinner = getUI().spinner();
