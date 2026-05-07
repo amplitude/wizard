@@ -84,6 +84,7 @@ function makeSession(installDir: string): WizardSession {
     selectedEnvName: 'Production',
     selectedAppId: '12345',
     loginUrl: null,
+    authPhase: 'idle',
     credentials: null,
     apiKeyNotice: null,
     serviceStatus: null,

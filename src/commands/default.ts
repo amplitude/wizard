@@ -785,6 +785,16 @@ export const defaultCommand: CommandModule = {
               }
 
               if (auth === null) {
+                // Flip the AuthScreen placeholder to "Verifying your
+                // session…" while performAmplitudeAuth checks for a stored
+                // token. If a token exists the function returns
+                // immediately without ever opening the browser, so the
+                // "Preparing your sign-in link…" copy AuthScreen used to
+                // show here was misleading. If no token exists, oauth.ts
+                // flips authPhase to 'opening-browser' before constructing
+                // the URL — and the loginUrl setter flips us to
+                // 'awaiting-callback' the instant a real URL is ready.
+                tui.store.setAuthPhase('verifying-session');
                 auth = await performAmplitudeAuth({ zone, forceFresh });
               }
 
@@ -809,6 +819,10 @@ export const defaultCommand: CommandModule = {
                 // that's the "blank auth screen" symptom. Treat a timeout
                 // as a fetch failure and force a fresh OAuth so the
                 // browser opens and setLoginUrl fires immediately.
+                //
+                // Keep AuthPhase at 'verifying-session' here — fetchUser
+                // is the verification step, no browser is opening yet.
+                tui.store.setAuthPhase('verifying-session');
                 const STALE_TOKEN_PROBE_MS = 8_000;
                 // Capture the current (non-null) auth reference for the
                 // closure — the outer `auth` is typed `T | null` and the
@@ -973,6 +987,7 @@ export const defaultCommand: CommandModule = {
                 { readDisk: false },
               );
 
+              tui.store.setAuthPhase('verifying-session');
               let auth = await performAmplitudeAuth({
                 zone,
                 forceFresh: false,
