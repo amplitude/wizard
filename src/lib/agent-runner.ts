@@ -1183,11 +1183,15 @@ async function runAgentWizardBody(
           'detected framework': session.detectedFrameworkLabel ?? null,
         });
         const abortMessage = `Setup halted: the agent kept trying Bash commands the wizard does not permit (${consecutiveDenies} in a row). This usually means the agent was looping on env-var verification or a similar denied operation. Re-run the wizard; if it happens again, file an issue with the log file path shown below.`;
-        session.outroData = {
+        // Route through the UI layer so React subscribers (the OutroScreen)
+        // observe the change. Direct `session.outroData = ...` mutates the
+        // session object but never bumps `$version`, so the screen stays on
+        // Run until a terminal resize forces an Ink redraw.
+        getUI().setOutroData({
           kind: OutroKind.Error,
           message: abortMessage,
           canRestart: true,
-        };
+        });
         // Fire and forget — wizardAbort tears down the process. We
         // intentionally don't await so we don't deadlock the hook return.
         void wizardAbort({
@@ -1603,12 +1607,19 @@ async function runAgentWizardBody(
     );
   }
 
-  session.outroData = {
+  // Route the rich success payload through the UI layer so React
+  // subscribers (the OutroScreen) are notified. Direct
+  // `session.outroData = ...` mutates the session object but never bumps
+  // `$version`, so the screen stays on Run until a terminal resize forces
+  // an Ink redraw. `getUI().outro()` below sees outroData is set and
+  // skips its default; it still flips runPhase → Completed which emits a
+  // second change event for the router to advance.
+  getUI().setOutroData({
     kind: OutroKind.Success,
     changes,
     docsUrl: config.metadata.docsUrl,
     continueUrl,
-  };
+  });
 
   // Wizard-artifact cleanup happens in `runAgentWizard` after this
   // function returns `true`. Cancel/error paths return `false` (or
@@ -1748,7 +1759,12 @@ async function pollForDataIngestion(
               : '(events flowing)'
           }`,
         );
-        session.dataIngestionConfirmed = true;
+        // Route through the UI layer so React subscribers (the
+        // DataIngestionCheckScreen → next-screen transition) observe the
+        // change. Direct `session.dataIngestionConfirmed = true` mutates
+        // the field but never bumps `$version`, so the TUI router stays
+        // on verification until a terminal resize forces a re-render.
+        ui.markDataIngestionConfirmed();
         return;
       }
     } catch (err) {
