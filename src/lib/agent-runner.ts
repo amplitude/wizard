@@ -1176,10 +1176,11 @@ async function runAgentWizardBody(
       // Dashboard creation is deferred (PR 4 of DEFER_DASHBOARD_PLAN.md),
       // so a soft MCP failure here only matters if the agent was probing
       // the Amplitude MCP read-only — events are still instrumented.
+      const softDetail = detail || errorType;
       getUI().pushStatus(
-        `Note: a late tooling step couldn't reach Amplitude's setup service — your SDK + events are instrumented. Detail: ${
-          detail || errorType
-        }`,
+        eventsInstrumented
+          ? `Note: a late tooling step couldn't reach Amplitude's setup service — your SDK + events are instrumented. Detail: ${softDetail}`
+          : `Note: a late tooling step couldn't reach Amplitude's setup service — some progress was saved, but event instrumentation may be incomplete. Detail: ${softDetail}`,
       );
       // Fall through to env-var upload, MCP install, Slack, Outro —
       // they don't depend on agentResult.error being null.
