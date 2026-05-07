@@ -636,9 +636,7 @@ export const defaultCommand: CommandModule = {
               const { DEFAULT_AMPLITUDE_ZONE } = await import(
                 '../lib/constants.js'
               );
-              const { storeToken, getStoredToken } = await import(
-                '../utils/ampli-settings.js'
-              );
+              const { storeToken } = await import('../utils/ampli-settings.js');
 
               // Wait for the user to dismiss the welcome screen AND pick a
               // region before opening the OAuth URL. This ensures the logo
@@ -719,14 +717,11 @@ export const defaultCommand: CommandModule = {
               // response — in which case we fall through to the existing OAuth flow
               // (TUI has a browser; this fallback is valid).
               //
-              // On signup success, the wrapper already fetched the real user
-              // profile (with provisioning retry) and persisted tokens to
-              // ~/.ampli.json. SigningUpScreen mirrors the wrapper-fetched
-              // userInfo onto `session.signupAuth.userInfo`, so reading it
-              // here lets us skip the redundant fetch + storeToken below.
-              // When the wrapper's fetch failed (provisioning lag exhausted
-              // retries), `signupAuth.userInfo` is null and we fall through
-              // to the probe path — same outcome as before.
+              // On signup success, SigningUpScreen captured fresh tokens in
+              // session. Use those in-memory tokens as the immediate handoff;
+              // disk persistence is a side effect, not coordination state.
+              // If wrapper-fetched userInfo is present too, skip the redundant
+              // fetch + storeToken below.
               let auth: Awaited<
                 ReturnType<typeof performAmplitudeAuth>
               > | null = null;
@@ -743,32 +738,24 @@ export const defaultCommand: CommandModule = {
                 '../utils/signup-or-auth.js'
               );
               const s = tui.store.session;
-              if (s.signupTokensObtained) {
+              if (s.signupTokensObtained && s.signupAuth !== null) {
                 // SigningUpScreen settled the ceremony successfully:
-                // `performSignupOrAuth` called `replaceStoredUser`, and
                 // `setSignupAuth(non-null)` folded in
-                // `signupTokensObtained=true` atomically. Hydrate `auth`
-                // from disk here so `performAmplitudeAuth({ forceFresh })`
-                // below doesn't run on a fresh install dir and skip
-                // `~/.ampli.json` — that would open a spurious browser
-                // OAuth even though we already have valid tokens.
+                // `signupTokensObtained=true` atomically.
                 signupTokensObtained = true;
-                const fromDisk = getStoredToken(undefined, zone);
-                if (fromDisk) {
-                  auth = {
-                    idToken: fromDisk.idToken,
-                    accessToken: fromDisk.accessToken,
-                    refreshToken: fromDisk.refreshToken,
-                    zone,
-                  };
-                  getUI().log.info(
-                    'Using signup tokens obtained during the signup ceremony.',
-                  );
-                } else {
-                  getUI().log.warn(
-                    'Signup tokens were recorded but none found on disk; opening OAuth.',
-                  );
-                }
+                auth = {
+                  idToken: s.signupAuth.idToken,
+                  accessToken: s.signupAuth.accessToken,
+                  refreshToken: s.signupAuth.refreshToken,
+                  zone: s.signupAuth.zone,
+                };
+                getUI().log.info(
+                  'Using signup tokens obtained during the signup ceremony.',
+                );
+              } else if (s.signupTokensObtained) {
+                getUI().log.warn(
+                  'Signup tokens were recorded but signupAuth was missing; opening OAuth.',
+                );
               }
               // Otherwise: ceremony abandoned (`signupAbandoned=true`) or
               // sign-in path. Auth gate would not have released without

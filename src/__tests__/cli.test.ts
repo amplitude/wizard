@@ -667,6 +667,49 @@ describe('TUI auth task: region determines OAuth zone', () => {
       }),
     );
   });
+
+  test('uses in-memory signupAuth tokens instead of disk or browser OAuth after TUI signup', async () => {
+    let storedCallback: (() => void) | null = null;
+    (mockStore.subscribe as any).mockImplementation((cb: () => void) => {
+      if (!storedCallback) storedCallback = cb;
+      return vi.fn();
+    });
+
+    const cliPromise = runCLI(['--auth-onboarding', 'create-account']);
+
+    await new Promise((r) => setTimeout(r, 50));
+    mockStore.session = {
+      ...mockStore.session,
+      authOnboardingPath: 'create_account',
+      introConcluded: true,
+      region: 'us',
+      regionForced: false,
+      signupTokensObtained: true,
+      signupAuth: {
+        idToken: 'direct-id',
+        accessToken: 'direct-access',
+        refreshToken: 'direct-refresh',
+        zone: 'us',
+        userInfo: null,
+        dashboardUrl: null,
+      },
+      signupAbandoned: false,
+    };
+    (storedCallback as (() => void) | null)?.();
+
+    await cliPromise;
+    await waitFor(() => mockStore.setOAuthComplete.mock.calls.length > 0);
+
+    expect(mockGetStoredToken).not.toHaveBeenCalled();
+    expect(mockPerformAmplitudeAuth).not.toHaveBeenCalled();
+    expect(mockStore.setOAuthComplete).toHaveBeenCalledWith(
+      expect.objectContaining({
+        accessToken: 'direct-access',
+        idToken: 'direct-id',
+        cloudRegion: 'us',
+      }),
+    );
+  });
 });
 
 // ── Feature discovery ──────────────────────────────────────────────────────────
