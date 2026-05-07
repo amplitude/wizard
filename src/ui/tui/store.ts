@@ -1670,6 +1670,14 @@ export class WizardStore {
     this.$session.setKey('selectedAppId', null);
     this.$session.setKey('selectedEnvName', null);
     this.$session.setKey('projectHasData', null);
+    // Ceremony state is zone-scoped (signupAuth.zone is pinned to the
+    // old region; signupRequiredFields cached the old zone's probe
+    // response). Funnel through the shared helper alongside every
+    // other reset path so the invariant "every reset goes through
+    // _resetCeremonyKeys" holds — dormant today since back-nav from
+    // Auth doesn't currently reach this revert with signupAuth set,
+    // but the next caller that does won't have to remember.
+    this._resetCeremonyKeys();
     this.clearPostRunStateForBackNav();
     analytics.wizardCapture('back navigation', { from: 'auth', to: 'region' });
     this.emitChange();

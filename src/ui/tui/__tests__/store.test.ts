@@ -2030,6 +2030,38 @@ describe('WizardStore', () => {
       expect(store.session.selectedOrgId).toBeNull();
     });
 
+    it('resetAuthForRegionChange wipes signup ceremony state', () => {
+      // Same zone-scoping reasoning as setRegionForced: signupAuth.zone
+      // is pinned to the old region, signupRequiredFields cached the
+      // old zone's probe response. Funnel ceremony reset through the
+      // shared helper so the invariant holds across every reset path.
+      const store = createStore();
+      store.session.signupEmail = 'ada@example.com';
+      store.session.signupFullName = 'Ada Lovelace';
+      store.session.tosAccepted = true;
+      store.session.signupRequiredFields = ['full_name'];
+      store.session.signupAbandoned = false;
+      store.session.signupTokensObtained = true;
+      store.session.signupAuth = {
+        idToken: 'i',
+        accessToken: 'a',
+        refreshToken: 'r',
+        zone: 'us',
+        userInfo: null,
+        dashboardUrl: null,
+      };
+
+      store.resetAuthForRegionChange();
+
+      expect(store.session.signupEmail).toBeNull();
+      expect(store.session.signupFullName).toBeNull();
+      expect(store.session.tosAccepted).toBeNull();
+      expect(store.session.signupRequiredFields).toBeNull();
+      expect(store.session.signupAuth).toBeNull();
+      expect(store.session.signupAbandoned).toBe(false);
+      expect(store.session.signupTokensObtained).toBe(false);
+    });
+
     it('clearOrgAndProjectSelection clears post-run state', () => {
       const store = createStore();
       seedPostRunState(store);
