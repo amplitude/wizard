@@ -45,6 +45,11 @@ import {
 import { analytics, sessionPropertiesCompact } from '../../utils/analytics.js';
 import { clearApiKey } from '../../utils/api-key-store.js';
 import {
+  performSignupOrAuth,
+  type SignupOrAuthInput,
+  type PerformSignupOrAuthResult,
+} from '../../utils/signup-or-auth.js';
+import {
   CANONICAL_STEPS,
   matchCanonicalStep,
 } from '../../lib/canonical-tasks.js';
@@ -790,23 +795,30 @@ export class WizardStore {
   }
 
   /**
-   * Singleton setter for `signupInFlight`. The flag is mutated NOWHERE
-   * ELSE except inside `_resetCeremonyKeys` — this method is the only
-   * direct writer. Wraps the actual agentic-signup POST so the
-   * in-flight state always matches the network call, regardless of
-   * resolve, reject, or throw.
+   * Sole TUI entry point for the agentic-signup POST. Wraps
+   * `performSignupOrAuth` in a try/finally that toggles
+   * `signupInFlight` so the back-nav wall (`signupCommittedWall` in
+   * `flows.ts`) blocks Esc while the request is pending.
    *
-   * Pinned by `src/ui/tui/__tests__/signup-in-flight.invariants.test.ts`
-   * (any new `setKey('signupInFlight', …)` outside this file fails the
-   * invariant test). Used by the FlowEntry.isWall predicate on the
-   * signup-ceremony entries to block back-nav while the POST is
-   * pending — Esc must not let the user reset ceremony state mid-POST.
+   * Why this is the only TUI surface for the call:
+   * - `signupInFlight` is mutated nowhere else (singleton-writer
+   *   invariant, pinned by `signup-in-flight.invariants.test.ts`).
+   * - A bare `performSignupOrAuth(...)` call from the TUI would skip
+   *   the wall and re-introduce the BA-114 race (response landing on
+   *   a session that's been wiped by Esc mid-POST).
+   * - Pinned by `signup-or-auth-tui-encapsulation.test.ts`: the only
+   *   import of `performSignupOrAuth` inside `src/ui/tui/` is this
+   *   file. Non-TUI modes (CI / agent / classic) intentionally call
+   *   `performSignupOrAuth` directly via `runDirectSignupIfRequested`
+   *   — they have no Esc handler so no wall to maintain.
    */
-  async runSignupAttempt<T>(fn: () => Promise<T>): Promise<T> {
+  async runSignupAttempt(
+    input: SignupOrAuthInput,
+  ): Promise<PerformSignupOrAuthResult> {
     this.$session.setKey('signupInFlight', true);
     this.emitChange();
     try {
-      return await fn();
+      return await performSignupOrAuth(input);
     } finally {
       this.$session.setKey('signupInFlight', false);
       this.emitChange();

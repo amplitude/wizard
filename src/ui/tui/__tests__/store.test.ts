@@ -54,6 +54,12 @@ vi.mock('../../../utils/api-key-store.js', () => ({
   persistApiKey: vi.fn(),
   readApiKeyWithSource: vi.fn(),
 }));
+
+// Mocked at the import boundary so `runSignupAttempt` tests below can
+// drive the wrapped POST's resolution without hitting the network.
+vi.mock('../../../utils/signup-or-auth.js', () => ({
+  performSignupOrAuth: vi.fn(),
+}));
 // Stub `getStoredUser` so the Wizard flow's RegionSelect gate (which calls
 // `tryResolveZone`) doesn't pick up the developer's real ~/.ampli.json.
 // `readAmpliConfig` is left un-mocked because store.test.ts already
@@ -812,53 +818,64 @@ describe('WizardStore', () => {
 
   describe('runSignupAttempt', () => {
     // The wrapper is the load-bearing piece for the back-nav wall:
-    // signupInFlight must be true exactly while the network call is
+    // signupInFlight must be true exactly while the wrapped POST is
     // pending and false otherwise, regardless of whether the call
-    // resolves, rejects, or aborts. Without these tests the contract
-    // is only exercised indirectly via SigningUpScreen and a future
-    // refactor could silently break it.
+    // resolves or rejects. Without these tests the contract is only
+    // exercised indirectly via SigningUpScreen and a future refactor
+    // could silently break it.
 
-    it('flips signupInFlight true while the awaited fn is pending', async () => {
+    const SIGNUP_INPUT = {
+      email: 'ada@example.com',
+      fullName: null,
+      zone: 'us' as const,
+    };
+
+    it('flips signupInFlight true while performSignupOrAuth is pending', async () => {
+      const { performSignupOrAuth } = await import(
+        '../../../utils/signup-or-auth.js'
+      );
       const store = createStore();
       expect(store.session.signupInFlight).toBe(false);
 
-      let observedDuringAwait: boolean | null = null;
-      let release: (() => void) | null = null;
-      const pending = new Promise<void>((resolve) => {
-        release = resolve;
+      let release: ((value: never) => void) | null = null;
+      const pending = new Promise<never>((_, reject) => {
+        release = reject;
       });
+      vi.mocked(performSignupOrAuth).mockReturnValueOnce(pending);
 
-      const wrapped = store.runSignupAttempt(async () => {
-        observedDuringAwait = store.session.signupInFlight;
-        await pending;
-      });
+      const wrapped = store.runSignupAttempt(SIGNUP_INPUT);
 
-      // Yield so runSignupAttempt's setKey + the inner fn's first
-      // microtask run before we read the observed value.
+      // Yield so runSignupAttempt's setKey runs before we read the flag.
       await Promise.resolve();
-      expect(observedDuringAwait).toBe(true);
       expect(store.session.signupInFlight).toBe(true);
 
-      release!();
-      await wrapped;
+      release!(new Error('release'));
+      await expect(wrapped).rejects.toThrow('release');
       expect(store.session.signupInFlight).toBe(false);
     });
 
-    it('clears signupInFlight after the awaited fn resolves', async () => {
+    it('clears signupInFlight after performSignupOrAuth resolves', async () => {
+      const { performSignupOrAuth } = await import(
+        '../../../utils/signup-or-auth.js'
+      );
       const store = createStore();
-      const result = await store.runSignupAttempt(async () => 'ok');
-      expect(result).toBe('ok');
+      vi.mocked(performSignupOrAuth).mockResolvedValueOnce({
+        kind: 'redirect',
+      } as never);
+      const result = await store.runSignupAttempt(SIGNUP_INPUT);
+      expect(result.kind).toBe('redirect');
       expect(store.session.signupInFlight).toBe(false);
     });
 
-    it('clears signupInFlight after the awaited fn rejects', async () => {
+    it('clears signupInFlight after performSignupOrAuth rejects', async () => {
+      const { performSignupOrAuth } = await import(
+        '../../../utils/signup-or-auth.js'
+      );
       const store = createStore();
       const boom = new Error('boom');
-      await expect(
-        store.runSignupAttempt(async () => {
-          throw boom;
-        }),
-      ).rejects.toBe(boom);
+      vi.mocked(performSignupOrAuth).mockRejectedValueOnce(boom);
+
+      await expect(store.runSignupAttempt(SIGNUP_INPUT)).rejects.toBe(boom);
       // try/finally must clear regardless of throw — the wall would
       // otherwise stay stuck-on after a thrown signup attempt.
       expect(store.session.signupInFlight).toBe(false);
