@@ -234,6 +234,12 @@ export function summariseResults(rows) {
   const sonnetJudge = [];
 
   for (const row of rows) {
+    // Skip rows that errored at the runner stage. `score-quality.mjs`
+    // tags them `structural: { skipped: true }` so a transient
+    // API/network blip cannot masquerade as a structural failure and
+    // trip the `revert-to-sonnet` recommendation. Mirror of the same
+    // `!haiku.error && !sonnet.error` filter the judge step uses.
+    if (row.structural?.skipped === true) continue;
     const passed = row.structural?.pass === true;
     if (row.model === 'haiku') {
       if (passed) summary.haikuStructuralPass += 1;

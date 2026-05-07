@@ -166,10 +166,30 @@ async function main() {
   );
 
   // Score structural for every row.
+  //
+  // Skip rows that errored at the runner stage (`row.error` set,
+  // `row.text === ''`): scoring an empty response against any fixture
+  // with `minLength > 0` would always fail, polluting
+  // `haikuStructuralFail` and forcing a `revert-to-sonnet`
+  // recommendation off a single transient API/network blip. Errored
+  // rows are tagged `structural: { skipped: true }`; `summariseResults`
+  // ignores them (`structural?.pass === true` is false either way, but
+  // the explicit shape makes the intent clear at the callsite). Mirror
+  // of the same `!haiku.error && !sonnet.error` filter used by the
+  // judge step.
   const scored = rows.map((row) => {
+    if (row.error) {
+      return {
+        ...row,
+        structural: { skipped: true, reason: 'runner error' },
+      };
+    }
     const checks = checksByPromptId.get(row.promptId);
     if (!checks) {
-      return { ...row, structural: { pass: false, failures: ['unknown promptId'] } };
+      return {
+        ...row,
+        structural: { pass: false, failures: ['unknown promptId'] },
+      };
     }
     const structural = scoreStructural(row.text, checks);
     return { ...row, structural };

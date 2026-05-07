@@ -238,6 +238,33 @@ describe('summariseResults', () => {
     const s = summariseResults([row('sonnet', true, 5)]);
     expect(s.recommendation).toBe('inconclusive');
   });
+
+  it('ignores rows tagged structural.skipped (runner errors do not trigger revert)', () => {
+    // Regression: a transient API/network error during the haiku phase
+    // produced an empty `row.text`, which `scoreStructural` counted as
+    // a structural failure (any fixture with `minLength > 0` fails on
+    // empty text). Since `summariseResults` triggers `revert-to-sonnet`
+    // on ANY `haikuStructuralFail > 0`, a single transient blip would
+    // flip the recommendation. `score-quality.mjs` now tags errored
+    // rows `structural: { skipped: true }`, and the summariser must
+    // skip them so infrastructure issues don't masquerade as model
+    // quality failures.
+    const erroredHaiku = {
+      model: 'haiku' as const,
+      promptId: 'p',
+      structural: { skipped: true, reason: 'runner error' },
+    };
+    const s = summariseResults([
+      erroredHaiku,
+      row('haiku', true, 5),
+      row('haiku', true, 5),
+      row('sonnet', true, 5),
+      row('sonnet', true, 5),
+    ]);
+    expect(s.haikuStructuralFail).toBe(0);
+    expect(s.haikuStructuralPass).toBe(2);
+    expect(s.recommendation).toBe('keep-haiku');
+  });
 });
 
 describe('model alias resolution', () => {
