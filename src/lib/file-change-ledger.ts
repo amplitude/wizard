@@ -47,6 +47,7 @@ import { existsSync, mkdirSync, readFileSync, rmSync, statSync } from 'node:fs';
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 
 import { writeFileSync, renameSync, unlinkSync } from 'node:fs';
+import { logToFile } from '../utils/debug.js';
 
 /**
  * Why a write happened, from the ledger's perspective.
@@ -267,16 +268,18 @@ export class FileChangeLedger {
       return;
     }
     // No matching PreWrite — record a fresh entry. Pre-existence is
-    // unknown at this point; we conservatively assume the file existed
-    // (kind: modify) so the rollback writer attempts to restore from
-    // beforeContent (`null`), which falls through to the create-path
-    // delete branch. Either way the rollback removes the agent's
-    // contribution.
+    // unknown at this point (e.g. a MultiEdit fan-out where we missed
+    // the PreToolUse, or a tool that didn't fire PreToolUse at all).
+    // Default to `kind: 'modify'` with `beforeContent: null`: the
+    // rollback writer interprets that as "leave the file alone" rather
+    // than "delete it." Data preservation beats aggressive cleanup —
+    // if the file pre-existed the wizard, deleting it on rollback
+    // would lose the user's prior content.
     const entry: FileChangeEntry = {
       path: abs,
       beforeContent: null,
       afterContent,
-      kind: 'create',
+      kind: 'modify',
       ts: Date.now(),
     };
     this.entries.push(entry);
@@ -531,9 +534,16 @@ let _ledger: FileChangeLedger | null = null;
  * Initialise (or reset) the wizard-wide ledger for the current run.
  * Call once near the top of the run with the resolved install dir.
  * Returns the new ledger so the caller can also keep a local handle.
+ *
+ * `log` is optional — when omitted, the ledger uses the canonical
+ * wizard `logToFile` so capture/revert diagnostics land in the
+ * per-project log file. Tests can pass a no-op or a spy.
  */
-export function initFileChangeLedger(installDir: string): FileChangeLedger {
-  _ledger = new FileChangeLedger(installDir);
+export function initFileChangeLedger(
+  installDir: string,
+  log?: (message: string, ...rest: unknown[]) => void,
+): FileChangeLedger {
+  _ledger = new FileChangeLedger(installDir, log ?? logToFile);
   _ledger.capturePreamble();
   return _ledger;
 }

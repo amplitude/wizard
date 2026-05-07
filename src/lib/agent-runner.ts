@@ -458,19 +458,23 @@ export async function runAgentWizard(
     archiveSetupReportFile,
     restoreSetupReportIfMissing,
   } = await import('./wizard-tools.js');
-  ensureWizardArtifactsIgnored(session.installDir);
 
-  // Initialise the file-change ledger BEFORE the agent has touched
-  // anything so its preamble snapshot of the working tree (gitignore
-  // content, presence of `.amplitude/`) reflects the truly-pre-wizard
-  // state. PreToolUse / PostToolUse hooks consume the ledger via
-  // `getFileChangeLedger()` — see inner-lifecycle.ts. The cancel path
-  // (wizardAbort + the cleanup hook below) reverses the ledger so a
-  // cancelled run leaves the user's repo unchanged.
+  // Initialise the file-change ledger BEFORE we touch ANY user file so
+  // its preamble snapshot of the working tree (gitignore content,
+  // presence of `.amplitude/`) reflects the truly-pre-wizard state.
+  // ensureWizardArtifactsIgnored writes to `.gitignore`, so it MUST run
+  // after the ledger has captured the original gitignore — otherwise
+  // rollback would "restore" the wizard's own gitignore additions.
   const { initFileChangeLedger, getFileChangeLedger } = await import(
     './file-change-ledger.js'
   );
   initFileChangeLedger(session.installDir);
+
+  // Idempotent — safe to call on every run. Without this, `git status`
+  // after a run is full of wizard scaffolding and `git add .` sweeps it
+  // into the user's commits. Runs AFTER the ledger preamble snapshot
+  // above so rollback restores the user's original `.gitignore`.
+  ensureWizardArtifactsIgnored(session.installDir);
 
   // Move any prior `amplitude-setup-report.md` to
   // `amplitude-setup-report.previous.md` BEFORE the run starts so the
@@ -614,14 +618,14 @@ export async function runAgentWizard(
     // report existed, restore handles it; otherwise the canonical path
     // stays absent and the OutroScreen hides "View setup report".
     if (!success) {
-      restoreSetupReportIfMissing(session.installDir);
-      // Mirror what `wizardAbort()` does on cancel/error: reverse the
-      // file-change ledger so a body-thrown exception (uncaught
-      // upstream) or a non-throwing early `return false` (version-check
-      // failure) still restores the user's working tree. The ledger's
-      // `rolledBack` flag makes this a no-op when wizardAbort already
-      // ran on this path.
+      // Order matches `registerPriorityCleanup` (rollback unshifted last
+      // so it fires first): rollback the ledger BEFORE restoring the
+      // archived setup report. Otherwise, when the agent created
+      // `amplitude-setup-report.md`, restore would see the agent's file
+      // exists and skip restoration, then rollback would delete the
+      // agent's file — leaving the user's prior report unrecovered.
       runRollbackIfNotSuccessful();
+      restoreSetupReportIfMissing(session.installDir);
     }
   }
   // Cleanup runs only when the body explicitly signals success. Other
