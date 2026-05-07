@@ -37,26 +37,31 @@ describe('EventPlanFullScreen', () => {
     expect(frame).toContain('Event 1 Created');
     expect(frame).toContain('Event 8 Created');
     expect(frame).toContain('[Y] approve [S] skip [F] give feedback');
+    // No scroll indicator when everything fits.
+    expect(frame).not.toMatch(/more (above|below)/);
   });
 
-  it('caps the visible events list and surfaces a +N more line for large plans', () => {
+  it('shows a scroll indicator and hides events past the viewport on small terminals', () => {
     const events = sampleEvents(20);
     const { lastFrame } = render(
       <EventPlanFullScreen
         store={store}
         events={events}
         width={120}
-        height={30}
+        height={15}
       />,
     );
     const frame = lastFrame() ?? '';
     expect(frame).toContain('Instrumentation Plan (20 events)');
     expect(frame).toContain('Event 1 Created');
-    expect(frame).toContain('Event 12 Created');
-    expect(frame).not.toContain('Event 13 Created');
-    expect(frame).toContain('+8 more events');
-    // Action hint MUST stay on screen even with 20-event plan.
+    // Last few events are off-screen — must NOT be silently dropped, the
+    // scroll indicator surfaces them and the down arrow reaches them.
+    expect(frame).not.toContain('Event 20 Created');
+    expect(frame).toMatch(/more below/);
+    // Action hint MUST stay on screen even with 20-event plan, and
+    // should advertise scroll keys.
     expect(frame).toContain('[Y] approve [S] skip [F] give feedback');
+    expect(frame).toMatch(/scroll/);
   });
 
   it('keeps the action hint visible even on a small (24-row) terminal', () => {

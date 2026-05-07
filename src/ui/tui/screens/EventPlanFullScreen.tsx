@@ -10,14 +10,16 @@
  *
  * Layout invariants:
  *   - Title pinned to top (`flexShrink={0}`)
- *   - Events list scrolls (`flexGrow={1}`, capped to MAX_VISIBLE with
- *     `+N more` tail so very long plans don't push the action hint
- *     off-screen on a tiny terminal)
+ *   - Events list grows to fill available rows (`flexGrow={1}`,
+ *     `overflow="hidden"`). The visible window is sized from the `height`
+ *     prop so we never silently clip past the viewport, and any overflow
+ *     is reachable via ↑/↓ / PgUp / PgDn scrolling.
  *   - Action hint pinned to bottom (`flexShrink={0}`) — `[Y] approve
- *     [S] skip [F] feedback` is ALWAYS visible
+ *     [S] skip [F] feedback` is ALWAYS visible, plus `[↑/↓] scroll` when
+ *     the plan exceeds the viewport.
  *
- * Keyboard surface (matches the previous inline handler exactly):
- *   - Options mode: `Y` / `S` / `F`
+ * Keyboard surface:
+ *   - Options mode: `Y` / `S` / `F`, plus ↑/↓ / PgUp / PgDn for scroll
  *   - Feedback mode: free-text input, Enter sends, Esc cancels
  */
 
@@ -30,12 +32,14 @@ import { Colors, Icons, Layout } from '../styles.js';
 import type { PlannedEvent } from '../store.js';
 
 /**
- * Cap on visible event rows. Sized so a 24-row terminal still has room
- * for the title + action hint with this many rows in between. Anything
- * beyond is summarized as "+N more" so the action hint never gets
- * clipped off the bottom regardless of plan size.
+ * Rows of chrome consumed by everything OTHER than the events list:
+ *   2  outer paddingY (top + bottom)
+ *   2  title block (subtitle + bold title line)
+ *   1  events-box marginTop
+ *   1  hint-box marginTop
+ *   1  hint content row
  */
-const MAX_VISIBLE_EVENTS = 12;
+const CHROME_ROWS = 7;
 
 interface EventPlanFullScreenProps {
   store: WizardStore;
@@ -60,6 +64,24 @@ export const EventPlanFullScreen = ({
   );
   const [planFeedbackText, setPlanFeedbackText] = useState('');
   const [cursorVisible, setCursorVisible] = useState(true);
+  const [scrollOffset, setScrollOffset] = useState(0);
+
+  // Rows available for the events list itself, derived from the current
+  // viewport height. Sizing the window here (instead of from a hard cap
+  // like MAX_VISIBLE_EVENTS) means events can never be silently clipped
+  // by Yoga's overflow="hidden" — anything that doesn't fit goes behind
+  // a scroll indicator the user can reach with the arrow keys.
+  const eventsBudget = Math.max(1, height - CHROME_ROWS);
+  const needsScroll = events.length > eventsBudget;
+  // Reserve one row for the scroll-state indicator when scrolling is on.
+  const visibleCount = needsScroll
+    ? Math.max(1, eventsBudget - 1)
+    : eventsBudget;
+  const maxOffset = Math.max(0, events.length - visibleCount);
+  const clampedOffset = Math.min(scrollOffset, maxOffset);
+  const visible = events.slice(clampedOffset, clampedOffset + visibleCount);
+  const above = clampedOffset;
+  const below = events.length - clampedOffset - visible.length;
 
   // Blink the cursor in feedback mode (purely cosmetic).
   useEffect(() => {
@@ -94,8 +116,26 @@ export const EventPlanFullScreen = ({
         }
         return;
       }
-      // options mode — explicit Y/S/F so Enter alone can't accidentally
-      // approve or skip when the user just wants to dismiss something.
+      // options mode — scroll first so arrow keys never fall through to
+      // Y/S/F handling.
+      if (key.upArrow) {
+        setScrollOffset((o) => Math.max(0, o - 1));
+        return;
+      }
+      if (key.downArrow) {
+        setScrollOffset((o) => Math.min(maxOffset, o + 1));
+        return;
+      }
+      if (key.pageUp) {
+        setScrollOffset((o) => Math.max(0, o - visibleCount));
+        return;
+      }
+      if (key.pageDown) {
+        setScrollOffset((o) => Math.min(maxOffset, o + visibleCount));
+        return;
+      }
+      // Explicit Y/S/F so Enter alone can't accidentally approve or skip
+      // when the user just wants to dismiss something.
       const lc = char.toLowerCase();
       if (lc === 'y') {
         store.resolveEventPlan({ decision: 'approved' });
@@ -107,9 +147,6 @@ export const EventPlanFullScreen = ({
     },
     { isActive: true },
   );
-
-  const overflow = Math.max(0, events.length - MAX_VISIBLE_EVENTS);
-  const visible = events.slice(0, MAX_VISIBLE_EVENTS);
 
   return (
     <Box
@@ -128,18 +165,22 @@ export const EventPlanFullScreen = ({
         </Text>
       </Box>
 
-      {/* Events list — scrollable area, but capped to MAX_VISIBLE_EVENTS so
-          the action hint below stays on screen even on tiny terminals. */}
+      {/* Events list — fills the remaining vertical space, but the visible
+          window is bounded by `visibleCount` so nothing gets silently
+          clipped. Anything outside the window is reachable via the scroll
+          indicator below. */}
       <Box
         flexDirection="column"
         flexGrow={1}
         flexShrink={1}
         overflow="hidden"
         marginTop={1}
-        gap={1}
       >
         {visible.map((e, i) => (
-          <Text key={e.name || i} wrap="truncate-end">
+          <Text
+            key={`${clampedOffset + i}-${e.name || ''}`}
+            wrap="truncate-end"
+          >
             <Text color={Colors.accent} bold>
               {Icons.bullet} {e.name}
             </Text>
@@ -148,10 +189,13 @@ export const EventPlanFullScreen = ({
             ) : null}
           </Text>
         ))}
-        {overflow > 0 && (
+        {needsScroll && (
           <Text color={Colors.muted}>
-            {Icons.dot} +{overflow} more event{overflow === 1 ? '' : 's'} (full
-            list saved to .amplitude/events.json on approve)
+            {Icons.dot}
+            {above > 0 ? ` ${above} more above` : ''}
+            {above > 0 && below > 0 ? ' ·' : ''}
+            {below > 0 ? ` ${below} more below` : ''} (full list saved to
+            .amplitude/events.json on approve)
           </Text>
         )}
       </Box>
@@ -170,6 +214,7 @@ export const EventPlanFullScreen = ({
         ) : (
           <Text color={Colors.muted}>
             [Y] approve [S] skip [F] give feedback
+            {needsScroll ? ' [↑/↓] scroll' : ''}
           </Text>
         )}
       </Box>
