@@ -237,6 +237,32 @@ export function createInnerLifecycleHooks(config: InnerLifecycleConfig): {
       } catch {
         // Ledger capture must never break the agent loop. Swallow.
       }
+      // NDJSON event ordering for outer-agent orchestrators:
+      //   1. `file_change_applied` — the canonical lifecycle marker
+      //      ("tool finished writing this path"). Emit FIRST so an
+      //      orchestrator that only cares about apply events doesn't
+      //      need to know about the enrichment event.
+      //   2. `file_changed` — per-write diff enrichment (additions /
+      //      deletions / hunks). Emit AFTER so orchestrators that
+      //      enrich previously-seen `file_change_applied` records can
+      //      key on `path` and find the prior event in their state.
+      // The `emitFileChanged` JSDoc documents this ordering — keep them
+      // in sync.
+      // Use `content !== null` not `content` — empty string `''` is falsy
+      // and would drop `bytes` from the event. Outer agents need to
+      // distinguish "byte count unknown" (no content captured) from
+      // "zero-byte file" (empty `Write`).
+      try {
+        getUI().recordFileChangeApplied({
+          path,
+          operation,
+          ...(content !== null && {
+            bytes: Buffer.byteLength(content, 'utf8'),
+          }),
+        });
+      } catch {
+        // See preToolUse — same defensive swallow.
+      }
       // Emit per-write `file_changed` NDJSON event in agent mode so
       // ambient orchestrators see the additions/deletions/hunks without
       // having to compute the diff themselves. Pulls from the canonical
@@ -257,21 +283,6 @@ export function createInnerLifecycleHooks(config: InnerLifecycleConfig): {
         }
       } catch {
         // NDJSON emission must never break the agent run.
-      }
-      // Use `content !== null` not `content` — empty string `''` is falsy
-      // and would drop `bytes` from the event. Outer agents need to
-      // distinguish "byte count unknown" (no content captured) from
-      // "zero-byte file" (empty `Write`).
-      try {
-        getUI().recordFileChangeApplied({
-          path,
-          operation,
-          ...(content !== null && {
-            bytes: Buffer.byteLength(content, 'utf8'),
-          }),
-        });
-      } catch {
-        // See preToolUse — same defensive swallow.
       }
     }
     return Promise.resolve({});

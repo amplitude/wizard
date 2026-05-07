@@ -219,6 +219,44 @@ describe('createInnerLifecycleHooks (with AgentUI)', () => {
     });
   });
 
+  it('PostToolUse emits file_change_applied BEFORE file_changed (NDJSON contract)', async () => {
+    // Regression: emitFileChanged JSDoc documents that file_changed is
+    // emitted AFTER file_change_applied (so an orchestrator receiving
+    // the apply lifecycle marker can later enrich it with diff stats).
+    // The hook used to fire them in reverse order, breaking that
+    // contract for any consumer that keys on file_change_applied first.
+    const lifecycle = createInnerLifecycleHooks({ phase: 'apply' });
+    await lifecycle.hooks().PostToolUse(
+      {
+        tool_name: 'Write',
+        tool_input: {
+          file_path: 'src/lib/amplitude-ordering.ts',
+          content: 'export const ok = true;\n',
+        },
+      },
+      undefined,
+      { signal: new AbortController().signal },
+    );
+
+    const all = writes.map((l) => JSON.parse(l.trim()) as NDJSONEvent);
+    const appliedIdx = all.findIndex(
+      (e) =>
+        (e.data as { event?: string } | undefined)?.event ===
+        'file_change_applied',
+    );
+    const changedIdx = all.findIndex(
+      (e) =>
+        (e.data as { event?: string } | undefined)?.event === 'file_changed',
+    );
+    // Apply lifecycle marker must come first.
+    expect(appliedIdx).toBeGreaterThanOrEqual(0);
+    if (changedIdx !== -1) {
+      // file_changed only emits when a ledger summary is available;
+      // when both are emitted, applied must precede changed.
+      expect(appliedIdx).toBeLessThan(changedIdx);
+    }
+  });
+
   it('PostToolUse for non-write tools is a no-op', async () => {
     const lifecycle = createInnerLifecycleHooks({ phase: 'wizard' });
     await lifecycle
