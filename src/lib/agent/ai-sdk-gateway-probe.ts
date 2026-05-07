@@ -75,12 +75,17 @@ export async function maybeRunAiSdkGatewayProbe(args: {
     // factory is also dynamically imported so the static `@ai-sdk/anthropic`
     // import in `wizard-ai-sdk-anthropic.ts` only runs when the probe path is
     // exercised.
-    const [{ streamText }, { createWizardAiSdkAnthropic }] = await Promise.all([
-      import('ai'),
-      import('./wizard-ai-sdk-anthropic.js'),
-    ]);
+    const [{ streamText }, { createWizardAiSdkAnthropic, ensureV1Suffix }] =
+      await Promise.all([import('ai'), import('./wizard-ai-sdk-anthropic.js')]);
 
-    const provider = createWizardAiSdkAnthropic();
+    // Explicitly normalize the baseURL with `ensureV1Suffix` so the AI SDK's
+    // `${baseURL}/messages` resolves to `…/v1/messages` against the wizard
+    // gateway. The factory applies this internally too, but passing it at the
+    // callsite documents the contract (and would survive a factory refactor
+    // that ever stopped normalizing).
+    const provider = createWizardAiSdkAnthropic({
+      baseURL: ensureV1Suffix(baseURL),
+    });
     const probeModel = selectModel('oneshot', args.useDirectApiKey);
 
     const result = streamText({
