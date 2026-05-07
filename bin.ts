@@ -524,6 +524,31 @@ void yargs(hideBin(process.argv))
       describe: 'internal: AMPLITUDE_WIZARD_SKILL_TIERS env-var passthrough',
       type: 'boolean',
     },
+    // Same passthrough pattern as `--skill-tiers`: yargs auto-maps the
+    // AMPLITUDE_WIZARD_AI_SDK_PROBE / _CONSOLE / USE_AI_SDK env vars to
+    // these flag names; without these declarations `.strict()` rejects
+    // the inferred flags with "Unknown argument: aiSdkProbe" etc.
+    'ai-sdk-probe': {
+      hidden: true,
+      describe: 'internal: AMPLITUDE_WIZARD_AI_SDK_PROBE env-var passthrough',
+      type: 'boolean',
+    },
+    'ai-sdk-console': {
+      hidden: true,
+      describe: 'internal: AMPLITUDE_WIZARD_AI_SDK_CONSOLE env-var passthrough',
+      type: 'boolean',
+    },
+    'use-ai-sdk': {
+      hidden: true,
+      describe: 'internal: AMPLITUDE_WIZARD_USE_AI_SDK env-var passthrough',
+      type: 'boolean',
+    },
+    'compaction-window': {
+      hidden: true,
+      describe:
+        'internal: AMPLITUDE_WIZARD_COMPACTION_WINDOW env-var passthrough',
+      type: 'string',
+    },
     // Force the env-selection prompt to emit a `needs_input` for
     // `app_selection` even when there's a single match. The skill
     // always passes this so the user gets to confirm which app the
