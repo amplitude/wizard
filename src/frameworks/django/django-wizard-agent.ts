@@ -16,6 +16,7 @@ import {
   findDjangoSettingsFile,
   IGNORE_PATTERNS,
 } from './utils';
+import { hasPythonProjectMarkers } from '../python/preflight';
 
 type DjangoContext = {
   projectType?: DjangoProjectType;
@@ -49,6 +50,13 @@ export const DJANGO_AGENT_CONFIG: FrameworkConfig<DjangoContext> = {
     getInstalledVersion: (options: WizardOptions) => getDjangoVersion(options),
     detect: async (options) => {
       const { installDir } = options;
+
+      // Cheap sync preflight — bail before kicking off recursive globs
+      // when the install dir has no python markers at root. Without this,
+      // a JS-heavy repo's `node_modules` tree pushes fast-glob past the
+      // 10s detection timeout and parks the welcome screen at "Scanning…".
+      // See `frameworks/python/preflight.ts`.
+      if (!hasPythonProjectMarkers(installDir)) return false;
 
       const managePyMatches = await fg('**/manage.py', {
         cwd: installDir,

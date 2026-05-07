@@ -14,6 +14,7 @@ import {
   getPackageManagerName,
   PythonPackageManager,
 } from './utils';
+import { hasPythonProjectMarkers } from './preflight';
 
 type PythonContext = {
   packageManager?: PythonPackageManager;
@@ -60,6 +61,10 @@ export const PYTHON_AGENT_CONFIG: FrameworkConfig<PythonContext> = {
       Promise.resolve(getPythonVersion(options)),
     detect: async (options) => {
       const { installDir } = options;
+
+      // Bail before recursive globs on JS-heavy repos with no python at
+      // root. See `frameworks/python/preflight.ts`.
+      if (!hasPythonProjectMarkers(installDir)) return false;
 
       // Look for Python package management files
       const pythonConfigFiles = await fg(

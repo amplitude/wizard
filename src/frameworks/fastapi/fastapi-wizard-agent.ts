@@ -13,6 +13,7 @@ import {
   findFastAPIAppFile,
   IGNORE_PATTERNS,
 } from './utils';
+import { hasPythonProjectMarkers } from '../python/preflight';
 
 interface FastAPIContext extends Record<string, unknown> {
   projectType?: FastAPIProjectType;
@@ -55,6 +56,10 @@ export const FASTAPI_AGENT_CONFIG: FrameworkConfig<FastAPIContext> = {
     getInstalledVersion: getFastAPIVersion,
     detect: async (options) => {
       const { installDir } = options;
+
+      // Bail before recursive globs on JS-heavy repos with no python at
+      // root. See `frameworks/python/preflight.ts`.
+      if (!hasPythonProjectMarkers(installDir)) return false;
 
       // Note: Django and Flask are checked before FastAPI in INTEGRATION_ORDER,
       // so if we get here, the project is not a Django or Flask project.
