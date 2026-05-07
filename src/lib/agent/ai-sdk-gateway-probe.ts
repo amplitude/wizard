@@ -8,25 +8,20 @@
  *
  * Set {@code AMPLITUDE_WIZARD_AI_SDK_PROBE_STRICT=1} to throw on failure
  * (CI / dogfood). Default is log-only so a probe regression never blocks users.
+ *
+ * The `ai` and `@ai-sdk/anthropic` packages are imported dynamically inside
+ * {@link maybeRunAiSdkGatewayProbe} so they only load when the probe actually
+ * runs — `agent-interface.ts` calls this on every wizard run, but the env-var
+ * gate short-circuits well before any AI SDK code is touched.
  */
-import { createAnthropic } from '@ai-sdk/anthropic';
-import { streamText } from 'ai';
-
 import { sanitizingFetch } from '../gateway-request-sanitize.js';
 import { logToFile } from '../../utils/debug.js';
+import { resolveAnthropicAuth } from './anthropic-auth.js';
 
 export type AiSdkGatewayProbeResult =
   | { status: 'skipped'; reason: string }
   | { status: 'ok'; preview: string }
   | { status: 'error'; message: string };
-
-function resolveAuth(): { apiKey?: string; authToken?: string } {
-  const apiKey = process.env.ANTHROPIC_API_KEY?.trim();
-  if (apiKey) return { apiKey };
-  const authToken = process.env.ANTHROPIC_AUTH_TOKEN?.trim();
-  if (authToken) return { authToken };
-  return {};
-}
 
 /**
  * Single short completion to validate streaming + gateway auth. Does not use tools.
@@ -50,7 +45,7 @@ export async function maybeRunAiSdkGatewayProbe(args: {
   }
 
   const baseURL = process.env.ANTHROPIC_BASE_URL?.trim();
-  const auth = resolveAuth();
+  const auth = resolveAnthropicAuth();
   if (!baseURL && !auth.apiKey) {
     return {
       status: 'skipped',
@@ -65,6 +60,13 @@ export async function maybeRunAiSdkGatewayProbe(args: {
   }
 
   try {
+    // Dynamic imports keep these substantial packages out of every wizard run;
+    // they only load once the env-var gate above lets us through.
+    const [{ createAnthropic }, { streamText }] = await Promise.all([
+      import('@ai-sdk/anthropic'),
+      import('ai'),
+    ]);
+
     const provider = createAnthropic({
       ...(baseURL ? { baseURL } : {}),
       ...auth,
