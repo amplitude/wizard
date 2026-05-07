@@ -336,6 +336,7 @@ export const WIZARD_GITIGNORE_PATTERNS: readonly string[] = [
   '.claude/skills/add-analytics-instrumentation/',
   '.claude/skills/amplitude-chart-dashboard-plan/',
   '.claude/skills/amplitude-quickstart-taxonomy-agent/',
+  '.claude/skills/discover-analytics-patterns/',
   '.claude/skills/wizard-prompt-supplement/',
 ];
 

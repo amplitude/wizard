@@ -196,6 +196,60 @@ describe('browser-only commandment gating', () => {
 });
 
 /**
+ * discover-analytics-patterns — Lendi (Jamie Lim) reported the wizard
+ * reimplemented every event on top of the raw SDK even though their
+ * codebase already had a `trackEvent()` wrapper. Root cause: the
+ * commandments did not require the agent to load the
+ * `discover-analytics-patterns` skill before `confirm_event_plan`, so
+ * existing wrappers / hooks / typed-Ampli calls went unnoticed. The
+ * commandment below pins the requirement, and the skill is now
+ * pre-staged via `preStageSkills` so the Skill tool can load it by id.
+ *
+ * If this rule disappears (or moves out of the pre-confirm-event-plan
+ * phase) the failure mode the customer hit comes back, so lock both
+ * the rule's presence and its ordering relative to confirm_event_plan.
+ */
+describe('discover-analytics-patterns commandment', () => {
+  const text = getWizardCommandments();
+
+  it('mandates loading discover-analytics-patterns before the event plan', () => {
+    // Skill name is the durable sentinel — the agent matches on it
+    // exactly when calling the Skill tool.
+    expect(text).toContain('discover-analytics-patterns');
+    // The "BEFORE confirm_event_plan" ordering is what makes the rule
+    // matter — pattern discovery has to happen before the plan is
+    // proposed, otherwise the agent has already committed to a shape.
+    // Anchor the comparison against the standalone confirm_event_plan
+    // mandate, which begins "you MUST call confirm_event_plan" — that
+    // phrase is unique to the dedicated rule and won't false-match the
+    // discover-analytics-patterns commandment that simply names
+    // confirm_event_plan as a downstream gate.
+    const discoverIdx = text.indexOf('discover-analytics-patterns');
+    const confirmRuleIdx = text.indexOf('you MUST call confirm_event_plan');
+    expect(
+      discoverIdx,
+      'discover-analytics-patterns rule missing',
+    ).toBeGreaterThan(-1);
+    expect(
+      confirmRuleIdx,
+      'confirm_event_plan mandate rule missing',
+    ).toBeGreaterThan(-1);
+    expect(
+      discoverIdx,
+      'discover-analytics-patterns must be ordered BEFORE the confirm_event_plan mandate so the agent runs discovery before proposing a plan',
+    ).toBeLessThan(confirmRuleIdx);
+  });
+
+  it('explicitly tells the agent to reuse existing wrappers rather than reimplement', () => {
+    // The customer-facing failure mode: agent ignores `trackEvent()`
+    // and writes raw `amplitude.track()` calls. The commandment
+    // language must make the reuse-vs-reimplement choice unambiguous.
+    expect(text).toMatch(/REUSE/);
+    expect(text).toMatch(/wrapper/i);
+  });
+});
+
+/**
  * Discovery parallelism — the cold-start tail of every wizard run was
  * dominated by sequential probes (detect_package_manager → check_env_keys
  * → Glob package.json → Read package.json), each costing a full LLM
