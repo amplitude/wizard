@@ -222,6 +222,17 @@ export function getDashboardFile(installDir: string): string {
 }
 
 /**
+ * Dashboard-plan artifact written at the end of the agent's plan phase.
+ * Sibling of `events.json` and `dashboard.json`. Read by the deferred
+ * `wizard dashboard` command (PR 3) to actually create charts + dashboards
+ * in Amplitude once event ingestion catches up. See `src/lib/dashboard-plan.ts`
+ * for the schema + reader/writer.
+ */
+export function getDashboardPlanFile(installDir: string): string {
+  return join(getProjectMetaDir(installDir), 'dashboard-plan.json');
+}
+
+/**
  * Canonical wizard project binding (org, project, source, zone, app id, etc.).
  * Legacy `ampli.json` in the project root is still read for back-compat;
  * Phase G-1 stopped the dual-write mirror.

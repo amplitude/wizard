@@ -1,4 +1,7 @@
-import { describe, it, expect, vi, beforeEach } from 'vitest';
+import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import * as fs from 'fs';
+import * as path from 'path';
+import * as os from 'os';
 
 // Mock agent-ops so we can assert the MCP tool handlers forward correctly.
 vi.mock('../agent-ops.js', () => ({
@@ -78,14 +81,16 @@ describe('registerWizardTools', () => {
     registerWizardTools(fake);
   });
 
-  it('registers exactly the six expected tools by name', () => {
+  it('registers exactly the eight expected tools by name', () => {
     const names = fake.tools.map((t) => t.name).sort();
     expect(names).toEqual([
       'detect_framework',
       'get_auth_status',
       'get_auth_token',
+      'get_dashboard_plan',
       'get_project_status',
       'plan_setup',
+      'record_dashboard_plan',
       'verify_setup',
     ]);
   });
@@ -307,5 +312,91 @@ describe('registerWizardTools', () => {
     expect(mockedRunVerify).toHaveBeenCalledWith('/tmp/example');
     expect(parsed.outcome).toBe('fail');
     expect(parsed.failures).toContain('amplitude API key is not configured');
+  });
+
+  // ── record_dashboard_plan / get_dashboard_plan ─────────────────────────
+  // PR 2 of DEFER_DASHBOARD_PLAN.md: external MCP-server parity for the
+  // in-process `wizard-tools:record_dashboard_plan`. Tests round-trip
+  // against a real tmp directory so the on-disk artifact shape is locked.
+
+  describe('record_dashboard_plan / get_dashboard_plan', () => {
+    let tmpDir: string;
+    beforeEach(() => {
+      tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'wizard-mcp-plan-'));
+    });
+    afterEach(() => {
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    });
+
+    function validPlanInput() {
+      return {
+        orgId: '111',
+        projectId: '222',
+        events: [{ name: 'User Signed Up' }],
+        charts: [
+          {
+            title: 'Signup Funnel',
+            eventName: 'User Signed Up',
+            chartType: 'funnel' as const,
+          },
+        ],
+        dashboard: { title: 'Onboarding' },
+      };
+    }
+
+    it('record_dashboard_plan writes the artifact and returns the stamped plan', () => {
+      const tool = fake.tools.find((t) => t.name === 'record_dashboard_plan')!;
+      const result = tool.handler({
+        installDir: tmpDir,
+        plan: validPlanInput(),
+      });
+      const parsed = parseToolResult(result) as {
+        ok: boolean;
+        plan: { planId: string; version: number; createdAt: string };
+      };
+      expect(parsed.ok).toBe(true);
+      expect(parsed.plan.version).toBe(1);
+      expect(parsed.plan.planId).toMatch(/^[0-9a-f-]+$/i);
+
+      const filePath = path.join(tmpDir, '.amplitude', 'dashboard-plan.json');
+      expect(fs.existsSync(filePath)).toBe(true);
+    });
+
+    it('record_dashboard_plan returns ok:false on schema-invalid input', () => {
+      const tool = fake.tools.find((t) => t.name === 'record_dashboard_plan')!;
+      const bad = { ...validPlanInput(), orgId: '' };
+      const result = tool.handler({ installDir: tmpDir, plan: bad });
+      const parsed = parseToolResult(result) as {
+        ok: boolean;
+        error?: string;
+      };
+      expect(parsed.ok).toBe(false);
+      expect(parsed.error).toBeTruthy();
+    });
+
+    it('get_dashboard_plan returns the persisted plan after record_dashboard_plan', () => {
+      const recorder = fake.tools.find(
+        (t) => t.name === 'record_dashboard_plan',
+      )!;
+      const reader = fake.tools.find((t) => t.name === 'get_dashboard_plan')!;
+
+      const wrote = parseToolResult(
+        recorder.handler({ installDir: tmpDir, plan: validPlanInput() }),
+      ) as { plan: { planId: string } };
+
+      const read = parseToolResult(reader.handler({ installDir: tmpDir })) as {
+        plan: { planId: string } | null;
+      };
+      expect(read.plan).not.toBeNull();
+      expect(read.plan!.planId).toBe(wrote.plan.planId);
+    });
+
+    it('get_dashboard_plan returns plan:null when nothing has been written', () => {
+      const reader = fake.tools.find((t) => t.name === 'get_dashboard_plan')!;
+      const parsed = parseToolResult(
+        reader.handler({ installDir: tmpDir }),
+      ) as { plan: unknown };
+      expect(parsed.plan).toBeNull();
+    });
   });
 });

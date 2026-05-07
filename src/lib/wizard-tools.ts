@@ -321,6 +321,10 @@ export const PREVIOUS_SETUP_REPORT_FILENAME =
  */
 export const WIZARD_GITIGNORE_PATTERNS: readonly string[] = [
   '.amplitude/dashboard.json',
+  // dashboard-plan.json embeds numeric org/project ids and the agent's chart
+  // strategy — same machine-local sensitivity as dashboard.json. Gitignored
+  // for the same reason (PR 2 of DEFER_DASHBOARD_PLAN.md).
+  '.amplitude/dashboard-plan.json',
   '.amplitude-events.json',
   '.amplitude-dashboard.json',
   // Note: amplitude-setup-report.md (the CURRENT report) is intentionally
@@ -1804,6 +1808,135 @@ Returns: "ok" on successful persistence, an error string otherwise. Idempotent �
     },
   );
 
+  // -- record_dashboard_plan ------------------------------------------------
+  // Persists the agent's chart + dashboard PLAN — the strategist output, not
+  // the actual created dashboard. This is the deferred-dashboard hand-off:
+  // the agent declares what charts and dashboard it wants, and a separate
+  // `wizard dashboard` command (PR 3) consumes the artifact later, once
+  // event ingestion has caught up, to actually create them in Amplitude.
+  //
+  // PR 2 only registers the tool — it is intentionally NOT wired into the
+  // agent's prompt yet. PR 4 swaps the main run over from `record_dashboard`
+  // (which hits Amplitude inline) to `record_dashboard_plan` (deferred).
+  // For now this tool is additive: today's `record_dashboard` still ships,
+  // and nothing reads `dashboard-plan.json` outside the deferred command +
+  // its tests. Behavior is unchanged.
+  //
+  // Writes `<installDir>/.amplitude/dashboard-plan.json` via writeDashboardPlan
+  // (which stamps `version`, `planId`, `createdAt`).
+  const recordDashboardPlan = tool(
+    'record_dashboard_plan',
+    `Record the chart + dashboard plan you intend to build, BEFORE actually creating anything in Amplitude.
+Used by the deferred dashboard flow: a separate command (\`wizard dashboard\`) reads the persisted plan and creates the charts + dashboard once event ingestion catches up.
+Required: orgId, projectId, events, charts, dashboard. \`planId\` and \`createdAt\` are stamped by the wizard.
+Returns: "ok: <planId>" on successful persistence, an error string otherwise. Idempotent — calling again overwrites the prior plan with a fresh \`planId\`.`,
+    {
+      orgId: z
+        .string()
+        .min(1)
+        .describe(
+          'Numeric Amplitude org id — the same value the wizard wrote into project-binding.json.',
+        ),
+      projectId: z
+        .string()
+        .min(1)
+        .describe(
+          'Numeric Amplitude project (app) id — the same value the wizard wrote into project-binding.json.',
+        ),
+      events: z
+        .array(
+          z.object({
+            name: z.string().min(1),
+            properties: z.array(z.string().min(1)).optional(),
+          }),
+        )
+        .describe(
+          'Events the plan covers. Mirror the confirmed event plan from `confirm_event_plan` so the deferred command can intersect it with what is actually being ingested.',
+        ),
+      charts: z
+        .array(
+          z.object({
+            title: z.string().min(1),
+            eventName: z.string().min(1),
+            chartType: z.enum([
+              'funnel',
+              'line',
+              'bar',
+              'pie',
+              'retention',
+              'segmentation',
+              'unknown',
+            ]),
+            grouping: z.string().min(1).optional(),
+            metadata: z.record(z.string(), z.unknown()).optional(),
+          }),
+        )
+        .describe(
+          'Charts to build. Each chart references an event by name (must match an entry in `events`). `metadata` is a forward-compat slot for skill-specific extras.',
+        ),
+      dashboard: z
+        .object({
+          title: z.string().min(1),
+          layout: z.enum(['grid', 'list']).optional(),
+        })
+        .describe('The dashboard wrapper — title and optional layout.'),
+      reason: reasonField,
+    },
+    async (args: {
+      orgId: string;
+      projectId: string;
+      events: Array<{ name: string; properties?: string[] }>;
+      charts: Array<{
+        title: string;
+        eventName: string;
+        chartType:
+          | 'funnel'
+          | 'line'
+          | 'bar'
+          | 'pie'
+          | 'retention'
+          | 'segmentation'
+          | 'unknown';
+        grouping?: string;
+        metadata?: Record<string, unknown>;
+      }>;
+      dashboard: { title: string; layout?: 'grid' | 'list' };
+      reason: string;
+    }) => {
+      // Lazy import — keeps the dashboard-plan module out of the wizard-tools
+      // module-init graph for any consumer that doesn't actually call this
+      // tool (e.g. the external `wizard-mcp-server` registers its own copy).
+      const { writeDashboardPlan } = await import('./dashboard-plan.js');
+      const persisted = writeDashboardPlan(workingDirectory, {
+        orgId: args.orgId,
+        projectId: args.projectId,
+        events: args.events,
+        charts: args.charts,
+        dashboard: args.dashboard,
+      });
+
+      logToFile(
+        `record_dashboard_plan: charts=${args.charts.length} events=${
+          args.events.length
+        } persisted=${persisted ? persisted.planId : 'failed'}`,
+      );
+
+      if (!persisted) {
+        return {
+          content: [
+            {
+              type: 'text' as const,
+              text: 'error: failed to persist dashboard plan to disk — see wizard log',
+            },
+          ],
+        };
+      }
+      return {
+        content: [{ type: 'text' as const, text: `ok: ${persisted.planId}` }],
+      };
+    },
+  );
+
   // -- wizard_feedback ------------------------------------------------------
   // Structured agent-side feedback for blocked or stuck states. Distinct from
   // the user-facing /feedback slash command (`trackWizardFeedback`); this one
@@ -1897,6 +2030,10 @@ Returns: "ok" on successful persistence, an error string otherwise. Idempotent �
       confirmEventPlan,
       reportStatus,
       recordDashboard,
+      // PR 2 of DEFER_DASHBOARD_PLAN: additive — registered so it is
+      // callable, but not yet referenced in agent prompts. PR 4 wires it
+      // in and retires `record_dashboard`.
+      recordDashboardPlan,
       wizardFeedback,
     ],
   });
@@ -1921,6 +2058,9 @@ export const WIZARD_TOOL_NAMES = [
   `${SERVER_NAME}:confirm_event_plan`,
   `${SERVER_NAME}:report_status`,
   `${SERVER_NAME}:record_dashboard`,
+  // PR 2 of DEFER_DASHBOARD_PLAN: registered so the agent CAN call it,
+  // but no prompt copy references it yet. PR 4 wires it in.
+  `${SERVER_NAME}:record_dashboard_plan`,
   `${SERVER_NAME}:wizard_feedback`,
 ];
 
