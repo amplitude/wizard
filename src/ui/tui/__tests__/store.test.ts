@@ -688,6 +688,42 @@ describe('WizardStore', () => {
       expect(store.session.runPhase).toBe(RunPhase.Idle);
     });
 
+    it('setRegionForced wipes signup ceremony state so the new zone re-runs the probe POST', () => {
+      // /region during a mid-signup ceremony: signupAuth.zone is pinned
+      // to the old region, and a cached signupRequiredFields from the
+      // old zone's needs_information response would steer the new
+      // zone's pass through the wrong field-collection screens. Every
+      // ceremony key must reset alongside the rest of the zone-scoped
+      // state.
+      const store = createStore();
+      store.session.region = 'us';
+      store.session.authOnboardingPath = AuthOnboardingPath.CreateAccount;
+      store.session.signupEmail = 'ada@example.com';
+      store.session.signupFullName = 'Ada Lovelace';
+      store.session.tosAccepted = true;
+      store.session.signupRequiredFields = ['full_name'];
+      store.session.signupAbandoned = false;
+      store.session.signupTokensObtained = true;
+      store.session.signupAuth = {
+        idToken: 'i',
+        accessToken: 'a',
+        refreshToken: 'r',
+        zone: 'us',
+        userInfo: null,
+        dashboardUrl: null,
+      };
+
+      store.setRegionForced();
+
+      expect(store.session.signupEmail).toBeNull();
+      expect(store.session.signupFullName).toBeNull();
+      expect(store.session.tosAccepted).toBeNull();
+      expect(store.session.signupRequiredFields).toBeNull();
+      expect(store.session.signupAuth).toBeNull();
+      expect(store.session.signupAbandoned).toBe(false);
+      expect(store.session.signupTokensObtained).toBe(false);
+    });
+
     it('setRegion persists new zone to existing ampli.json even when org/workspace are cleared', async () => {
       const store = createStore();
       // Seed ampli.json in the store's tmpdir as if from a prior SUSI

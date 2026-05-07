@@ -822,6 +822,15 @@ export class WizardStore {
     this.$session.setKey('activationOptionsComplete', false);
     this.$session.setKey('dataIngestionConfirmed', false);
     this.$session.setKey('signupMagicLinkUrl', null);
+
+    // Signup ceremony state is zone-scoped: `signupAuth.zone` is pinned
+    // to the old region, and `signupRequiredFields` cached from the old
+    // zone's probe POST would steer the next forward pass through the
+    // wrong field-collection screens. Funnel through the shared helper
+    // so any future ceremony field gets cleared automatically (matches
+    // backToWelcome / setSignupEmail(null) / switchToLogin).
+    this._resetCeremonyKeys();
+
     this.$session.setKey('mcpComplete', false);
     this.$session.setKey('mcpOutcome', null);
     this.$session.setKey('mcpInstalledClients', []);
