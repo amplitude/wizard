@@ -2040,6 +2040,14 @@ export async function runAgent(
     // recovery attempt (often many minutes) even though the agent is working.
     let postStreamRetryActive = false;
 
+    // Tracks which retry path triggered the most recent `continue` back to
+    // the loop head. The retry banner / NDJSON `transient_retry` event must
+    // accurately report `reason` so orchestrators can distinguish a stall
+    // (no SDK message) from a transient API error (post-stream classifier)
+    // from a thrown SDK error (catch branch). Updated by each `continue`
+    // site below; consumed by the next attempt's `emitTransientRetry` call.
+    let lastRetryReason: 'stall' | 'transient_api' | 'sdk_thrown' = 'stall';
+
     // Most recent SDK-reported retry delay from `api_retry` system messages.
     // The SDK includes `retry_delay_ms` (its own honour of the upstream's
     // `Retry-After` / 429 hint). When the OUTER loop computes its next
@@ -2227,7 +2235,7 @@ export async function runAgent(
             attempt: attempt + 1,
             totalAttempts: MAX_RETRIES + 1,
             nextRetryInMs: backoffMs,
-            reason: 'stall',
+            reason: lastRetryReason,
             retryAfterMs: lastApiRetryDelayMs,
           });
         } catch {
@@ -3134,6 +3142,7 @@ export async function runAgent(
               : `Upstream ${matchedTransientError.label}`,
           });
           postStreamRetryActive = true;
+          lastRetryReason = 'transient_api';
           collectedText.length = 0;
           recentStatuses.length = 0;
           signalDone();
@@ -3191,6 +3200,7 @@ export async function runAgent(
             reason: 'Agent stalled',
           });
           postStreamRetryActive = true;
+          lastRetryReason = 'stall';
           continue;
         }
 
@@ -3261,6 +3271,7 @@ export async function runAgent(
             reason: 'Transient error',
           });
           postStreamRetryActive = true;
+          lastRetryReason = 'sdk_thrown';
           collectedText.length = 0;
           recentStatuses.length = 0;
           continue;
