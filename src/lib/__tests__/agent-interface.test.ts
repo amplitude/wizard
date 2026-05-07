@@ -32,7 +32,12 @@ import {
   AUTH_RETRY_LIMIT,
   isStallNonProgressMessage,
   redactToolLogPayload,
+  EVENT_PLAN_FEEDBACK_REINJECTION_PROMPT,
 } from '../agent-interface';
+import {
+  recordEventPlanDecision,
+  resetEventPlanFeedbackState,
+} from '../agent/event-plan-feedback-state';
 import { resetRetryBudgetForTests } from '../agent/transient-llm-retry';
 import { AgentState } from '../agent-state';
 import type { WizardOptions } from '../../utils/types';
@@ -1643,6 +1648,133 @@ describe('createStopHook', () => {
     // Third call → allow stop
     const third = await hook(hookInput, undefined, { signal });
     expect(third).toEqual({});
+  });
+
+  // -- Phase 0: unresolved confirm_event_plan feedback ---------------------
+  // Bug: user gives feedback on the event plan, agent emits a clarifying
+  // question, Stop hook unconditionally requests WIZARD-REMARK and the run
+  // ends with no events.json persisted. Phase 0 catches that case and tells
+  // the agent to revise + re-call the tool instead.
+
+  describe('Phase 0: unresolved confirm_event_plan feedback', () => {
+    beforeEach(() => {
+      resetEventPlanFeedbackState();
+    });
+
+    afterEach(() => {
+      resetEventPlanFeedbackState();
+    });
+
+    it('returns the feedback re-injection prompt (NOT WIZARD-REMARK) when last decision was feedback', async () => {
+      recordEventPlanDecision({
+        decision: 'feedback',
+        events: [
+          { name: 'User Signed Up', description: 'when a user signs up' },
+        ],
+        feedback: 'add a prefix',
+      });
+
+      const hook = createStopHook(() => []);
+      const signal = new AbortController().signal;
+
+      const first = await hook(hookInput, undefined, { signal });
+      expect(first).toHaveProperty('decision', 'block');
+      const reason = (first as { reason: string }).reason;
+      expect(reason).toBe(EVENT_PLAN_FEEDBACK_REINJECTION_PROMPT);
+      // Crucially, the prompt is NOT the WIZARD-REMARK request
+      expect(reason).not.toContain('WIZARD-REMARK');
+    });
+
+    it('escalates to WIZARD-REMARK after feedback was followed by approved', async () => {
+      // Round 1: user gives feedback
+      recordEventPlanDecision({
+        decision: 'feedback',
+        events: [{ name: 'User Signed Up', description: 'signup' }],
+        feedback: 'add a prefix',
+      });
+      // Round 2: agent revised and user approved — feedback state cleared
+      recordEventPlanDecision({
+        decision: 'approved',
+        events: [
+          { name: 'App User Signed Up', description: 'signup with prefix' },
+        ],
+      });
+
+      const hook = createStopHook(() => []);
+      const signal = new AbortController().signal;
+
+      // First call should now go directly to the WIZARD-REMARK phase
+      // because the unresolved-feedback flag was cleared by the approve.
+      const first = await hook(hookInput, undefined, { signal });
+      expect(first).toHaveProperty('decision', 'block');
+      expect((first as { reason: string }).reason).toContain('WIZARD-REMARK');
+
+      // Second call → allow stop (the normal happy path tail).
+      const second = await hook(hookInput, undefined, { signal });
+      expect(second).toEqual({});
+    });
+
+    it('caps feedback re-injection at 1 per session, then falls through to WIZARD-REMARK', async () => {
+      recordEventPlanDecision({
+        decision: 'feedback',
+        events: [{ name: 'User Signed Up', description: 'signup' }],
+        feedback: 'rename it',
+      });
+
+      const hook = createStopHook(() => []);
+      const signal = new AbortController().signal;
+
+      // First call → feedback re-prompt (1st re-injection)
+      const first = await hook(hookInput, undefined, { signal });
+      expect(first).toHaveProperty('decision', 'block');
+      expect((first as { reason: string }).reason).toBe(
+        EVENT_PLAN_FEEDBACK_REINJECTION_PROMPT,
+      );
+
+      // Second call → cap reached, fall through to WIZARD-REMARK so the
+      // run can actually conclude. (The outro safety net in agent-runner
+      // will persist a draft so the user can resume in a fresh run.)
+      const second = await hook(hookInput, undefined, { signal });
+      expect(second).toHaveProperty('decision', 'block');
+      const secondReason = (second as { reason: string }).reason;
+      expect(secondReason).toContain('WIZARD-REMARK');
+      expect(secondReason).not.toBe(EVENT_PLAN_FEEDBACK_REINJECTION_PROMPT);
+
+      // Third call → allow stop
+      const third = await hook(hookInput, undefined, { signal });
+      expect(third).toEqual({});
+    });
+
+    it('skipped decision behaves like approved — no feedback re-injection', async () => {
+      recordEventPlanDecision({
+        decision: 'skipped',
+        events: [{ name: 'User Signed Up', description: 'signup' }],
+      });
+
+      const hook = createStopHook(() => []);
+      const signal = new AbortController().signal;
+
+      const first = await hook(hookInput, undefined, { signal });
+      expect(first).toHaveProperty('decision', 'block');
+      expect((first as { reason: string }).reason).toContain('WIZARD-REMARK');
+    });
+
+    it('auth error wins over unresolved feedback (allow stop immediately)', async () => {
+      recordEventPlanDecision({
+        decision: 'feedback',
+        events: [{ name: 'User Signed Up', description: 'signup' }],
+        feedback: 'rename it',
+      });
+
+      const hook = createStopHook(
+        () => [],
+        () => true,
+      );
+      const signal = new AbortController().signal;
+
+      const result = await hook(hookInput, undefined, { signal });
+      expect(result).toEqual({});
+    });
   });
 });
 

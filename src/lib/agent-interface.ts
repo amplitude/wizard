@@ -69,6 +69,10 @@ import {
 } from './wizard-tools';
 import { parseEventPlanContent } from './event-plan-parser.js';
 import {
+  noteFeedbackReinjection,
+  shouldReinjectFeedbackPrompt,
+} from './agent/event-plan-feedback-state.js';
+import {
   createPreToolUseHook,
   evaluateCanUseToolFileLogging,
   redactToolLogPayload,
@@ -624,12 +628,28 @@ export function stripStreamEventNoise(data: string): {
 }
 
 /**
- * Create a stop hook callback that drains the additional feature queue,
- * then collects a remark, then allows stop.
+ * Prompt injected by the Stop hook when the most recent
+ * `confirm_event_plan` decision was `feedback` and the agent has not
+ * called the tool again. Tells the agent to revise IN-PROCESS — without
+ * asking the user questions — and re-call the tool. Exported so tests
+ * can assert the exact wording without duplicating it.
+ */
+export const EVENT_PLAN_FEEDBACK_REINJECTION_PROMPT =
+  'Your last `confirm_event_plan` returned user feedback that you have not acted on. Revise the event plan based on the feedback and call `confirm_event_plan` again. Do NOT ask the user clarifying questions — make a reasonable interpretation. The user can give more feedback in the next round.';
+
+/**
+ * Create a stop hook callback that handles unresolved event-plan feedback,
+ * drains the additional feature queue, then collects a remark, then allows
+ * stop.
  *
- * Three-phase logic using closure state:
+ * Phase order (closure state):
+ *   Phase 0 — feedback re-prompt (≤1×): if `confirm_event_plan` last
+ *             returned user feedback that the agent never acted on,
+ *             block with a reminder to revise and re-call the tool.
+ *             Capped at one re-injection per session so a stuck agent
+ *             can't infinite-loop the run.
  *   Phase 1 — drain queue: block with each feature prompt in order
- *   Phase 2 — collect remark (once): block with remark prompt
+ *   Phase 2 — collect remark (once): block with WIZARD-REMARK prompt
  *   Phase 3 — allow stop: return {}
  *
  * If `isAuthError()` returns true, all phases are skipped and stop is
@@ -668,6 +688,32 @@ export function createStopHook(
     if (isAuthError()) {
       logToFile('Stop hook: allowing stop (auth error detected)');
       return Promise.resolve({});
+    }
+
+    // Phase 0: unresolved confirm_event_plan feedback
+    //
+    // The most recent `confirm_event_plan` call returned user feedback,
+    // but the agent has not called the tool again with a revised plan.
+    // Without this branch the run advances to the WIZARD-REMARK phase
+    // and concludes with no events.json persisted, losing both the
+    // proposed plan AND the user's feedback. Inject a focused prompt
+    // telling the agent to revise IN-PROCESS rather than asking the
+    // user questions the wizard has no surface to answer.
+    //
+    // Capped at one re-injection per unresolved-feedback record (the
+    // singleton in `event-plan-feedback-state.ts` enforces the cap).
+    // After the cap, fall through to the normal remark / allow-stop
+    // sequence so the run can actually conclude — the outro safety net
+    // in agent-runner.ts will persist the draft so the user can resume.
+    if (shouldReinjectFeedbackPrompt()) {
+      noteFeedbackReinjection();
+      logToFile(
+        'Stop hook: injecting confirm_event_plan feedback re-prompt (unresolved feedback)',
+      );
+      return Promise.resolve({
+        decision: 'block',
+        reason: EVENT_PLAN_FEEDBACK_REINJECTION_PROMPT,
+      });
     }
 
     // The previous feature (if any) just finished — mark it complete before

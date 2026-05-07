@@ -15,6 +15,7 @@ import { z } from 'zod';
 import { logToFile } from '../utils/debug';
 import { atomicWriteJSON } from '../utils/atomic-write';
 import { readLocalEventPlan } from './event-plan-parser.js';
+import { recordEventPlanDecision } from './agent/event-plan-feedback-state.js';
 import {
   ensureDir,
   getDashboardFile,
@@ -863,6 +864,101 @@ export function persistEventPlan(
 }
 
 /**
+ * Write a DRAFT event plan to `<workingDirectory>/.amplitude/events.json`.
+ *
+ * Used as the outro safety net when a wizard run ends with an unresolved
+ * `confirm_event_plan` feedback decision (the agent gave the user a plan,
+ * the user asked for changes, the agent never circled back to call the
+ * tool again with a revised plan). Without this, `events.json` is never
+ * written, the user sees "No event plan was persisted" in the outro, and
+ * loses the proposed plan AND the feedback they typed.
+ *
+ * Draft persist writes a wrapper object — `{ events, draft, lastFeedback }`
+ * — instead of the plain array shape `persistEventPlan` uses. The
+ * canonical reader (`parseEventPlanContent` in event-plan-parser.ts)
+ * already tolerates `{ events: [...] }` wrappers, so existing callers
+ * continue to render the events correctly while ignoring the extra
+ * `draft` / `lastFeedback` fields. New code can opt in by reading the
+ * raw JSON and surfacing the draft state to the user (see the outro
+ * fallback report).
+ *
+ * Refuses to overwrite a non-draft `events.json` — that would clobber
+ * a prior approved plan. The check is best-effort: if the existing
+ * file can't be parsed, we treat it as not-a-finalized-plan and write
+ * the draft anyway. Returns true on a successful write, false on any
+ * filesystem or guard failure.
+ */
+export function persistDraftEventPlan(
+  workingDirectory: string,
+  events: Array<{ name: string; description: string }>,
+  lastFeedback: string,
+): boolean {
+  try {
+    if (!fs.existsSync(workingDirectory)) {
+      logToFile(
+        `persistDraftEventPlan: working directory does not exist: ${workingDirectory}`,
+      );
+      return false;
+    }
+
+    const eventsFile = getEventsFile(workingDirectory);
+
+    // Don't clobber an approved plan. If the file already exists and is
+    // a plain array OR a wrapper without `draft: true`, leave it alone —
+    // the user's previous run may have left a valid plan on disk that
+    // this run failed to advance past. Re-running the wizard is the
+    // correct recovery path; silently overwriting would lose data.
+    if (fs.existsSync(eventsFile)) {
+      try {
+        const raw = fs.readFileSync(eventsFile, 'utf8');
+        const parsed: unknown = JSON.parse(raw);
+        const isDraft =
+          parsed &&
+          typeof parsed === 'object' &&
+          !Array.isArray(parsed) &&
+          (parsed as { draft?: unknown }).draft === true;
+        if (!isDraft) {
+          logToFile(
+            `persistDraftEventPlan: refusing to overwrite non-draft ${eventsFile}`,
+          );
+          return false;
+        }
+      } catch (err) {
+        // Unparseable existing file — most likely a partial write or
+        // corruption. Better to overwrite with a usable draft than to
+        // leave the user stuck.
+        logToFile(
+          `persistDraftEventPlan: existing ${eventsFile} unparseable, overwriting (${
+            err instanceof Error ? err.message : String(err)
+          })`,
+        );
+      }
+    }
+
+    ensureDir(getProjectMetaDir(workingDirectory), 0o755);
+    atomicWriteJSON(eventsFile, {
+      events: events.map((e) => ({
+        name: e.name,
+        description: e.description,
+      })),
+      draft: true,
+      lastFeedback,
+    });
+    logToFile(
+      `persistDraftEventPlan: wrote draft with ${events.length} event(s) and feedback="${lastFeedback}"`,
+    );
+    return true;
+  } catch (err) {
+    logToFile(
+      `persistDraftEventPlan: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
+    return false;
+  }
+}
+
+/**
  * Write the dashboard payload to the canonical
  * `<workingDirectory>/.amplitude/dashboard.json`.
  *
@@ -926,11 +1022,43 @@ function readPersistedEventPlan(
 }
 
 /**
+ * Inspect the canonical `<installDir>/.amplitude/events.json` for the
+ * draft-marker shape that {@link persistDraftEventPlan} writes when a
+ * run ends with unresolved `confirm_event_plan` feedback. Returns
+ * `null` for the common case (file missing, or contents are a regular
+ * approved plan) so callers can short-circuit. Best-effort and silent
+ * on parse errors.
+ */
+export function readDraftEventPlanMeta(
+  installDir: string,
+): { lastFeedback: string } | null {
+  const eventsFile = getEventsFile(installDir);
+  if (!fs.existsSync(eventsFile)) return null;
+  try {
+    const raw = fs.readFileSync(eventsFile, 'utf8');
+    const parsed: unknown = JSON.parse(raw);
+    if (
+      parsed &&
+      typeof parsed === 'object' &&
+      !Array.isArray(parsed) &&
+      (parsed as { draft?: unknown }).draft === true
+    ) {
+      const fb = (parsed as { lastFeedback?: unknown }).lastFeedback;
+      return { lastFeedback: typeof fb === 'string' ? fb : '' };
+    }
+    return null;
+  } catch {
+    return null;
+  }
+}
+
+/**
  * Render a minimal Markdown setup report from session state. Exported so
  * tests can lock down the formatting without going through the filesystem.
  */
 export function buildFallbackReport(ctx: FallbackReportContext): string {
   const events = readPersistedEventPlan(ctx.installDir);
+  const draftMeta = readDraftEventPlanMeta(ctx.installDir);
   const lines: string[] = [];
 
   lines.push('<wizard-report>');
@@ -955,6 +1083,17 @@ export function buildFallbackReport(ctx: FallbackReportContext): string {
   if (events.length > 0) {
     lines.push('## Instrumented events');
     lines.push('');
+    if (draftMeta) {
+      // The events file we just read is a DRAFT — the agent proposed a
+      // plan, the user gave feedback, and the agent never closed the
+      // loop. Surface that state explicitly so the user knows the table
+      // below is the LAST proposal (not what's actually in the code) and
+      // gets pointed back into the wizard to keep iterating.
+      lines.push(
+        `_Feedback was given but the plan was never finalized — re-run the wizard to continue iterating. Your feedback was: "${draftMeta.lastFeedback}"._`,
+      );
+      lines.push('');
+    }
     lines.push('| Event | Description |');
     lines.push('| --- | --- |');
     for (const e of events) {
@@ -1569,6 +1708,9 @@ export async function createWizardToolsServer(options: WizardToolsOptions) {
     `Present the proposed instrumentation plan to the user for review BEFORE instrumenting any events.
 Call this tool AFTER installing the SDK and adding initialization code, but BEFORE writing any track() calls.
 The user can approve the plan, skip the review, or give feedback.
+
+You MUST NOT ask the user clarifying questions in response to feedback. Make a reasonable interpretation of their feedback, revise the plan in-process, and call this tool again with the revised events. The user can give more feedback in the next round if your interpretation was wrong — do not block the run with a chat-style follow-up question, the wizard has no surface for the user to reply mid-stream.
+
 If the user gives feedback, revise your plan and call this tool again — loop until approved or skipped.
 Returns: "approved", "skipped", or "feedback: <user message>"`,
     {
@@ -1633,6 +1775,18 @@ Returns: "approved", "skipped", or "feedback: <user message>"`,
       } else {
         text = decision.decision; // 'approved' or 'skipped'
       }
+      // Publish the outcome to the per-process singleton so the Stop hook
+      // (in `agent-interface.ts`) can detect "user gave feedback but the
+      // agent has not re-called this tool yet" and inject a re-prompt
+      // instead of letting the run conclude with no event plan persisted.
+      // Recorded for every decision so a subsequent approved/skipped also
+      // clears the feedback state cleanly.
+      recordEventPlanDecision({
+        decision:
+          decision.decision === 'revised' ? 'feedback' : decision.decision,
+        events,
+        feedback: decision.decision === 'revised' ? decision.feedback : '',
+      });
       // Persist the canonical event plan to `.amplitude/events.json` so the
       // watcher and return-run loader see the same {name, description} shape
       // regardless of what the agent would otherwise emit. Only write on

@@ -45,6 +45,7 @@ import {
   getDashboardFile,
   pickFreshestExisting,
 } from '../../../utils/storage-paths.js';
+import { readDraftEventPlanMeta } from '../../../lib/wizard-tools.js';
 import { retryFromCheckpoint } from '../../../lib/retry-from-checkpoint.js';
 import { isInteractiveOutro } from '../utils/outro-mode.js';
 
@@ -270,6 +271,24 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
     if (url) setDiskDashboardUrl(url);
   }, [installDir, store.session.checklistDashboardUrl]);
 
+  // When the run ends with unresolved confirm_event_plan feedback the
+  // outro safety net in agent-runner.ts persists a DRAFT events.json
+  // (wrapper shape with `draft: true` and the user's last feedback).
+  // Surface that here so the user understands why the listed events
+  // aren't fully instrumented and what to do about it. One-shot read on
+  // mount — same pattern as `reportExists` and the dashboard URL above.
+  const [draftMeta, setDraftMeta] = useState<{ lastFeedback: string } | null>(
+    null,
+  );
+  useEffect(() => {
+    try {
+      setDraftMeta(readDraftEventPlanMeta(installDir));
+    } catch {
+      // Non-fatal — the draft hint is purely additive.
+      setDraftMeta(null);
+    }
+  }, [installDir]);
+
   /**
    * Resolve the canonical dashboard URL: in-session value (set by
    * agent-interface's watcher during a fresh run) wins, then the
@@ -414,6 +433,25 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
               <Text color={Colors.secondary} bold>
                 Events
               </Text>
+              {/* Draft notice — only when events.json is the wrapper-shaped
+                  draft persisted by the outro safety net (i.e. the user
+                  gave feedback during confirm_event_plan and the agent
+                  never circled back). Tells them the events below are
+                  the LAST proposal, not what's in the code, so re-running
+                  is the right next step. */}
+              {draftMeta && (
+                <Box flexDirection="column" marginBottom={1}>
+                  <Text color={Colors.warning}>
+                    {Icons.bullet} Feedback was given but the plan was
+                    never finalized — re-run the wizard to continue iterating.
+                  </Text>
+                  {draftMeta.lastFeedback && (
+                    <Text color={Colors.muted}>
+                      Your feedback: {draftMeta.lastFeedback}
+                    </Text>
+                  )}
+                </Box>
+              )}
               {visibleEvents.map((event) => (
                 <Text key={event.name} color={Colors.body}>
                   {Icons.diamond} <Text bold>{event.name}</Text>
