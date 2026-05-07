@@ -6,13 +6,15 @@
  * Tiered delivery is default-on; opt out with
  * `AMPLITUDE_WIZARD_SKILL_TIERS=0` to restore eager pre-staging.
  */
-import { isSkillTiersEnabled, loadBundledSkillMenu } from '../wizard-tools.js';
+import { isSkillTiersEnabled } from '../wizard-tools.js';
+import {
+  buildSkillMenuFileContent,
+  type SkillMenuFileContent,
+} from '../wizard-tools/bundled-skills.js';
 
 const MAX_SKILL_MENU_PROMPT_CHARS = 12_000;
 
-type SkillMenuPayload = {
-  categories: Record<string, { id: string; name: string }[]>;
-};
+type SkillMenuPayload = SkillMenuFileContent;
 
 function renderMenu(payload: SkillMenuPayload): string {
   return JSON.stringify(payload);
@@ -89,15 +91,7 @@ function fitMenuToBudget(payload: SkillMenuPayload): string | null {
 export function buildSkillTierSystemPromptAppend(): string {
   if (!isSkillTiersEnabled()) return '';
   try {
-    const menu = loadBundledSkillMenu();
-    const payload: SkillMenuPayload = {
-      categories: Object.fromEntries(
-        Object.entries(menu.categories).map(([name, entries]) => [
-          name,
-          entries.map((s) => ({ id: s.id, name: s.name })),
-        ]),
-      ),
-    };
+    const payload: SkillMenuPayload = buildSkillMenuFileContent();
     // Truncating the JSON mid-token (the previous behaviour) produced
     // syntactically invalid JSON inside a fenced code block, which made the
     // model hallucinate ids. Instead, drop entries until the menu fits, and
