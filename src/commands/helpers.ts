@@ -16,6 +16,7 @@ import {
 } from '../lib/wizard-session.js';
 import { setProjectLogFile } from '../lib/observability';
 import { runMigrationShim } from '../utils/storage-migration';
+import { assertNever } from '../utils/assert-never';
 import { CLI_INVOCATION } from './context';
 
 function authOnboardingPathFromArgv(
@@ -74,12 +75,34 @@ function bootstrapInstallDir(installDir: string): void {
  * Also runs `bootstrapInstallDir` so every command path migrates legacy
  * storage and switches the logger to the per-project location once
  * `installDir` is known.
+ *
+ * **Mode-gated args:** the resolved execution mode is threaded into
+ * `buildSession` so `--auth-onboarding`, `--email`, and `--accept-tos`
+ * are dropped in interactive TUI runs (the Intro picker, signup-email
+ * screen, and ToS screen own those decisions). Non-interactive modes
+ * (`--ci` / `--agent`) honor every flag as today.
  */
 export const buildSessionFromOptions = async (
   options: Record<string, unknown>,
   overrides?: { ci?: boolean },
 ) => {
   const { buildSession } = await import('../lib/wizard-session.js');
+  const { resolveMode } = await import('../lib/mode-config.js');
+  // Resolve the effective mode using the same inputs `resolveMode` uses
+  // elsewhere. `ci` may be forced via the `overrides` arg (e.g. the
+  // `apply` subcommand always runs CI-style); otherwise we read it from
+  // argv. `--agent` and `--yes` similarly come from argv. `isTTY` reflects
+  // the real terminal state — non-TTY auto-routes to ci, TTY + no other
+  // flags lands on `interactive`.
+  const { mode } = resolveMode({
+    ci: overrides?.ci ?? Boolean(options.ci),
+    yes: Boolean(options.yes),
+    autoApprove: Boolean(options.autoApprove),
+    force: Boolean(options.force),
+    agent: Boolean(options.agent),
+    isTTY: Boolean(process.stdout.isTTY),
+  });
+  const executionMode = mode;
   const session = buildSession({
     debug: options.debug as boolean | undefined,
     verbose: options.verbose as boolean | undefined,
@@ -107,6 +130,7 @@ export const buildSessionFromOptions = async (
     // refers to the Amplitude project (formerly workspace), not the app.
     appId: options.appId as string | undefined,
     appName: options.appName as string | undefined,
+    executionMode,
   });
   bootstrapInstallDir(session.installDir);
   return session;
@@ -643,9 +667,13 @@ export function gateCiSignupAcceptToS(
  *   - Intro is dismissed  (so the logo / welcome stays visible)
  *   - Region is picked    (so the OAuth URL targets the right zone)
  *   - regionForced is off (so /region mid-session doesn't race the new pick)
- *   - On the create-account path, ToS is accepted (so the browser doesn't open before
- *     EmailCapture / ToS finish — tosAccepted=true implies email capture
- *     is complete since ToS only renders after EmailCapture)
+ *   - On the create-account path, the signup ceremony has settled — either
+ *     `signupAuth` is set (SigningUpScreen captured fresh tokens from the
+ *     direct-signup endpoint), or `signupAbandoned` is true (server
+ *     redirected / errored, OAuth fallback is the user's path forward).
+ *     Without this gate, the auth task races SigningUpScreen and opens
+ *     browser OAuth while the screen-driven POST is still in flight,
+ *     producing two concurrent auth attempts and an unwinnable UX race.
  *
  * Pure function, exported for unit testing — the original inline closure
  * silently regressed when its individual conditions drifted and there was
@@ -657,8 +685,11 @@ export function isAuthTaskGateReady(
   if (!session.introConcluded) return false;
   if (session.region === null) return false;
   if (session.regionForced) return false;
-  if (isCreateAccountOnboarding(session) && session.tosAccepted !== true)
-    return false;
+  if (isCreateAccountOnboarding(session)) {
+    const ceremonySettled =
+      session.signupAuth !== null || session.signupAbandoned;
+    if (!ceremonySettled) return false;
+  }
   return true;
 }
 
@@ -697,6 +728,10 @@ export const runDirectSignupIfRequested = async (
   }
   let tokens: Awaited<ReturnType<typeof performSignupOrAuth>>;
   try {
+    // No `signal` here: CI / agent / classic modes have no in-band
+    // cancellation surface (no Esc handler, no unmount lifecycle), so
+    // there is nothing to thread through. The TUI path passes a signal
+    // from SigningUpScreen's useAsyncEffect; this entry point doesn't.
     tokens = await performSignupOrAuth({
       email: session.signupEmail,
       fullName: session.signupFullName,
@@ -711,17 +746,27 @@ export const runDirectSignupIfRequested = async (
     );
     return;
   }
-  // Loose equality to also catch `undefined` — performSignupOrAuth's return
-  // type is `PerformSignupOrAuthResult | null`, but a defensive check covers
-  // both no-credentials sentinels.
-  if (tokens == null) {
-    getUI().log.info(
-      `Direct signup did not produce credentials; continuing to ${fallbackLabel}.`,
-    );
-    return;
+  // Exhaustive switch — `default: assertNever` makes a future arm a
+  // compile error so no new ceremony outcome silently routes to the
+  // mode's fallback without explicit review.
+  switch (tokens.kind) {
+    case 'success':
+      getUI().log.info('Direct signup succeeded; using newly created account.');
+      session.signupMagicLinkUrl = tokens.dashboardUrl ?? null;
+      return;
+    case 'needs_information':
+    case 'redirect':
+    case 'error':
+      // Wrapper already emitted the appropriate telemetry; non-TUI
+      // modes have no in-band collection screens, so all three arms
+      // route to the mode's existing fallback path.
+      getUI().log.info(
+        `Direct signup did not produce credentials (${tokens.kind}); continuing to ${fallbackLabel}.`,
+      );
+      return;
+    default:
+      assertNever(tokens);
   }
-  getUI().log.info('Direct signup succeeded; using newly created account.');
-  session.signupMagicLinkUrl = tokens.dashboardUrl ?? null;
 };
 
 /**

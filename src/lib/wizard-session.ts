@@ -836,16 +836,54 @@ export interface WizardSession {
   tosAccepted: boolean | null;
 
   /**
-   * True once the email capture step is complete on the create-account path.
-   * Email is required before showing ToS.
-   */
-  emailCaptureComplete: boolean;
-
-  /**
-   * True if signup tokens were already obtained during EmailCaptureScreen
-   * (to skip duplicate signup attempt in bin.ts)
+   * True if signup tokens were already obtained during the SigningUp
+   * ceremony (to skip duplicate signup attempt in `default.ts`'s auth
+   * task — keyed off this flag, not signupAuth, so the legacy classic /
+   * agent / CI paths that don't set signupAuth still benefit from it).
    */
   signupTokensObtained: boolean;
+
+  /**
+   * Server-driven signup field collection state.
+   *
+   * The agentic signup endpoint can respond `needs_information` when the
+   * user is new and the request is missing fields the server requires
+   * (today: `full_name`). The TUI's signup ceremony POSTs email-only
+   * first, then writes the server's `required` array here. Downstream
+   * collection screens render iff their key is present AND the session
+   * doesn't already hold a value for it.
+   *
+   * `null` = no probe POST has fired yet (initial state) OR the server
+   * didn't ask for anything (e.g. redirect / error / success arms).
+   * Non-null = SigningUpScreen received `needs_information` and the
+   * collection-screen pipeline should advance.
+   */
+  signupRequiredFields: string[] | null;
+
+  /**
+   * Direct-signup success result, captured by SigningUpScreen on the
+   * `oauth` arm. Drives the auth-task gate: when present, the post-TUI
+   * auth flow uses these tokens directly instead of opening browser OAuth.
+   * `null` until the signup ceremony settles on success.
+   */
+  signupAuth: {
+    idToken: string;
+    accessToken: string;
+    refreshToken: string;
+    zone: import('./constants').AmplitudeZone;
+    userInfo: import('./api').AmplitudeUserInfo | null;
+    /** May contain secrets — never log or NDJSON. */
+    dashboardUrl: string | null;
+  } | null;
+
+  /**
+   * True when the signup ceremony settled on a non-success outcome
+   * (`requires_redirect` or `error`) and the wizard should fall through
+   * to the browser OAuth flow. Distinct from `signupAuth === null` so
+   * the auth-task gate can release on either "we have tokens" or "we
+   * gave up on direct signup".
+   */
+  signupAbandoned: boolean;
 
   /**
    * Create-project flow state.
@@ -980,6 +1018,16 @@ function resolveAuthOnboardingPathFromArgs(args: {
  * `signup` / `accountCreationFlow` are legacy boolean inputs still merged
  * here so older scripts and env-injected argv keep working; both map to
  * create-account when true.
+ *
+ * **TUI scope of signup flags:** When `executionMode` is `'interactive'`,
+ * `--auth-onboarding`, `--email`, and `--accept-tos` are silently ignored
+ * because the TUI's Intro menu, signup-email screen, and ToS screen own
+ * those decisions. `--full-name` continues to pre-fill the name screen
+ * regardless of mode (no confirmation step is bypassed by pre-fill — it's
+ * just metadata). Non-interactive modes (`'ci'` / `'agent'`) honor every
+ * flag as today. When `executionMode` is omitted, behavior matches the
+ * pre-gating contract (all flags honored) — call sites that have not been
+ * updated to thread the resolved mode keep working unchanged.
  */
 export function buildSession(args: {
   debug?: boolean;
@@ -1023,11 +1071,37 @@ export function buildSession(args: {
    * session's region so RegionSelect is skipped in the TUI flow too.
    */
   region?: AmplitudeZone;
+  /**
+   * Resolved execution mode. When `'interactive'`, signup-related CLI args
+   * (`--auth-onboarding`, `--email`, `--accept-tos`) are silently ignored —
+   * the TUI screens are the canonical UX for those decisions. Omitting this
+   * preserves the legacy "honor every flag" behavior so callers that don't
+   * thread mode in (tests, store init, etc.) keep working.
+   */
+  executionMode?: import('./mode-config.js').ExecutionMode;
 }): WizardSession {
-  const resolvedAuthPath = resolveAuthOnboardingPathFromArgs(args);
-  // Validate CLI args via Zod — warn on bad input but fall back to defaults
+  const isInteractive = args.executionMode === 'interactive';
+  // In interactive mode, drop the signup-specific args at the doorstep so
+  // every downstream resolver (zod parse, auth-path resolution, default
+  // assignment) treats them as unset. Single-source-of-truth: the gating
+  // happens here, not at every read site.
+  const effectiveArgs = isInteractive
+    ? {
+        ...args,
+        authOnboardingPath: undefined,
+        authOnboarding: undefined,
+        signup: undefined,
+        accountCreationFlow: undefined,
+        signupEmail: undefined,
+        acceptTos: undefined,
+      }
+    : args;
+  const resolvedAuthPath = resolveAuthOnboardingPathFromArgs(effectiveArgs);
+  // Validate CLI args via Zod — warn on bad input but fall back to defaults.
+  // Parse against `effectiveArgs` so interactive-mode gating drops the
+  // ignored flags before zod's email/boolean validation sees them.
   const parsed = CliArgsSchema.safeParse({
-    ...args,
+    ...effectiveArgs,
     authOnboardingPath: resolvedAuthPath,
   });
   if (!parsed.success) {
@@ -1038,8 +1112,10 @@ export function buildSession(args: {
     );
   }
 
-  // Use Zod-validated data (with coerced appId and defaults) when available
-  const validated = parsed.success ? parsed.data : args;
+  // Use Zod-validated data (with coerced appId and defaults) when available.
+  // The fallback also uses `effectiveArgs` so interactive-mode gating still
+  // applies on parse failure.
+  const validated = parsed.success ? parsed.data : effectiveArgs;
 
   return {
     debug: validated.debug ?? false,
@@ -1050,7 +1126,7 @@ export function buildSession(args: {
     agent: false,
     authOnboardingPath: parsed.success
       ? parsed.data.authOnboardingPath
-      : resolveAuthOnboardingPathFromArgs(args),
+      : resolveAuthOnboardingPathFromArgs(effectiveArgs),
     // On parse failure we intentionally reject raw args for the signup
     // fields — otherwise a malformed email would skip zod's .email() check
     // via the fallback and reach the signup endpoint. Null here means the
@@ -1143,10 +1219,12 @@ export function buildSession(args: {
 
     // --accept-tos pre-accepts ToS for non-TUI signup; in TUI mode the
     // ToSScreen still owns the UX but its `isComplete` check sees `true`
-    // and skips. Email capture is independently flagged below.
+    // and skips.
     tosAccepted: validated.acceptTos === true ? true : null,
-    emailCaptureComplete: false,
     signupTokensObtained: false,
+    signupRequiredFields: null,
+    signupAuth: null,
+    signupAbandoned: false,
 
     createProject: {
       pending: false,

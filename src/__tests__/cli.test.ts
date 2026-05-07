@@ -221,7 +221,13 @@ vi.mock('../utils/signup-or-auth', async () => {
   >('../utils/signup-or-auth');
   return {
     ...actual,
-    performSignupOrAuth: vi.fn(),
+    // Default to the `error` arm so test paths that don't override it
+    // fall through to the mode's fallback auth flow, instead of returning
+    // `undefined` (which would crash the `tokens.kind` narrowing in the
+    // wrapper's caller). Individual tests override with
+    // `mockResolvedValueOnce` / `mockRejectedValueOnce` when they need
+    // success / redirect / throw behavior.
+    performSignupOrAuth: vi.fn().mockResolvedValue({ kind: 'error' }),
   };
 });
 vi.mock('node:os', async () => {
@@ -666,6 +672,49 @@ describe('TUI auth task: region determines OAuth zone', () => {
       expect.objectContaining({
         accessToken: 'access-abc',
         idToken: 'id-abc',
+        cloudRegion: 'us',
+      }),
+    );
+  });
+
+  test('uses in-memory signupAuth tokens instead of disk or browser OAuth after TUI signup', async () => {
+    let storedCallback: (() => void) | null = null;
+    (mockStore.subscribe as any).mockImplementation((cb: () => void) => {
+      if (!storedCallback) storedCallback = cb;
+      return vi.fn();
+    });
+
+    const cliPromise = runCLI(['--auth-onboarding', 'create-account']);
+
+    await new Promise((r) => setTimeout(r, 50));
+    mockStore.session = {
+      ...mockStore.session,
+      authOnboardingPath: 'create_account',
+      introConcluded: true,
+      region: 'us',
+      regionForced: false,
+      signupTokensObtained: true,
+      signupAuth: {
+        idToken: 'direct-id',
+        accessToken: 'direct-access',
+        refreshToken: 'direct-refresh',
+        zone: 'us',
+        userInfo: null,
+        dashboardUrl: null,
+      },
+      signupAbandoned: false,
+    };
+    (storedCallback as (() => void) | null)?.();
+
+    await cliPromise;
+    await waitFor(() => mockStore.setOAuthComplete.mock.calls.length > 0);
+
+    expect(mockGetStoredToken).not.toHaveBeenCalled();
+    expect(mockPerformAmplitudeAuth).not.toHaveBeenCalled();
+    expect(mockStore.setOAuthComplete).toHaveBeenCalledWith(
+      expect.objectContaining({
+        accessToken: 'direct-access',
+        idToken: 'direct-id',
         cloudRegion: 'us',
       }),
     );

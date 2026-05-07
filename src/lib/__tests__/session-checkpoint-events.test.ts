@@ -104,7 +104,6 @@ function makeSession(installDir: string): WizardSession {
     userEmail: null,
     _restoredFromCheckpoint: false,
     tosAccepted: null,
-    emailCaptureComplete: false,
     createProject: { pending: false, source: null, suggestedName: null },
     eventPlan: null,
     eventIngestionDetected: null,

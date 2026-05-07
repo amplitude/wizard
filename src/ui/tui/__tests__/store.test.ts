@@ -688,6 +688,42 @@ describe('WizardStore', () => {
       expect(store.session.runPhase).toBe(RunPhase.Idle);
     });
 
+    it('setRegionForced wipes signup ceremony state so the new zone re-runs the probe POST', () => {
+      // /region during a mid-signup ceremony: signupAuth.zone is pinned
+      // to the old region, and a cached signupRequiredFields from the
+      // old zone's needs_information response would steer the new
+      // zone's pass through the wrong field-collection screens. Every
+      // ceremony key must reset alongside the rest of the zone-scoped
+      // state.
+      const store = createStore();
+      store.session.region = 'us';
+      store.session.authOnboardingPath = AuthOnboardingPath.CreateAccount;
+      store.session.signupEmail = 'ada@example.com';
+      store.session.signupFullName = 'Ada Lovelace';
+      store.session.tosAccepted = true;
+      store.session.signupRequiredFields = ['full_name'];
+      store.session.signupAbandoned = false;
+      store.session.signupTokensObtained = true;
+      store.session.signupAuth = {
+        idToken: 'i',
+        accessToken: 'a',
+        refreshToken: 'r',
+        zone: 'us',
+        userInfo: null,
+        dashboardUrl: null,
+      };
+
+      store.setRegionForced();
+
+      expect(store.session.signupEmail).toBeNull();
+      expect(store.session.signupFullName).toBeNull();
+      expect(store.session.tosAccepted).toBeNull();
+      expect(store.session.signupRequiredFields).toBeNull();
+      expect(store.session.signupAuth).toBeNull();
+      expect(store.session.signupAbandoned).toBe(false);
+      expect(store.session.signupTokensObtained).toBe(false);
+    });
+
     it('setRegion persists new zone to existing ampli.json even when org/workspace are cleared', async () => {
       const store = createStore();
       // Seed ampli.json in the store's tmpdir as if from a prior SUSI
@@ -935,24 +971,66 @@ describe('WizardStore', () => {
       store.session.authOnboardingPath = AuthOnboardingPath.CreateAccount;
       store.session.introConcluded = true;
       store.session.region = 'eu';
-      store.session.emailCaptureComplete = true;
       store.session.tosAccepted = false;
       store.session.signupEmail = 'x@y.co';
       store.session.signupFullName = 'X Y';
       store.session.signupTokensObtained = true;
+      // Pre-seed ceremony state that a real session might have at the
+      // moment the user hits Esc back to Welcome — server returned
+      // needs_information, signupAuth never settled, signupAbandoned
+      // false. backToWelcome must clear all three so the next forward
+      // pass through the create-account section starts fresh.
+      store.session.signupRequiredFields = ['full_name'];
+      store.session.signupAuth = null;
+      store.session.signupAbandoned = false;
 
       store.backToWelcome();
 
       expect(store.session.introConcluded).toBe(false);
       expect(store.session.region).toBeNull();
-      expect(store.session.emailCaptureComplete).toBe(false);
       expect(store.session.tosAccepted).toBeNull();
       expect(store.session.signupEmail).toBeNull();
       expect(store.session.signupFullName).toBeNull();
       expect(store.session.signupTokensObtained).toBe(false);
+      // Ceremony state must be wiped — mirroring `setSignupEmail(null)`'s
+      // contract. Without this, a second-time-around user re-typing the
+      // same email would skip the probe POST and consume the cached
+      // needs_information response.
+      expect(store.session.signupRequiredFields).toBeNull();
+      expect(store.session.signupAuth).toBeNull();
+      expect(store.session.signupAbandoned).toBe(false);
       expect(wizardCaptureMock).toHaveBeenCalledWith('back navigation', {
         to: 'welcome',
       });
+    });
+
+    it('clears ceremony state populated by a successful signup before backToWelcome', () => {
+      // Edge case the bound-to-setSignupEmail contract was meant to
+      // catch: signup succeeded (signupAuth populated, server account
+      // exists), user hits Esc back to Welcome before the auth task
+      // finishes resolving creds. Without the ceremony reset, the next
+      // forward pass would release the auth gate on stale tokens.
+      const store = createStore();
+      store.session.authOnboardingPath = AuthOnboardingPath.CreateAccount;
+      store.session.introConcluded = true;
+      store.session.region = 'us';
+      store.session.signupEmail = 'ada@example.com';
+      store.session.signupFullName = 'Ada Lovelace';
+      store.session.signupRequiredFields = ['full_name'];
+      store.session.signupAuth = {
+        idToken: 'i',
+        accessToken: 'a',
+        refreshToken: 'r',
+        zone: 'us',
+        userInfo: null,
+        dashboardUrl: null,
+      };
+
+      store.backToWelcome();
+
+      expect(store.session.signupRequiredFields).toBeNull();
+      expect(store.session.signupAuth).toBeNull();
+      expect(store.session.signupAbandoned).toBe(false);
     });
 
     it('keeps create-account onboarding path after rewind', () => {
@@ -1955,6 +2033,38 @@ describe('WizardStore', () => {
       expect(store.session.selectedOrgId).toBeNull();
     });
 
+    it('resetAuthForRegionChange wipes signup ceremony state', () => {
+      // Same zone-scoping reasoning as setRegionForced: signupAuth.zone
+      // is pinned to the old region, signupRequiredFields cached the
+      // old zone's probe response. Funnel ceremony reset through the
+      // shared helper so the invariant holds across every reset path.
+      const store = createStore();
+      store.session.signupEmail = 'ada@example.com';
+      store.session.signupFullName = 'Ada Lovelace';
+      store.session.tosAccepted = true;
+      store.session.signupRequiredFields = ['full_name'];
+      store.session.signupAbandoned = false;
+      store.session.signupTokensObtained = true;
+      store.session.signupAuth = {
+        idToken: 'i',
+        accessToken: 'a',
+        refreshToken: 'r',
+        zone: 'us',
+        userInfo: null,
+        dashboardUrl: null,
+      };
+
+      store.resetAuthForRegionChange();
+
+      expect(store.session.signupEmail).toBeNull();
+      expect(store.session.signupFullName).toBeNull();
+      expect(store.session.tosAccepted).toBeNull();
+      expect(store.session.signupRequiredFields).toBeNull();
+      expect(store.session.signupAuth).toBeNull();
+      expect(store.session.signupAbandoned).toBe(false);
+      expect(store.session.signupTokensObtained).toBe(false);
+    });
+
     it('clearOrgAndProjectSelection clears post-run state', () => {
       const store = createStore();
       seedPostRunState(store);
@@ -2004,6 +2114,188 @@ describe('WizardStore', () => {
       const store = createStore();
       const popped = store.popLastFrameworkContextAnswer();
       expect(popped).toBe(false);
+    });
+  });
+
+  // ── Signup setter side-effects ──────────────────────────────────
+  //
+  // `setSignupEmail` and `setSignupFullName` are reused on both the
+  // happy "user submitted a value" path and the back-nav "revert
+  // cleared the value" path. The setters need to:
+  //   1. Only fire `'signup ... captured'` analytics on positive
+  //      captures (back-nav clears must NOT pollute the funnel).
+  //   2. On `setSignupEmail(null)`, also reset the ceremony state
+  //      (`signupRequiredFields` / `signupAuth` / `signupAbandoned`)
+  //      so a forward pass after back-nav fires a fresh probe POST
+  //      against whatever email the user types next.
+  describe('signup setter side-effects', () => {
+    it('setSignupEmail with a string fires analytics and sets the value', () => {
+      const store = createStore();
+      const wizardCapture = analytics.wizardCapture as Mock;
+      wizardCapture.mockClear();
+
+      store.setSignupEmail('ada@example.com');
+
+      expect(store.session.signupEmail).toBe('ada@example.com');
+      expect(wizardCapture).toHaveBeenCalledWith('signup email captured');
+    });
+
+    it('setSignupEmail(null) does NOT fire the captured analytics event', () => {
+      const store = createStore();
+      const wizardCapture = analytics.wizardCapture as Mock;
+      wizardCapture.mockClear();
+
+      store.setSignupEmail(null);
+
+      expect(store.session.signupEmail).toBeNull();
+      expect(wizardCapture).not.toHaveBeenCalledWith(
+        'signup email captured',
+        expect.anything(),
+      );
+      expect(wizardCapture).not.toHaveBeenCalledWith('signup email captured');
+    });
+
+    it('setSignupEmail(null) resets the entire ceremony as one unit', () => {
+      // Pre-seed a session that's mid-ceremony: probe POST returned
+      // needs_information, ToS was accepted, signupFullName was typed,
+      // signupAuth is populated from a success arm. Going back to the
+      // email screen must invalidate every piece of that state so the
+      // next forward pass starts fresh.
+      //
+      // Defensive coverage: signupFullName + tosAccepted are also
+      // cleared. They're not strictly required to clear today (no
+      // current code path reads them to wrongful effect), but they're
+      // part of the same conceptual "ceremony" unit — leaving them
+      // stale would leak across an Esc-back-then-retype cycle if
+      // anything ever reads them in that window.
+      const store = createStore();
+      const internal = store as unknown as {
+        $session: { setKey: (k: string, v: unknown) => void };
+      };
+      internal.$session.setKey('signupRequiredFields', ['full_name']);
+      internal.$session.setKey('signupAbandoned', false);
+      internal.$session.setKey('signupFullName', 'Ada Lovelace');
+      internal.$session.setKey('tosAccepted', true);
+      internal.$session.setKey('signupTokensObtained', true);
+      internal.$session.setKey('signupAuth', {
+        idToken: 'i',
+        accessToken: 'a',
+        refreshToken: 'r',
+        zone: 'us',
+        userInfo: null,
+        dashboardUrl: null,
+      });
+
+      store.setSignupEmail(null);
+
+      expect(store.session.signupRequiredFields).toBeNull();
+      expect(store.session.signupAuth).toBeNull();
+      expect(store.session.signupAbandoned).toBe(false);
+      expect(store.session.signupFullName).toBeNull();
+      expect(store.session.tosAccepted).toBeNull();
+      // signupTokensObtained gates the post-TUI auth task's "hydrate
+      // from disk" branch — leaving it true after a ceremony reset
+      // would silently re-use the prior user's tokens on the next
+      // forward pass.
+      expect(store.session.signupTokensObtained).toBe(false);
+    });
+
+    it('setSignupFullName with a string fires analytics and sets the value', () => {
+      const store = createStore();
+      const wizardCapture = analytics.wizardCapture as Mock;
+      wizardCapture.mockClear();
+
+      store.setSignupFullName('Ada Lovelace');
+
+      expect(store.session.signupFullName).toBe('Ada Lovelace');
+      expect(wizardCapture).toHaveBeenCalledWith('signup full name captured');
+    });
+
+    it('setSignupFullName(null) does NOT fire the captured analytics event', () => {
+      const store = createStore();
+      const wizardCapture = analytics.wizardCapture as Mock;
+      wizardCapture.mockClear();
+
+      store.setSignupFullName(null);
+
+      expect(store.session.signupFullName).toBeNull();
+      expect(wizardCapture).not.toHaveBeenCalledWith(
+        'signup full name captured',
+      );
+      expect(wizardCapture).not.toHaveBeenCalledWith(
+        'signup full name captured',
+        expect.anything(),
+      );
+    });
+
+    it('setSignupAuth(non-null) folds in signupTokensObtained=true atomically', () => {
+      // The auth-task gate releases on `signupAuth !== null` and the
+      // post-gate hydration branch reads `signupTokensObtained`. If the
+      // two writes were separate calls, a subscriber-fired microtask
+      // could observe `signupAuth` set with `signupTokensObtained` still
+      // false and route the user to browser OAuth despite valid tokens.
+      // This test pins the atomicity contract.
+      const store = createStore();
+      expect(store.session.signupTokensObtained).toBe(false);
+
+      store.setSignupAuth({
+        idToken: 'i',
+        accessToken: 'a',
+        refreshToken: 'r',
+        zone: 'us',
+        userInfo: null,
+        dashboardUrl: null,
+      });
+
+      expect(store.session.signupAuth).not.toBeNull();
+      expect(store.session.signupTokensObtained).toBe(true);
+    });
+
+    it('setSignupAuth(null) does NOT set signupTokensObtained', () => {
+      // Clearing auth (e.g. during a ceremony reset) must not flip the
+      // tokens-obtained gate true — only a successful settle does.
+      const store = createStore();
+
+      store.setSignupAuth(null);
+
+      expect(store.session.signupAuth).toBeNull();
+      expect(store.session.signupTokensObtained).toBe(false);
+    });
+
+    it('switchToLogin resets the entire ceremony alongside the path flip', () => {
+      // The signup→login switch is conceptually the same kind of reset
+      // as `setSignupEmail(null)`: every piece of ceremony state keyed
+      // to the previous email must be invalidated so nothing leaks
+      // through into the SignIn path. Pin that contract so a future
+      // ceremony field added to `_resetCeremonyKeys` doesn't silently
+      // drift past `switchToLogin`.
+      const store = createStore();
+      const internal = store as unknown as {
+        $session: { setKey: (k: string, v: unknown) => void };
+      };
+      internal.$session.setKey('signupEmail', 'ada@example.com');
+      internal.$session.setKey('signupFullName', 'Ada Lovelace');
+      internal.$session.setKey('signupRequiredFields', ['full_name']);
+      internal.$session.setKey('tosAccepted', true);
+      internal.$session.setKey('signupTokensObtained', true);
+      internal.$session.setKey('signupAuth', {
+        idToken: 'i',
+        accessToken: 'a',
+        refreshToken: 'r',
+        zone: 'us',
+        userInfo: null,
+        dashboardUrl: null,
+      });
+
+      store.switchToLogin();
+
+      expect(store.session.authOnboardingPath).toBe(AuthOnboardingPath.SignIn);
+      expect(store.session.signupEmail).toBeNull();
+      expect(store.session.signupFullName).toBeNull();
+      expect(store.session.signupRequiredFields).toBeNull();
+      expect(store.session.tosAccepted).toBeNull();
+      expect(store.session.signupTokensObtained).toBe(false);
+      expect(store.session.signupAuth).toBeNull();
     });
   });
 

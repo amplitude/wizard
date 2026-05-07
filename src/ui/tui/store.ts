@@ -678,28 +678,66 @@ export class WizardStore {
     this.emitChange();
   }
 
-  setSignupEmail(email: string): void {
-    this.$session.setKey('signupEmail', email);
-    analytics.wizardCapture('signup email captured', { 'has email': !!email });
+  /**
+   * Wipe every piece of ceremony state at once. Used by `setSignupEmail(null)`,
+   * `switchToLogin`, `backToWelcome`, and `setRegionForced` so the reset
+   * semantics stay in one place. Treats the ceremony as a single conceptual
+   * unit keyed to email — backing out past the email step invalidates
+   * everything it produced.
+   */
+  private _resetCeremonyKeys(): void {
+    this.$session.setKey('signupEmail', null);
+    this.$session.setKey('signupRequiredFields', null);
+    this.$session.setKey('signupAuth', null);
+    this.$session.setKey('signupAbandoned', false);
+    // Clear the inputs the ceremony fed too. Defensive against a
+    // future change that adds an `onChange` lifting drafts to session
+    // state — without these, a stale `signupFullName` could ride
+    // through a re-probe or land in `~/.ampli.json` under the wrong
+    // name. `tosAccepted` has the same flavor of stale-but-load-bearing
+    // risk (`SigningUpScreen` only includes `full_name` in the POST
+    // when ToS is accepted, so a stale `true` could change POST
+    // semantics on the next forward pass).
+    this.$session.setKey('signupFullName', null);
+    this.$session.setKey('tosAccepted', null);
+    // `signupTokensObtained` gates whether the post-TUI auth task
+    // hydrates from disk vs. opens browser OAuth. If we leave a stale
+    // `true` after a ceremony reset, the next forward pass would
+    // silently re-use the prior user's tokens from `~/.ampli.json`
+    // even though the user explicitly backed out and is starting
+    // fresh. Reset alongside the rest of the ceremony state. (Note:
+    // the forward-direction write is folded into `setSignupAuth`, not
+    // a separate setter — see that method for the atomicity rationale.)
+    this.$session.setKey('signupTokensObtained', false);
+  }
+
+  setSignupEmail(email: string | null): void {
+    if (email === null) {
+      // Clearing the email means the user backed out of (or rewound
+      // past) the signup ceremony — invalidate every piece of
+      // ceremony state that was keyed to the previous email
+      // (including `signupEmail` itself). Without this, a subsequent
+      // forward pass consumes a stale `signupRequiredFields` from the
+      // prior probe POST and routes the user back through ToS/name
+      // collection with the wrong response cached.
+      this._resetCeremonyKeys();
+    } else {
+      this.$session.setKey('signupEmail', email);
+      // Only fire on positive captures. Back-nav reverts call this
+      // setter with `null` and must not pollute the funnel with false
+      // "captured" events — caught by Cursor Bugbot on PR #539.
+      analytics.wizardCapture('signup email captured');
+    }
     this.emitChange();
   }
 
-  setSignupFullName(fullName: string): void {
+  setSignupFullName(fullName: string | null): void {
     this.$session.setKey('signupFullName', fullName);
-    analytics.wizardCapture('signup full name captured', {
-      'has name': !!fullName,
-    });
-    this.emitChange();
-  }
-
-  markEmailCaptureComplete(): void {
-    this.$session.setKey('emailCaptureComplete', true);
-    analytics.wizardCapture('email capture complete');
-    this.emitChange();
-  }
-
-  markSignupTokensObtained(): void {
-    this.$session.setKey('signupTokensObtained', true);
+    // Same reasoning as `setSignupEmail` for the analytics gate — only
+    // fire on positive captures.
+    if (fullName !== null) {
+      analytics.wizardCapture('signup full name captured');
+    }
     this.emitChange();
   }
 
@@ -709,15 +747,40 @@ export class WizardStore {
     this.emitChange();
   }
 
-  resetEmailCapture(): void {
-    this.$session.setKey('emailCaptureComplete', false);
-    analytics.wizardCapture('back navigation', { to: 'email-capture' });
-    this.emitChange();
-  }
-
   resetToS(): void {
     this.$session.setKey('tosAccepted', null);
     analytics.wizardCapture('back navigation', { to: 'tos' });
+    this.emitChange();
+  }
+
+  setSignupRequiredFields(fields: string[] | null): void {
+    this.$session.setKey('signupRequiredFields', fields);
+    this.emitChange();
+  }
+
+  setSignupAuth(auth: WizardSession['signupAuth']): void {
+    this.$session.setKey('signupAuth', auth);
+    // `signupTokensObtained` is folded in here as a single logical
+    // "ceremony settled successfully" event. The TUI auth-task gate
+    // (`isAuthTaskGateReady`) releases on `signupAuth !== null`; the
+    // post-gate hydration branch in `default.ts` reads
+    // `signupTokensObtained` to decide whether to pull tokens from
+    // disk vs. open browser OAuth. Both fields MUST land in the same
+    // synchronous block — otherwise the gate-listener's microtask
+    // continuation could fire between the two writes and read a
+    // stale `signupTokensObtained=false`, then open spurious browser
+    // OAuth even though the tokens are valid. Folding the write in
+    // here removes the load-bearing event-loop ordering that the
+    // prior `setSignupAuth → setSignupMagicLinkUrl →
+    // markSignupTokensObtained` chain quietly relied on.
+    if (auth !== null) {
+      this.$session.setKey('signupTokensObtained', true);
+    }
+    this.emitChange();
+  }
+
+  setSignupAbandoned(abandoned: boolean): void {
+    this.$session.setKey('signupAbandoned', abandoned);
     this.emitChange();
   }
 
@@ -728,8 +791,14 @@ export class WizardStore {
 
   switchToLogin(): void {
     this.$session.setKey('authOnboardingPath', AuthOnboardingPath.SignIn);
-    this.$session.setKey('signupEmail', null);
-    this.$session.setKey('signupFullName', null);
+    // Funnel the ceremony cleanup through the shared helper so any
+    // future ceremony field added to `_resetCeremonyKeys` gets cleared
+    // on the signup→login switch automatically. The inline
+    // `signupFullName = null` we used to do here was already a subset
+    // of the helper's reset; the previous shape would silently drift
+    // (leaving e.g. `signupRequiredFields` or `signupTokensObtained`
+    // populated) the moment a new ceremony field appeared.
+    this._resetCeremonyKeys();
     analytics.wizardCapture('signup switched to login', {
       reason: 'existing user',
     });
@@ -780,6 +849,15 @@ export class WizardStore {
     this.$session.setKey('activationOptionsComplete', false);
     this.$session.setKey('dataIngestionConfirmed', false);
     this.$session.setKey('signupMagicLinkUrl', null);
+
+    // Signup ceremony state is zone-scoped: `signupAuth.zone` is pinned
+    // to the old region, and `signupRequiredFields` cached from the old
+    // zone's probe POST would steer the next forward pass through the
+    // wrong field-collection screens. Funnel through the shared helper
+    // so any future ceremony field gets cleared automatically (matches
+    // backToWelcome / setSignupEmail(null) / switchToLogin).
+    this._resetCeremonyKeys();
+
     this.$session.setKey('mcpComplete', false);
     this.$session.setKey('mcpOutcome', null);
     this.$session.setKey('mcpInstalledClients', []);
@@ -861,11 +939,14 @@ export class WizardStore {
     this.$session.setKey('region', null);
 
     if (isCreateAccountOnboarding(this.session)) {
-      this.$session.setKey('emailCaptureComplete', false);
-      this.$session.setKey('tosAccepted', null);
-      this.$session.setKey('signupEmail', null);
-      this.$session.setKey('signupFullName', null);
-      this.$session.setKey('signupTokensObtained', false);
+      // Wipe ceremony state via the shared helper — same writes
+      // `setSignupEmail(null)` does, so back-to-Welcome and
+      // Esc-back-from-screens stay in sync without a "keep these
+      // matched" comment. The non-ceremony writes below (magic link,
+      // pending OAuth intermediates, pendingOrgs) live alongside the
+      // create-account flow but aren't part of the ceremony state
+      // machine, so they're cleared inline.
+      this._resetCeremonyKeys();
       this.$session.setKey('signupMagicLinkUrl', null);
       this.$session.setKey('pendingAuthAccessToken', null);
       this.$session.setKey('pendingAuthIdToken', null);
@@ -1627,6 +1708,14 @@ export class WizardStore {
     this.$session.setKey('selectedAppId', null);
     this.$session.setKey('selectedEnvName', null);
     this.$session.setKey('projectHasData', null);
+    // Ceremony state is zone-scoped (signupAuth.zone is pinned to the
+    // old region; signupRequiredFields cached the old zone's probe
+    // response). Funnel through the shared helper alongside every
+    // other reset path so the invariant "every reset goes through
+    // _resetCeremonyKeys" holds — dormant today since back-nav from
+    // Auth doesn't currently reach this revert with signupAuth set,
+    // but the next caller that does won't have to remember.
+    this._resetCeremonyKeys();
     this.clearPostRunStateForBackNav();
     analytics.wizardCapture('back navigation', { from: 'auth', to: 'region' });
     this.emitChange();

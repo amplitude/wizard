@@ -5,6 +5,7 @@ import { fetchAmplitudeUser, type AmplitudeUserInfo } from '../lib/api.js';
 import { createLogger } from '../lib/observability/logger.js';
 import type { AmplitudeZone } from '../lib/constants.js';
 import { analytics } from './analytics.js';
+import { assertNever } from './assert-never.js';
 
 const log = createLogger('signup-or-auth');
 
@@ -93,6 +94,17 @@ async function fetchUserWithProvisioningRetry(
 export type SignupAttemptStatus =
   | 'success'
   | 'requires_redirect'
+  | 'needs_information'
+  /**
+   * Server returned `needs_information` with a `required` shape the wizard
+   * doesn't know how to collect (anything other than exactly `['full_name']`
+   * — including unknown new fields, an empty array, or a mix with unknown
+   * fields). Treated as a terminal abandon → user falls back to OAuth.
+   * Distinct from `signup_error` so the wire-contract drift is visible in
+   * the funnel — if this status starts firing, the server has added a
+   * required field the wizard doesn't yet handle.
+   */
+  | 'needs_information_unsupported'
   | 'signup_error'
   | 'user_fetch_failed'
   | 'wrapper_exception'
@@ -121,88 +133,155 @@ export const trackSignupAttempt = (
 
 export interface SignupOrAuthInput {
   email: string | null;
-  fullName: string | null;
+  /**
+   * Optional. Omit on the probe POST so the server can decide whether the
+   * account is new (→ `needs_information`) or already exists (→ redirect).
+   * Pass it on the follow-up POST after the wizard collected it.
+   */
+  fullName?: string | null;
   zone: AmplitudeZone;
+  /**
+   * Threaded from the screen's `useAsyncEffect`. Aborts the in-flight
+   * provisioning + token-exchange POSTs and gates the post-success
+   * persistence (`replaceStoredUser`) so a cancelled ceremony doesn't
+   * leak tokens to disk. Without this, `/exit` mid-POST would still
+   * persist tokens and the next launch would think the user is signed
+   * in.
+   */
+  signal?: AbortSignal;
 }
 
 /**
- * Result of {@link performSignupOrAuth}. Extends {@link AmplitudeAuthResult}
- * with the user profile fetched inside the function, so callers can skip a
- * redundant `fetchAmplitudeUser` call.
+ * Discriminated-union result of {@link performSignupOrAuth}.
  *
- * `userInfo` is:
- * - populated on the direct-signup success path when the internal fetch
- *   (with provisioning retry) succeeded
- * - `null` on the pending-sentinel path (internal fetch failed) — the
- *   caller is responsible for fetching userInfo itself in that case
+ * - `success` — server returned `oauth`; tokens are valid and the wrapper
+ *   already fetched the real user profile (with provisioning retry) and
+ *   persisted it to `~/.ampli.json`.
+ * - `needs_information` — server returned `needs_information`; the caller
+ *   should collect the listed fields and call again. No tokens, no
+ *   persistence side-effects.
+ * - `redirect` — server returned `requires_auth` (existing user OR feature
+ *   flag off). Caller should fall back to browser OAuth.
+ * - `error` — direct-signup network call errored, the response shape was
+ *   malformed, or the server returned an `error` arm. Caller decides
+ *   whether to fall back to OAuth or hard-fail.
  */
-export type PerformSignupOrAuthResult = AmplitudeAuthResult & {
-  userInfo: AmplitudeUserInfo | null;
-  /**
-   * Provisioning `dashboard_url` (browser magic link). May contain secrets —
-   * do not log or emit on NDJSON.
-   */
-  dashboardUrl: string | null;
-};
+export type PerformSignupOrAuthResult =
+  | (AmplitudeAuthResult & {
+      kind: 'success';
+      userInfo: AmplitudeUserInfo | null;
+      /**
+       * Provisioning `dashboard_url` (browser magic link). May contain
+       * secrets — do not log or emit on NDJSON.
+       */
+      dashboardUrl: string | null;
+    })
+  | { kind: 'needs_information'; requiredFields: string[] }
+  | { kind: 'redirect' }
+  | { kind: 'error'; message: string };
 
 /**
  * Attempt direct signup via the headless provisioning endpoint.
  *
- * Returns the new account's tokens (and userInfo, when the internal fetch
- * succeeded) on success; returns `null` when:
- * - email or fullName is missing
- * - the endpoint returns `requires_redirect` / `needs_information` / `error`
- * - the direct-signup network call itself errors
+ * `email` is required (the only required input). `fullName` is optional —
+ * omit it on the probe POST so the server can route a brand-new email to
+ * `needs_information` (the TUI then collects the field and calls again
+ * with `fullName` populated). Non-TUI callers (CI / agent / classic) gate
+ * on both being present upstream and never hit the `needs_information`
+ * arm in practice.
  *
- * On success, also fetches the real user profile and persists the
+ * On `success`, also fetches the real user profile and persists the
  * `StoredUser` + tokens to `~/.ampli.json` so downstream
  * `resolveCredentials()` can populate `session.credentials` via the
- * standard path. Falls back to the `id:'pending'` sentinel if the
- * user fetch fails. The user fetch retries briefly on the "no env with
- * API key yet" case to absorb post-signup provisioning lag.
+ * standard path. Falls back to the `id:'pending'` sentinel if the user
+ * fetch fails. The user fetch retries briefly on the "no env with API key
+ * yet" case to absorb post-signup provisioning lag.
  *
  * This function does NOT fall back to `performAmplitudeAuth()`. Callers
- * that want OAuth fallback (e.g. the TUI path) must call it explicitly
- * when this returns null. Agent/CI modes typically skip OAuth and let
+ * that want OAuth fallback (e.g. the TUI path on `redirect` / `error`)
+ * must call it explicitly. Agent/CI modes typically skip OAuth and let
  * `resolveNonInteractiveCredentials` handle cached-token resolution.
  */
 export async function performSignupOrAuth(
   input: SignupOrAuthInput,
-): Promise<PerformSignupOrAuthResult | null> {
-  if (input.email === null || input.fullName === null) {
-    log.debug('missing email or fullName; skipping direct signup');
-    return null;
+): Promise<PerformSignupOrAuthResult> {
+  if (input.email === null) {
+    log.debug('missing email; skipping direct signup');
+    return { kind: 'error', message: 'missing email' };
   }
+  const fullName = input.fullName ?? null;
 
-  log.debug('attempting direct signup');
+  log.debug('attempting direct signup', { hasFullName: fullName !== null });
   // performDirectSignup is contracted to catch its own network/parse errors
   // and return { kind: 'error' }. The try/catch here is belt-and-suspenders
-  // enforcement of the wrapper's documented null-on-any-error behavior —
-  // callers rely on the null return to decide fallback strategy.
+  // enforcement against an unexpected throw — emit `wrapper_exception`
+  // telemetry so a thrown error is distinguishable from a clean error arm.
   let result: Awaited<ReturnType<typeof performDirectSignup>>;
   try {
     result = await performDirectSignup({
       email: input.email,
-      fullName: input.fullName,
+      ...(fullName !== null ? { fullName } : {}),
       zone: input.zone,
+      signal: input.signal,
     });
   } catch (err) {
-    log.warn('direct signup threw unexpectedly', {
-      message: err instanceof Error ? err.message : String(err),
-    });
-    trackSignupAttempt({ status: 'signup_error', zone: input.zone });
-    return null;
+    const message = err instanceof Error ? err.message : String(err);
+    log.warn('direct signup threw unexpectedly', { message });
+    trackSignupAttempt({ status: 'wrapper_exception', zone: input.zone });
+    return { kind: 'error', message };
   }
 
-  if (result.kind === 'requires_redirect') {
-    log.debug('direct signup did not succeed', { kind: result.kind });
-    trackSignupAttempt({ status: 'requires_redirect', zone: input.zone });
-    return null;
-  }
-  if (result.kind === 'error') {
-    log.debug('direct signup did not succeed', { kind: result.kind });
-    trackSignupAttempt({ status: 'signup_error', zone: input.zone });
-    return null;
+  // Exhaustive switch on the direct-signup result. `default: assertNever`
+  // makes a future arm a compile error — the wrapper is the closest
+  // layer to the wire and a silent fall-through into the success path
+  // below would attempt to read `result.tokens` on a shape that doesn't
+  // have it. TS narrowing already protects us here, but matching the
+  // explicit pattern used at SigningUpScreen.tsx and runDirectSignupIfRequested
+  // keeps the contract uniform across all consumers of DirectSignupResult.
+  switch (result.kind) {
+    case 'requires_redirect':
+      log.debug('direct signup → redirect');
+      trackSignupAttempt({ status: 'requires_redirect', zone: input.zone });
+      return { kind: 'redirect' };
+    case 'needs_information':
+      log.debug('direct signup → needs_information', {
+        requiredFields: result.requiredFields,
+      });
+      trackSignupAttempt({ status: 'needs_information', zone: input.zone });
+      return {
+        kind: 'needs_information',
+        requiredFields: result.requiredFields,
+      };
+    case 'error': {
+      log.debug('direct signup → error', {
+        message: result.message,
+        code: result.code,
+      });
+      // Caller cancelled the in-flight request (Esc, /exit, screen
+      // unmount). Surface as a clean `error` arm but don't emit
+      // signup_error telemetry — user-initiated aborts aren't funnel
+      // failures and would inflate signup_error counts otherwise.
+      if (result.code === 'aborted') {
+        return { kind: 'error', message: result.message };
+      }
+      // The schema's `.refine()` on `required` rejects shapes the wizard
+      // can't act on, and `direct-signup.ts` surfaces that with
+      // `code: 'unsupported_required_shape'`. Emit a distinct telemetry
+      // status so the wire-contract drift is visible separately from
+      // generic signup errors — one funnel query reveals when the server
+      // adds a required field the wizard doesn't yet handle.
+      const status: SignupAttemptStatus =
+        result.code === 'unsupported_required_shape'
+          ? 'needs_information_unsupported'
+          : 'signup_error';
+      trackSignupAttempt({ status, zone: input.zone });
+      return { kind: 'error', message: result.message };
+    }
+    case 'success':
+      // Fall through to the persistence + user-fetch block below.
+      break;
+    default:
+      assertNever(result);
   }
 
   const tokens = {
@@ -239,7 +318,10 @@ export async function performSignupOrAuth(
         zone: input.zone,
       },
     );
-    const parts = input.fullName.trim().split(/\s+/);
+    // `fullName` is required by the server when this success arm fires, so
+    // it's non-null here despite being optional in the input — the server
+    // would have returned `needs_information` otherwise.
+    const parts = (fullName ?? '').trim().split(/\s+/);
     user = {
       id: 'pending',
       firstName: parts[0] ?? '',
@@ -256,6 +338,16 @@ export async function performSignupOrAuth(
     tosAcceptedAt: new Date().toISOString(),
   };
 
+  // Last guard before persistence: if the caller aborted at any point —
+  // axios responses already returned, fetchUserWithProvisioningRetry's
+  // sleep loop completed — skip the disk write so a cancelled ceremony
+  // doesn't leak tokens. Mirror the abort guards inside
+  // `performDirectSignup` so we cover the window between the last
+  // network call and `replaceStoredUser`.
+  if (input.signal?.aborted) {
+    log.debug('direct signup aborted before persistence; skipping write');
+    return { kind: 'error', message: 'aborted' };
+  }
   // Persist BEFORE telemetry: a disk/permission failure must propagate to
   // the outer catch so `wrapper_exception` is the sole event — emitting
   // success or user_fetch_failed first would double-count the attempt.
@@ -276,6 +368,7 @@ export async function performSignupOrAuth(
   }
 
   return {
+    kind: 'success',
     idToken: tokens.idToken,
     accessToken: tokens.accessToken,
     refreshToken: tokens.refreshToken,

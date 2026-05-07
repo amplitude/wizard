@@ -28,7 +28,9 @@ export enum Screen {
   Auth = 'auth',
   CreateProject = 'create-project',
   RegionSelect = 'region-select',
-  EmailCapture = 'email-capture',
+  SignupEmail = 'signup-email',
+  SigningUp = 'signing-up',
+  SignupFullName = 'signup-full-name',
   ToS = 'tos',
   DataSetup = 'data-setup',
   Options = 'options',
@@ -117,29 +119,135 @@ export const FLOWS: Record<Flow, FlowEntry[]> = {
         store.resetAuthForRegionChange();
       },
     },
-    // 2a. Email capture — create-account path only, before ToS.
+    // 2a. Signup email — create-account path, first step. Always renders
+    //     when the session has no email yet (initial entry, or after a
+    //     back-nav from a collection screen cleared it).
     {
-      screen: Screen.EmailCapture,
-      show: (s) => isCreateAccountOnboarding(s) && !s.emailCaptureComplete,
+      screen: Screen.SignupEmail,
+      show: (s) => isCreateAccountOnboarding(s) && s.signupEmail === null,
       isComplete: (s) =>
-        !isCreateAccountOnboarding(s) || s.emailCaptureComplete,
+        !isCreateAccountOnboarding(s) || s.signupEmail !== null,
       revert: (store) => {
         if (!isCreateAccountOnboarding(store.session)) return false;
-        store.resetEmailCapture();
+        store.setSignupEmail(null);
       },
     },
-    // 2b. Terms of Service — create-account path after email capture.
+    // 2b. Signing up — POSTs the agentic provisioning request and writes
+    //     the response into session state. Show predicate gates on email
+    //     present + ceremony unsettled + all required-fields satisfied
+    //     (covers both the initial probe POST and the retry-after-collection
+    //     POST). isComplete fires when signupAuth or signupAbandoned is set.
+    //
+    //     `revert` returns false on the sign-in path so the entry is
+    //     transparent to back-nav — a sign-in user reaching Auth must be
+    //     able to back-walk to RegionSelect / Intro without hitting a
+    //     create-account-only wall. On the create-account path with the
+    //     ceremony in flight, returning false keeps the wall semantics
+    //     (no clean undo: a successful signup created a server account;
+    //     an abandon already routed to OAuth).
+    {
+      screen: Screen.SigningUp,
+      show: (s) =>
+        isCreateAccountOnboarding(s) &&
+        s.signupEmail !== null &&
+        s.signupAuth === null &&
+        !s.signupAbandoned &&
+        // No required fields known yet, OR all known required fields are
+        // filled. SigningUp re-shows after collection screens write back.
+        (s.signupRequiredFields === null ||
+          s.signupRequiredFields.every((field) =>
+            field === 'full_name' ? s.signupFullName !== null : true,
+          )) &&
+        // ToS must be accepted before the second POST creates the account.
+        // On the initial probe (`signupRequiredFields === null`) ToS is not
+        // required yet — the server might redirect or error and we never
+        // touch ToS at all.
+        (s.signupRequiredFields === null || s.tosAccepted === true),
+      isComplete: (s) =>
+        !isCreateAccountOnboarding(s) ||
+        s.signupAuth !== null ||
+        s.signupAbandoned,
+      // SigningUp has no in-band "undo": the in-flight POST to the
+      // provisioning endpoint may have already created (or abandoned)
+      // the account on the server. Returning false makes back-nav walk
+      // past this entry transparently — back-nav lands on the screen
+      // *before* SigningUp (typically SignupFullName or SignupEmail),
+      // and clearing those inputs via their own revert handlers is what
+      // resets the ceremony so the next forward pass fires a fresh
+      // probe.
+      revert: () => false,
+    },
+    // 2c. Terms of Service — only renders AFTER the server confirmed
+    //     agentic signup is happening (signupRequiredFields was set).
+    //     Skipped entirely on the redirect / error / immediate-success
+    //     arms — exactly the "don't ask for ToS unless we're going to
+    //     create the account" behavior PR 234 motivated.
     {
       screen: Screen.ToS,
       show: (s) =>
         isCreateAccountOnboarding(s) &&
-        s.emailCaptureComplete &&
+        s.signupRequiredFields !== null &&
         s.tosAccepted !== true,
       isComplete: (s) =>
-        !isCreateAccountOnboarding(s) || s.tosAccepted === true,
+        !isCreateAccountOnboarding(s) ||
+        s.signupRequiredFields === null ||
+        s.tosAccepted === true,
+      // Returning false when the screen was *skipped* (server never asked,
+      // or ToS was never accepted) is critical: `isComplete` returns true
+      // via the "screen was skipped" arm too, and a blind `resetToS` would
+      // be a no-op that nonetheless stops the back-nav walk — leaving the
+      // user on Auth pressing Esc with nothing visibly happening.
       revert: (store) => {
         if (!isCreateAccountOnboarding(store.session)) return false;
+        if (store.session.signupRequiredFields === null) return false;
+        if (store.session.tosAccepted === null) return false;
+        // Walk past on abandonment: clearing tosAccepted alone leaves
+        // signupAbandoned=true, which still gates SigningUp.show off.
+        // The user would re-accept ToS and land back on Auth without
+        // any retry — a dead-end. Letting back-nav continue to
+        // SignupEmail.revert clears the whole ceremony via
+        // _resetCeremonyKeys (which resets signupAbandoned), giving
+        // the user a clean restart.
+        if (store.session.signupAbandoned) return false;
         store.resetToS();
+      },
+    },
+    // 2d. Signup full name — renders only when the server included
+    //     'full_name' in `required` AND the session doesn't already have
+    //     a name (e.g. from `--full-name`).
+    {
+      screen: Screen.SignupFullName,
+      show: (s) =>
+        isCreateAccountOnboarding(s) &&
+        s.signupRequiredFields !== null &&
+        s.signupRequiredFields.includes('full_name') &&
+        s.signupFullName === null,
+      isComplete: (s) =>
+        !isCreateAccountOnboarding(s) ||
+        s.signupRequiredFields === null ||
+        !s.signupRequiredFields.includes('full_name') ||
+        s.signupFullName !== null,
+      // Same reasoning as ToS above: `isComplete` returns true via "I was
+      // skipped" arms (no needs_information, server didn't ask for
+      // full_name, or signupFullName never set). Calling
+      // `setSignupFullName(null)` in those cases is a no-op that traps
+      // back-nav. Return false so the walk continues to entries that can
+      // actually do something.
+      revert: (store) => {
+        if (!isCreateAccountOnboarding(store.session)) return false;
+        if (store.session.signupRequiredFields === null) return false;
+        if (!store.session.signupRequiredFields.includes('full_name'))
+          return false;
+        if (store.session.signupFullName === null) return false;
+        // Walk past on abandonment: clearing signupFullName alone
+        // leaves signupAbandoned=true, so the next forward pass
+        // skips SigningUp (its show predicate gates on
+        // !signupAbandoned) and lands the user back on Auth without
+        // re-firing the POST. Continue back-walking to SignupEmail's
+        // revert, which clears the whole ceremony via
+        // _resetCeremonyKeys (resetting signupAbandoned too).
+        if (store.session.signupAbandoned) return false;
+        store.setSignupFullName(null);
       },
     },
     // 3. Authenticate (SUSI for new users, silent login check for returning users).

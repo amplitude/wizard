@@ -33,6 +33,66 @@ const RedirectSchema = z.object({
   }),
 });
 
+// JSON-Schema-shaped payload from the server. We only consume `required` to
+// know which fields to collect next; `properties` is preserved as opaque so a
+// future server-side addition (e.g. a new field with extra metadata) doesn't
+// fail-closed the parse.
+//
+// The server wraps the JSON-Schema in an extra `schema` field — verified via
+// direct curl against `https://app.amplitude.com/t/agentic/signup/v1`:
+//
+//   { "type": "needs_information",
+//     "needs_information": {
+//       "schema": {
+//         "type": "object",
+//         "properties": { "full_name": { ... } },
+//         "required": ["full_name"]
+//       }
+//     } }
+//
+// An earlier version put `type`/`properties`/`required` directly on
+// `needs_information`, which made every probe POST fall through to the
+// generic "unrecognized response shape" error and silently route users to
+// OAuth.
+//
+// **Wire contract:** the `properties` map's VALUES are opaque to the wizard.
+// `z.unknown()` is intentional — the server today emits
+// `{ type, description }` per property, but `description` is purely cosmetic
+// and may be removed (or any other inner field added) without coordination.
+// Do NOT tighten the inner shape without verifying every `selectModel`-mode
+// can still parse a response from the live server. There's a regression
+// test (`accepts properties values with or without optional metadata`) that
+// pins both shapes; keep it green if you change this.
+//
+// **Supported `required` shape:** the wizard's TUI ceremony has exactly one
+// collection screen (`SignupFullNameScreen`), so the only `required` value
+// it can act on is exactly `['full_name']`. The `.refine()` enforces this at
+// the parse layer — anything else (additional fields, missing fields, empty
+// array, substituted field) fails the parse and we route through the
+// type-aware handler below to `kind: 'error'` with `code:
+// 'unsupported_required_shape'`. That code maps to a distinct
+// `needs_information_unsupported` telemetry status in the wrapper so the
+// drift is visible in the funnel before users notice. To extend support,
+// update both this refine and `SUPPORTED_REQUIRED` together.
+const SUPPORTED_REQUIRED: ReadonlyArray<string> = ['full_name'];
+const NeedsInformationSchema = z.object({
+  type: z.literal('needs_information'),
+  needs_information: z.object({
+    schema: z.object({
+      type: z.literal('object'),
+      properties: z.record(z.string(), z.unknown()),
+      required: z
+        .array(z.string())
+        .refine(
+          (arr) =>
+            arr.length === SUPPORTED_REQUIRED.length &&
+            SUPPORTED_REQUIRED.every((field) => arr.includes(field)),
+          { message: 'unsupported_required_shape' },
+        ),
+    }),
+  }),
+});
+
 const ErrorSchema = z.object({
   type: z.literal('error'),
   error: z.object({ code: z.string(), message: z.string() }),
@@ -58,10 +118,40 @@ function provisioningUrl(zone: AmplitudeZone): string {
   return `${OUTBOUND_URLS.app[zone]}/t/agentic/signup/v1`;
 }
 
+function isCallerAbort(error: unknown, signal?: AbortSignal): boolean {
+  if (signal?.aborted) return true;
+  if (axios.isCancel(error)) return true;
+  if (error instanceof Error) {
+    const maybeCode = (error as Error & { code?: string }).code;
+    return (
+      error.name === 'AbortError' ||
+      error.name === 'CanceledError' ||
+      maybeCode === 'ERR_CANCELED'
+    );
+  }
+  return false;
+}
+
 export interface DirectSignupInput {
   email: string;
-  fullName: string;
+  /**
+   * Optional. Omit on the probe POST so the server can decide whether the
+   * account is new (→ `needs_information`) or already exists (→ redirect).
+   * Required on the follow-up POST when the wizard has collected the field
+   * the server asked for.
+   */
+  fullName?: string;
   zone: AmplitudeZone;
+  /**
+   * Aborts both the provisioning POST and the token-exchange POST when
+   * fired. Threaded from the screen's `useAsyncEffect` so unmounting
+   * (Esc back, /exit, navigation) cancels in-flight network work
+   * before it can settle and trigger downstream side effects (token
+   * persistence). Without this, a cancelled ceremony can still leak
+   * `replaceStoredUser` writes that make the next launch think the
+   * user is signed in.
+   */
+  signal?: AbortSignal;
 }
 
 export type DirectSignupResult =
@@ -78,12 +168,16 @@ export type DirectSignupResult =
       dashboardUrl: string | null;
     }
   | { kind: 'requires_redirect' }
+  | { kind: 'needs_information'; requiredFields: string[] }
   | { kind: 'error'; message: string; code?: string };
 
 /**
  * Attempts to create an Amplitude account and obtain tokens directly via the
- * provisioning endpoint (amplitude/javascript PR #103683). Callers should fall
- * back to the OAuth redirect flow on `requires_redirect` or `error`.
+ * provisioning endpoint (amplitude/javascript PR #103683). Callers should:
+ * - on `success`: store tokens and continue.
+ * - on `needs_information`: collect the requested field(s) and call again
+ *   with `fullName` populated.
+ * - on `requires_redirect` or `error`: fall back to the OAuth redirect flow.
  */
 export async function performDirectSignup(
   input: DirectSignupInput,
@@ -96,33 +190,83 @@ export async function performDirectSignup(
   const state = crypto.randomBytes(16).toString('hex');
   log.debug('[direct-signup] POST', { url, zone: input.zone });
 
+  // Build the request body conditionally — omit `full_name` entirely when
+  // unset, instead of sending it as an empty string. The server treats
+  // `!body.full_name` as "no name provided" and responds `needs_information`;
+  // sending `""` would either be rejected by the server's zod (`min(1)`)
+  // or — worse, depending on coercion — be accepted as a valid name.
+  const requestBody: Record<string, unknown> = {
+    email: input.email,
+    scopes: ['openid', 'offline'],
+    state,
+    client_id: oAuthClientId,
+    redirect_uri: `http://localhost:${OAUTH_PORT}/callback`,
+  };
+  if (input.fullName !== undefined && input.fullName.length > 0) {
+    requestBody.full_name = input.fullName;
+  }
+
   let response;
   try {
-    response = await axios.post(
-      url,
-      {
-        email: input.email,
-        scopes: ['openid', 'offline'],
-        state,
-        client_id: oAuthClientId,
-        redirect_uri: `http://localhost:${OAUTH_PORT}/callback`,
-        full_name: input.fullName,
-      },
-      {
-        headers: { 'Content-Type': 'application/json' },
-        timeout: REQUEST_TIMEOUT_MS,
-        validateStatus: (s) => s < 500,
-      },
-    );
+    response = await axios.post(url, requestBody, {
+      headers: { 'Content-Type': 'application/json' },
+      timeout: REQUEST_TIMEOUT_MS,
+      validateStatus: (s) => s < 500,
+      signal: input.signal,
+    });
   } catch (e) {
+    if (isCallerAbort(e, input.signal)) {
+      return { kind: 'error', message: 'aborted', code: 'aborted' };
+    }
     return {
       kind: 'error',
       message: e instanceof Error ? e.message : String(e),
     };
   }
+  // Bail before parsing if the caller aborted between sending the
+  // request and receiving the response. The screen's `useAsyncEffect`
+  // unmount handler fires the AbortController; without this guard we'd
+  // continue on to token exchange and potential persistence even though
+  // the user has navigated away.
+  if (input.signal?.aborted) {
+    return { kind: 'error', message: 'aborted', code: 'aborted' };
+  }
 
   const parsedRedirect = RedirectSchema.safeParse(response.data);
   if (parsedRedirect.success) return { kind: 'requires_redirect' };
+
+  const parsedNeeds = NeedsInformationSchema.safeParse(response.data);
+  if (parsedNeeds.success) {
+    return {
+      kind: 'needs_information',
+      requiredFields: parsedNeeds.data.needs_information.schema.required,
+    };
+  }
+  // The schema's `.refine()` rejected the `required` shape (e.g. the
+  // server added a new field the wizard doesn't have a screen for, or
+  // returned an empty `required` array). Detect this here — by peeking
+  // at the response's `type` field — so we can return a distinct error
+  // code instead of falling through to the generic "Unexpected response"
+  // path. The wrapper maps `code: 'unsupported_required_shape'` to
+  // `needs_information_unsupported` telemetry so the wire-contract drift
+  // is visible in the funnel.
+  const responseType =
+    typeof response.data === 'object' &&
+    response.data !== null &&
+    'type' in response.data
+      ? (response.data as { type: unknown }).type
+      : undefined;
+  if (responseType === 'needs_information') {
+    log.warn('[direct-signup] needs_information with unsupported shape', {
+      supported: SUPPORTED_REQUIRED,
+    });
+    return {
+      kind: 'error',
+      code: 'unsupported_required_shape',
+      message:
+        'Server requested fields the wizard does not support — falling back to browser auth.',
+    };
+  }
 
   const parsedError = ErrorSchema.safeParse(response.data);
   if (parsedError.success) {
@@ -172,15 +316,24 @@ export async function performDirectSignup(
         headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
         timeout: REQUEST_TIMEOUT_MS,
         validateStatus: (s) => s < 500,
+        signal: input.signal,
       },
     );
   } catch (e) {
+    if (isCallerAbort(e, input.signal)) {
+      return { kind: 'error', message: 'aborted', code: 'aborted' };
+    }
     return {
       kind: 'error',
       message: `Token exchange failed: ${
         e instanceof Error ? e.message : String(e)
       }`,
     };
+  }
+  // Same abort check as after the provisioning POST: skip downstream
+  // parsing if the caller backed out while we were waiting on Hydra.
+  if (input.signal?.aborted) {
+    return { kind: 'error', message: 'aborted', code: 'aborted' };
   }
 
   if (tokenResponse.status >= 400) {

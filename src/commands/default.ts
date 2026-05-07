@@ -19,10 +19,7 @@ import {
   loadOrchestratorContext,
   resolveOrchestratorContextPath,
 } from '../utils/orchestrator-context';
-import {
-  type WizardSession,
-  isCreateAccountOnboarding,
-} from '../lib/wizard-session';
+import { type WizardSession } from '../lib/wizard-session';
 
 /**
  * Load `--context-file` (or `AMPLITUDE_WIZARD_CONTEXT`) and stamp the
@@ -636,9 +633,7 @@ export const defaultCommand: CommandModule = {
               const { DEFAULT_AMPLITUDE_ZONE } = await import(
                 '../lib/constants.js'
               );
-              const { storeToken, getStoredToken } = await import(
-                '../utils/ampli-settings.js'
-              );
+              const { storeToken } = await import('../utils/ampli-settings.js');
 
               // Wait for the user to dismiss the welcome screen AND pick a
               // region before opening the OAuth URL. This ensures the logo
@@ -655,13 +650,36 @@ export const defaultCommand: CommandModule = {
               // setRegion() flips regionForced back to false once the new
               // region is chosen, releasing the wait against the right zone.
               //
-              // For create-account onboarding, also wait for ToS acceptance. Otherwise the
-              // auth task races past EmailCapture / ToS and opens the OAuth
-              // browser before the user has filled in their email or
-              // accepted the terms — which is the entire point of the
-              // signup flow. See `isAuthTaskGateReady` for the full
-              // predicate (kept testable, since the inline version
-              // silently regressed when its conditions drifted).
+              // For create-account onboarding, also wait for the signup
+              // ceremony to settle (signupAuth set or signupAbandoned).
+              // Otherwise the auth task races past the SignupEmail /
+              // SigningUp / ToS / SignupFullName chain and opens the
+              // OAuth browser concurrently with the in-flight POST —
+              // two parallel auth attempts and a UX race the user can't
+              // win. See `isAuthTaskGateReady` for the full predicate
+              // (kept testable, since the inline version silently
+              // regressed when its conditions drifted).
+              //
+              // **Settle hazard.** This wait depends on `SigningUpScreen`
+              // eventually writing one of `signupAuth` / `signupAbandoned`
+              // via `useAsyncEffect`. Three paths guarantee that happens:
+              //
+              //   1. Network success → wrapper returns `success` →
+              //      `setSignupAuth(...)`.
+              //   2. Network non-success or unrecognized response →
+              //      wrapper returns `redirect` / `error` →
+              //      `setSignupAbandoned(true)`.
+              //   3. Network hang past axios's `REQUEST_TIMEOUT_MS`
+              //      (10s, in `direct-signup.ts`) → axios throws →
+              //      wrapper catches → `error` arm → abandon.
+              //
+              // `useAsyncEffect`'s AbortController fires on unmount;
+              // re-mount fires a fresh effect. `/exit` short-circuits
+              // via `OutroKind.Cancel` (the router teleports to Outro
+              // and the process exits, releasing this Promise via GC).
+              // The one path that would hang is a raw async-effect
+              // without the timeout — don't strip the `REQUEST_TIMEOUT_MS`
+              // from `direct-signup.ts` without re-thinking this gate.
               await new Promise<void>((resolve) => {
                 if (isAuthTaskGateReady(tui.store.session)) {
                   resolve();
@@ -705,16 +723,17 @@ export const defaultCommand: CommandModule = {
               // response — in which case we fall through to the existing OAuth flow
               // (TUI has a browser; this fallback is valid).
               //
-              // On signup success, the wrapper already fetched the real user
-              // profile (with provisioning retry) and persisted tokens to
-              // ~/.ampli.json — so we carry its userInfo through and skip the
-              // redundant fetch + storeToken below.
+              // On signup success, SigningUpScreen captured fresh tokens in
+              // session. Use those in-memory tokens as the immediate handoff;
+              // disk persistence is a side effect, not coordination state.
+              // If wrapper-fetched userInfo is present too, skip the redundant
+              // fetch + storeToken below.
               let auth: Awaited<
                 ReturnType<typeof performAmplitudeAuth>
               > | null = null;
-              let signupUserInfo: Awaited<
+              const signupUserInfo: Awaited<
                 ReturnType<typeof fetchAmplitudeUser>
-              > | null = null;
+              > | null = tui.store.session.signupAuth?.userInfo ?? null;
               // True iff direct signup produced fresh tokens in this run.
               // Used by the downstream fetchAmplitudeUser catch to
               // distinguish a provisioning-lag recovery (signup succeeded,
@@ -725,64 +744,29 @@ export const defaultCommand: CommandModule = {
                 '../utils/signup-or-auth.js'
               );
               const s = tui.store.session;
-              if (
-                isCreateAccountOnboarding(s) &&
-                s.signupEmail &&
-                s.signupFullName &&
-                !s.signupTokensObtained
-              ) {
-                const { performSignupOrAuth } = await import(
-                  '../utils/signup-or-auth.js'
-                );
-                try {
-                  const signupResult = await performSignupOrAuth({
-                    email: s.signupEmail,
-                    fullName: s.signupFullName,
-                    zone,
-                  });
-                  if (signupResult !== null) {
-                    auth = signupResult;
-                    signupUserInfo = signupResult.userInfo;
-                    signupTokensObtained = true;
-                    tui.store.setSignupMagicLinkUrl(
-                      signupResult.dashboardUrl ?? null,
-                    );
-                    getUI().log.info(
-                      'Direct signup succeeded; using newly created account.',
-                    );
-                  }
-                } catch (err) {
-                  trackSignupAttempt({ status: 'wrapper_exception', zone });
-                  getUI().log.warn(
-                    `Direct signup errored: ${
-                      err instanceof Error ? err.message : String(err)
-                    }. Falling back to OAuth.`,
-                  );
-                  auth = null;
-                }
-              } else if (s.signupTokensObtained) {
-                // EmailCaptureScreen already called replaceStoredUser + set
-                // signupTokensObtained. Without hydrating `auth` here,
-                // performAmplitudeAuth({ forceFresh }) runs on a fresh install
-                // dir and skips ~/.ampli.json — spurious browser OAuth.
+              if (s.signupTokensObtained && s.signupAuth !== null) {
+                // SigningUpScreen settled the ceremony successfully:
+                // `setSignupAuth(non-null)` folded in
+                // `signupTokensObtained=true` atomically.
                 signupTokensObtained = true;
-                const fromDisk = getStoredToken(undefined, zone);
-                if (fromDisk) {
-                  auth = {
-                    idToken: fromDisk.idToken,
-                    accessToken: fromDisk.accessToken,
-                    refreshToken: fromDisk.refreshToken,
-                    zone,
-                  };
-                  getUI().log.info(
-                    'Using signup tokens obtained during email capture.',
-                  );
-                } else {
-                  getUI().log.warn(
-                    'Signup tokens were recorded but none found on disk; opening OAuth.',
-                  );
-                }
+                auth = {
+                  idToken: s.signupAuth.idToken,
+                  accessToken: s.signupAuth.accessToken,
+                  refreshToken: s.signupAuth.refreshToken,
+                  zone: s.signupAuth.zone,
+                };
+                getUI().log.info(
+                  'Using signup tokens obtained during the signup ceremony.',
+                );
+              } else if (s.signupTokensObtained) {
+                getUI().log.warn(
+                  'Signup tokens were recorded but signupAuth was missing; opening OAuth.',
+                );
               }
+              // Otherwise: ceremony abandoned (`signupAbandoned=true`) or
+              // sign-in path. Auth gate would not have released without
+              // one of those; `auth === null` falls through to the
+              // browser OAuth call below.
 
               if (auth === null) {
                 // Flip the AuthScreen placeholder to "Verifying your

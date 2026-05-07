@@ -22,24 +22,34 @@ Feature: Wizard flow
     Then the US region should be stored in my session
     And I should go through the SUSI flow
 
-  Scenario: Signup flow requires email capture before ToS
+  Scenario: Signup flow collects email first, then probes the server
+    # The new server-driven ceremony POSTs email-only first. ToS only renders
+    # after the server confirms agentic signup is happening (needs_information
+    # response) — this avoids asking a returning user (server redirect) for
+    # ToS unnecessarily.
     Given I have no credentials stored in "~/.ampli.json"
     When the wizard launches with "--auth-onboarding create-account"
     And I continue past the intro
     And I select the "US" region
-    Then I should be on the EmailCaptureScreen
+    Then I should be on the SignupEmailScreen
     When I enter my email address
+    And the signup probe returns needs_information for "full_name"
     Then I should be on the ToSScreen
 
-  Scenario: Signup flow requires explicit ToS acceptance
+  Scenario: Signup flow requires explicit ToS acceptance after server confirms agentic signup
+    # After ToS, the user lands on SignupFullName (the field the server
+    # asked for in this scenario). The full ceremony — name → SigningUp
+    # POST → Auth — is exercised by the router/screen tests; this BDD
+    # scenario asserts the ToS → name handoff specifically.
     Given I have no credentials stored in "~/.ampli.json"
     When the wizard launches with "--auth-onboarding create-account"
     And I continue past the intro
     And I select the "US" region
     And I enter my email address
+    And the signup probe returns needs_information for "full_name"
     Then I should be on the ToSScreen
     When I accept the Terms of Service
-    Then I should go through the SUSI flow
+    Then I should be on the SignupFullNameScreen
 
   Scenario: Signup flow can be cancelled from ToS screen
     Given I have no credentials stored in "~/.ampli.json"
@@ -47,16 +57,20 @@ Feature: Wizard flow
     And I continue past the intro
     And I select the "US" region
     And I enter my email address
+    And the signup probe returns needs_information for "full_name"
     And I am on the ToSScreen
     When I decline the Terms of Service
     Then I should be taken to the Outro with a cancel state
 
   Scenario: Email is pre-filled from --signup-email flag
+    # In TUI mode --email is ignored (the SignupEmail screen always renders).
+    # The pre-fill behavior in this scenario is for non-TUI test contexts
+    # where the session already has signupEmail set — the flow skips the
+    # email screen entirely and goes straight to the probe.
     Given I have no credentials stored in "~/.ampli.json"
     When the wizard launches with "--auth-onboarding create-account --email test@example.com"
     And I continue past the intro
     And I select the "US" region
-    Then I should be on the EmailCaptureScreen
     And the email field should be pre-filled with "test@example.com"
 
   Scenario: Existing customer email detected during signup offers login option

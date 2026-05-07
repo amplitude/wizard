@@ -246,11 +246,20 @@ When('I pick "Change region" on the intro', function () {
   s.introConcluded = true;
 });
 
-// ── Signup flow (email capture + ToS) ─────────────────────────────────────────
+// ── Signup flow (server-driven field collection) ──────────────────────────────
+//
+// The signup flow now POSTs email-only first and routes the user based on
+// the server's response (oauth / requires_auth / needs_information / error).
+// These step bindings simulate the screen → store → router transitions
+// without booting the TUI or hitting the network — the SigningUpScreen's
+// useAsyncEffect is what fires the real POST. The test layer re-creates
+// the same session writes the screen would have made on each response arm.
 
 When('I enter my email address', function () {
+  // Mirrors SignupEmailScreen submitting → store.setSignupEmail(email).
+  // Subsequently SigningUpScreen mounts and POSTs; tests that need the
+  // post-response state simulate it via dedicated steps below.
   session.signupEmail = 'test@example.com';
-  session.emailCaptureComplete = true;
 });
 
 When('I am on the ToSScreen', function () {
@@ -274,12 +283,32 @@ When('I decline the Terms of Service', function () {
   };
 });
 
-Then('I should be on the EmailCaptureScreen', function () {
+When(
+  'the signup probe returns needs_information for {string}',
+  function (field: string) {
+    // Mirrors SigningUpScreen receiving needs_information from the server:
+    // store.setSignupRequiredFields([field]). The router's next resolve()
+    // will land on the ToS screen (always-rendered post-probe) or
+    // SignupFullName depending on what's needed.
+    session.signupRequiredFields = [field];
+  },
+);
+
+Then('I should be on the SignupEmailScreen', function () {
   const screen = router.resolve(session);
   assert.strictEqual(
     screen,
-    Screen.EmailCapture,
-    `Expected EmailCapture screen but got ${screen}`,
+    Screen.SignupEmail,
+    `Expected SignupEmail screen but got ${screen}`,
+  );
+});
+
+Then('I should be on the SignupFullNameScreen', function () {
+  const screen = router.resolve(session);
+  assert.strictEqual(
+    screen,
+    Screen.SignupFullName,
+    `Expected SignupFullName screen but got ${screen}`,
   );
 });
 
@@ -663,13 +692,14 @@ When('I select {string}', function (option: string) {
 });
 
 When('I enter an email that belongs to an existing customer', function () {
-  // Simulate the existing customer scenario by setting a special email
-  // In real implementation, the EmailCaptureScreen would call
-  // performDirectSignup and detect the 'user_already_exists' error
+  // Simulate the existing customer scenario by setting the email and
+  // marking the ceremony as abandoned (the equivalent server signal —
+  // real flow would have SigningUpScreen receive `requires_redirect`
+  // and call store.setSignupAbandoned(true)).
   session.signupEmail = 'existing@example.com';
   session.signupFullName = 'Existing User';
-  // Don't mark emailCaptureComplete yet - we'll show the existing user options
-  // Store this in the cucumber world context rather than session
+  // Cucumber world context — the BDD scenarios assert on this directly
+  // for the existing-user picker, not on session state.
   this.existingUserDetected = true;
 });
 
@@ -697,7 +727,6 @@ When('I choose to {string}', function (choice: string) {
     session.authOnboardingPath = AuthOnboardingPath.SignIn;
     session.signupEmail = null;
     session.signupFullName = null;
-    session.emailCaptureComplete = true;
     this.existingUserDetected = false;
   } else if (choice === 'Use a different email') {
     // Reset to email entry
@@ -708,15 +737,17 @@ When('I choose to {string}', function (choice: string) {
 });
 
 Then('the signup flow should switch to regular auth', function () {
+  // Authentication path flipped to sign_in, signup-section state
+  // cleared so the SignupEmail/SigningUp/etc. screens stop rendering.
   assert.strictEqual(
     session.authOnboardingPath,
     AuthOnboardingPath.SignIn,
     'Expected authOnboardingPath to be sign_in after switching to login',
   );
   assert.strictEqual(
-    session.emailCaptureComplete,
-    true,
-    'Expected emailCaptureComplete to be true to skip email capture',
+    session.signupEmail,
+    null,
+    'Expected signupEmail to be cleared after switching to login',
   );
 });
 
@@ -743,10 +774,10 @@ Then('I should be back at email entry', function () {
 });
 
 Then('I can enter a new email address', function () {
-  // The user is now free to enter a different email
+  // The user is now free to enter a different email — populating the
+  // session here simulates them re-typing it on SignupEmailScreen.
   session.signupEmail = 'newemail@example.com';
   session.signupFullName = 'New User';
-  session.emailCaptureComplete = true;
   this.existingUserDetected = false;
 });
 

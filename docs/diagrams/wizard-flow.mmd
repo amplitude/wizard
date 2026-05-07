@@ -8,11 +8,18 @@ flowchart TD
     REGION_SELECT["RegionSelect: US or EU?<br/>(Enter = US default · skipped for returning users)"]
     REGION_SELECT --> CREATE_ACCOUNT_PATH
 
-    CREATE_ACCOUNT_PATH{Create new Amplitude account?<br/>(Intro picker or CLI --auth-onboarding create-account)}
+    CREATE_ACCOUNT_PATH{Create new Amplitude account?<br/>(Intro picker; CLI --auth-onboarding create-account in non-TUI modes)}
     CREATE_ACCOUNT_PATH -->|no — sign in to existing| AUTH
-    CREATE_ACCOUNT_PATH -->|yes — new account| EMAIL_CAPTURE["EmailCaptureScreen<br/>(collect user email · pre-filled from --email when passed on the CLI)"]
-    EMAIL_CAPTURE --> TOS["ToSScreen<br/>(require explicit ToS acceptance)"]
-    TOS --> AUTH
+    CREATE_ACCOUNT_PATH -->|yes — new account| SIGNUP_EMAIL["SignupEmailScreen<br/>(collect user email)"]
+    SIGNUP_EMAIL --> SIGNING_UP_PROBE["SigningUpScreen<br/>(POST email-only — server decides next step)"]
+    SIGNING_UP_PROBE --> SERVER_RESPONSE{server response}
+    SERVER_RESPONSE -->|oauth — success| AUTH
+    SERVER_RESPONSE -->|requires_auth — existing user| AUTH
+    SERVER_RESPONSE -->|error| AUTH
+    SERVER_RESPONSE -->|needs_information — new user, asks for fields| TOS["ToSScreen<br/>(only renders post-needs_information — never asked of redirect/error users)"]
+    TOS --> SIGNUP_FULL_NAME["SignupFullNameScreen<br/>(only when server includes 'full_name' in required AND signupFullName is null;<br/>--full-name pre-fill skips this screen)"]
+    SIGNUP_FULL_NAME --> SIGNING_UP_RETRY["SigningUpScreen<br/>(re-POST with full_name)"]
+    SIGNING_UP_RETRY --> AUTH
 
     subgraph AUTH ["Auth / Account Setup (AuthScreen)"]
         SUSI["See: SUSI flow<br/>(OAuth → org → project → API key)"]

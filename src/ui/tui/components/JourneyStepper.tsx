@@ -26,10 +26,19 @@ const WIZARD_STEPS: Array<{ screen: Screen; label: string }> = [
 /** Screens that belong to each step (for grouping substeps). */
 const STEP_SCREENS: Record<string, Screen[]> = {
   Welcome: [Screen.Intro],
+  // Order matches the actual flow path so getCompletedScreens'
+  // flatten reflects what the user has already passed: SignupEmail →
+  // SigningUp (probe) → ToS → SignupFullName → SigningUp (second) →
+  // Auth → DataSetup. The bucket-level stepper is single-label, so
+  // the previous order didn't visibly affect anything, but keeping
+  // the array in flow order avoids confusion if a future stepper
+  // ever exposes sub-steps.
   Auth: [
     Screen.RegionSelect,
-    Screen.EmailCapture,
+    Screen.SignupEmail,
+    Screen.SigningUp,
     Screen.ToS,
+    Screen.SignupFullName,
     Screen.Auth,
     Screen.DataSetup,
   ],
