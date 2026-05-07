@@ -1,0 +1,91 @@
+{
+  "callSite": "console-query",
+  "description": "Slash-command Q&A on the Vercel AI SDK path. Routes through createWizardAiSdkAnthropic + streamText. Gated by AMPLITUDE_WIZARD_AI_SDK_CONSOLE=1. Moved to Haiku in #590; this fixture exercises representative slash-prompt user questions against a wizard-shaped system prompt and grades both models on accuracy and helpfulness.",
+  "rubricVersion": "2026-05-07.1",
+  "system": "You are the Amplitude Wizard's slash-prompt assistant. The user is in the middle of an interactive wizard session that is instrumenting a codebase with Amplitude analytics. They are running `npx @amplitude/wizard` in a terminal. Answer concisely (target under 6 short paragraphs unless code blocks demand more). When the user asks about Amplitude SDKs, prefer @amplitude/analytics-browser for web, @amplitude/analytics-node for server, and the @amplitude/react-native variant for React Native. Always recommend named events with snake_case_or_Title_Case names and tracked properties as plain objects. Never invent project-specific event names. If the user asks about wizard slash commands, the canonical list is: /region, /login, /logout, /whoami, /create-project, /mcp, /slack, /feedback, /clear, /help, /debug, /diagnostics, /snake, /exit. Respond in plaintext markdown — no HTML, no XML tags.",
+  "prompts": [
+    {
+      "id": "track-call-help",
+      "userMessage": "I want to add a track call when a user clicks the Sign Up button in my Next.js app. What's the minimal code I need?",
+      "structuralChecks": {
+        "minLength": 80,
+        "maxLength": 4000,
+        "expectKeywords": ["track", "amplitude"],
+        "forbiddenKeywords": ["I cannot help", "I can't help", "I'm unable to", "as an AI", "I don't have access"],
+        "expectJson": false
+      }
+    },
+    {
+      "id": "events-not-showing",
+      "userMessage": "My events aren't showing up in Amplitude. What should I check first?",
+      "structuralChecks": {
+        "minLength": 60,
+        "maxLength": 4000,
+        "expectKeywords": ["api key", "project"],
+        "expectKeywordsAnyOf": ["api key", "API key", "apiKey", "project id", "projectId", "Project ID"],
+        "forbiddenKeywords": ["I cannot help", "I can't help", "I'm unable to", "as an AI"],
+        "expectJson": false
+      }
+    },
+    {
+      "id": "framework-disambiguation",
+      "userMessage": "I'm not sure which framework option to pick — my project uses Next.js 14 with the App Router, server components, and a few client components. Which integration?",
+      "structuralChecks": {
+        "minLength": 60,
+        "maxLength": 4000,
+        "expectKeywords": ["next"],
+        "expectKeywordsAnyOf": ["nextjs", "Next.js", "next.js"],
+        "forbiddenKeywords": ["I cannot help", "I can't help", "as an AI", "I don't have access"],
+        "expectJson": false
+      }
+    },
+    {
+      "id": "slash-command-list",
+      "userMessage": "What slash commands are available in this wizard?",
+      "structuralChecks": {
+        "minLength": 60,
+        "maxLength": 4000,
+        "expectKeywords": ["/help"],
+        "expectKeywordsAnyOf": ["/region", "/login", "/whoami", "/exit"],
+        "forbiddenKeywords": ["I cannot help", "I don't know", "as an AI"],
+        "expectJson": false
+      }
+    },
+    {
+      "id": "user-properties",
+      "userMessage": "How do I set user properties like email and signup date so they show up on the user profile in Amplitude?",
+      "structuralChecks": {
+        "minLength": 80,
+        "maxLength": 4000,
+        "expectKeywords": ["identify"],
+        "expectKeywordsAnyOf": ["identify", "Identify", "setUserId", "user_id", "user properties", "Identify event"],
+        "forbiddenKeywords": ["I cannot help", "I can't help", "as an AI"],
+        "expectJson": false
+      }
+    },
+    {
+      "id": "gdpr-pii",
+      "userMessage": "What should I avoid putting into event properties for GDPR / PII reasons?",
+      "structuralChecks": {
+        "minLength": 80,
+        "maxLength": 4000,
+        "expectKeywords": ["pii"],
+        "expectKeywordsAnyOf": ["PII", "personal", "email", "password"],
+        "forbiddenKeywords": ["I cannot help", "I can't help", "as an AI"],
+        "expectJson": false
+      }
+    },
+    {
+      "id": "json-event-plan",
+      "userMessage": "Give me a JSON event plan with three events for an e-commerce checkout funnel: viewed cart, started checkout, purchase completed. Each should have a name and a `properties` object with at least one property. Respond with ONLY the JSON, no prose, no code fences.",
+      "structuralChecks": {
+        "minLength": 50,
+        "maxLength": 4000,
+        "expectKeywords": [],
+        "forbiddenKeywords": ["I cannot help", "as an AI"],
+        "expectJson": true,
+        "jsonRequiredKeys": []
+      }
+    }
+  ]
+}
