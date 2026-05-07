@@ -2,7 +2,7 @@
 
 **Status:** proposal, awaiting approval. **No code change in this PR — design only.**
 **Effective:** 2026-05-07.
-**Scope:** server-side (`thunder/wizard-proxy`). Wizard-side changes are minimal (one new error-classification path).
+**Scope:** server-side (the Amplitude LLM gateway / `wizard-proxy` server). Wizard-side changes are minimal (one new error-classification path).
 
 ## Problem
 
@@ -123,10 +123,12 @@ New metrics:
 
 | Metric | Tags | Purpose |
 |---|---|---|
-| `thunder.wizard_proxy.fallback.attempted` | `reason:vertex_5xx|vertex_fetch_error|vertex_timeout` | How often we even try the fallback |
-| `thunder.wizard_proxy.fallback.success` | `reason:<same>` | Did the fallback save the request |
-| `thunder.wizard_proxy.fallback.failed` | `reason:<same>`, `direct_status:<code>` | Did Anthropic-direct also fail |
-| `thunder.wizard_proxy.fallback.latency_ms` | `outcome:success|failed` | Distribution of fallback latency |
+| `<gateway-prefix>.fallback.attempted` | `reason:vertex_5xx|vertex_fetch_error|vertex_timeout` | How often we even try the fallback |
+| `<gateway-prefix>.fallback.success` | `reason:<same>` | Did the fallback save the request |
+| `<gateway-prefix>.fallback.failed` | `reason:<same>`, `direct_status:<code>` | Did Anthropic-direct also fail |
+| `<gateway-prefix>.fallback.latency_ms` | `outcome:success|failed` | Distribution of fallback latency |
+
+(Metric prefix follows the gateway server's existing convention — see the `METRICS_PREFIX` constant in the proxy source.)
 
 New structured log fields on the existing `request completed` line (from #113749): `fallback_attempted`, `fallback_outcome`, `vertex_status`, `direct_status`.
 
@@ -170,7 +172,7 @@ Each PR is <400 LOC, independently revertable. The first ships entirely-new code
 
 ## Approval needed from
 
-- Platform team (thunder owners): confirm `WIZARD_PROXY_ANTHROPIC_DIRECT_KEY` secret rotation cadence is consistent with their existing patterns
+- Platform team (LLM gateway server owners): confirm `WIZARD_PROXY_ANTHROPIC_DIRECT_KEY` secret rotation cadence is consistent with their existing patterns
 - Security: review the `staff_only` gating and the `x-anthropic-key` redaction add
 - LLM cost owner: sign off on the Anthropic-direct fallback budget impact
 
