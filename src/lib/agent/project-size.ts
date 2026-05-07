@@ -128,14 +128,13 @@ function countSourceFiles(
     for (const entry of entries) {
       if (entry.isDirectory()) {
         if (SKIP_DIRECTORIES.has(entry.name)) continue;
-        // Skip dotted directories at any level (`.cache-foo`, `.next`,
-        // bespoke `.something`) unless explicitly allowlisted via not
-        // being in `SKIP_DIRECTORIES`. We already cover the common
-        // cases above; this guards against IDE / tool dot-dirs we
-        // didn't enumerate.
-        if (entry.name.startsWith('.') && !SKIP_DIRECTORIES.has(entry.name)) {
-          continue;
-        }
+        // Skip ALL dotted directories at any level (`.cache-foo`, `.next`,
+        // bespoke `.something`) — they're either tool/IDE caches we don't
+        // enumerate or generated artifacts. `SKIP_DIRECTORIES` already
+        // handled the common named cases above; this is the catch-all.
+        // (Not an allowlist — there is no mechanism to opt a `.foo` dir
+        // back in via `SKIP_DIRECTORIES`.)
+        if (entry.name.startsWith('.')) continue;
         stack.push(path.join(dir, entry.name));
       } else if (entry.isFile()) {
         fileCount += 1;
