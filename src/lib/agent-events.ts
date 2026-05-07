@@ -194,6 +194,30 @@ export const EVENT_DATA_VERSIONS = {
    * showing a "resume?" prompt once the underlying state is gone.
    */
   checkpoint_cleared: 1,
+  /**
+   * `transient_retry` — emitted by the OUTER `runAgent` retry loop on
+   * every wizard-driven retry decision (stall timer, transient API
+   * error reclassification, SDK thrown transient). Distinct from the
+   * SDK-internal `api_retry` system messages, which are tracked via
+   * the existing `setRetryState` banner. Carries the next backoff and
+   * the SDK-reported `Retry-After` floor so stall-visibility consumers
+   * can render an accurate "retrying in Xs" indicator.
+   */
+  transient_retry: 1,
+  /**
+   * `compaction_started` — emitted by the PreCompact hook just before
+   * the SDK summarises conversation history. Lets orchestrators render
+   * a "compacting…" indicator during what would otherwise be silent
+   * (compactions often take 60–120s on large contexts).
+   */
+  compaction_started: 1,
+  /**
+   * `compaction_completed` — emitted on the SDK's `compact_boundary`
+   * system message. Carries pre/post token counts and duration so
+   * orchestrators can attribute lost context to a specific compaction
+   * cycle when surfacing "the agent forgot X" failures.
+   */
+  compaction_completed: 1,
 } as const;
 
 /** All NDJSON event-level types. */

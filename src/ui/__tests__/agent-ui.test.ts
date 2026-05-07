@@ -1760,3 +1760,113 @@ describe('AgentUI.heartbeat', () => {
     expect(last.data_version).toBe(1);
   });
 });
+
+describe('AgentUI reliability events (transient_retry, compaction)', () => {
+  let writes: string[];
+  let spy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    writes = [];
+    spy = vi
+      .spyOn(process.stdout, 'write')
+      .mockImplementation((chunk: string | Uint8Array): boolean => {
+        writes.push(typeof chunk === 'string' ? chunk : chunk.toString());
+        return true;
+      });
+  });
+
+  afterEach(() => {
+    spy.mockRestore();
+  });
+
+  const lastEvent = (): NDJSONEvent => {
+    const last = writes[writes.length - 1];
+    return JSON.parse(last.trim()) as NDJSONEvent;
+  };
+
+  it('emitTransientRetry emits a progress event with the full payload', () => {
+    const ui = new AgentUI();
+    ui.emitTransientRetry({
+      attempt: 2,
+      totalAttempts: 6,
+      nextRetryInMs: 4500,
+      reason: 'stall',
+      retryAfterMs: 3000,
+    });
+    const event = lastEvent();
+    expect(event.type).toBe('progress');
+    expect(event.message).toContain('transient_retry');
+    expect(event.message).toContain('2/6');
+    expect(event.data).toMatchObject({
+      event: 'transient_retry',
+      attempt: 2,
+      totalAttempts: 6,
+      nextRetryInMs: 4500,
+      reason: 'stall',
+      retryAfterMs: 3000,
+    });
+    expect(event.data_version).toBe(1);
+  });
+
+  it('emitTransientRetry preserves null retryAfterMs (no Retry-After hint)', () => {
+    const ui = new AgentUI();
+    ui.emitTransientRetry({
+      attempt: 1,
+      totalAttempts: 6,
+      nextRetryInMs: 2000,
+      reason: 'sdk_thrown',
+      retryAfterMs: null,
+    });
+    expect((lastEvent().data as Record<string, unknown>).retryAfterMs).toBe(
+      null,
+    );
+  });
+
+  it('emitCompactionStarted emits a progress event with the trigger', () => {
+    const ui = new AgentUI();
+    ui.emitCompactionStarted({ trigger: 'auto' });
+    const event = lastEvent();
+    expect(event.type).toBe('progress');
+    expect(event.message).toBe('compaction_started (auto)');
+    expect(event.data).toMatchObject({
+      event: 'compaction_started',
+      trigger: 'auto',
+    });
+    expect(event.data_version).toBe(1);
+  });
+
+  it('emitCompactionCompleted emits pre/post token counts and duration', () => {
+    const ui = new AgentUI();
+    ui.emitCompactionCompleted({
+      trigger: 'auto',
+      preTokens: 168_943,
+      postTokens: 42_000,
+      durationMs: 119_000,
+    });
+    const event = lastEvent();
+    expect(event.type).toBe('progress');
+    expect(event.message).toContain('168943');
+    expect(event.message).toContain('42000');
+    expect(event.data).toMatchObject({
+      event: 'compaction_completed',
+      trigger: 'auto',
+      preTokens: 168_943,
+      postTokens: 42_000,
+      durationMs: 119_000,
+    });
+    expect(event.data_version).toBe(1);
+  });
+
+  it('emitCompactionCompleted handles partial-compaction shape (no post_tokens / duration_ms)', () => {
+    const ui = new AgentUI();
+    ui.emitCompactionCompleted({ trigger: 'manual', preTokens: 100_000 });
+    const event = lastEvent();
+    expect(event.message).toContain('100000');
+    // No `→` arrow when post is absent.
+    expect(event.message).not.toContain('→');
+    const data = event.data as Record<string, unknown>;
+    expect(data.preTokens).toBe(100_000);
+    expect(data.postTokens).toBeUndefined();
+    expect(data.durationMs).toBeUndefined();
+  });
+});

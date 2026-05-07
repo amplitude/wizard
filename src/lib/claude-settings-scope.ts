@@ -74,9 +74,59 @@ const SCOPED_ENV_KEYS = [
 
 type ScopedEnvKey = (typeof SCOPED_ENV_KEYS)[number];
 
+/**
+ * Auto-compact window (in tokens) the wizard requests for the inner SDK
+ * conversation. The SDK's default lets context fill almost to the 200K
+ * limit before triggering compaction — the May 2026 reliability audit
+ * caught a case where compaction fired at `pre_tokens: 168,943` and the
+ * resulting summary lost a load-bearing user-feedback turn ("More funny
+ * names"). Lowering the threshold makes compaction fire earlier with a
+ * smaller, less-aggressive summary at the cost of more frequent cycles.
+ *
+ * 120000 is conservative — comfortably below the average inner-agent
+ * working size, well above the typical first-turn context size, and
+ * leaves headroom so a single oversize tool result doesn't trip
+ * compaction immediately. Override via `AMPLITUDE_WIZARD_COMPACTION_WINDOW`
+ * (set to `0` or `disable` to opt out and use the SDK default).
+ *
+ * Note: only effective when the user's `.claude/settings.json` doesn't
+ * also set `autoCompactWindow` at the project layer (settings-local
+ * wins over project, project wins over user — same precedence as the
+ * env block above).
+ */
+const DEFAULT_AUTO_COMPACT_WINDOW = 120_000;
+
+/**
+ * Resolve the wizard's auto-compact-window override. Returns `null`
+ * when the override is explicitly disabled (env=`0` / `disable` / `off`)
+ * so the caller skips writing the key entirely. Invalid env values fall
+ * back to the default — better to keep the safety net than refuse to
+ * boot on a typo.
+ */
+function resolveAutoCompactWindow(): number | null {
+  const raw = process.env.AMPLITUDE_WIZARD_COMPACTION_WINDOW;
+  if (raw === undefined || raw === '') return DEFAULT_AUTO_COMPACT_WINDOW;
+  const trimmed = raw.trim().toLowerCase();
+  if (trimmed === '0' || trimmed === 'disable' || trimmed === 'off') {
+    return null;
+  }
+  const parsed = Number(trimmed);
+  if (Number.isFinite(parsed) && parsed > 0) {
+    return Math.floor(parsed);
+  }
+  return DEFAULT_AUTO_COMPACT_WINDOW;
+}
+
 /** Minimal shape we care about. Everything else is preserved verbatim. */
 interface ClaudeSettingsLocal {
   env?: Record<string, string | undefined>;
+  /**
+   * SDK's auto-compact threshold (tokens). Documented on the bundled
+   * `Settings` type in `@anthropic-ai/claude-agent-sdk`. We write this
+   * to lower the compaction trigger from "near 200K" to a more
+   * conservative window — see `DEFAULT_AUTO_COMPACT_WINDOW` above.
+   */
+  autoCompactWindow?: number;
   [key: string]: unknown;
 }
 
@@ -204,6 +254,29 @@ export function applyScopedSettings(
     ...(prior ?? {}),
     env: mergedEnv,
   };
+
+  // Lower the SDK's auto-compact threshold so compaction fires earlier
+  // with a smaller summary instead of waiting until the context is
+  // nearly full. The audit (May 2026) traced lost user-feedback context
+  // to a compaction that fired at pre_tokens=168,943 — too late for the
+  // summarizer to keep load-bearing turns. ONLY override when the user
+  // hasn't set their own value at the local layer (project-layer
+  // overrides are deliberately respected — that's the user's setting).
+  const autoCompactWindow = resolveAutoCompactWindow();
+  if (autoCompactWindow !== null && prior?.autoCompactWindow === undefined) {
+    merged.autoCompactWindow = autoCompactWindow;
+    logToFile(
+      `claude-settings-scope: setting autoCompactWindow=${autoCompactWindow}`,
+    );
+  } else if (autoCompactWindow === null) {
+    logToFile(
+      'claude-settings-scope: autoCompactWindow override disabled via env',
+    );
+  } else {
+    logToFile(
+      `claude-settings-scope: respecting user autoCompactWindow=${prior?.autoCompactWindow}`,
+    );
+  }
 
   try {
     atomicWriteJSON(filePath, merged);

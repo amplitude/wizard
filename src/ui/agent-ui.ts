@@ -970,6 +970,44 @@ export class AgentUI implements WizardUI {
     });
   }
 
+  emitTransientRetry(data: {
+    attempt: number;
+    totalAttempts: number;
+    nextRetryInMs: number;
+    reason: 'stall' | 'transient_api' | 'sdk_thrown';
+    retryAfterMs: number | null;
+  }): void {
+    emit(
+      'progress',
+      `transient_retry: attempt ${data.attempt}/${data.totalAttempts} in ${data.nextRetryInMs}ms (${data.reason})`,
+      {
+        data: { event: 'transient_retry', ...data },
+      },
+    );
+  }
+
+  emitCompactionStarted(data: { trigger: 'manual' | 'auto' }): void {
+    emit('progress', `compaction_started (${data.trigger})`, {
+      data: { event: 'compaction_started', ...data },
+    });
+  }
+
+  emitCompactionCompleted(data: {
+    trigger: 'manual' | 'auto';
+    preTokens: number;
+    postTokens?: number;
+    durationMs?: number;
+  }): void {
+    const post = data.postTokens !== undefined ? `→${data.postTokens}` : '';
+    emit(
+      'progress',
+      `compaction_completed (${data.trigger} ${data.preTokens}${post} tokens)`,
+      {
+        data: { event: 'compaction_completed', ...data },
+      },
+    );
+  }
+
   // Security: stack traces redacted from NDJSON output to prevent path/secret leakage
   setRunError(error: Error): Promise<boolean> {
     let sanitized: string;

@@ -210,4 +210,75 @@ describe('applyScopedSettings', () => {
     // file just because we couldn't parse it.
     expect(fs.readFileSync(localPath, 'utf-8')).toBe(garbage);
   });
+
+  // ── autoCompactWindow override ─────────────────────────────────────
+  // The reliability audit (May 2026) traced lost user-feedback context
+  // to compactions firing at ~169K tokens — too late for the summarizer
+  // to keep load-bearing turns. The wizard now writes a 120K
+  // `autoCompactWindow` into the local settings layer to lower the
+  // trigger threshold. These tests pin the behaviour around env-driven
+  // override + user-respect.
+
+  it('writes a default autoCompactWindow=120000 when env is unset and user has no value', () => {
+    process.env.ANTHROPIC_BASE_URL = 'https://gateway.example.com';
+    delete process.env.AMPLITUDE_WIZARD_COMPACTION_WINDOW;
+
+    const handle = applyScopedSettings(workdir);
+    const written = JSON.parse(fs.readFileSync(handle!.filePath, 'utf-8'));
+    expect(written.autoCompactWindow).toBe(120_000);
+  });
+
+  it('honours AMPLITUDE_WIZARD_COMPACTION_WINDOW when it parses to a positive number', () => {
+    process.env.ANTHROPIC_BASE_URL = 'https://gateway.example.com';
+    process.env.AMPLITUDE_WIZARD_COMPACTION_WINDOW = '90000';
+
+    const handle = applyScopedSettings(workdir);
+    const written = JSON.parse(fs.readFileSync(handle!.filePath, 'utf-8'));
+    expect(written.autoCompactWindow).toBe(90_000);
+
+    delete process.env.AMPLITUDE_WIZARD_COMPACTION_WINDOW;
+  });
+
+  it.each(['0', 'disable', 'OFF', '  off  '])(
+    'omits autoCompactWindow when env is %j (opt-out)',
+    (raw) => {
+      process.env.ANTHROPIC_BASE_URL = 'https://gateway.example.com';
+      process.env.AMPLITUDE_WIZARD_COMPACTION_WINDOW = raw;
+
+      const handle = applyScopedSettings(workdir);
+      const written = JSON.parse(fs.readFileSync(handle!.filePath, 'utf-8'));
+      expect(written).not.toHaveProperty('autoCompactWindow');
+
+      delete process.env.AMPLITUDE_WIZARD_COMPACTION_WINDOW;
+    },
+  );
+
+  it('falls back to default on invalid env values rather than refusing to boot', () => {
+    process.env.ANTHROPIC_BASE_URL = 'https://gateway.example.com';
+    process.env.AMPLITUDE_WIZARD_COMPACTION_WINDOW = 'not-a-number';
+
+    const handle = applyScopedSettings(workdir);
+    const written = JSON.parse(fs.readFileSync(handle!.filePath, 'utf-8'));
+    expect(written.autoCompactWindow).toBe(120_000);
+
+    delete process.env.AMPLITUDE_WIZARD_COMPACTION_WINDOW;
+  });
+
+  it('respects an existing autoCompactWindow set by the user (does not override)', () => {
+    process.env.ANTHROPIC_BASE_URL = 'https://gateway.example.com';
+
+    // User has their own preferred value at the local layer.
+    const localPath = path.join(workdir, '.claude', 'settings.local.json');
+    fs.mkdirSync(path.dirname(localPath), { recursive: true });
+    const prior = JSON.stringify({ autoCompactWindow: 50_000 }, null, 2);
+    fs.writeFileSync(localPath, prior);
+
+    const handle = applyScopedSettings(workdir);
+    const written = JSON.parse(fs.readFileSync(handle!.filePath, 'utf-8'));
+    expect(written.autoCompactWindow).toBe(50_000);
+
+    handle!.restore();
+    // User's original file is intact.
+    expect(fs.readFileSync(localPath, 'utf-8')).toBe(prior);
+  });
 });
