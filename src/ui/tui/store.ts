@@ -709,6 +709,11 @@ export class WizardStore {
     // the forward-direction write is folded into `setSignupAuth`, not
     // a separate setter — see that method for the atomicity rationale.)
     this.$session.setKey('signupTokensObtained', false);
+    // Match the singleton-writer invariant: this and `runSignupAttempt`
+    // are the only direct writers of `signupInFlight`. Resetting it
+    // here guards against a stale `true` riding through a ceremony
+    // wipe (e.g. region change while a POST was abandoned in-flight).
+    this.$session.setKey('signupInFlight', false);
   }
 
   setSignupEmail(email: string | null): void {
@@ -782,6 +787,30 @@ export class WizardStore {
   setSignupAbandoned(abandoned: boolean): void {
     this.$session.setKey('signupAbandoned', abandoned);
     this.emitChange();
+  }
+
+  /**
+   * Singleton setter for `signupInFlight`. The flag is mutated NOWHERE
+   * ELSE except inside `_resetCeremonyKeys` — this method is the only
+   * direct writer. Wraps the actual agentic-signup POST so the
+   * in-flight state always matches the network call, regardless of
+   * resolve, reject, or throw.
+   *
+   * Pinned by `src/ui/tui/__tests__/signup-in-flight.invariants.test.ts`
+   * (any new `setKey('signupInFlight', …)` outside this file fails the
+   * invariant test). Used by the FlowEntry.isWall predicate on the
+   * signup-ceremony entries to block back-nav while the POST is
+   * pending — Esc must not let the user reset ceremony state mid-POST.
+   */
+  async runSignupAttempt<T>(fn: () => Promise<T>): Promise<T> {
+    this.$session.setKey('signupInFlight', true);
+    this.emitChange();
+    try {
+      return await fn();
+    } finally {
+      this.$session.setKey('signupInFlight', false);
+      this.emitChange();
+    }
   }
 
   setAuthOnboardingPath(path: WizardSession['authOnboardingPath']): void {
