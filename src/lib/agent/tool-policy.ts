@@ -163,11 +163,110 @@ export function isSkillInstallCommand(command: string): boolean {
 }
 
 /**
+ * Strip a monorepo workspace selector prefix from a tokenized argv, returning
+ * a new argv that looks like `<pkg-mgr> <rest>` so the standard allowlist
+ * check can be applied. Returns null if the input is not a recognized
+ * selector shape.
+ *
+ * Recognized selectors (one level only — nested selectors are intentionally
+ * not supported to keep the surface small and prevent recursive bypass):
+ *
+ *   yarn workspace <name> <rest>            (Yarn 1 workspace selector)
+ *   yarn workspaces foreach [-flags...] <rest>  (Yarn 2+ foreach selector)
+ *   yarn --cwd <dir> <rest>                 (Yarn cwd flag)
+ *   yarn -C <dir> <rest>                    (Yarn cwd short flag)
+ *   pnpm --filter <name> <rest>             (pnpm filter)
+ *   pnpm -F <name> <rest>                   (pnpm filter short)
+ *   npm --workspace <ws> <rest>             (npm workspace flag)
+ *   npm -w <ws> <rest>                      (npm workspace short)
+ *   bun --cwd <dir> <rest>                  (bun cwd flag)
+ *
+ * After stripping, the returned argv keeps the original package-manager
+ * token at parts[0] so the recursive `matchesAllowedPrefix` check sees a
+ * normal `<pkg-mgr> <safe-script>` shape.
+ */
+function stripMonorepoSelector(parts: string[]): string[] | null {
+  if (parts.length < 3) return null;
+  const pm = parts[0];
+
+  // yarn-family selectors
+  if (pm === 'yarn') {
+    // yarn workspaces foreach [flags...] <script...>
+    if (parts[1] === 'workspaces' && parts[2] === 'foreach') {
+      // Skip flags after `foreach` (anything starting with `-`).
+      let i = 3;
+      while (i < parts.length && parts[i].startsWith('-')) {
+        i++;
+      }
+      if (i >= parts.length) return null;
+      return [pm, ...parts.slice(i)];
+    }
+    // yarn workspace <name> <rest>
+    if (parts[1] === 'workspace') {
+      const name = parts[2];
+      // Reject empty / flag-shaped selector names.
+      if (!name || name.startsWith('-')) return null;
+      if (parts.length < 4) return null;
+      return [pm, ...parts.slice(3)];
+    }
+    // yarn --cwd <dir> <rest>  /  yarn -C <dir> <rest>
+    if (parts[1] === '--cwd' || parts[1] === '-C') {
+      const dir = parts[2];
+      if (!dir || dir.startsWith('-')) return null;
+      if (parts.length < 4) return null;
+      return [pm, ...parts.slice(3)];
+    }
+    return null;
+  }
+
+  // pnpm --filter <name> <rest>  /  pnpm -F <name> <rest>
+  if (pm === 'pnpm') {
+    if (parts[1] === '--filter' || parts[1] === '-F') {
+      const name = parts[2];
+      if (!name || name.startsWith('-')) return null;
+      if (parts.length < 4) return null;
+      return [pm, ...parts.slice(3)];
+    }
+    return null;
+  }
+
+  // npm --workspace <ws> <rest>  /  npm -w <ws> <rest>
+  if (pm === 'npm') {
+    if (parts[1] === '--workspace' || parts[1] === '-w') {
+      const ws = parts[2];
+      if (!ws || ws.startsWith('-')) return null;
+      if (parts.length < 4) return null;
+      return [pm, ...parts.slice(3)];
+    }
+    return null;
+  }
+
+  // bun --cwd <dir> <rest>
+  if (pm === 'bun') {
+    if (parts[1] === '--cwd') {
+      const dir = parts[2];
+      if (!dir || dir.startsWith('-')) return null;
+      if (parts.length < 4) return null;
+      return [pm, ...parts.slice(3)];
+    }
+    return null;
+  }
+
+  return null;
+}
+
+/**
  * Check if command is an allowed package manager command.
  * Matches: <pkg-manager> [run|exec] <safe-script> [args...]
+ *
+ * Also recognizes one level of monorepo workspace selector
+ * (`yarn workspace <name> ...`, `pnpm --filter <name> ...`,
+ * `npm -w <ws> ...`, etc.) by stripping the selector and re-checking the
+ * inner command. The recursion is guarded by `_depth` to allow exactly one
+ * strip; nested selectors stay denied.
  */
-export function matchesAllowedPrefix(command: string): boolean {
-  const parts = command.split(/\s+/);
+export function matchesAllowedPrefix(command: string, _depth = 0): boolean {
+  const parts = command.split(/\s+/).filter((p) => p.length > 0);
   if (parts.length === 0 || !PACKAGE_MANAGERS.includes(parts[0])) {
     return false;
   }
@@ -187,10 +286,22 @@ export function matchesAllowedPrefix(command: string): boolean {
   const scriptPart = parts.slice(scriptIndex).join(' ');
 
   // Check if script starts with any safe script name or linting tool
-  return (
+  const directMatch =
     SAFE_SCRIPTS.some((safe) => scriptPart.startsWith(safe)) ||
-    LINTING_TOOLS.some((tool: string) => scriptPart.startsWith(tool))
-  );
+    LINTING_TOOLS.some((tool: string) => scriptPart.startsWith(tool));
+  if (directMatch) return true;
+
+  // Fallback: try stripping a single monorepo workspace selector and
+  // re-checking the inner command. Depth guard prevents infinite recursion
+  // on pathological inputs and intentionally disallows nested selectors.
+  if (_depth === 0) {
+    const stripped = stripMonorepoSelector(parts);
+    if (stripped !== null) {
+      return matchesAllowedPrefix(stripped.join(' '), 1);
+    }
+  }
+
+  return false;
 }
 
 /**
