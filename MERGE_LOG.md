@@ -27,4 +27,4 @@ short JIT-exploration prompt instead. Thresholds default to 200 files /
 The HOLD on #600 lifts as soon as the gate PR lands — the two PRs together
 implement the recommendation.
 
-**Follow-up PR:** _to be linked once `gh pr create` returns the URL._
+**Follow-up PR:** #603 — https://github.com/amplitude/wizard/pull/603
