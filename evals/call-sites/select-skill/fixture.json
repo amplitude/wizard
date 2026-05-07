@@ -1,0 +1,22 @@
+{
+  "id": "select-skill-nextjs-integration-phase",
+  "callSiteId": "select_skill",
+  "description": "Tier-2 load_skill decision during the integration phase for a Next.js App Router project. The agent should select the integration/nextjs skill from the menu (the only sensible match). The negative-control variant lives in fixture-no-match.json.",
+  "kind": "tool-decision",
+  "input": {
+    "phase": "integration",
+    "framework": "nextjs",
+    "menu": [
+      { "id": "integration/nextjs", "title": "Next.js SDK integration" },
+      { "id": "integration/react-vite", "title": "React + Vite SDK integration" },
+      { "id": "integration/vue", "title": "Vue SDK integration" },
+      { "id": "integration/django", "title": "Django SDK integration" },
+      { "id": "instrumentation/event-discovery", "title": "Event discovery" },
+      { "id": "taxonomy/quickstart", "title": "Taxonomy quickstart" }
+    ]
+  },
+  "recordedOutput": {
+    "selectedSkillId": "integration/nextjs",
+    "rationale": "Phase=integration and framework=nextjs match the integration/nextjs skill exactly."
+  }
+}

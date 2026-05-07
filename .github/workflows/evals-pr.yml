@@ -1,0 +1,66 @@
+name: 'Evals — PR call-site gate'
+
+# Per MIGRATION_PLAN.md §7.4: per-call-site eval coverage is the floor
+# for LLM regression prevention. This workflow runs the call-site
+# registry only when a PR touches files that can affect an LLM call's
+# behavior — commandments, the agent runner / interface, the
+# streamText inner loop, or skill SKILL.md files. PRs that don't touch
+# these paths (docs, infra, unrelated TUI screens, etc.) are not gated
+# here so we don't burn CI minutes on changes that can't move the
+# needle.
+#
+# Gate scope mirrors `evals/call-sites/registry.ts:CALL_SITE_SOURCE_GLOBS`.
+# When you add a new call site, update both — they go out of sync
+# silently otherwise.
+
+on:
+  pull_request:
+    paths:
+      # propose_event_plan + select_skill source code
+      - 'src/lib/wizard-tools.ts'
+      - 'src/lib/wizard-tools/**'
+      - 'src/lib/agent/**'
+      - 'src/lib/agent-runner.ts'
+      - 'src/lib/agent-interface.ts'
+      - 'src/lib/commandments.ts'
+      # Skills the agent can pick up
+      - 'skills/integration/**/SKILL.md'
+      - 'skills/instrumentation/**'
+      - 'skills/taxonomy/**'
+      # The eval framework itself
+      - 'evals/call-sites/**'
+      - 'evals/runner/**'
+      - 'evals/scorers/**'
+
+permissions:
+  contents: read
+
+jobs:
+  call-site-evals:
+    name: Call-site registry (mock-mode)
+    runs-on: ubuntu-latest
+    # Per §7.5: org secrets are not available to fork PRs. Live capture
+    # already requires WIZARD_OAUTH_TOKEN; the mock-mode path runs
+    # everywhere (including forks) because it doesn't need auth.
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - name: Install pnpm
+        uses: pnpm/action-setup@eae0cfeb286e66ffb5155f1a79b90583a127a68b # v2
+        with:
+          version: 10.23.0
+          run_install: false
+      - name: Set up Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          # Pin to 22 (LTS) to match the unit-tests matrix middle value.
+          # `node-version-file: 'package.json'` was resolving to a Node
+          # 20.x where vitest 4 / vite 7 hit `ERR_REQUIRE_ESM` loading
+          # `vitest.config.ts`.
+          node-version: 22
+          cache: 'pnpm'
+      - name: Install dependencies with pnpm
+        run: pnpm install --frozen-lockfile
+      - name: Run call-site registry tests (mock + golden modes only)
+        # Mock + golden modes need no LLM auth. Live mode runs in the
+        # nightly workflow once §7.5 wizard-side OAuth wiring lands.
+        run: pnpm exec vitest run --pool=forks --maxWorkers=2 evals/call-sites/

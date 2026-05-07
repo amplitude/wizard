@@ -13,3 +13,4 @@
 - [ ] TUI / router / `flows.ts` / navigation `store.ts` changes: ran focused Vitest  
       `pnpm exec vitest run --pool=forks --maxWorkers=1` on the relevant `src/ui/tui/**/__tests__/*` paths (or N/A)
 - [ ] Included **`/reflect`** checklist in this PR description or linked it (or N/A — e.g. typo-only / non-agent work)
+- [ ] If this PR adds, removes, or changes an LLM call site, list the call-site IDs in this PR description and confirm fixture + scorer + golden are updated under `evals/call-sites/<id>/` (or N/A)
