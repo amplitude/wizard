@@ -32,11 +32,13 @@ function makeSession(
 function makeDeps(overrides: Partial<CiBootstrapDeps> = {}): {
   deps: CiBootstrapDeps;
   setSecret: ReturnType<typeof vi.fn>;
+  setVariable: ReturnType<typeof vi.fn>;
   info: ReturnType<typeof vi.fn>;
   error: ReturnType<typeof vi.fn>;
   confirm: ReturnType<typeof vi.fn>;
 } {
   const setSecret = vi.fn();
+  const setVariable = vi.fn();
   const info = vi.fn();
   const error = vi.fn();
   const confirm = vi.fn().mockResolvedValue(true);
@@ -44,12 +46,14 @@ function makeDeps(overrides: Partial<CiBootstrapDeps> = {}): {
     deps: {
       loadSession: () => makeSession(),
       setSecret,
+      setVariable,
       confirm,
       info,
       error,
       ...overrides,
     },
     setSecret,
+    setVariable,
     info,
     error,
     confirm,
@@ -57,8 +61,8 @@ function makeDeps(overrides: Partial<CiBootstrapDeps> = {}): {
 }
 
 describe('runCiBootstrap', () => {
-  it('writes all four secrets in the expected order with --yes', async () => {
-    const { deps, setSecret, confirm } = makeDeps();
+  it('writes three secrets + one variable in the expected order with --yes', async () => {
+    const { deps, setSecret, setVariable, confirm } = makeDeps();
     const code = await runCiBootstrap(deps, {
       repo: 'amplitude/wizard',
       yes: true,
@@ -69,12 +73,14 @@ describe('runCiBootstrap', () => {
       ['WIZARD_OAUTH_TOKEN', 'access-123', 'amplitude/wizard'],
       ['WIZARD_REFRESH_TOKEN', 'refresh-456', 'amplitude/wizard'],
       ['WIZARD_EXPIRES_AT', '2026-05-07T01:23:45.000Z', 'amplitude/wizard'],
+    ]);
+    expect(setVariable.mock.calls).toEqual([
       ['WIZARD_ZONE', 'us', 'amplitude/wizard'],
     ]);
   });
 
   it('prompts for confirmation when --yes is not set', async () => {
-    const { deps, setSecret, confirm } = makeDeps();
+    const { deps, setSecret, setVariable, confirm } = makeDeps();
     confirm.mockResolvedValueOnce(true);
     const code = await runCiBootstrap(deps, {
       repo: 'amplitude/wizard',
@@ -82,7 +88,8 @@ describe('runCiBootstrap', () => {
     });
     expect(code).toBe(ExitCode.SUCCESS);
     expect(confirm).toHaveBeenCalledOnce();
-    expect(setSecret).toHaveBeenCalledTimes(4);
+    expect(setSecret).toHaveBeenCalledTimes(3);
+    expect(setVariable).toHaveBeenCalledTimes(1);
   });
 
   it('aborts cleanly when the user declines the confirmation', async () => {
@@ -138,25 +145,25 @@ describe('runCiBootstrap', () => {
   });
 
   it('honours a custom --repo target', async () => {
-    const { deps, setSecret } = makeDeps();
+    const { deps, setSecret, setVariable } = makeDeps();
     await runCiBootstrap(deps, {
       repo: 'kelson/wizard-fork',
       yes: true,
     });
-    for (const call of setSecret.mock.calls) {
+    for (const call of [...setSecret.mock.calls, ...setVariable.mock.calls]) {
       expect(call[2]).toBe('kelson/wizard-fork');
     }
   });
 
   it('passes through the EU zone value when stored that way', async () => {
-    const { deps, setSecret } = makeDeps({
+    const { deps, setVariable } = makeDeps({
       loadSession: () => makeSession({ zone: 'eu' }),
     });
     await runCiBootstrap(deps, {
       repo: 'amplitude/wizard',
       yes: true,
     });
-    const zoneCall = setSecret.mock.calls.find(
+    const zoneCall = setVariable.mock.calls.find(
       (c: unknown[]) => c[0] === 'WIZARD_ZONE',
     );
     expect(zoneCall?.[1]).toBe('eu');

@@ -43,7 +43,7 @@ jobs:
         run: node scripts/refresh-wizard-oauth-token.mjs
         env:
           WIZARD_REFRESH_TOKEN: ${{ secrets.WIZARD_REFRESH_TOKEN }}
-          WIZARD_ZONE: ${{ secrets.WIZARD_ZONE }}
+          WIZARD_ZONE: ${{ vars.WIZARD_ZONE }}
 
       - name: Update repository secrets
         if: steps.refresh.outputs.refresh != 'failed'

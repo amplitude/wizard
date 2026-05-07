@@ -41,12 +41,12 @@ secrets in place.
    amplitude-wizard ci-bootstrap
    ```
 
-   This pushes four values to repo secrets:
+   This pushes three secrets and one variable to the repo:
 
-   - `WIZARD_OAUTH_TOKEN` ← current access token
-   - `WIZARD_REFRESH_TOKEN` ← current refresh token
-   - `WIZARD_EXPIRES_AT` ← ISO 8601 expiry
-   - `WIZARD_ZONE` ← `us` or `eu`
+   - `WIZARD_OAUTH_TOKEN` ← current access token (secret)
+   - `WIZARD_REFRESH_TOKEN` ← current refresh token (secret)
+   - `WIZARD_EXPIRES_AT` ← ISO 8601 expiry (secret)
+   - `WIZARD_ZONE` ← `us` or `eu` (variable — non-sensitive, read via `vars.`)
 
    Pass `--yes` to skip the confirmation prompt, or `--repo <owner/name>` to
    target a fork.

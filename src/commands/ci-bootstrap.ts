@@ -40,6 +40,8 @@ export interface CiBootstrapDeps {
     | Promise<CiBootstrapSession | null>;
   /** Runs `gh secret set` (or equivalent). Throws on non-zero exit. */
   setSecret: (name: string, value: string, repo: string) => void;
+  /** Runs `gh variable set` (or equivalent). Throws on non-zero exit. */
+  setVariable: (name: string, value: string, repo: string) => void;
   /** Asks the user [y/N]. */
   confirm: (prompt: string) => Promise<boolean>;
   /** Prints an info-level message. */
@@ -73,11 +75,11 @@ export async function runCiBootstrap(
   }
 
   deps.info(
-    `About to push 4 secrets to ${chalk.bold(options.repo)}:\n` +
-      `  - ${SECRET_NAMES.accessToken}\n` +
-      `  - ${SECRET_NAMES.refreshToken}\n` +
-      `  - ${SECRET_NAMES.expiresAt}\n` +
-      `  - ${SECRET_NAMES.zone}`,
+    `About to push 3 secrets + 1 variable to ${chalk.bold(options.repo)}:\n` +
+      `  - ${SECRET_NAMES.accessToken}  (secret)\n` +
+      `  - ${SECRET_NAMES.refreshToken}  (secret)\n` +
+      `  - ${SECRET_NAMES.expiresAt}  (secret)\n` +
+      `  - ${SECRET_NAMES.zone}  (variable)`,
   );
 
   if (!options.yes) {
@@ -96,7 +98,7 @@ export async function runCiBootstrap(
       options.repo,
     );
     deps.setSecret(SECRET_NAMES.expiresAt, session.expiresAt, options.repo);
-    deps.setSecret(SECRET_NAMES.zone, session.zone, options.repo);
+    deps.setVariable(SECRET_NAMES.zone, session.zone, options.repo);
   } catch (err) {
     deps.error(
       `Failed to write secret: ${
@@ -160,6 +162,28 @@ function defaultSetSecret(name: string, value: string, repo: string): void {
   }
 }
 
+/** Default variable writer: shells out to `gh variable set`. */
+function defaultSetVariable(name: string, value: string, repo: string): void {
+  const result = spawnSync('gh', ['variable', 'set', name, '--repo', repo], {
+    input: value,
+    stdio: ['pipe', 'inherit', 'inherit'],
+  });
+  if (result.error) {
+    if ((result.error as NodeJS.ErrnoException).code === 'ENOENT') {
+      throw new Error(
+        '`gh` CLI not found on PATH. Install GitHub CLI ' +
+          '(https://cli.github.com) and run `gh auth login` before retrying.',
+      );
+    }
+    throw result.error;
+  }
+  if (typeof result.status === 'number' && result.status !== 0) {
+    throw new Error(
+      `gh variable set ${name} exited with status ${result.status}`,
+    );
+  }
+}
+
 /** Default y/N confirm — reads a single line from stdin. */
 function defaultConfirm(prompt: string): Promise<boolean> {
   return new Promise((resolve) => {
@@ -202,6 +226,7 @@ export const ciBootstrapCommand: CommandModule = {
         {
           loadSession: defaultLoadSession,
           setSecret: defaultSetSecret,
+          setVariable: defaultSetVariable,
           confirm: defaultConfirm,
           info: (msg) => getUI().log.info(msg),
           error: (msg) => getUI().log.error(msg),
