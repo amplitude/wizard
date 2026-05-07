@@ -638,6 +638,57 @@ describe('WizardRouter', () => {
       expect(ref.session.signupAuth).not.toBeNull();
       expect(new WizardRouter().resolve(ref.session)).toBe(Screen.Auth);
     });
+
+    it('Esc on SigningUp during in-flight POST is walled', () => {
+      // Active screen is SigningUp (the agentic-signup POST is mid-flight).
+      // Esc must not let the user reset ceremony state mid-POST: the
+      // response could still land (success → tokens captured; abandon
+      // → ceremony settles) on a session that's been wiped. The
+      // ceremony entries' isWall predicate gates on `signupInFlight`
+      // exactly to block this race.
+      const router = new WizardRouter();
+      const session = signupBase({
+        signupEmail: 'ada@example.com',
+        signupInFlight: true,
+      });
+      expect(router.resolve(session)).toBe(Screen.SigningUp);
+
+      expect(router.canGoBack(session)).toBe(false);
+
+      const { stub, ref } = makeStubStore(session);
+      const ok = router.goBack(ref.session, stub as never);
+      expect(ok).toBe(false);
+      // Wall is non-mutating: ceremony state is untouched.
+      expect(ref.session.signupEmail).toBe('ada@example.com');
+      expect(ref.session.signupInFlight).toBe(true);
+      expect(new WizardRouter().resolve(ref.session)).toBe(Screen.SigningUp);
+    });
+
+    it('Esc on SigningUp after in-flight cleared resumes back-nav', () => {
+      // Once the wrapper's finally runs and `signupInFlight` flips back
+      // to false (e.g. signal-driven abort, or the response settled to
+      // a non-terminal state), the wall releases. Without signupAuth or
+      // signupAbandoned being set the user is in an interstitial state
+      // that shouldn't normally render — but the back-walk should be
+      // available so they can recover.
+      const router = new WizardRouter();
+      const session = signupBase({
+        signupEmail: 'ada@example.com',
+        signupInFlight: false,
+        signupAuth: null,
+        signupAbandoned: false,
+      });
+
+      expect(router.canGoBack(session)).toBe(true);
+
+      const { stub, ref } = makeStubStore(session);
+      const ok = router.goBack(ref.session, stub as never);
+      expect(ok).toBe(true);
+      // SignupEmail.revert wipes ceremony via _resetCeremonyKeys,
+      // landing the user back on SignupEmail to retype.
+      expect(ref.session.signupEmail).toBeNull();
+      expect(new WizardRouter().resolve(ref.session)).toBe(Screen.SignupEmail);
+    });
   });
 
   // ── 3. Overlay stack ──────────────────────────────────────────────
