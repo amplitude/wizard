@@ -443,6 +443,68 @@ describe('persistEventPlan', () => {
     expect(JSON.parse(fs.readFileSync(canonical(tmpDir), 'utf8'))).toEqual([]);
     expect(fs.existsSync(legacy(tmpDir))).toBe(false);
   });
+
+  // SCALE_RESEARCH §C.1 — paginated write phase persists call-sites so the
+  // rich plan survives compaction. Optional and additive: small-project
+  // runs without callsites round-trip the original {name, description} shape.
+  it('persists callsites verbatim when present', () => {
+    const events = [
+      {
+        name: 'User Signed Up',
+        description: 'Fires when signup completes',
+        callsites: [
+          { filePath: 'src/auth/signup.tsx', anchor: 'onSubmit' },
+          { filePath: 'src/auth/signup-mobile.tsx' },
+        ],
+      },
+    ];
+    expect(persistEventPlan(tmpDir, events)).toBe(true);
+    const parsed = JSON.parse(fs.readFileSync(canonical(tmpDir), 'utf8'));
+    expect(parsed).toEqual([
+      {
+        name: 'User Signed Up',
+        description: 'Fires when signup completes',
+        callsites: [
+          { filePath: 'src/auth/signup.tsx', anchor: 'onSubmit' },
+          { filePath: 'src/auth/signup-mobile.tsx' },
+        ],
+      },
+    ]);
+  });
+
+  it('omits the callsites field entirely when none provided', () => {
+    const events = [{ name: 'Page Viewed', description: 'Fires on mount' }];
+    expect(persistEventPlan(tmpDir, events)).toBe(true);
+    const parsed = JSON.parse(fs.readFileSync(canonical(tmpDir), 'utf8'));
+    expect(parsed).toEqual([
+      { name: 'Page Viewed', description: 'Fires on mount' },
+    ]);
+    // Important: don't write `callsites: undefined` or an empty array.
+    expect('callsites' in parsed[0]).toBe(false);
+  });
+
+  it('omits the callsites field when an empty array is provided', () => {
+    const events = [
+      { name: 'Page Viewed', description: 'Fires on mount', callsites: [] },
+    ];
+    expect(persistEventPlan(tmpDir, events)).toBe(true);
+    const parsed = JSON.parse(fs.readFileSync(canonical(tmpDir), 'utf8'));
+    expect('callsites' in parsed[0]).toBe(false);
+  });
+
+  it('drops the anchor field per-callsite when absent', () => {
+    const events = [
+      {
+        name: 'Page Viewed',
+        description: 'Fires on mount',
+        callsites: [{ filePath: 'src/page.tsx' }],
+      },
+    ];
+    expect(persistEventPlan(tmpDir, events)).toBe(true);
+    const parsed = JSON.parse(fs.readFileSync(canonical(tmpDir), 'utf8'));
+    expect(parsed[0].callsites).toEqual([{ filePath: 'src/page.tsx' }]);
+    expect('anchor' in parsed[0].callsites[0]).toBe(false);
+  });
 });
 
 // ---------------------------------------------------------------------------
@@ -1121,6 +1183,7 @@ describe('WIZARD_TOOL_NAMES', () => {
         'wizard-tools:confirm',
         'wizard-tools:choose',
         'wizard-tools:confirm_event_plan',
+        'wizard-tools:propose_event_plan',
         'wizard-tools:report_status',
         'wizard-tools:record_dashboard',
         // PR 2 of DEFER_DASHBOARD_PLAN: registered (additive) so the
