@@ -1367,6 +1367,34 @@ async function runAgentWizardBody(
   // independent I/O — overlap them to shorten the post-agent gap. Each step
   // owns its own `setPostAgentStep` lifecycle and session mutations on
   // disjoint fields (`commit` → API / `create-dashboard` → local artifacts).
+  //
+  // Pagination breadcrumb (SCALE_RESEARCH §C.2 + LLM_RELIABILITY_RESEARCH §B.2):
+  // capture how many planned events the agent emitted and whether the run
+  // crossed the pagination threshold. This lets us see how often >50-event
+  // codebases hit the wizard before the chunked write phase is end-to-end
+  // wired through the SDK (the schema + tools land in this PR; the
+  // multi-session driver is a follow-up — see PR description).
+  {
+    const eventCount = agentResult.plannedEvents?.length ?? 0;
+    const { shouldPaginate, resolveChunkSize, buildBatches } = await import(
+      './event-plan-pagination.js'
+    );
+    const paginated = shouldPaginate(eventCount);
+    const chunkSize = resolveChunkSize();
+    const totalBatches = paginated
+      ? buildBatches(eventCount, chunkSize).length
+      : 1;
+    logToFile(
+      `[agent-runner] event plan: ${eventCount} events, paginated=${paginated}, chunkSize=${chunkSize}, batches=${totalBatches}`,
+    );
+    analytics.wizardCapture('event plan paginated', {
+      'event count': eventCount,
+      paginated,
+      'chunk size': chunkSize,
+      'total batches': totalBatches,
+      integration: config.metadata.integration,
+    });
+  }
   const [plannedEventsSummary] = await Promise.all([
     commitPlannedEventsStep(
       agentResult.plannedEvents ?? [],
