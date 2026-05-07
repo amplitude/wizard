@@ -8,17 +8,7 @@
 import { createAnthropic } from '@ai-sdk/anthropic';
 
 import { sanitizingFetch } from '../gateway-request-sanitize.js';
-
-export function resolveWizardAnthropicAuthFromEnv(): {
-  apiKey?: string;
-  authToken?: string;
-} {
-  const apiKey = process.env.ANTHROPIC_API_KEY?.trim();
-  if (apiKey) return { apiKey };
-  const authToken = process.env.ANTHROPIC_AUTH_TOKEN?.trim();
-  if (authToken) return { authToken };
-  return {};
-}
+import { resolveAnthropicAuth } from './anthropic-auth.js';
 
 export type CreateWizardAiSdkAnthropicOptions = {
   /**
@@ -34,7 +24,7 @@ export function createWizardAiSdkAnthropic(
   opts: CreateWizardAiSdkAnthropicOptions = {},
 ) {
   const baseURL = opts.baseURL ?? process.env.ANTHROPIC_BASE_URL?.trim();
-  const auth = resolveWizardAnthropicAuthFromEnv();
+  const auth = resolveAnthropicAuth();
   const headers =
     opts.headers && Object.keys(opts.headers).length > 0
       ? opts.headers
