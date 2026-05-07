@@ -1,5 +1,48 @@
 # Changelog
 
+## [1.16.0](https://github.com/amplitude/wizard/compare/wizard-v1.15.0...wizard-v1.16.0) (2026-05-07)
+
+
+### Features
+
+* add get_event_plan to external MCP server ([#553](https://github.com/amplitude/wizard/issues/553)) ([b99e63d](https://github.com/amplitude/wizard/commit/b99e63d8fb436842551d3baa1f3577c687bdba3e))
+* **agent:** drop dashboard step from main run; wire is terminal (defer PR 4) ([#593](https://github.com/amplitude/wizard/issues/593)) ([079d4ff](https://github.com/amplitude/wizard/commit/079d4ffce1c2cfbd9437f3b1695af7d5f9378835))
+* **agent:** inject pre-flight context to eliminate redundant agent probing ([#600](https://github.com/amplitude/wizard/issues/600)) ([d055efb](https://github.com/amplitude/wizard/commit/d055efb2ee222e8a925fe8034d99a2105bf12af6))
+* **agent:** structured upstream-error parsing + run summary event ([#589](https://github.com/amplitude/wizard/issues/589)) ([254b495](https://github.com/amplitude/wizard/commit/254b49569f42a1724a8013c5dc956d5138c412b3))
+* **auth:** read WIZARD_OAUTH_TOKEN/EXPIRES_AT/ZONE from env ([#561](https://github.com/amplitude/wizard/issues/561)) ([8f36b42](https://github.com/amplitude/wizard/commit/8f36b42a6ce0426f4dd6fcc5c7222cd7245688b5))
+* **ci:** scheduled wizard-OAuth-token refresh workflow + ci-bootstrap CLI ([#605](https://github.com/amplitude/wizard/issues/605)) ([9102b5b](https://github.com/amplitude/wizard/commit/9102b5bd36a41a271dc031f179d8f62cedba0bbb))
+* **commands:** add dashboard-plan artifact + record_dashboard_plan tool ([#583](https://github.com/amplitude/wizard/issues/583)) ([2b531a7](https://github.com/amplitude/wizard/commit/2b531a706bf7f61256d8b7ec69f171a60373dc89))
+* **commands:** wizard dashboard command for deferred chart/dashboard creation ([#584](https://github.com/amplitude/wizard/issues/584)) ([f196fd3](https://github.com/amplitude/wizard/commit/f196fd3c90becf6d430f0d8f7e57e4adcc5d1541))
+* **evals:** scaffold SDK-integration eval framework (Week 1) ([#560](https://github.com/amplitude/wizard/issues/560)) ([97273ec](https://github.com/amplitude/wizard/commit/97273ecc8a3ed7ff39c65443b33c449ffed67daf))
+* gateway schema tree guard + sanitizingFetch contract tests ([#550](https://github.com/amplitude/wizard/issues/550)) ([62583b9](https://github.com/amplitude/wizard/commit/62583b9b46b8854bed546b393e8da6ca226df37e))
+* **perf:** port bench harness from wizard-rewrite ([#564](https://github.com/amplitude/wizard/issues/564)) ([d1d1b32](https://github.com/amplitude/wizard/commit/d1d1b320870cc15fcb1002c480bc9eed7da6f508))
+* **reliability:** transactional rollback on cancel/abort ([#598](https://github.com/amplitude/wizard/issues/598)) ([f7ddda0](https://github.com/amplitude/wizard/commit/f7ddda0c5c5b27473a4918cc96ae557652998e19))
+* **storage:** stop writing ampli.json mirror (Phase G-1) ([#573](https://github.com/amplitude/wizard/issues/573)) ([e5c42d4](https://github.com/amplitude/wizard/commit/e5c42d4285e37c4f46ba7aac462be1ed30c89162))
+
+
+### Bug Fixes
+
+* address three regressions surfaced by end-to-end excalidraw run ([#578](https://github.com/amplitude/wizard/issues/578)) ([#579](https://github.com/amplitude/wizard/issues/579)) ([40c5c8f](https://github.com/amplitude/wizard/commit/40c5c8f756eba7e34a01e86e793fde6456a45347))
+* **agent:** allowlist yarn/pnpm/npm workspace selectors in Bash policy ([#580](https://github.com/amplitude/wizard/issues/580)) ([e326473](https://github.com/amplitude/wizard/commit/e3264735f116705cf11af2261492802aabc88bfd))
+* **agent:** jitter + retry-after + compaction event hooks (reliability) ([#595](https://github.com/amplitude/wizard/issues/595)) ([9f69d4c](https://github.com/amplitude/wizard/commit/9f69d4cdd5e161c154cb0bbbfe351b42ff7293cd))
+* **agent:** recognize analytics wrappers via discover-analytics-patterns skill ([#585](https://github.com/amplitude/wizard/issues/585)) ([9794f61](https://github.com/amplitude/wizard/commit/9794f61a6aa61fcf8f24181f94001854daf6ffdc))
+* **agent:** stop opting into 1M-context beta on the gateway path ([#528](https://github.com/amplitude/wizard/issues/528)) ([0d47c12](https://github.com/amplitude/wizard/commit/0d47c12b9a6a02a1aa4079cd37f43d2d955b4469))
+* **agent:** unbreak default-mode runs by giving fallbackModel a distinct alias ([#569](https://github.com/amplitude/wizard/issues/569)) ([1bc9b53](https://github.com/amplitude/wizard/commit/1bc9b53079bda413c6b5c0d356ca61a14d19bbdd))
+* **cli:** stop translating AMPLITUDE_WIZARD_SKILL_TIERS to a yargs flag ([#587](https://github.com/amplitude/wizard/issues/587)) ([d4b816a](https://github.com/amplitude/wizard/commit/d4b816a722149331d8d731c03ba8c3581178f9cd))
+* **health-checks:** replace dead amplitudestatus.com with status.amplitude.com ([#533](https://github.com/amplitude/wizard/issues/533)) ([fec4b2c](https://github.com/amplitude/wizard/commit/fec4b2cfd4bc7296368763037b2bacfe245f8a23))
+* **journey:** recognize chart-building tools as dashboard in-progress triggers ([#581](https://github.com/amplitude/wizard/issues/581)) ([1c084a1](https://github.com/amplitude/wizard/commit/1c084a1df50c5f58b4a077a70e18d3176bb21b0d))
+* **p0:** welcome stuck + auth opens unprompted on cold-start ([#609](https://github.com/amplitude/wizard/issues/609)) ([36410eb](https://github.com/amplitude/wizard/commit/36410ebc805557f3e2357d328300baa0020c62bc))
+* **skills:** allow dotted skill IDs in SKILL_ID_ALLOWLIST ([#597](https://github.com/amplitude/wizard/issues/597)) ([7cb31ab](https://github.com/amplitude/wizard/commit/7cb31abc9679eaf0be2b7f060e89c4f5b48f2888))
+* **skills:** pin context-hub releases + guard against shipping 'version: dev' skills ([#540](https://github.com/amplitude/wizard/issues/540)) ([354c4a4](https://github.com/amplitude/wizard/commit/354c4a4fe2f5b3d400d4d409a36379961256e86f))
+* **skills:** update skills ([#538](https://github.com/amplitude/wizard/issues/538)) ([db231f2](https://github.com/amplitude/wizard/commit/db231f25d806ad61330bfb12bb4601c30b9aaa36))
+
+
+### Performance Improvements
+
+* **agent:** cap Amplitude MCP surface to curated 17-tool allowlist ([#588](https://github.com/amplitude/wizard/issues/588)) ([018e02e](https://github.com/amplitude/wizard/commit/018e02ec93347c5376d70eb2db2e8d29675161b8))
+* **agent:** optimize skill-tier-prompt budget-overflow path (Node 24 flake) ([#582](https://github.com/amplitude/wizard/issues/582)) ([f8a557b](https://github.com/amplitude/wizard/commit/f8a557b3dcd3eac638bfe453736fe74468bd4883))
+* **skills:** enable Tier-1 menu + lazy skill bodies by default ([#591](https://github.com/amplitude/wizard/issues/591)) ([c3576d1](https://github.com/amplitude/wizard/commit/c3576d13e37f051dfc92dcf1468caee1446afbce))
+
 ## [1.15.0](https://github.com/amplitude/wizard/compare/wizard-v1.14.0...wizard-v1.15.0) (2026-05-01)
 
 
