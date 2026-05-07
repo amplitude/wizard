@@ -8,11 +8,12 @@ export {
   getConsoleQueryStack,
   type ConsoleQueryStackKind,
 } from './console-query-stack.js';
-export {
-  createWizardAiSdkAnthropic,
-  resolveWizardAnthropicAuthFromEnv,
-  type CreateWizardAiSdkAnthropicOptions,
-} from './wizard-ai-sdk-anthropic.js';
+// Type-only re-export — TypeScript erases this at compile time, so importing
+// the barrel does NOT eagerly load `@ai-sdk/anthropic`. Value-side symbols
+// (`createWizardAiSdkAnthropic`) must be imported directly from
+// `./wizard-ai-sdk-anthropic.js`, ideally inside a dynamic import in the
+// function that uses them — see `console-query.ts` and the gateway probe.
+export type { CreateWizardAiSdkAnthropicOptions } from './wizard-ai-sdk-anthropic.js';
 export {
   enforceAiSdkProbeStrict,
   maybeRunAiSdkGatewayProbe,

@@ -53,7 +53,7 @@ function parseWizardExpiresAt(raw: string | undefined): number | null {
  * Returns `null` when `WIZARD_OAUTH_TOKEN` is not set — the caller then
  * falls through to the standard OAuth-file path.
  *
- * Note: PR #549's `resolveWizardAnthropicAuthFromEnv` (AI-SDK path) reads
+ * Note: PR #549's `resolveAnthropicAuth` (AI-SDK path) reads
  * `ANTHROPIC_API_KEY` / `ANTHROPIC_AUTH_TOKEN`. Those are SDK-shaped env
  * vars consumed at the gateway-call boundary; this function reads the
  * `WIZARD_*` org-secret-shaped vars consumed at the credential-resolution
