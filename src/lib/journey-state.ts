@@ -80,58 +80,30 @@ function isWizardTool(toolName: string, bare: string): boolean {
 }
 
 /**
- * Recognise a Bash command that runs a JS or Python package install.
+ * Recognise a Bash command that installs an Amplitude SDK package.
  * Covers npm / yarn / pnpm / bun (JS) and pip / poetry / uv (Python).
- *
- * Deliberately broad: any package install verb during a wizard run is
- * load-bearing progress (the agent is past detection and into
- * dependency setup), so we flip Install to in_progress on the first
- * such Bash call rather than waiting for the literal Amplitude package
- * argument. This is the cold-start "0 done · 4 to go" fix — users see
- * the journey advance the moment the agent starts installing things.
+ * Conservative: requires both the install verb AND a literal
+ * `@amplitude/` (JS) or `amplitude-` (Python) in the same command so a
+ * Bash that merely mentions amplitude in a comment / unrelated flag
+ * doesn't trigger the transition.
  */
-function isPackageInstallCommand(command: string): boolean {
+function isAmplitudeInstallCommand(command: string): boolean {
   if (!command) return false;
   const cmd = command.toLowerCase();
-  // JS managers: `i` is npm / pnpm / yarn shorthand for `install`. Match it
-  // only as a standalone token so we don't accidentally fire on `pip` or
-  // other words that happen to contain the letter.
-  const jsInstallVerb = /\b(npm|pnpm|yarn|bun)\s+(install|add|i)\b/.test(cmd);
-  if (jsInstallVerb) return true;
-  const pyInstallVerb = /\b(pip|poetry|uv)\s+(install|add)\b/.test(cmd);
-  if (pyInstallVerb) return true;
+  const hasJsInstallVerb = /\b(npm|pnpm|yarn|bun)\s+(install|add|i)\b/.test(
+    cmd,
+  );
+  const hasJsAmplitudePackage = /(^|\s)@amplitude\//.test(cmd);
+  if (hasJsInstallVerb && hasJsAmplitudePackage) return true;
+  const hasPyInstallVerb = /\b(pip|poetry|uv)\s+(install|add)\b/.test(cmd);
+  const hasPyAmplitudePackage =
+    /(^|\s|=)amplitude(-analytics|_analytics)?\b/.test(cmd);
+  if (hasPyInstallVerb && hasPyAmplitudePackage) return true;
   return false;
 }
 
 /** Set of write-tool names that mutate files on disk. Mirrors `classifyWriteOperation` in agent-interface.ts. */
 const WRITE_TOOLS = new Set(['Edit', 'Write', 'MultiEdit', 'NotebookEdit']);
-
-/**
- * Read-only investigation tools the agent uses while ramping up. The
- * first such call is a strong signal that detection work has started —
- * we flip Detect to in_progress so the user sees progress during the
- * 1-3s cold-start window before any explicit detect tool fires.
- */
-const DETECT_INVESTIGATION_TOOLS = new Set(['Read', 'Grep', 'Glob']);
-
-/**
- * File-path patterns the wizard itself owns. An Edit / Write to one of
- * these is bookkeeping (events.json, dashboard.json, the post-run
- * setup report), not user-facing instrumentation, so it must NOT flip
- * Wire to in_progress.
- */
-function isWizardManagedPath(filePath: string): boolean {
-  if (!filePath) return false;
-  // Project metadata directory: `<installDir>/.amplitude/...`
-  if (/(^|[\\/])\.amplitude([\\/]|$)/.test(filePath)) return true;
-  // Wizard-generated post-run reports.
-  if (/amplitude-setup-report(\.previous)?\.md$/.test(filePath)) return true;
-  // Legacy mirrors next to the project root.
-  if (/(^|[\\/])\.amplitude-events\.json$/.test(filePath)) return true;
-  if (/(^|[\\/])\.amplitude-dashboard\.json$/.test(filePath)) return true;
-  if (/(^|[\\/])ampli\.json$/.test(filePath)) return true;
-  return false;
-}
 
 function readStringField(value: unknown, key: string): string | undefined {
   if (!value || typeof value !== 'object') return undefined;
@@ -148,25 +120,16 @@ function readStringField(value: unknown, key: string): string | undefined {
  *
  * Steps and their triggers:
  *
- *   1. **detect** — flips to in_progress on the FIRST of:
- *        - any `Read` / `Grep` / `Glob` call (agent ramping up), OR
- *        - `mcp__wizard-tools__detect_package_manager` Pre.
- *      Completes on `detect_package_manager` Post.
- *   2. **install** — flips to in_progress on the FIRST of:
- *        - any `(npm|pnpm|yarn|bun)\s+(install|add|i)` /
- *          `(pip|poetry|uv)\s+(install|add)` Bash command (Pre), OR
- *        - `detect_package_manager` Post (detection just finished, the
- *          agent is about to install something).
- *      No completion trigger — install is implicitly completed when a
- *      later step (plan / wire) advances and the store cascades.
+ *   1. **detect** — `mcp__wizard-tools__detect_package_manager`
+ *      Pre → in_progress, Post → completed.
+ *   2. **install** — Bash command running an Amplitude package install
+ *      (e.g. `pnpm add @amplitude/unified`, `pip install amplitude-analytics`).
+ *      Pre → in_progress.
  *   3. **plan** — `mcp__wizard-tools__confirm_event_plan`
  *      Pre → in_progress, Post → completed (regardless of approval —
  *      the call returning means the agent finished the planning step;
- *      the user's verdict on the plan is orthogonal). Feedback /
- *      re-loop calls re-enter Pre but the idempotent guard means the
- *      step stays in_progress without churn.
- *   4. **wire** — first Edit / Write / MultiEdit / NotebookEdit Pre to
- *      a non-wizard-managed file path AFTER `plan` has completed.
+ *      the user's verdict on the plan is orthogonal).
+ *   4. **wire** — any Edit/Write tool firing AFTER plan has completed.
  *      Pre → in_progress. Wire is the terminal step; it transitions to
  *      `completed` from the agent-runner post-loop boundary
  *      (`finalizeWireStep`) once the agent stream ends and an
@@ -174,14 +137,6 @@ function readStringField(value: unknown, key: string): string | undefined {
  *      signal — wiring spans many files and the first PostToolUse on a
  *      write would falsely flip the pill to "done" while the agent is
  *      still mid-instrumentation.
- *
- * Idempotency: every `in_progress` trigger checks `prevDerived[stepId]`
- * and returns null if the step is already in_progress or completed.
- * The classifier never demotes a completed step back to in_progress
- * (mirroring the store's monotonic guard) — second/third Read calls,
- * additional install Bashes, repeated confirm_event_plan invocations,
- * and subsequent Edits after wire is in_progress all fall through to
- * `null` so the UI is only notified on genuine state changes.
  *
  * History: a fifth `dashboard` step used to live here, with triggers on
  * Amplitude MCP `create_chart` / `create_dashboard` / `record_dashboard`
@@ -195,59 +150,22 @@ export function classifyToolEvent(
   const { phase, toolName, toolInput, prevDerived } = input;
   const bare = bareToolName(toolName);
 
-  const detectStatus = prevDerived?.detect;
-  const installStatus = prevDerived?.install;
-  const planStatus = prevDerived?.plan;
-  const wireStatus = prevDerived?.wire;
-
   // ── Step 3: plan ──
   if (bare === 'confirm_event_plan' && isWizardTool(toolName, bare)) {
     if (phase === 'post') return { stepId: 'plan', status: 'completed' };
-    // Pre: only emit on the first call. Subsequent calls (feedback
-    // loops, retries) are no-ops once plan is already in_progress or
-    // completed.
-    if (planStatus === 'in_progress' || planStatus === 'completed') return null;
     return { stepId: 'plan', status: 'in_progress' };
   }
 
-  // ── Step 1: detect — explicit detect_package_manager tool ──
-  // Pre flips to in_progress on first call. Post completes detect.
-  // The function can only return one transition per event, so we
-  // emit detect:completed on Post — the install→in_progress signal
-  // comes from the agent's subsequent Bash install command. The
-  // store cascades detect→completed automatically when install
-  // advances later, so we don't lose any signal.
+  // ── Step 1: detect ──
   if (bare === 'detect_package_manager' && isWizardTool(toolName, bare)) {
     if (phase === 'post') return { stepId: 'detect', status: 'completed' };
-    if (detectStatus === 'in_progress' || detectStatus === 'completed') {
-      return null;
-    }
-    return { stepId: 'detect', status: 'in_progress' };
-  }
-
-  // ── Step 1: detect — implicit ramp-up (Read / Grep / Glob) ──
-  // First read-only investigation tool flips detect to in_progress
-  // even before the agent calls detect_package_manager. This is the
-  // cold-start fix: users see progress during the 1-3s window while
-  // the agent is reading skill files / project layout.
-  if (
-    phase === 'pre' &&
-    DETECT_INVESTIGATION_TOOLS.has(toolName) &&
-    detectStatus !== 'in_progress' &&
-    detectStatus !== 'completed'
-  ) {
     return { stepId: 'detect', status: 'in_progress' };
   }
 
   // ── Step 2: install ──
-  if (
-    phase === 'pre' &&
-    toolName === 'Bash' &&
-    installStatus !== 'in_progress' &&
-    installStatus !== 'completed'
-  ) {
+  if (phase === 'pre' && toolName === 'Bash') {
     const command = readStringField(toolInput, 'command') ?? '';
-    if (isPackageInstallCommand(command)) {
+    if (isAmplitudeInstallCommand(command)) {
       return { stepId: 'install', status: 'in_progress' };
     }
   }
@@ -258,24 +176,16 @@ export function classifyToolEvent(
   // the agent is instructed to confirm_event_plan THEN write track calls,
   // so the temporal gate is sufficient and avoids parsing edit content.
   //
-  // Wizard-managed paths (`.amplitude/events.json`, the post-run setup
-  // report, legacy mirrors) are bookkeeping writes the wizard itself
-  // performs — they don't count as user-facing instrumentation.
-  //
   // No `dashboard` guard any more — the dashboard step is gone, and wire
   // is now the terminal step. Agent-runner flips wire to `completed` at
   // the post-agent boundary (see `finalizeWireStep`), not here.
   if (
     phase === 'pre' &&
     WRITE_TOOLS.has(toolName) &&
-    planStatus === 'completed' &&
-    wireStatus !== 'in_progress' &&
-    wireStatus !== 'completed'
+    prevDerived?.plan === 'completed' &&
+    prevDerived?.wire !== 'completed'
   ) {
-    const filePath = readStringField(toolInput, 'file_path') ?? '';
-    if (!isWizardManagedPath(filePath)) {
-      return { stepId: 'wire', status: 'in_progress' };
-    }
+    return { stepId: 'wire', status: 'in_progress' };
   }
 
   return null;
