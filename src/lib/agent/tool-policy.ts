@@ -26,6 +26,21 @@ export const MAX_BASH_SLEEP_SECONDS = 5;
 
 export const MAX_CONSECUTIVE_BASH_DENIES = 5;
 
+/**
+ * Maximum times the agent may call `wizard-tools:load_skill` for the same
+ * skillId within a single agent run. Bodies are cached on the wizard side
+ * (the file lives on disk in the wizard package), so repeat calls are
+ * always pure waste — and historically a load_skill_menu → load_skill →
+ * load_skill_menu loop has been observed in production traces (see the
+ * "DISABLED" comment block in `wizard-tools.ts`).
+ *
+ * The limit is two: the model can re-fetch once after a long context
+ * compaction without tripping the deny, but a tight succession of three
+ * gets blocked with a clear "use the cached body" message that breaks
+ * the loop instead of letting it burn turns.
+ */
+export const MAX_LOAD_SKILL_PER_ID = 2;
+
 /** Matches `sleep <number>` at the start of a command or after a chain operator. */
 const SLEEP_COMMAND_PATTERN = /(?:^|[;&|\n]\s*)\s*sleep\s+(\d+(?:\.\d+)?)/i;
 
@@ -738,6 +753,12 @@ export function createPreToolUseHook(
 ): HookCallback {
   let consecutiveBashDenies = 0;
   let circuitBreakerFired = false;
+  // Per-skillId call counts for the tiered `load_skill` tool. Scoped to
+  // the lifetime of this hook instance, which matches the lifetime of a
+  // single agent run — that's our "phase" per the rollout spec. Tracking
+  // by skillId (not just total calls) means the agent CAN load multiple
+  // distinct skills, just not re-fetch the same body in a loop.
+  const loadSkillCalls = new Map<string, number>();
 
   /**
    * Wrap a Bash deny return value with circuit-breaker bookkeeping.
@@ -805,6 +826,48 @@ export function createPreToolUseHook(
           'tool name': shortName,
           reason,
         });
+      }
+    }
+
+    // Tier-2 `load_skill` loop detection. The body lives on disk inside
+    // the wizard package — once fetched, the agent already has it in
+    // context. A 3rd call for the same id always indicates either a
+    // load_skill_menu → load_skill → load_skill_menu loop (the legacy
+    // pattern that motivated disabling the original menu/install tools)
+    // or context that was lost across a compaction we can't help with.
+    // Either way, denying with a clear "use what you already have"
+    // message is strictly better than letting the loop burn turns.
+    if (toolName === 'mcp__wizard-tools__load_skill') {
+      const skillId =
+        typeof toolInput.skillId === 'string' ? toolInput.skillId : '';
+      if (skillId) {
+        const count = (loadSkillCalls.get(skillId) ?? 0) + 1;
+        loadSkillCalls.set(skillId, count);
+        if (count > MAX_LOAD_SKILL_PER_ID) {
+          const reason = `load_skill for "${skillId}" has already been called ${
+            count - 1
+          } times in this run (cap is ${MAX_LOAD_SKILL_PER_ID}). The skill body is in your context — re-read your earlier tool result instead of re-fetching. If you need a different skill, call load_skill with a different skillId.`;
+          logToFile(
+            `Denying load_skill loop on "${skillId}" (call #${count}): ${reason}`,
+          );
+          captureWizardError(
+            'Skill Tier Policy',
+            'load_skill loop detected',
+            'createPreToolUseHook',
+            {
+              'skill id': skillId,
+              'call count': count,
+              cap: MAX_LOAD_SKILL_PER_ID,
+            },
+          );
+          return Promise.resolve({
+            hookSpecificOutput: {
+              hookEventName: 'PreToolUse',
+              permissionDecision: 'deny',
+              permissionDecisionReason: reason,
+            },
+          });
+        }
       }
     }
 

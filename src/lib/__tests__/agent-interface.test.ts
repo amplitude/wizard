@@ -2799,6 +2799,87 @@ describe('createPreToolUseHook', () => {
     });
   });
 
+  // ── load_skill loop guard ─────────────────────────────────────────────
+  //
+  // Tier-2 skill bodies are cached for the run — calling load_skill
+  // for the same id more than the cap is always a loop bug (typically
+  // load_skill_menu → load_skill → load_skill_menu burning turns).
+  // Verifies the guard fires at the cap without flagging legitimate
+  // calls for distinct skills.
+  describe('load_skill loop guard', () => {
+    const TOOL = 'mcp__wizard-tools__load_skill';
+    const hookOpts = { signal: new AbortController().signal };
+
+    it('allows the first two calls for the same skillId, denies the third', async () => {
+      const hook = createPreToolUseHook();
+      const skillId = 'add-analytics-instrumentation';
+      const call = () =>
+        hook(
+          { tool_name: TOOL, tool_input: { skillId, reason: 'unit test' } },
+          'tool-use-id',
+          hookOpts,
+        );
+
+      // Calls 1 and 2 must pass through (no deny payload).
+      const r1 = await call();
+      expect(r1).toEqual({});
+      const r2 = await call();
+      expect(r2).toEqual({});
+
+      // Call 3 trips the guard.
+      const r3 = await call();
+      expect(r3.hookSpecificOutput).toMatchObject({
+        hookEventName: 'PreToolUse',
+        permissionDecision: 'deny',
+      });
+      const reason = (
+        r3.hookSpecificOutput as { permissionDecisionReason: string }
+      ).permissionDecisionReason;
+      expect(reason).toContain(skillId);
+      expect(reason.toLowerCase()).toContain('cap');
+    });
+
+    it('does not deny calls for distinct skillIds (independent counters)', async () => {
+      const hook = createPreToolUseHook();
+      const call = (skillId: string) =>
+        hook(
+          { tool_name: TOOL, tool_input: { skillId, reason: 'unit test' } },
+          'tool-use-id',
+          hookOpts,
+        );
+
+      // Three calls, three different ids — no deny.
+      expect(await call('add-analytics-instrumentation')).toEqual({});
+      expect(await call('amplitude-quickstart-taxonomy-agent')).toEqual({});
+      expect(await call('amplitude-chart-dashboard-plan')).toEqual({});
+    });
+
+    it('counters reset across hook instances (per-run scope)', async () => {
+      // First hook hits the cap.
+      const hook1 = createPreToolUseHook();
+      const callOnce = (h: typeof hook1) =>
+        h(
+          {
+            tool_name: TOOL,
+            tool_input: { skillId: 'wizard-prompt-supplement', reason: 'x' },
+          },
+          'tool-use-id',
+          hookOpts,
+        );
+      await callOnce(hook1);
+      await callOnce(hook1);
+      const hook1Third = await callOnce(hook1);
+      expect(hook1Third.hookSpecificOutput).toMatchObject({
+        permissionDecision: 'deny',
+      });
+
+      // Fresh hook instance starts the counter over (new run).
+      const hook2 = createPreToolUseHook();
+      const hook2First = await callOnce(hook2);
+      expect(hook2First).toEqual({});
+    });
+  });
+
   // ── Destructive-bash safety scanner ──────────────────────────────────
   //
   // Verifies the wiring between createPreToolUseHook and the scanner. The
