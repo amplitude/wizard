@@ -598,10 +598,11 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
         return;
       }
       if (ch === 'n') {
-        // Keep credentials + org; only clear the project selection so
-        // CreateProjectScreen can authenticate and knows which org to
-        // create in without a fresh OAuth round-trip.
-        store.clearProjectForNewProject();
+        // Keep credentials + org + project intact; only flip off the
+        // confirmation gate so CreateProjectScreen can render. The
+        // create success path overwrites project fields; cancel restores
+        // the confirm screen so the original project stays visible.
+        store.dismissAccountConfirmForNewProject();
         store.startCreateProject('account-confirm');
         return;
       }

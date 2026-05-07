@@ -1324,11 +1324,20 @@ export class WizardStore {
 
   /** Exit the create-project flow without creating a project. */
   cancelCreateProject(): void {
+    const source = this.session.createProject.source;
     this.$session.setKey('createProject', {
       pending: false,
       source: null,
       suggestedName: null,
     });
+    // Cancelling from the account-confirm path means the user changed
+    // their mind about creating a new project — bring them back to the
+    // confirm screen with the original selection still intact (the
+    // dismiss path leaves project-level fields untouched precisely so
+    // this restore is a no-op on session state, just a flag flip).
+    if (source === 'account-confirm') {
+      this.$session.setKey('requiresAccountConfirmation', true);
+    }
     analytics.wizardCapture('Create Project Cancelled', {});
     this.emitChange();
   }
@@ -1788,19 +1797,18 @@ export class WizardStore {
    * Unlike `rejectStoredAccount()` (which clears credentials + org so the
    * full SUSI picker re-runs), this keeps credentials and the resolved org so
    * CreateProjectScreen can authenticate and knows which org to create in.
-   * Only the project-level selection is cleared because the user is replacing
-   * the project, not switching orgs or signing in again.
+   *
+   * Project-level fields (id/name/appId/envName/projectHasData) are left
+   * intact: the create-project success path overwrites them via
+   * `restoreSessionIds` + `setCredentials` + `setProjectHasData(false)`,
+   * and the cancel path needs them so `cancelCreateProject` can restore the
+   * account-confirm screen with the original selection still visible.
+   * Returning users never have `pendingOrgs` populated (it's only set by
+   * the OAuth-or-mismatch paths), so falling back to a project-less Auth
+   * screen would render an OAuth-waiting state with no login URL.
    */
-  clearProjectForNewProject(): void {
+  dismissAccountConfirmForNewProject(): void {
     this.$session.setKey('requiresAccountConfirmation', false);
-    // Keep credentials — we already have valid auth tokens; no new OAuth
-    // round-trip is needed to create a project.
-    // Keep selectedOrgId / selectedOrgName — we're creating in the same org.
-    this.$session.setKey('selectedProjectId', null);
-    this.$session.setKey('selectedProjectName', null);
-    this.$session.setKey('selectedAppId', null);
-    this.$session.setKey('selectedEnvName', null);
-    this.$session.setKey('projectHasData', null);
     analytics.wizardCapture('account project cleared for new project', {
       'from screen': 'auth',
     });

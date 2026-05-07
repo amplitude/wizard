@@ -36,6 +36,7 @@ import { FileWritesPanel } from '../components/FileWritesPanel.js';
 import { FinalizingPanel } from '../components/FinalizingPanel.js';
 import { PostAgentStepStatus } from '../session-constants.js';
 import { useStdoutDimensions } from '../hooks/useStdoutDimensions.js';
+import { useResolvedZone } from '../hooks/useResolvedZone.js';
 import { DiscoveredFeature } from '../../../lib/wizard-session.js';
 import {
   ADDITIONAL_FEATURE_LABELS,
@@ -136,8 +137,8 @@ const InlineEventPlan = ({ store }: { store: WizardStore }) => {
 
 /** Compact conditional tips — Stripe doc link only (other features are queued tasks). */
 const ConditionalTips = ({ store }: { store: WizardStore }) => {
-  const { discoveredFeatures, selectedOrgId, region } = store.session;
-  const zone = (region ?? 'us');
+  const { discoveredFeatures, selectedOrgId } = store.session;
+  const zone = useResolvedZone(store.session);
   const tips: ReactNode[] = [];
 
   if (discoveredFeatures.includes(DiscoveredFeature.Stripe)) {
