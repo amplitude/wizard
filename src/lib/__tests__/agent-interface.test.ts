@@ -691,57 +691,71 @@ describe('runAgent', () => {
       vi.useRealTimers();
     });
 
-    it('retries after a stall and succeeds on the second attempt', async () => {
-      vi.useFakeTimers();
+    // 15s real-time timeout (default 5s). The retry path added in PR #595
+    // walks through jittered-backoff math, the per-process retry budget,
+    // the optional `emitTransientRetry` UI hook, and `agentState.reset()`
+    // between attempts. The cumulative microtask work that
+    // `vi.advanceTimersByTimeAsync(63_000)` schedules tipped this test
+    // past the default 5s vitest deadline on slow Node 20 CI runners
+    // (observed at 5017ms). 15s is a comfortable margin without depending
+    // on runner speed. Also bumped the advance window from 63s → 70s
+    // because the full-jitter formula `min(30s, 2s + Math.random()*2s)`
+    // can return up to ~4s, so 60s stall + 4s backoff = 64s worst case.
+    it(
+      'retries after a stall and succeeds on the second attempt',
+      { timeout: 15_000 },
+      async () => {
+        vi.useFakeTimers();
 
-      let queryCallCount = 0;
+        let queryCallCount = 0;
 
-      mockQuery.mockImplementation(
-        (params: { options: Record<string, unknown> }) => {
-          queryCallCount++;
-          const signal = params.options.abortSignal as AbortSignal;
+        mockQuery.mockImplementation(
+          (params: { options: Record<string, unknown> }) => {
+            queryCallCount++;
+            const signal = params.options.abortSignal as AbortSignal;
 
-          if (queryCallCount === 1) {
-            // Hang until aborted — no yield because the await always rejects first
-            // eslint-disable-next-line require-yield
+            if (queryCallCount === 1) {
+              // Hang until aborted — no yield because the await always rejects first
+              // eslint-disable-next-line require-yield
+              return (async function* () {
+                await new Promise<never>((_, reject) => {
+                  signal.addEventListener('abort', () =>
+                    reject(new Error('Stall aborted')),
+                  );
+                });
+              })();
+            }
+
+            // Second attempt: succeed immediately
             return (async function* () {
-              await new Promise<never>((_, reject) => {
-                signal.addEventListener('abort', () =>
-                  reject(new Error('Stall aborted')),
-                );
-              });
+              yield {
+                type: 'result',
+                subtype: 'success',
+                is_error: false,
+                result: '',
+              };
             })();
-          }
+          },
+        );
 
-          // Second attempt: succeed immediately
-          return (async function* () {
-            yield {
-              type: 'result',
-              subtype: 'success',
-              is_error: false,
-              result: '',
-            };
-          })();
-        },
-      );
+        const runPromise = runAgent(
+          defaultAgentConfig,
+          'test prompt',
+          defaultOptions,
+          mockSpinner as unknown as SpinnerHandle,
+          { successMessage: 'Done', errorMessage: 'Failed' },
+        );
 
-      const runPromise = runAgent(
-        defaultAgentConfig,
-        'test prompt',
-        defaultOptions,
-        mockSpinner as unknown as SpinnerHandle,
-        { successMessage: 'Done', errorMessage: 'Failed' },
-      );
+        // 60s cold-start stall + jittered backoff (2-4s) = 62-64s worst case.
+        await vi.advanceTimersByTimeAsync(70_000);
 
-      // Trigger the initial stall timeout (60s cold-start grace period) + backoff (2s)
-      await vi.advanceTimersByTimeAsync(63_000);
+        const result = await runPromise;
 
-      const result = await runPromise;
-
-      expect(result).toEqual({ plannedEvents: [] });
-      expect(queryCallCount).toBe(2);
-      expect(mockSpinner.stop).toHaveBeenCalledWith('Done');
-    });
+        expect(result).toEqual({ plannedEvents: [] });
+        expect(queryCallCount).toBe(2);
+        expect(mockSpinner.stop).toHaveBeenCalledWith('Done');
+      },
+    );
 
     it('throws after exhausting all retries', async () => {
       vi.useFakeTimers();
