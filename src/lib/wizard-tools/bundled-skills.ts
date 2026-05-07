@@ -247,6 +247,15 @@ export function preStageSkills(
     'wizard-prompt-supplement',
     'amplitude-quickstart-taxonomy-agent',
     'add-analytics-instrumentation',
+    // Pre-staged so the agent can load it via the Skill tool BEFORE
+    // confirm_event_plan to detect existing analytics wrappers / helpers
+    // / hooks in the codebase. Without this, the agent reimplements
+    // events on top of the raw SDK and ignores the wrappers customers
+    // already use (Lendi feedback — see the corresponding commandment
+    // in `commandments.ts`). Referenced by the `instrument-events` and
+    // `discover-event-surfaces` skills as well, so pre-staging avoids
+    // a missing-skill error if those sub-skills run.
+    'discover-analytics-patterns',
     'amplitude-chart-dashboard-plan',
   ];
   const staged: string[] = [];
