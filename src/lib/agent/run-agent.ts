@@ -17,6 +17,8 @@
  *   | Surface                   | D-3 status                       |
  *   |---------------------------|-----------------------------------|
  *   | streamText against gateway| ✅ via createWizardAiSdkAnthropic |
+ *   | session-id header         | ✅ via buildAiSdkProviderHeaders  |
+ *   | observability middleware  | ✅ via dispatch synth onMessage   |
  *   | system prompt + cache     | ✅ ephemeral cache control        |
  *   | wizard-tools subset       | ✅ native AI SDK tools            |
  *   | Amplitude MCP             | ⚠️ deferred to D-4                |
@@ -34,7 +36,12 @@
  * `AMPLITUDE_WIZARD_AI_SDK_INNER_LOOP=1` (see `run-agent-feature-flag.ts`).
  * Default off — this PR ships dark.
  */
-import { stepCountIs, streamText, type LanguageModel } from 'ai';
+import {
+  stepCountIs,
+  streamText,
+  type LanguageModel,
+  type SystemModelMessage,
+} from 'ai';
 
 import { logToFile } from '../../utils/debug.js';
 import type { WizardOptions } from '../../utils/types.js';
@@ -204,16 +211,25 @@ export function buildAiSdkSystemPrompt(args: {
 /**
  * Build the system message envelope `streamText` accepts, attaching
  * the Anthropic `cacheControl: { type: 'ephemeral' }` provider option
- * so prompt caching kicks in on the static prefix. The shape is
- * verified against `@ai-sdk/anthropic@3.x` types — see
- * `wizard-rewrite/src/agents/wizard-agent-loop.ts:516,522` for the
- * reference.
+ * so prompt caching kicks in on the static prefix.
+ *
+ * AI SDK v6's `streamText` accepts `system: string | SystemModelMessage |
+ * Array<SystemModelMessage>` (see `node_modules/ai/dist/index.d.ts:484-498`
+ * — the `Prompt` type). `SystemModelMessage` is `{ role: 'system';
+ * content: string; providerOptions?: ProviderOptions }` (see
+ * `@ai-sdk/provider-utils/dist/index.d.ts:905-914`). The runner picks the
+ * `SystemModelMessage` variant — not a plain string — because that's the
+ * only branch that carries `providerOptions`, which is where the Anthropic
+ * provider reads `cacheControl` from.
+ *
+ * We export the explicitly-typed `SystemModelMessage` here (instead of a
+ * locally-typed object literal) so any future SDK version bump that
+ * narrows the shape gets caught at compile time. The reference cache-
+ * control wiring is in `wizard-rewrite/src/agents/wizard-agent-loop.ts:516,522`.
  */
-function systemMessageWithCacheControl(content: string): {
-  role: 'system';
-  content: string;
-  providerOptions: { anthropic: { cacheControl: { type: 'ephemeral' } } };
-} {
+export function systemMessageWithCacheControl(
+  content: string,
+): SystemModelMessage {
   return {
     role: 'system',
     content,
