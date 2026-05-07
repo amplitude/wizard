@@ -20,10 +20,40 @@ export type CreateWizardAiSdkAnthropicOptions = {
   baseURL?: string;
 };
 
+/**
+ * Append `/v1` to a gateway / proxy URL when it isn't already there so
+ * `@ai-sdk/anthropic` resolves `${baseURL}/messages` to `…/v1/messages`.
+ *
+ * The Vercel AI SDK's `@ai-sdk/anthropic` provider posts to
+ * `${baseURL}/messages`, while the Claude Agent SDK appends `/v1/messages`.
+ * The wizard sets `ANTHROPIC_BASE_URL=https://core.amplitude.com/wizard`
+ * (no `/v1`) for the Agent SDK path; passing the same bare URL to
+ * `createAnthropic` produces 404s on `…/wizard/messages`.
+ *
+ * Idempotent — if the URL already ends in `/v1` (or any `/vN`), leave it
+ * alone. Trims trailing slashes so we don't end up with `…//v1`.
+ *
+ * Keep in sync with `evals/model-quality/lib/run-prompt.mjs` (intentionally
+ * inlined there because the eval harness is `.mjs` and can't import from
+ * compiled `.ts`).
+ */
+export function ensureV1Suffix(rawBase: string): string;
+export function ensureV1Suffix(rawBase: undefined): undefined;
+export function ensureV1Suffix(rawBase: string | undefined): string | undefined;
+export function ensureV1Suffix(
+  rawBase: string | undefined,
+): string | undefined {
+  if (!rawBase || typeof rawBase !== 'string') return rawBase;
+  const trimmed = rawBase.replace(/\/+$/, '');
+  if (/\/v\d+$/.test(trimmed)) return trimmed;
+  return `${trimmed}/v1`;
+}
+
 export function createWizardAiSdkAnthropic(
   opts: CreateWizardAiSdkAnthropicOptions = {},
 ) {
-  const baseURL = opts.baseURL ?? process.env.ANTHROPIC_BASE_URL?.trim();
+  const rawBaseURL = opts.baseURL ?? process.env.ANTHROPIC_BASE_URL?.trim();
+  const baseURL = ensureV1Suffix(rawBaseURL);
   const auth = resolveAnthropicAuth();
   const headers =
     opts.headers && Object.keys(opts.headers).length > 0

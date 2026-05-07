@@ -199,4 +199,47 @@ describe('queryConsole — Vercel AI SDK path (AMPLITUDE_WIZARD_AI_SDK_CONSOLE)'
     expect(mockQuery).toHaveBeenCalled();
     expect(out).toBe('local');
   });
+
+  it('forwards a /v1-suffixed baseURL to createAnthropic so the AI SDK posts to …/wizard/v1/messages', async () => {
+    vi.mocked(getAgent).mockResolvedValue(fakeAgentConfig(TEST_SESSION_ID));
+    const prior = process.env.ANTHROPIC_BASE_URL;
+    process.env.ANTHROPIC_BASE_URL = 'https://core.amplitude.com/wizard';
+
+    try {
+      await queryConsole('ping', 'ctx', CREDS);
+
+      expect(mockCreateAnthropic).toHaveBeenCalledTimes(1);
+      const opts = mockCreateAnthropic.mock.calls[0][0] as {
+        baseURL?: string;
+      };
+      expect(opts.baseURL).toBe('https://core.amplitude.com/wizard/v1');
+    } finally {
+      if (prior === undefined) {
+        delete process.env.ANTHROPIC_BASE_URL;
+      } else {
+        process.env.ANTHROPIC_BASE_URL = prior;
+      }
+    }
+  });
+
+  it('leaves an already /v1-suffixed ANTHROPIC_BASE_URL untouched (idempotent)', async () => {
+    vi.mocked(getAgent).mockResolvedValue(fakeAgentConfig(TEST_SESSION_ID));
+    const prior = process.env.ANTHROPIC_BASE_URL;
+    process.env.ANTHROPIC_BASE_URL = 'https://core.amplitude.com/wizard/v1';
+
+    try {
+      await queryConsole('ping', 'ctx', CREDS);
+
+      const opts = mockCreateAnthropic.mock.calls[0][0] as {
+        baseURL?: string;
+      };
+      expect(opts.baseURL).toBe('https://core.amplitude.com/wizard/v1');
+    } finally {
+      if (prior === undefined) {
+        delete process.env.ANTHROPIC_BASE_URL;
+      } else {
+        process.env.ANTHROPIC_BASE_URL = prior;
+      }
+    }
+  });
 });

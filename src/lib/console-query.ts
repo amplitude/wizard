@@ -175,10 +175,11 @@ async function queryConsoleWithVercelAiSdk(
   // `wizard-ai-sdk-anthropic.ts`) out of every wizard run. They only load when
   // AMPLITUDE_WIZARD_AI_SDK_CONSOLE actually routes a console query through
   // this path.
-  const [{ streamText }, { createWizardAiSdkAnthropic }] = await Promise.all([
-    import('ai'),
-    import('./agent/wizard-ai-sdk-anthropic.js'),
-  ]);
+  const [{ streamText }, { createWizardAiSdkAnthropic, ensureV1Suffix }] =
+    await Promise.all([
+      import('ai'),
+      import('./agent/wizard-ai-sdk-anthropic.js'),
+    ]);
 
   const customHeaders = buildAgentEnv(
     agentConfig.wizardMetadata ?? {},
@@ -186,7 +187,15 @@ async function queryConsoleWithVercelAiSdk(
     agentConfig.agentSessionId,
   );
 
+  // Explicitly normalize the baseURL with `ensureV1Suffix` so the AI SDK's
+  // `${baseURL}/messages` resolves to `…/v1/messages` against the wizard
+  // gateway. The factory applies this internally too, but passing it at the
+  // callsite documents the contract (and would survive a factory refactor
+  // that ever stopped normalizing).
+  const baseURL = ensureV1Suffix(process.env.ANTHROPIC_BASE_URL?.trim());
+
   const provider = createWizardAiSdkAnthropic({
+    ...(baseURL ? { baseURL } : {}),
     headers: parseAnthropicCustomHeaderBlock(customHeaders),
   });
 
