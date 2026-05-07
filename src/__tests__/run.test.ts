@@ -34,6 +34,16 @@ vi.mock('../ui', () => ({
     setRunError: vi.fn(),
   }),
   setUI: vi.fn(),
+  createWizardUiInstallPresentation: vi.fn(() => ({
+    intro: vi.fn(),
+    log: {
+      info: vi.fn(),
+      warn: vi.fn(),
+      error: vi.fn(),
+      success: vi.fn(),
+      step: vi.fn(),
+    },
+  })),
 }));
 
 const mockRunAgentWizard = runAgentWizard as MockedFunction<

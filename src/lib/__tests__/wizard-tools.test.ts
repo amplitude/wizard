@@ -22,6 +22,10 @@ import {
   WIZARD_GITIGNORE_PATTERNS,
   WIZARD_TOOL_NAMES,
   WIZARD_TOOLS_SERVER_NAME,
+  resolveWizardAllowedToolNames,
+  bundledSkillExists,
+  readBundledSkillBody,
+  readBundledSkillReference,
 } from '../wizard-tools';
 import { toWizardDashboardOpenUrl } from '../../utils/dashboard-open-url';
 
@@ -938,6 +942,10 @@ describe('WIZARD_TOOL_NAMES', () => {
     expect(WIZARD_TOOL_NAMES).not.toContain('wizard-tools:install_skill');
   });
 
+  it('keeps load_skill opt-in on the static list (use resolveWizardAllowedToolNames)', () => {
+    expect(WIZARD_TOOL_NAMES).not.toContain('wizard-tools:load_skill');
+  });
+
   it('has no duplicate entries', () => {
     expect(new Set(WIZARD_TOOL_NAMES).size).toBe(WIZARD_TOOL_NAMES.length);
   });
@@ -946,6 +954,72 @@ describe('WIZARD_TOOL_NAMES', () => {
     for (const name of WIZARD_TOOL_NAMES) {
       expect(name.startsWith('wizard-tools:')).toBe(true);
     }
+  });
+});
+
+describe('resolveWizardAllowedToolNames', () => {
+  const envKey = 'AMPLITUDE_WIZARD_SKILL_TIERS';
+
+  afterEach(() => {
+    delete process.env[envKey];
+  });
+
+  it('matches WIZARD_TOOL_NAMES when tiers flag unset', () => {
+    delete process.env[envKey];
+    expect(resolveWizardAllowedToolNames()).toEqual(WIZARD_TOOL_NAMES);
+  });
+
+  it('appends load_skill when AMPLITUDE_WIZARD_SKILL_TIERS=1', () => {
+    process.env[envKey] = '1';
+    expect(resolveWizardAllowedToolNames()).toEqual([
+      ...WIZARD_TOOL_NAMES,
+      'wizard-tools:load_skill_menu',
+      'wizard-tools:load_skill',
+      'wizard-tools:load_skill_reference',
+    ]);
+  });
+});
+
+describe('readBundledSkillBody', () => {
+  it('returns null for traversal-like ids', () => {
+    expect(readBundledSkillBody('../etc/passwd')).toBeNull();
+  });
+
+  it('returns SKILL.md contents when bundled skill exists', () => {
+    const id = 'wizard-prompt-supplement';
+    if (!bundledSkillExists(id)) {
+      return;
+    }
+    const body = readBundledSkillBody(id);
+    expect(body).toBeTruthy();
+    expect(body).toContain('---');
+  });
+});
+
+describe('readBundledSkillReference', () => {
+  it('returns null for traversal-like ids', () => {
+    expect(
+      readBundledSkillReference('../etc/passwd', 'references/a.md'),
+    ).toBeNull();
+  });
+
+  it('returns null for non-reference paths', () => {
+    expect(
+      readBundledSkillReference('wizard-prompt-supplement', 'SKILL.md'),
+    ).toBeNull();
+  });
+
+  it('returns bundled reference content when present', () => {
+    const id = 'wizard-prompt-supplement';
+    if (!bundledSkillExists(id)) {
+      return;
+    }
+    const text = readBundledSkillReference(
+      id,
+      'references/browser-sdk-init-defaults.md',
+    );
+    expect(text).toBeTruthy();
+    expect(text).toContain('Amplitude');
   });
 });
 

@@ -125,6 +125,13 @@ export function loadBundledSkillMenu(): SkillMenu {
 const SKILL_ID_ALLOWLIST = /^[a-z0-9][a-z0-9_-]*$/;
 
 /**
+ * Strict reference path allowlist: only `references/<basename>.md` is
+ * allowed, where the basename is restricted to word characters, hyphens,
+ * and dots. Prevents traversal escapes from the skill directory.
+ */
+export const SKILL_REFERENCE_REL_PATH = /^references\/[\w.-]+\.md$/;
+
+/**
  * Check whether a bundled skill exists on disk by searching across all
  * category subdirectories under skills/. Used to decide whether to pre-stage
  * a skill before the agent runs vs leave integration entry to the agent
@@ -159,6 +166,66 @@ export function bundledSkillExists(skillId: string): boolean {
     return false;
   }
   return false;
+}
+
+/**
+ * Read bundled `SKILL.md` body for tiered-context experiments (never writes
+ * to `.claude/skills/`). Returns null when absent or malformed inputs.
+ */
+export function readBundledSkillBody(skillId: string): string | null {
+  if (!SKILL_ID_ALLOWLIST.test(skillId)) return null;
+  const skillsRoot = getSkillsRootDir();
+  try {
+    for (const category of fs.readdirSync(skillsRoot)) {
+      if (!SKILL_ID_ALLOWLIST.test(category)) continue;
+      // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
+      const candidate = path.join(skillsRoot, category, skillId);
+      // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
+      const skillMd = path.join(candidate, 'SKILL.md');
+      if (
+        fs.existsSync(candidate) &&
+        fs.statSync(candidate).isDirectory() &&
+        fs.existsSync(skillMd)
+      ) {
+        return fs.readFileSync(skillMd, 'utf8');
+      }
+    }
+  } catch {
+    return null;
+  }
+  return null;
+}
+
+/**
+ * Read a bundled skill reference markdown file by relative path.
+ * Path is restricted to `references/*.md` to avoid broad file reads.
+ */
+export function readBundledSkillReference(
+  skillId: string,
+  refPath: string,
+): string | null {
+  if (!SKILL_ID_ALLOWLIST.test(skillId)) return null;
+  if (!SKILL_REFERENCE_REL_PATH.test(refPath)) return null;
+  const skillsRoot = getSkillsRootDir();
+  try {
+    for (const category of fs.readdirSync(skillsRoot)) {
+      if (!SKILL_ID_ALLOWLIST.test(category)) continue;
+      // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
+      const candidate = path.join(skillsRoot, category, skillId);
+      // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
+      const reference = path.join(candidate, refPath);
+      if (
+        fs.existsSync(candidate) &&
+        fs.statSync(candidate).isDirectory() &&
+        fs.existsSync(reference)
+      ) {
+        return fs.readFileSync(reference, 'utf8');
+      }
+    }
+  } catch {
+    return null;
+  }
+  return null;
 }
 
 /**

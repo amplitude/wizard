@@ -1,0 +1,807 @@
+/**
+ * Bash / path allowlists, canUseTool gate, and authoritative PreToolUse hook.
+ * Extracted from agent-interface.ts for Phase D of NEW_MIGRATION_PLAN.md.
+ */
+import path from 'path';
+import { debug, logToFile } from '../../utils/debug';
+import type { WizardOptions } from '../../utils/types';
+import { analytics, captureWizardError } from '../../utils/analytics';
+import type { HookCallback } from '../agent-hooks';
+import { LINTING_TOOLS } from '../safe-tools';
+import { scanBashCommandForDestructive } from '../safety-scanner';
+
+/**
+ * Maximum number of seconds the agent may sleep in a single Bash call.
+ *
+ * Long sleeps are the proximate cause of "API Error: 400 terminated" cascades:
+ * the agent emits a Bash tool_use that idles the upstream API streaming
+ * connection. The Amplitude LLM gateway / Vertex closes idle streams after
+ * ~30s, the next API call returns 400, and the agent escalates by sleeping
+ * even longer (3s → 5s → 10s → 30s → 60s) trying to "wait for MCP recovery".
+ *
+ * Capping at 5s keeps short, legitimate pauses (e.g. waiting for a brief
+ * dev-server boot) working while breaking the runaway sleep loop.
+ */
+export const MAX_BASH_SLEEP_SECONDS = 5;
+
+export const MAX_CONSECUTIVE_BASH_DENIES = 5;
+
+/** Matches `sleep <number>` at the start of a command or after a chain operator. */
+const SLEEP_COMMAND_PATTERN = /(?:^|[;&|\n]\s*)\s*sleep\s+(\d+(?:\.\d+)?)/i;
+
+/**
+ * Executables that can be used to run build commands.
+ * Includes package managers, language build tools, and static site generators.
+ */
+const PACKAGE_MANAGERS = [
+  // JavaScript / Node
+  'npm',
+  'pnpm',
+  'yarn',
+  'bun',
+  'npx',
+  'deno',
+  // Python
+  'pip',
+  'pip3',
+  'poetry',
+  'pipenv',
+  'uv',
+  // Ruby
+  'gem',
+  'bundle',
+  'bundler',
+  'rake',
+  // PHP
+  'composer',
+  // Go
+  'go',
+  // Rust
+  'cargo',
+  // Java / Kotlin / Android
+  'gradle',
+  './gradlew',
+  'mvn',
+  './mvnw',
+  // .NET
+  'dotnet',
+  // Swift
+  'swift',
+  // Haskell
+  'stack',
+  'cabal',
+  // Elixir
+  'mix',
+  // Flutter / Dart
+  'flutter',
+  'dart',
+  // Make
+  'make',
+  // Static site generators
+  'zola',
+  'hugo',
+  'jekyll',
+  'eleventy',
+  'hexo',
+  'pelican',
+  'mkdocs',
+];
+
+/**
+ * Commands that are safe to run with no sub-command (the executable alone builds the project).
+ */
+const STANDALONE_BUILD_COMMANDS = ['hugo', 'make', 'eleventy'];
+
+/**
+ * Safe sub-commands/scripts that can be run with any executable in PACKAGE_MANAGERS.
+ * Uses startsWith matching, so 'build' matches 'build', 'build:prod', etc.
+ * Note: Linting tools are in LINTING_TOOLS and checked separately.
+ */
+const SAFE_SCRIPTS = [
+  // Package / dependency installation
+  'install',
+  'add',
+  'ci',
+  'get',
+  'restore',
+  'fetch',
+  'deps',
+  'update',
+  // Build / compile / generate
+  'build',
+  'compile',
+  'assemble',
+  'package',
+  'generate',
+  'bundle',
+  // Type checking (various naming conventions)
+  'tsc',
+  'typecheck',
+  'type-check',
+  'check-types',
+  'types',
+  // Check / verify
+  'check',
+  // Test
+  'test',
+  // Serve (for build verification with static site tools)
+  'serve',
+  // Module / dependency management sub-commands
+  'mod',
+  'pub',
+  // Make targets
+  'all',
+  // Linting/formatting script names (actual tools are in LINTING_TOOLS)
+  'lint',
+  'format',
+];
+
+/**
+ * Dangerous shell operators that could allow command injection.
+ * Note: We handle `2>&1` and `| tail/head` separately as safe patterns.
+ * Note: `&&` is allowed for specific safe patterns like skill installation.
+ */
+const DANGEROUS_OPERATORS = /[;`$()]/;
+
+/**
+ * Check if command is a Amplitude skill installation from MCP.
+ * We control the MCP server, so we only need to verify:
+ * 1. It installs to .claude/skills/
+ * 2. It downloads from our GitHub releases or localhost (dev)
+ */
+export function isSkillInstallCommand(command: string): boolean {
+  if (!command.startsWith('mkdir -p .claude/skills/')) return false;
+
+  const urlMatch = command.match(/curl -sL ['"]([^'"]+)['"]/);
+  if (!urlMatch) return false;
+
+  const url = urlMatch[1];
+  return (
+    url.startsWith('https://github.com/Amplitude/context-mill/releases/') ||
+    /^http:\/\/localhost:\d+\//.test(url)
+  );
+}
+
+/**
+ * Check if command is an allowed package manager command.
+ * Matches: <pkg-manager> [run|exec] <safe-script> [args...]
+ */
+export function matchesAllowedPrefix(command: string): boolean {
+  const parts = command.split(/\s+/);
+  if (parts.length === 0 || !PACKAGE_MANAGERS.includes(parts[0])) {
+    return false;
+  }
+
+  // Allow tools that are safe to invoke with no sub-command (e.g. `hugo`, `make`)
+  if (parts.length === 1 && STANDALONE_BUILD_COMMANDS.includes(parts[0])) {
+    return true;
+  }
+
+  // Skip 'run' or 'exec' if present
+  let scriptIndex = 1;
+  if (parts[scriptIndex] === 'run' || parts[scriptIndex] === 'exec') {
+    scriptIndex++;
+  }
+
+  // Get the script/command portion (may include args)
+  const scriptPart = parts.slice(scriptIndex).join(' ');
+
+  // Check if script starts with any safe script name or linting tool
+  return (
+    SAFE_SCRIPTS.some((safe) => scriptPart.startsWith(safe)) ||
+    LINTING_TOOLS.some((tool: string) => scriptPart.startsWith(tool))
+  );
+}
+
+/**
+ * Recognize the "background a package install + report PID" shell idiom
+ * the wizard commandments instruct agents to use. Returns true ONLY when
+ * the command matches one of:
+ *
+ *   <pkg-mgr> <safe-script> [args...] [2>&1] &
+ *   <pkg-mgr> <safe-script> [args...] [2>&1] & echo "..."
+ *   <pkg-mgr> <safe-script> [args...] [2>&1] &\necho "..."
+ *
+ * Where `<pkg-mgr> <safe-script>` is the same allowlist `matchesAllowedPrefix`
+ * accepts (pnpm/npm/yarn/bun + add/install/etc.).
+ *
+ * The base command is checked for any other chaining/dangerous operators
+ * before we approve, so commands like `pnpm add foo; rm -rf /` or
+ * `pnpm add foo $(curl evil) &` still get caught by the deny rules below.
+ */
+export function isSafeBackgroundedInstall(command: string): boolean {
+  // Strip stderr redirection (2>&1, 2>&2, 1>&2, …) so we can pattern-match
+  // the underlying base command + & terminator.
+  const stripped = command.replace(/\s*\d*>&\d+\s*/g, ' ').trim();
+
+  // Split on the first `&` that backgrounds the command. The base must come
+  // before the `&`; everything after is the (optional) trailer.
+  const ampIdx = stripped.indexOf('&');
+  if (ampIdx === -1) return false;
+  const base = stripped.slice(0, ampIdx).trim();
+  const trailer = stripped.slice(ampIdx + 1).trim();
+
+  // Reject if the base contains any other shell metacharacter — the deny
+  // rules below would catch them anyway, but checking here keeps the
+  // decision local and explicit.
+  if (/[;`$()|&]/.test(base)) return false;
+  if (!matchesAllowedPrefix(base)) return false;
+
+  // No trailer is fine: `pnpm add foo &`
+  if (trailer === '') return true;
+
+  // Trailer must be a single echo statement with safe content. Any other
+  // structure (extra `&`, `;`, `|`, command substitution, backticks) is
+  // rejected so we don't accidentally let through chained commands like
+  // `pnpm add foo & echo ok; <chained>` or
+  // `pnpm add foo & echo "$(curl evil.com)"`.
+  //
+  // Forbid these anywhere in the trailer, even inside quotes — bash expands
+  // `$()`, `${...}`, and backticks inside double quotes.
+  if (/[`;|&]/.test(trailer)) return false;
+  if (/\$\(|\$\{/.test(trailer)) return false;
+
+  // Strip ONE optional leading newline (literal `\n` or escaped `\\n`) so
+  // patterns like `& \necho "..."` still validate. After this, no further
+  // newlines are permitted: bash treats newlines as command terminators,
+  // so any internal `\n` in the trailer would let an attacker append a
+  // second command (e.g. `echo ok\ncurl evil.com`).
+  const trimmed = trailer.replace(/^(?:\\n|\n)\s*/, '');
+  if (/[\n\r]/.test(trimmed)) return false;
+
+  // Single `echo` with EITHER:
+  //   - a double-quoted string with no `$`-expansion except `$!`, `$?`, `$$`, or `$<digit>`
+  //   - a single-quoted string (literal, no expansion)
+  //   - bare alphanumeric/punctuation text (note: ` ` is the ONLY whitespace
+  //     allowed here — `\s` would also match `\n` and re-open the bypass)
+  const echoMatch = trimmed.match(
+    /^echo +(?:"([^"]*)"|'([^']*)'|([A-Za-z0-9_:.,!?\-+/= ]*))$/,
+  );
+  if (!echoMatch) return false;
+
+  const doubleQuoted = echoMatch[1];
+  if (doubleQuoted !== undefined) {
+    // Inside double quotes bash performs parameter expansion. We already
+    // rejected `$(` and `${` above, so the only `$` patterns that can
+    // appear are `$<char>`. Allow only the harmless special parameters
+    // (`$!`, `$?`, `$$`, `$0`-`$9`); reject `$alpha` (env var leak risk).
+    if (/\$[^!?$0-9]/.test(doubleQuoted)) return false;
+  }
+
+  return true;
+}
+
+const CAN_USE_TOOL_LOG_MAX_JSON_CHARS = 2400;
+
+let canUseToolLogCounter = 0;
+
+/**
+ * Shrink large tool I/O before writing to the structured log file (every
+ * `canUseTool` hit can carry multi‑KB MCP payloads).
+ */
+export function redactToolLogPayload(value: unknown): unknown {
+  if (typeof value === 'string') {
+    if (value.length <= CAN_USE_TOOL_LOG_MAX_JSON_CHARS) return value;
+    return {
+      _truncated: true,
+      length: value.length,
+      preview: `${value.slice(0, CAN_USE_TOOL_LOG_MAX_JSON_CHARS)}…`,
+    };
+  }
+  if (value === null || typeof value !== 'object') {
+    return value;
+  }
+  let json: string;
+  try {
+    json = JSON.stringify(value);
+  } catch {
+    return '[unserializable]';
+  }
+  if (json.length <= CAN_USE_TOOL_LOG_MAX_JSON_CHARS) {
+    return value;
+  }
+  const keys =
+    !Array.isArray(value) && value !== null
+      ? Object.keys(value as Record<string, unknown>).slice(0, 48)
+      : undefined;
+  return {
+    _truncated: true,
+    approxLength: json.length,
+    keys,
+    preview: `${json.slice(0, CAN_USE_TOOL_LOG_MAX_JSON_CHARS)}…`,
+  };
+}
+
+/** Whether this `canUseTool` invocation should emit file logs (increments sample counter once). */
+export function evaluateCanUseToolFileLogging(options: WizardOptions): boolean {
+  const debugFlag =
+    Boolean(options.debug) ||
+    process.env.AMPLITUDE_WIZARD_DEBUG === '1' ||
+    process.env.AMPLITUDE_WIZARD_VERBOSE === '1' ||
+    process.env.AMPLITUDE_WIZARD_DEBUG_CAN_USE_TOOL === '1';
+  const sampleRaw = process.env.AMPLITUDE_WIZARD_CAN_USE_TOOL_LOG_SAMPLE;
+  const sampleEvery =
+    sampleRaw !== undefined && sampleRaw !== ''
+      ? Math.max(1, Number.parseInt(sampleRaw, 10) || 0)
+      : 0;
+  canUseToolLogCounter += 1;
+  const sampled = sampleEvery > 0 && canUseToolLogCounter % sampleEvery === 0;
+  return debugFlag || sampled;
+}
+
+/**
+ * Permission hook that allows only safe commands.
+ * - Package manager install commands
+ * - Build/typecheck/lint commands for verification
+ * - Piping to tail/head for output limiting is allowed
+ * - Stderr redirection (2>&1) is allowed
+ * - Amplitude skill installation commands from MCP
+ * - Backgrounded package installs (`<pkg-mgr> add foo 2>&1 & echo "..."`)
+ */
+export function wizardCanUseTool(
+  toolName: string,
+  input: Record<string, unknown>,
+):
+  | { behavior: 'allow'; updatedInput: Record<string, unknown> }
+  | { behavior: 'deny'; message: string } {
+  // Block direct reads/writes of .env files — use wizard-tools MCP instead.
+  // The full set of write tools is `Write`, `Edit`, `MultiEdit`, and
+  // `NotebookEdit` — see classifyWriteOperation in agent-events.ts. Older
+  // versions of this hook only matched `Write`/`Edit`, leaving MultiEdit
+  // as a bypass path. Cover all four tools here.
+  const isReadTool = toolName === 'Read';
+  const isWriteTool =
+    toolName === 'Write' ||
+    toolName === 'Edit' ||
+    toolName === 'MultiEdit' ||
+    toolName === 'NotebookEdit';
+  if (isReadTool || isWriteTool) {
+    const filePath = typeof input.file_path === 'string' ? input.file_path : '';
+    // Normalize path separators BEFORE computing basename. On POSIX, Node's
+    // `path.basename` does not recognize `\` as a separator, so a Windows
+    // path like `C:\\project\\.amplitude\\events.json` would basename to
+    // the entire string and slip past our matchers. Normalizing to `/`
+    // first means `path.basename` is correct on both platforms regardless
+    // of which slash style the agent passed.
+    const normalizedPath = filePath.replace(/\\/g, '/');
+    const basename = path.basename(normalizedPath);
+    if (basename.startsWith('.env')) {
+      logToFile(`Denying ${toolName} on env file: ${filePath}`);
+      return {
+        behavior: 'deny',
+        message: `Direct ${toolName} of ${basename} is not allowed. Use the wizard-tools MCP server (check_env_keys / set_env_values) to read or modify environment variables.`,
+      };
+    }
+    // Block direct writes to the wizard-managed event-plan and dashboard
+    // artifacts. These files are owned by `confirm_event_plan` and the
+    // dashboard watcher — direct writes are the source of two recurring
+    // bugs: (1) the file already exists from a prior run and Write errors
+    // out (Write requires a prior Read of an existing file), forcing the
+    // agent into a confused "stale file" recovery loop; (2) the agent
+    // writes a different shape (event_name, file_path, etc.) than the
+    // wizard UI expects, so the manifest drifts from real track() calls.
+    // The integration skills owned by context-hub still instruct agents
+    // to write `.amplitude-events.json` directly — denying here is
+    // defense in depth that lands today, in advance of the upstream
+    // skill refresh.
+    if (isWriteTool) {
+      const lower = basename.toLowerCase();
+      const isEventsFile =
+        lower === '.amplitude-events.json' || lower === 'events.json';
+      const isDashboardFile =
+        lower === '.amplitude-dashboard.json' || lower === 'dashboard.json';
+      // For the bare `events.json` / `dashboard.json` cases, only deny
+      // when the path is inside `.amplitude/` (the wizard's metadata
+      // dir). A user codebase might legitimately have an unrelated
+      // `events.json` somewhere else. We use the already-normalized
+      // path (forward slashes) computed at the top of this branch so
+      // the substring check is consistent across POSIX and Windows.
+      const insideMetaDir = normalizedPath.includes('/.amplitude/');
+      const isLegacyDotfile =
+        lower === '.amplitude-events.json' ||
+        lower === '.amplitude-dashboard.json';
+      const isCanonicalInMetaDir =
+        (lower === 'events.json' || lower === 'dashboard.json') &&
+        insideMetaDir;
+      if (isLegacyDotfile || isCanonicalInMetaDir) {
+        const which = isEventsFile ? 'event plan' : 'dashboard';
+        const tool =
+          which === 'event plan'
+            ? 'mcp__wizard-tools__confirm_event_plan'
+            : 'the dashboard watcher (which mirrors writes from the Amplitude MCP `create_dashboard` call)';
+        logToFile(
+          `Denying ${toolName} on wizard-managed ${which} file: ${filePath}`,
+        );
+        return {
+          behavior: 'deny',
+          message: `Direct ${toolName} of ${basename} is not allowed. The ${which} file is owned by ${tool}. Call that tool with the proposed plan instead — it persists the file in the canonical shape the wizard UI expects, so the manifest never drifts from real track() calls. ${
+            isDashboardFile
+              ? ''
+              : 'If a stale ' +
+                basename +
+                ' is on disk from a prior run, ignore it and call confirm_event_plan; the wizard atomically replaces it.'
+          }`,
+        };
+      }
+    }
+    return { behavior: 'allow', updatedInput: input };
+  }
+
+  // Block Grep when it directly targets a .env file.
+  // Note: ripgrep skips dotfiles (like .env*) by default during directory traversal,
+  // so broad searches like `Grep { path: "." }` are already safe.
+  if (toolName === 'Grep') {
+    const grepPath = typeof input.path === 'string' ? input.path : '';
+    if (grepPath && path.basename(grepPath).startsWith('.env')) {
+      logToFile(`Denying Grep on env file: ${grepPath}`);
+      return {
+        behavior: 'deny',
+        message: `Grep on ${path.basename(
+          grepPath,
+        )} is not allowed. Use the wizard-tools MCP server (check_env_keys) to check environment variables.`,
+      };
+    }
+    return { behavior: 'allow', updatedInput: input };
+  }
+
+  // Allow all other non-Bash tools
+  if (toolName !== 'Bash') {
+    return { behavior: 'allow', updatedInput: input };
+  }
+
+  const command = (
+    typeof input.command === 'string' ? input.command : ''
+  ).trim();
+
+  // Check for Amplitude skill installation command (before dangerous operator check)
+  // These commands use && chaining but are generated by MCP with a strict format
+  if (isSkillInstallCommand(command)) {
+    logToFile(`Allowing skill installation command: ${command}`);
+    debug(`Allowing skill installation command: ${command}`);
+    return { behavior: 'allow', updatedInput: input };
+  }
+
+  // Allow the specific shell idiom the commandments tell agents to use:
+  // `<pkg-mgr> add/install ... [2>&1] & [echo "..."]`.
+  //
+  // The wizard commandment in src/lib/commandments.ts says "When installing
+  // packages, start the installation as a background task and then continue
+  // with other work." Agents follow this by emitting:
+  //   `pnpm add @amplitude/unified 2>&1 & echo "Installation started (PID: $!)"`
+  // …which contains `&` (background) and `$()` (in the echo string), both of
+  // which the generic deny rules below would catch. We pre-approve this
+  // specific pattern so the agent can actually do what the commandment
+  // tells it to do, without weakening the deny rules for other commands.
+  //
+  // Backwards-compat: every existing deny rule below stays in place and
+  // unchanged. This is purely an additional allow path.
+  if (isSafeBackgroundedInstall(command)) {
+    logToFile(`Allowing backgrounded package install: ${command}`);
+    debug(`Allowing backgrounded package install: ${command}`);
+    return { behavior: 'allow', updatedInput: input };
+  }
+
+  // Block definitely dangerous operators: ; ` $ ( )
+  if (DANGEROUS_OPERATORS.test(command)) {
+    logToFile(`Denying bash command with dangerous operators: ${command}`);
+    debug(`Denying bash command with dangerous operators: ${command}`);
+    captureWizardError(
+      'Bash Policy',
+      'Dangerous shell operators are not permitted',
+      'wizardCanUseBash',
+      { 'deny reason': 'dangerous operators', command },
+    );
+    return {
+      behavior: 'deny',
+      message: `Bash command denied by wizard policy: shell operators ; \` $ ( ) are not permitted on this run, and no rephrasing will change that. DO NOT retry the same goal with a different command — see the retry-budget commandment. If you were verifying env vars, use the wizard-tools \`check_env_keys\` MCP tool. If you were inspecting a file, use the \`Read\` tool. If you cannot accomplish the goal with the allowed tools, document the limitation in the setup report and proceed.`,
+    };
+  }
+
+  // Normalize: remove safe stderr redirection (2>&1, 2>&2, etc.)
+  const normalized = command.replace(/\s*\d*>&\d+\s*/g, ' ').trim();
+
+  // Check for pipe to tail/head (safe output limiting)
+  const pipeMatch = normalized.match(/^(.+?)\s*\|\s*(tail|head)(\s+\S+)*\s*$/);
+  if (pipeMatch) {
+    const baseCommand = pipeMatch[1].trim();
+
+    // Block if base command has pipes or & (multiple chaining)
+    if (/[|&]/.test(baseCommand)) {
+      logToFile(`Denying bash command with multiple pipes: ${command}`);
+      debug(`Denying bash command with multiple pipes: ${command}`);
+      captureWizardError(
+        'Bash Policy',
+        'Multiple pipes are not permitted',
+        'wizardCanUseBash',
+        { 'deny reason': 'multiple pipes', command },
+      );
+      return {
+        behavior: 'deny',
+        message: `Bash command denied by wizard policy: only a single pipe to tail/head is permitted (no chained pipes). This is a fixed policy — DO NOT retry the same goal with a re-ordered or differently-piped command. Use one allowed package-manager subcommand at a time, or document the limitation in the setup report and move on.`,
+      };
+    }
+
+    if (matchesAllowedPrefix(baseCommand)) {
+      logToFile(`Allowing bash command with output limiter: ${command}`);
+      debug(`Allowing bash command with output limiter: ${command}`);
+      return { behavior: 'allow', updatedInput: input };
+    }
+  }
+
+  // Block remaining pipes and & (not covered by tail/head case above)
+  if (/[|&]/.test(normalized)) {
+    logToFile(`Denying bash command with pipe/&: ${command}`);
+    debug(`Denying bash command with pipe/&: ${command}`);
+    captureWizardError(
+      'Bash Policy',
+      'Pipes are only allowed with tail/head',
+      'wizardCanUseBash',
+      { 'deny reason': 'disallowed pipe', command },
+    );
+    return {
+      behavior: 'deny',
+      message: `Bash command denied by wizard policy: pipes are only permitted as \`<allowed-command> | tail/head <args>\` for output limiting; \`&\` (background) and other pipe forms are not permitted. DO NOT retry with a re-piped variant. If you cannot accomplish the goal with allowed tools, document the limitation in the setup report and proceed.`,
+    };
+  }
+
+  // Check if command starts with any allowed prefix (package manager commands)
+  if (matchesAllowedPrefix(normalized)) {
+    logToFile(`Allowing bash command: ${command}`);
+    debug(`Allowing bash command: ${command}`);
+    return { behavior: 'allow', updatedInput: input };
+  }
+
+  logToFile(`Denying bash command: ${command}`);
+  debug(`Denying bash command: ${command}`);
+  captureWizardError(
+    'Bash Policy',
+    'Command not in allowlist',
+    'wizardCanUseBash',
+    { 'deny reason': 'not in allowlist', command },
+  );
+  return {
+    behavior: 'deny',
+    message: `Bash command denied by wizard policy: only package-manager subcommands (install / add / build / test / typecheck / lint / format / etc.) and Amplitude skill installs are permitted. DO NOT retry the same goal with a different shell command — \`node -e\`, \`node --eval\`, \`printenv\`, \`echo $VAR\`, \`cat .env\`, \`bash -c '...'\`, etc. will all be denied. To verify env vars, use the wizard-tools \`check_env_keys\` MCP tool (it reports key presence without exposing values). To inspect a file, use the \`Read\` tool. To inspect a directory, use \`Glob\`. To search code, use \`Grep\`. If you cannot accomplish the goal with the allowed tools, document the limitation in the setup report and proceed.`,
+  };
+}
+
+/**
+ * Build a PreToolUse hook that enforces wizard Bash safety.
+ *
+ * Why this exists: the Claude Agent SDK runs with
+ * `tools: { type: 'preset', preset: 'claude_code' }` and
+ * `permissionMode: 'acceptEdits'`. In that configuration, `canUseTool` is
+ * NOT invoked for the built-in `Bash` tool — only for MCP tools. Logs from
+ * production runs confirm zero `canUseTool` entries for Bash even though
+ * `wizardCanUseTool` is wired into options.
+ *
+ * PreToolUse hooks fire unconditionally for every tool, so this is the
+ * authoritative place to gate Bash. We delegate the canonical allowlist
+ * to `wizardCanUseTool` and additionally cap `sleep <N>` to
+ * MAX_BASH_SLEEP_SECONDS to break the 400-terminated sleep cascade.
+ *
+ * On top of the gate, the hook tracks consecutive Bash denies and trips a
+ * circuit breaker after MAX_CONSECUTIVE_BASH_DENIES. Prompt-side guidance
+ * ("DO NOT retry") reduces the rate of looping but doesn't eliminate it —
+ * a user reported a 47-turn loop on the same denied command. The breaker
+ * is the belt-and-suspenders enforcement that fires when the model ignores
+ * the prompt anyway. Trip callback is one-shot per hook instance; the
+ * counter resets on any allowed Bash call so legitimate deny → recover
+ * sequences don't trip falsely.
+ */
+export interface PreToolUseHookOptions {
+  /**
+   * Invoked exactly once per hook instance, when consecutive Bash denies
+   * reach MAX_CONSECUTIVE_BASH_DENIES. Caller should treat as a terminal
+   * signal (e.g. trigger `wizardAbort`). Synchronous throws from this
+   * callback are swallowed; async failures are the caller's responsibility.
+   */
+  onCircuitBreakerTripped?: (info: {
+    consecutiveDenies: number;
+    lastCommand: string;
+    lastDenyReason: string;
+  }) => void;
+}
+
+export function createPreToolUseHook(
+  options: PreToolUseHookOptions = {},
+): HookCallback {
+  let consecutiveBashDenies = 0;
+  let circuitBreakerFired = false;
+
+  /**
+   * Wrap a Bash deny return value with circuit-breaker bookkeeping.
+   * Increments the counter, fires the trip callback once at threshold,
+   * returns the original deny payload unchanged so the SDK still respects
+   * the deny decision while wizardAbort tears the run down.
+   */
+  const trackBashDeny = (
+    denyPayload: Record<string, unknown>,
+    command: string,
+    reason: string,
+  ): Record<string, unknown> => {
+    consecutiveBashDenies += 1;
+    if (
+      consecutiveBashDenies >= MAX_CONSECUTIVE_BASH_DENIES &&
+      !circuitBreakerFired
+    ) {
+      circuitBreakerFired = true;
+      logToFile(
+        `Circuit breaker tripped after ${consecutiveBashDenies} consecutive Bash denies; last command: ${command}`,
+      );
+      captureWizardError(
+        'Bash Policy',
+        'Circuit breaker tripped',
+        'createPreToolUseHook',
+        {
+          'consecutive denies': consecutiveBashDenies,
+          'last command': command,
+          'last deny reason': reason,
+        },
+      );
+      try {
+        options.onCircuitBreakerTripped?.({
+          consecutiveDenies: consecutiveBashDenies,
+          lastCommand: command,
+          lastDenyReason: reason,
+        });
+      } catch (err) {
+        logToFile(
+          `onCircuitBreakerTripped threw: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+      }
+    }
+    return denyPayload;
+  };
+
+  return (input: Record<string, unknown>) => {
+    const toolName = (input.tool_name as string | undefined) ?? '';
+    const toolInput =
+      (input.tool_input as Record<string, unknown> | undefined) ?? {};
+
+    // Surface the agent's intent on every wizard-tools MCP call. The
+    // `reason` field is required by every wizard-tools schema (see
+    // wizard-tools.ts) — capturing it here gives us instant visibility in
+    // our existing dashboards alongside Agent Analytics' track_tool_call().
+    // Tools without `reason` (Bash, Read, Edit, plus other MCP servers)
+    // are skipped so we don't pollute the event with empty fields.
+    if (toolName.startsWith('mcp__wizard-tools__')) {
+      const reason = toolInput.reason;
+      if (typeof reason === 'string' && reason.length > 0) {
+        const shortName = toolName.slice('mcp__wizard-tools__'.length);
+        analytics.wizardCapture('tool invoked', {
+          'tool name': shortName,
+          reason,
+        });
+      }
+    }
+
+    // Run the explicit destructive-command blocklist BEFORE the canonical
+    // allowlist check. Both deny these commands, but the allowlist deny
+    // message is generic ("command not in allowlist") which invites the
+    // model to retry rephrased variants of the same destructive intent.
+    // The scanner emits a specific "this is destructive policy, abandon
+    // this path" message that breaks the retry loop. Fail-closed on
+    // scanner exception (the catch returns deny).
+    if (toolName === 'Bash') {
+      const command =
+        typeof toolInput.command === 'string' ? toolInput.command : '';
+      try {
+        const scan = scanBashCommandForDestructive(command);
+        if (scan.matched && scan.rule) {
+          logToFile(
+            `Denying destructive bash command (rule: ${scan.rule.label}): ${command}`,
+          );
+          captureWizardError(
+            'Bash Policy',
+            `Destructive command blocked: ${scan.rule.label}`,
+            'createPreToolUseHook',
+            { 'rule id': scan.rule.id, command },
+          );
+          return Promise.resolve(
+            trackBashDeny(
+              {
+                hookSpecificOutput: {
+                  hookEventName: 'PreToolUse',
+                  permissionDecision: 'deny',
+                  permissionDecisionReason: scan.rule.message,
+                },
+              },
+              command,
+              scan.rule.message,
+            ),
+          );
+        }
+      } catch (err) {
+        // Fail-closed: a scanner exception is a block decision. The only
+        // realistic source of throws is regex backtracking on pathological
+        // input, and on those we'd rather block than pass.
+        logToFile('Destructive-bash scanner threw; failing closed:', err);
+        const reason =
+          'Bash command blocked by safety scanner due to an internal error. Re-attempting with the same command will produce the same result. Skip this step or take a different approach.';
+        return Promise.resolve(
+          trackBashDeny(
+            {
+              hookSpecificOutput: {
+                hookEventName: 'PreToolUse',
+                permissionDecision: 'deny',
+                permissionDecisionReason: reason,
+              },
+            },
+            command,
+            reason,
+          ),
+        );
+      }
+    }
+
+    // Cap long sleeps before the canonical allowlist check, so the
+    // diagnostic message is specific instead of "command not in allowlist".
+    if (toolName === 'Bash') {
+      const command =
+        typeof toolInput.command === 'string' ? toolInput.command : '';
+      const match = command.match(SLEEP_COMMAND_PATTERN);
+      if (match) {
+        const seconds = Number.parseFloat(match[1]);
+        if (Number.isFinite(seconds) && seconds > MAX_BASH_SLEEP_SECONDS) {
+          logToFile(
+            `Denying long sleep (${seconds}s > ${MAX_BASH_SLEEP_SECONDS}s): ${command}`,
+          );
+          captureWizardError(
+            'Bash Policy',
+            'Long sleep blocked',
+            'createPreToolUseHook',
+            { 'sleep seconds': seconds, command },
+          );
+          const reason = `Bash sleep > ${MAX_BASH_SLEEP_SECONDS}s is not permitted. Long sleeps idle the upstream API stream and trigger "API Error: 400 terminated" cascades. If a service appears unavailable, do NOT wait — proceed with the next step or report the failure.`;
+          return Promise.resolve(
+            trackBashDeny(
+              {
+                hookSpecificOutput: {
+                  hookEventName: 'PreToolUse',
+                  permissionDecision: 'deny',
+                  permissionDecisionReason: reason,
+                },
+              },
+              command,
+              reason,
+            ),
+          );
+        }
+      }
+    }
+
+    // Delegate to the canonical allowlist. Apply to Bash here; for other
+    // tools (Read/Write/Edit/Grep on .env, MCP tools) we keep canUseTool
+    // as the primary gate since it already runs reliably for those.
+    if (toolName === 'Bash') {
+      const command =
+        typeof toolInput.command === 'string' ? toolInput.command : '';
+      const decision = wizardCanUseTool(toolName, toolInput);
+      if (decision.behavior === 'deny') {
+        return Promise.resolve(
+          trackBashDeny(
+            {
+              hookSpecificOutput: {
+                hookEventName: 'PreToolUse',
+                permissionDecision: 'deny',
+                permissionDecisionReason: decision.message,
+              },
+            },
+            command,
+            decision.message,
+          ),
+        );
+      }
+      // Allowed Bash call — reset the consecutive-deny counter so a
+      // future deny → success → deny sequence doesn't accumulate falsely.
+      // The breaker is for a stuck agent, not for incidental denies
+      // sprinkled across an otherwise-progressing run.
+      consecutiveBashDenies = 0;
+    }
+
+    return Promise.resolve({});
+  };
+}
