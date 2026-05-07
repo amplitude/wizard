@@ -10,7 +10,7 @@
  */
 
 import { Box, Text } from 'ink';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import * as fs from 'fs';
 import type { WizardStore } from '../store.js';
 import { useWizardStore } from '../hooks/useWizardStore.js';
@@ -100,6 +100,17 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
   useEffect(() => {
     store.setCommandMode(false);
   }, [store]);
+
+  // Memoize the diff summary so we don't re-run `structuredPatch` on every
+  // render frame (Bugbot: outro is mounted post-run, ledger is frozen, so a
+  // single computation per mount is correct). The ledger reference itself is
+  // stable for the lifetime of the wizard run.
+  const meaningfulDiffs = useMemo(() => {
+    const diffs = summarizeLedgerDiffs(getFileChangeLedger());
+    return diffs.filter(
+      (d) => d.additions > 0 || d.deletions > 0 || d.operation !== 'modify',
+    );
+  }, []);
 
   const [showReport, setShowReport] = useState(false);
   const [showChangedFiles, setShowChangedFiles] = useState(false);
@@ -597,21 +608,14 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
               magnitude of each change at a glance. Sourced from the
               session-scoped FileChangeLedger; empty when capture
               didn't fire (probe runs, full-activation re-runs). */}
-          {(() => {
-            const diffs = summarizeLedgerDiffs(getFileChangeLedger());
-            const meaningful = diffs.filter(
-              (d) => d.additions > 0 || d.deletions > 0 || d.operation !== 'modify',
-            );
-            if (meaningful.length === 0) return null;
-            return (
-              <Box marginTop={1}>
-                <DiffViewer
-                  diffs={meaningful}
-                  installDir={installDir}
-                />
-              </Box>
-            );
-          })()}
+          {meaningfulDiffs.length > 0 && (
+            <Box marginTop={1}>
+              <DiffViewer
+                diffs={meaningfulDiffs}
+                installDir={installDir}
+              />
+            </Box>
+          )}
 
           {/* Single-line review note — only when a fresh report was actually
               written this run. Without the existence check, a stale report

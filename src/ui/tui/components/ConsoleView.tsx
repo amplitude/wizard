@@ -310,7 +310,9 @@ function executeCommand(raw: string, store: WizardStore): string | void {
         const totalAdd = diffs.reduce((s, d) => s + d.additions, 0);
         const totalDel = diffs.reduce((s, d) => s + d.deletions, 0);
         const lines = diffs.map((d) => {
-          const rel = d.path.startsWith(store.session.installDir + '/')
+          // Use path.sep so this works on Windows. Belt-and-braces: also
+          // accept the unit-test/POSIX form by checking either separator.
+          const rel = d.path.startsWith(store.session.installDir + path.sep)
             ? path.relative(store.session.installDir, d.path)
             : d.path;
           return `${d.operation.toUpperCase().padEnd(6)} ${rel}  ${formatChangeCounts(d.additions, d.deletions)}`;
@@ -328,7 +330,7 @@ function executeCommand(raw: string, store: WizardStore): string | void {
         : path.resolve(store.session.installDir, arg);
       const found =
         diffs.find((d) => d.path === target) ??
-        diffs.find((d) => d.path.endsWith('/' + arg));
+        diffs.find((d) => d.path.endsWith(path.sep + arg));
       if (!found) {
         store.setCommandFeedback(
           `No diff captured for "${arg}". Try /diff with no argument to see all changed files.`,
