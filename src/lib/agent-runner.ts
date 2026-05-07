@@ -247,10 +247,16 @@ export function classifyAgentOutcome(session: WizardSession): {
 export function buildDashboardDeferredMessage(args: {
   /** Path to the persisted plan artifact, or null if none was written. */
   planPath: string | null;
+  /** Whether the agent successfully wrote events.json. Defaults to true. */
+  eventsInstrumented?: boolean;
 }): string {
+  const eventsInstrumented = args.eventsInstrumented ?? true;
+  const lead = eventsInstrumented
+    ? 'Events instrumented!'
+    : 'Setup partially complete.';
   return args.planPath
-    ? `Events instrumented! Run \`npx @amplitude/wizard dashboard\` once your app has sent the new events to Amplitude (usually a few minutes) to build a starter dashboard from the plan saved at ${args.planPath}.`
-    : `Events instrumented! Run \`npx @amplitude/wizard dashboard\` once your app has sent the new events to Amplitude (usually a few minutes) to build a starter dashboard.`;
+    ? `${lead} Run \`npx @amplitude/wizard dashboard\` once your app has sent the new events to Amplitude (usually a few minutes) to build a starter dashboard from the plan saved at ${args.planPath}.`
+    : `${lead} Run \`npx @amplitude/wizard dashboard\` once your app has sent the new events to Amplitude (usually a few minutes) to build a starter dashboard.`;
 }
 
 /**
@@ -1451,6 +1457,7 @@ async function runAgentWizardBody(
   // whether the agent persisted a chart plan via `record_dashboard_plan`.
   const dashboardDeferredMessage = buildDashboardDeferredMessage({
     planPath: dashboardPlanWritten ? dashboardPlanPath : null,
+    eventsInstrumented: agentEventsInstrumented(session),
   });
 
   const changes = [

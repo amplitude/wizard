@@ -514,6 +514,19 @@ describe('buildDashboardDeferredMessage', () => {
     expect(message).not.toContain('saved at');
     expect(message).not.toContain('null');
   });
+
+  it('does not falsely claim "Events instrumented!" when events.json was not written', () => {
+    // Soft-error path: agent stream terminated, dashboard-plan.json may
+    // exist (from a checkpoint replay) but events.json does not. The
+    // status ticker / outro must not announce "Events instrumented!" in
+    // that case — wire is not marked completed either.
+    const message = buildDashboardDeferredMessage({
+      planPath: null,
+      eventsInstrumented: false,
+    });
+    expect(message).not.toMatch(/^Events instrumented!/);
+    expect(message).toContain('npx @amplitude/wizard dashboard');
+  });
 });
 
 // ── DEFER_DASHBOARD_PLAN PR 4: regression guards on the agent system prompt
