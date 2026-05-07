@@ -807,6 +807,102 @@ describe('runAgent', () => {
       expect(queryCallCount).toBe(6); // MAX_RETRIES=5 → 6 total attempts
     });
 
+    // Regression: P0 follow-on to PR #594. The 60s stall heartbeat used to
+    // fire while `confirm_event_plan` was blocking on `promptEventPlan`. The
+    // user reads the plan, no SDK message arrives, the timer trips, the
+    // controller aborts the SDK query, and the run looks "stuck" in the log
+    // (real Excalidraw repro: "no message for 60s" landed exactly while the
+    // user was deciding). Now the stall timer must suppress the abort while
+    // a wizard-tools user prompt is in flight.
+    it(
+      'suppresses stall heartbeat while a wizard-tools prompt is awaiting the user',
+      { timeout: 15_000 },
+      async () => {
+        vi.useFakeTimers();
+        const { __openWizardPromptForTests, __resetWizardPromptStateForTests } =
+          await import('../wizard-tools');
+        __resetWizardPromptStateForTests();
+        const { analytics } = (await import('../../utils/analytics')) as {
+          analytics: { wizardCapture: Mock };
+        };
+        analytics.wizardCapture.mockClear();
+
+        let queryCallCount = 0;
+        let signalHandle: AbortSignal | undefined;
+
+        mockQuery.mockImplementation(
+          (params: { options: Record<string, unknown> }) => {
+            queryCallCount++;
+            const signal = params.options.abortSignal as AbortSignal;
+            signalHandle = signal;
+            if (queryCallCount === 1) {
+              // Hang while the user "reads" the prompt — no SDK messages.
+              // eslint-disable-next-line require-yield
+              return (async function* () {
+                await new Promise<never>((_, reject) => {
+                  signal.addEventListener('abort', () =>
+                    reject(new Error('Stall aborted')),
+                  );
+                });
+              })();
+            }
+            // Should never reach attempt 2 — heartbeat suppression must
+            // keep the first attempt alive across the simulated wait.
+            return (async function* () {
+              yield {
+                type: 'result',
+                subtype: 'success',
+                is_error: false,
+                result: '',
+              };
+            })();
+          },
+        );
+
+        // Open the prompt window BEFORE the run reaches the stall timer.
+        // Production wraps the same flag around `promptEventPlan` etc., but
+        // we don't need the real UI — only the flag matters here.
+        const closePrompt = __openWizardPromptForTests();
+
+        const runPromise = runAgent(
+          defaultAgentConfig,
+          'test prompt',
+          defaultOptions,
+          mockSpinner as unknown as SpinnerHandle,
+          { successMessage: 'Done', errorMessage: 'Failed' },
+        );
+
+        // Walk well past the cold-start (60s) AND mid-run (120s) thresholds.
+        // Without the fix, the controller would have aborted multiple times.
+        await vi.advanceTimersByTimeAsync(300_000);
+
+        // Critical assertion: NO stall capture, NO abort, still on attempt 1.
+        const stallCalls = (
+          analytics.wizardCapture.mock.calls as unknown[][]
+        ).filter((args) => args[0] === 'agent stall detected');
+        expect(stallCalls).toHaveLength(0);
+        expect(signalHandle?.aborted).toBe(false);
+        expect(queryCallCount).toBe(1);
+
+        // Closing the prompt resets the timer and lets the run conclude.
+        closePrompt();
+        // The query mock still hangs on attempt 1's SDK call. After the
+        // mid-run STALL_TIMEOUT_MS elapses (120s), the now-armed timer
+        // can fire normally and trigger a retry — proving the suppression
+        // is reversible, not permanent.
+        await vi.advanceTimersByTimeAsync(200_000);
+        const result = await runPromise.catch((e) => e);
+        // Either we retried into success or surfaced a stall — both prove
+        // the timer resumed firing post-prompt-release.
+        if (result instanceof Error) {
+          expect(result.message).toMatch(/Stall|aborted/i);
+        } else {
+          expect(result).toEqual({ plannedEvents: [] });
+        }
+        __resetWizardPromptStateForTests();
+      },
+    );
+
     // Bugbot thread (PR #594): "Outer retry loop activity not cleared on
     // exhaustion". The outer retry loop sets a `rate-limit-retry` activity
     // before each backoff sleep but used to skip flipping the

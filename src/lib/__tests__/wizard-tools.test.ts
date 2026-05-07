@@ -1748,3 +1748,269 @@ describe('wizardCanUseTool — structured deny payload', () => {
     expect(parsed.suggestedTool).toBe('mcp__wizard-tools__check_env_keys');
   });
 });
+
+// ---------------------------------------------------------------------------
+// isWizardPromptActive / onWizardPromptRelease
+//
+// Regression coverage for the false-positive stall reported by the user on
+// Excalidraw: `confirm_event_plan` blocks server-side on `promptEventPlan`,
+// no SDK message arrives while the user reads the plan, and the 60s stall
+// detector in agent-interface.ts fires. The wizard-tools side of the fix
+// tracks an "active prompt" flag for the three blocking prompt tools so the
+// stall detector can suppress the abort while waiting on a human.
+// ---------------------------------------------------------------------------
+
+describe('isWizardPromptActive / onWizardPromptRelease', () => {
+  let isWizardPromptActive: typeof import('../wizard-tools').isWizardPromptActive;
+  let onWizardPromptRelease: typeof import('../wizard-tools').onWizardPromptRelease;
+  let __resetWizardPromptStateForTests: typeof import('../wizard-tools').__resetWizardPromptStateForTests;
+  let setUI: typeof import('../../ui').setUI;
+  let LoggingUI: typeof import('../../ui/logging-ui').LoggingUI;
+
+  beforeEach(async () => {
+    ({
+      isWizardPromptActive,
+      onWizardPromptRelease,
+      __resetWizardPromptStateForTests,
+    } = await import('../wizard-tools'));
+    ({ setUI } = await import('../../ui'));
+    ({ LoggingUI } = await import('../../ui/logging-ui'));
+    __resetWizardPromptStateForTests();
+  });
+
+  afterEach(() => {
+    __resetWizardPromptStateForTests();
+    // Restore default UI so other suites that rely on `getUI()` see a clean
+    // LoggingUI singleton. `setUI` always replaces — there's no `clearUI`.
+    setUI(new LoggingUI());
+  });
+
+  // Build a fake UI whose prompt methods return a Promise we control. Lets us
+  // observe the active-prompt window from the test (set→assert→resolve).
+  function makeDeferredPromptUI<T>(value: T): {
+    ui: import('../../ui').WizardUI;
+    resolve: () => void;
+    reject: (err: Error) => void;
+  } {
+    let resolveFn: () => void = () => {};
+    let rejectFn: (err: Error) => void = () => {};
+    const pending = new Promise<T>((res, rej) => {
+      resolveFn = () => res(value);
+      rejectFn = rej;
+    });
+    const ui = new LoggingUI();
+    // Override prompt methods to block on `pending`.
+    ui.promptConfirm = () => pending as unknown as Promise<boolean>;
+    ui.promptChoice = () => pending as unknown as Promise<string>;
+    ui.promptEventPlan = () =>
+      pending as unknown as Promise<
+        import('../../ui/wizard-ui').EventPlanDecision
+      >;
+    return { ui, resolve: resolveFn, reject: rejectFn };
+  }
+
+  async function getPromptTools(): Promise<{
+    confirmTool: ToolDef;
+    chooseTool: ToolDef;
+    confirmEventPlanTool: ToolDef;
+  }> {
+    const tmpDir = makeTmpDir();
+    try {
+      const tools = await getTools(tmpDir);
+      return {
+        confirmTool: findTool(tools, 'confirm'),
+        chooseTool: findTool(tools, 'choose'),
+        confirmEventPlanTool: findTool(tools, 'confirm_event_plan'),
+      };
+    } finally {
+      cleanup(tmpDir);
+    }
+  }
+
+  it('reports false when no prompt is in flight', () => {
+    expect(isWizardPromptActive()).toBe(false);
+  });
+
+  it('flips to true while confirm awaits the user, then back to false', async () => {
+    const { ui, resolve } = makeDeferredPromptUI(true);
+    setUI(ui);
+    const { confirmTool } = await getPromptTools();
+
+    // Fire the tool but do not await it — the user prompt is "open" until
+    // we resolve the deferred pending promise.
+    const inFlight = callTool(confirmTool, {
+      message: 'proceed?',
+      reason: 'unit test',
+    });
+    expect(await waitForPromptActive()).toBe(true);
+
+    resolve();
+    await inFlight;
+    expect(isWizardPromptActive()).toBe(false);
+  });
+
+  // Poll until the prompt-active flag flips on, with a short cap. Tool
+  // handlers may walk through several internal awaits (e.g. a dynamic
+  // `await import('./constants.js')` inside `confirm_event_plan`) before
+  // reaching the UI prompt — a fixed microtask flush is racy.
+  async function waitForPromptActive(timeoutMs = 1000): Promise<boolean> {
+    const deadline = Date.now() + timeoutMs;
+    while (Date.now() < deadline) {
+      if (isWizardPromptActive()) return true;
+      await new Promise<void>((res) => setImmediate(res));
+    }
+    return isWizardPromptActive();
+  }
+
+  it('flips for choose and confirm_event_plan as well', async () => {
+    {
+      const { ui, resolve } = makeDeferredPromptUI('opt-a');
+      setUI(ui);
+      const { chooseTool } = await getPromptTools();
+      const inFlight = callTool(chooseTool, {
+        message: 'pick',
+        options: ['opt-a', 'opt-b'],
+        reason: 'unit test',
+      });
+      expect(await waitForPromptActive()).toBe(true);
+      resolve();
+      await inFlight;
+      expect(isWizardPromptActive()).toBe(false);
+    }
+
+    {
+      const { ui, resolve } = makeDeferredPromptUI({
+        decision: 'approved' as const,
+      });
+      setUI(ui);
+      const { confirmEventPlanTool } = await getPromptTools();
+      const inFlight = callTool(confirmEventPlanTool, {
+        events: [{ name: 'Test Event Fired', description: 'fires on test' }],
+        reason: 'unit test',
+      });
+      expect(await waitForPromptActive()).toBe(true);
+      resolve();
+      await inFlight;
+      expect(isWizardPromptActive()).toBe(false);
+    }
+  });
+
+  it('release listener fires on the 1→0 transition when prompt resolves', async () => {
+    const { ui, resolve } = makeDeferredPromptUI(true);
+    setUI(ui);
+    const { confirmTool } = await getPromptTools();
+
+    let releaseCount = 0;
+    const unsubscribe = onWizardPromptRelease(() => {
+      releaseCount++;
+    });
+
+    const inFlight = callTool(confirmTool, {
+      message: 'proceed?',
+      reason: 'unit test',
+    });
+    expect(await waitForPromptActive()).toBe(true);
+    expect(releaseCount).toBe(0); // still in flight
+    resolve();
+    await inFlight;
+    expect(releaseCount).toBe(1);
+    expect(isWizardPromptActive()).toBe(false);
+    unsubscribe();
+  });
+
+  it('handles nested prompts — release only fires on outermost resolve', async () => {
+    // Two concurrent prompts in flight. Even though only one is fielded at
+    // a time in production, defending against the case keeps the flag
+    // honest if a future code path layers them. The release listener must
+    // fire exactly once, on the 1→0 edge, not after each individual prompt.
+    const outer = makeDeferredPromptUI(true);
+    const inner = makeDeferredPromptUI('opt-a');
+
+    let releaseCount = 0;
+    const unsubscribe = onWizardPromptRelease(() => {
+      releaseCount++;
+    });
+
+    setUI(outer.ui);
+    const { confirmTool, chooseTool } = await getPromptTools();
+    const outerCall = callTool(confirmTool, {
+      message: 'outer',
+      reason: 'unit test',
+    });
+    expect(await waitForPromptActive()).toBe(true);
+
+    // Swap to the inner UI so the choose tool's prompt resolves on its own
+    // deferred. (The factory is per-call: the tool reads `getUI()` afresh.)
+    setUI(inner.ui);
+    const innerCall = callTool(chooseTool, {
+      message: 'inner',
+      options: ['opt-a', 'opt-b'],
+      reason: 'unit test',
+    });
+    // Yield enough macrotasks for the second handler to enter its
+    // active-prompt window. We can't directly inspect the counter, but the
+    // outer flag is already true and only flips off when ALL prompts close.
+    for (let i = 0; i < 50; i++) {
+      await new Promise<void>((res) => setImmediate(res));
+    }
+    expect(isWizardPromptActive()).toBe(true);
+
+    // Resolve the inner prompt first — flag stays true (outer still open).
+    inner.resolve();
+    await innerCall;
+    expect(isWizardPromptActive()).toBe(true);
+    expect(releaseCount).toBe(0);
+
+    // Now resolve the outer — flag flips and listener fires once.
+    outer.resolve();
+    await outerCall;
+    expect(isWizardPromptActive()).toBe(false);
+    expect(releaseCount).toBe(1);
+    unsubscribe();
+  });
+
+  it('clears the flag even when the prompt rejects (try/finally)', async () => {
+    const { ui, reject } = makeDeferredPromptUI(true);
+    setUI(ui);
+    const { confirmTool } = await getPromptTools();
+
+    let releaseCount = 0;
+    const unsubscribe = onWizardPromptRelease(() => {
+      releaseCount++;
+    });
+
+    const inFlight = callTool(confirmTool, {
+      message: 'proceed?',
+      reason: 'unit test',
+    });
+    expect(await waitForPromptActive()).toBe(true);
+
+    reject(new Error('user closed terminal'));
+    // The tool handler awaits the prompt and lets the rejection propagate;
+    // the test treats it as expected.
+    await expect(inFlight).rejects.toThrow('user closed terminal');
+    expect(isWizardPromptActive()).toBe(false);
+    expect(releaseCount).toBe(1);
+    unsubscribe();
+  });
+
+  it('unsubscribe stops further release notifications', async () => {
+    let releaseCount = 0;
+    const unsubscribe = onWizardPromptRelease(() => {
+      releaseCount++;
+    });
+    unsubscribe();
+
+    const { ui, resolve } = makeDeferredPromptUI(true);
+    setUI(ui);
+    const { confirmTool } = await getPromptTools();
+    const inFlight = callTool(confirmTool, {
+      message: 'proceed?',
+      reason: 'unit test',
+    });
+    expect(await waitForPromptActive()).toBe(true);
+    resolve();
+    await inFlight;
+    expect(releaseCount).toBe(0);
+  });
+});
