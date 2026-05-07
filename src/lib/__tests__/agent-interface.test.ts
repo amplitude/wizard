@@ -1727,6 +1727,42 @@ describe('matchesAllowedPrefix', () => {
       ).toBe(true);
     });
 
+    it('allows `yarn workspaces foreach --include @scope/pkg run build`', () => {
+      expect(
+        matchesAllowedPrefix(
+          'yarn workspaces foreach --include @scope/pkg run build',
+        ),
+      ).toBe(true);
+    });
+
+    it('allows `yarn workspaces foreach --exclude some-pkg install`', () => {
+      expect(
+        matchesAllowedPrefix(
+          'yarn workspaces foreach --exclude some-pkg install',
+        ),
+      ).toBe(true);
+    });
+
+    it('allows `yarn workspaces foreach --since main run build`', () => {
+      expect(
+        matchesAllowedPrefix('yarn workspaces foreach --since main run build'),
+      ).toBe(true);
+    });
+
+    it('allows `yarn workspaces foreach --all --include @scope/pkg run build`', () => {
+      expect(
+        matchesAllowedPrefix(
+          'yarn workspaces foreach --all --include @scope/pkg run build',
+        ),
+      ).toBe(true);
+    });
+
+    it('allows `yarn workspaces foreach -j 5 run build`', () => {
+      expect(
+        matchesAllowedPrefix('yarn workspaces foreach -j 5 run build'),
+      ).toBe(true);
+    });
+
     // Yarn --cwd / -C
     it('allows `yarn --cwd packages/foo install`', () => {
       expect(matchesAllowedPrefix('yarn --cwd packages/foo install')).toBe(

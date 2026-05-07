@@ -193,10 +193,24 @@ function stripMonorepoSelector(parts: string[]): string[] | null {
   if (pm === 'yarn') {
     // yarn workspaces foreach [flags...] <script...>
     if (parts[1] === 'workspaces' && parts[2] === 'foreach') {
-      // Skip flags after `foreach` (anything starting with `-`).
+      // Flags that consume a separate value token (e.g. `--include pattern`).
+      // When written as `--flag=value` the loop already handles them because
+      // the combined token starts with `-`.
+      const FOREACH_VALUE_FLAGS = new Set([
+        '--include',
+        '--exclude',
+        '--since',
+        '--from',
+        '--jobs',
+        '-j',
+      ]);
       let i = 3;
       while (i < parts.length && parts[i].startsWith('-')) {
-        i++;
+        if (FOREACH_VALUE_FLAGS.has(parts[i])) {
+          i += 2; // skip the flag and its value argument
+        } else {
+          i++;
+        }
       }
       if (i >= parts.length) return null;
       return [pm, ...parts.slice(i)];
