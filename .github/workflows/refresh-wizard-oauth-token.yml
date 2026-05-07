@@ -1,0 +1,71 @@
+name: Refresh Wizard OAuth Token
+
+# Keeps the WIZARD_OAUTH_TOKEN / WIZARD_REFRESH_TOKEN / WIZARD_EXPIRES_AT
+# repo secrets fresh by exchanging the stored refresh token for a new
+# access token every hour. Required by eval / bench harnesses + production
+# wizard runs in CI that need a live OAuth bearer to hit the gateway.
+#
+# One-time setup:
+#   1. `amplitude-wizard ci-bootstrap` to seed the four secrets.
+#   2. Create a fine-grained PAT with `secrets:write` on this repo and
+#      store it as the WIZARD_SECRET_REFRESH_PAT secret. The default
+#      GITHUB_TOKEN cannot write repo secrets, hence the explicit PAT.
+
+on:
+  schedule:
+    # Hourly at :23 — off the top of the hour to avoid the GitHub
+    # cron thundering-herd that delays workflows scheduled at :00.
+    - cron: '23 * * * *'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  # Coalesce overlapping runs so a slow Hydra response doesn't double-rotate.
+  group: refresh-wizard-oauth-token
+  cancel-in-progress: false
+
+jobs:
+  refresh:
+    name: Rotate WIZARD_OAUTH_TOKEN
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+
+      - name: Set up Node
+        uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version-file: 'package.json'
+
+      - name: Refresh OAuth token via Hydra
+        id: refresh
+        run: node scripts/refresh-wizard-oauth-token.mjs
+        env:
+          WIZARD_REFRESH_TOKEN: ${{ secrets.WIZARD_REFRESH_TOKEN }}
+          WIZARD_ZONE: ${{ vars.WIZARD_ZONE }}
+
+      - name: Update repository secrets
+        if: steps.refresh.outputs.refresh != 'failed'
+        env:
+          # Fine-grained PAT with secrets:write on this repo. GITHUB_TOKEN
+          # cannot write secrets — see workflow docstring above.
+          GH_TOKEN: ${{ secrets.WIZARD_SECRET_REFRESH_PAT }}
+          NEW_ACCESS_TOKEN: ${{ steps.refresh.outputs.access_token }}
+          NEW_REFRESH_TOKEN: ${{ steps.refresh.outputs.refresh_token }}
+          NEW_EXPIRES_AT: ${{ steps.refresh.outputs.expires_at }}
+        run: |
+          set -euo pipefail
+          gh secret set WIZARD_OAUTH_TOKEN \
+            --repo "${GITHUB_REPOSITORY}" --body "$NEW_ACCESS_TOKEN"
+          gh secret set WIZARD_REFRESH_TOKEN \
+            --repo "${GITHUB_REPOSITORY}" --body "$NEW_REFRESH_TOKEN"
+          gh secret set WIZARD_EXPIRES_AT \
+            --repo "${GITHUB_REPOSITORY}" --body "$NEW_EXPIRES_AT"
+          echo "Rotated WIZARD_OAUTH_TOKEN; new expiry: $NEW_EXPIRES_AT"
+
+      - name: Surface refresh failure
+        if: steps.refresh.outputs.refresh == 'failed'
+        run: |
+          echo "::error::OAuth refresh failed. Re-run \`amplitude-wizard ci-bootstrap\` to re-seed WIZARD_REFRESH_TOKEN."
+          exit 1

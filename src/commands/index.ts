@@ -20,3 +20,4 @@ export { statusCommand } from './status';
 export { authCommand } from './auth';
 export { mcpCommand } from './mcp';
 export { manifestCommand } from './manifest';
+export { ciBootstrapCommand } from './ci-bootstrap';
