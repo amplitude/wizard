@@ -9,9 +9,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import type { Integration } from './constants.js';
-
-/** Same rule as wizard-tools — basename-safe skill ids only. */
-const SKILL_ID_ALLOWLIST = /^[a-z0-9][a-z0-9_-]*$/;
+import { isSafeSkillId } from './wizard-tools/bundled-skills.js';
 
 /**
  * Lists integration skill directory names under `.claude/skills/` that contain
@@ -24,7 +22,7 @@ export function listIntegrationSkillIdsOnDisk(installDir: string): string[] {
   for (const ent of fs.readdirSync(root, { withFileTypes: true })) {
     if (!ent.isDirectory()) continue;
     if (!ent.name.startsWith('integration-')) continue;
-    if (!SKILL_ID_ALLOWLIST.test(ent.name)) continue;
+    if (!isSafeSkillId(ent.name)) continue;
     const skillMd = path.join(root, ent.name, 'SKILL.md');
     if (fs.existsSync(skillMd)) out.push(ent.name);
   }

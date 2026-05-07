@@ -118,11 +118,44 @@ export function loadBundledSkillMenu(): SkillMenu {
 }
 
 /**
- * Strict skill-id allowlist: lowercase alphanumeric with hyphens or underscores
- * only. Used to gate any path.join with a skillId so a hostile or malformed
+ * Strict skill-id allowlist: lowercase alphanumeric with hyphens, underscores,
+ * or dots. Used to gate any path.join with a skillId so a hostile or malformed
  * id can never escape the skills root via traversal characters (`..`, `/`).
+ *
+ * The dot is permitted to support version-suffix style ids like
+ * `integration-nuxt-3.6` — without it, the bundled menu surfaces those
+ * skills but `load_skill` / `bundledSkillExists` reject them, causing a
+ * runtime failure when the agent tries to load one.
+ *
+ * Path-traversal patterns (`..`, `/`, `\`) and ids that start or end with
+ * a separator-like character (`.`, `-`) are rejected by {@link isSafeSkillId},
+ * not by the regex alone.
  */
-const SKILL_ID_ALLOWLIST = /^[a-z0-9][a-z0-9_-]*$/;
+const SKILL_ID_ALLOWLIST = /^[a-z0-9][a-z0-9_.-]*$/;
+
+/**
+ * Validate a skill id is safe to use with `path.join` against the skills
+ * root. Combines the {@link SKILL_ID_ALLOWLIST} regex with a
+ * defense-in-depth check that rejects:
+ *  - consecutive dots (`..`) anywhere in the id
+ *  - forward or backslash separators (`/`, `\`)
+ *  - ids that end with `.` or `-` (the regex already rejects leading dots
+ *    and dashes via the first character class)
+ *
+ * The dot is intentionally allowed *inside* the id (e.g. `nuxt-3.6`) but
+ * never as the first or last character, and never as a `..` sequence.
+ */
+export function isSafeSkillId(skillId: string): boolean {
+  if (typeof skillId !== 'string') return false;
+  if (!SKILL_ID_ALLOWLIST.test(skillId)) return false;
+  if (skillId.includes('..')) return false;
+  if (skillId.includes('/') || skillId.includes('\\')) return false;
+  // Trailing separator-like characters are rejected; leading ones are
+  // already filtered by the first character class in the regex.
+  const last = skillId[skillId.length - 1];
+  if (last === '.' || last === '-') return false;
+  return true;
+}
 
 /**
  * Strict reference path allowlist: only `references/<basename>.md` is
@@ -142,12 +175,12 @@ export function bundledSkillExists(skillId: string): boolean {
   // Reject any skillId that's not a strict basename — defense in depth before
   // the path.join below (skillId comes from internal callers but we treat it
   // as untrusted at the boundary).
-  if (!SKILL_ID_ALLOWLIST.test(skillId)) return false;
+  if (!isSafeSkillId(skillId)) return false;
   const skillsRoot = getSkillsRootDir();
   try {
     for (const category of fs.readdirSync(skillsRoot)) {
       // Same defense for category names read off disk.
-      if (!SKILL_ID_ALLOWLIST.test(category)) continue;
+      if (!isSafeSkillId(category)) continue;
       // skillId and category are both validated against SKILL_ID_ALLOWLIST
       // above, so neither can contain `..` or path separators.
       // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
@@ -173,11 +206,11 @@ export function bundledSkillExists(skillId: string): boolean {
  * to `.claude/skills/`). Returns null when absent or malformed inputs.
  */
 export function readBundledSkillBody(skillId: string): string | null {
-  if (!SKILL_ID_ALLOWLIST.test(skillId)) return null;
+  if (!isSafeSkillId(skillId)) return null;
   const skillsRoot = getSkillsRootDir();
   try {
     for (const category of fs.readdirSync(skillsRoot)) {
-      if (!SKILL_ID_ALLOWLIST.test(category)) continue;
+      if (!isSafeSkillId(category)) continue;
       // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
       const candidate = path.join(skillsRoot, category, skillId);
       // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
@@ -204,12 +237,12 @@ export function readBundledSkillReference(
   skillId: string,
   refPath: string,
 ): string | null {
-  if (!SKILL_ID_ALLOWLIST.test(skillId)) return null;
+  if (!isSafeSkillId(skillId)) return null;
   if (!SKILL_REFERENCE_REL_PATH.test(refPath)) return null;
   const skillsRoot = getSkillsRootDir();
   try {
     for (const category of fs.readdirSync(skillsRoot)) {
-      if (!SKILL_ID_ALLOWLIST.test(category)) continue;
+      if (!isSafeSkillId(category)) continue;
       // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
       const candidate = path.join(skillsRoot, category, skillId);
       // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
