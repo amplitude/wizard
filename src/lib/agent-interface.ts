@@ -21,8 +21,10 @@ import {
   extractApiErrorHttpStatusFromPattern,
   extractHttpStatusLooseFromMessage,
   findTransientSdkOutputPattern,
+  isPayloadShapeRejection,
   isThrownErrorCountedAsUpstreamGatewayFailure,
   isTransientThrownSdkErrorMessage,
+  parseStructuredUpstreamError,
 } from './agent/transient-llm-retry.js';
 import {
   AuthOnboardingPath,
@@ -1606,6 +1608,29 @@ export async function runAgent(
   // classified consistently with the post-stream collected-output case.
   let gatewayInvalidRequestDetected = false;
 
+  // Captures the terminal outcome of this run for the consolidated
+  // `agent run summary` analytics event emitted in the outer finally.
+  // First-write-wins so a cleanup error doesn't overwrite the real
+  // outcome (mirrors the SDK's "ignore post-success errors" behavior).
+  type TerminalState =
+    | { kind: 'success' }
+    | { kind: 'error'; error: AgentErrorType; message?: string };
+  let terminalState: TerminalState | undefined;
+  const recordTerminal = (s: TerminalState): void => {
+    if (!terminalState) terminalState = s;
+  };
+  // Wrap the error-return shape so every error exit records the terminal
+  // state in one place. Previously each `return { error: ... }` was bare;
+  // the run-summary event in `finally` would then have to guess which
+  // branch terminated.
+  const exitWithError = (
+    error: AgentErrorType,
+    message?: string,
+  ): { error: AgentErrorType; message?: string } => {
+    recordTerminal({ kind: 'error', error, message });
+    return message !== undefined ? { error, message } : { error };
+  };
+
   // Workaround for SDK bug: stdin closes before canUseTool responses can be sent.
   // The fix is to use an async generator for the prompt that stays open until
   // the result is received, keeping the stdin stream alive for permission responses.
@@ -1660,6 +1685,7 @@ export async function runAgent(
       'duration ms': durationMs,
       'duration seconds': durationSeconds,
     });
+    recordTerminal({ kind: 'success' });
     try {
       if (lastResultMessage) {
         middleware?.finalize(lastResultMessage, durationMs);
@@ -2737,19 +2763,30 @@ export async function runAgent(
         wizardSignal.removeEventListener('abort', onWizardAbort);
         const partialOutput = collectedText.join('\n');
 
-        // Vertex / wizard-proxy "Invalid request" — payload-shape rejection.
-        // Retrying with the same payload is guaranteed to 400 again, so we
-        // short-circuit the retry loop and let the post-loop classifier
-        // surface GATEWAY_INVALID_REQUEST with a clear remediation hint.
-        if (
-          !receivedSuccessResult &&
-          partialOutput.includes(GATEWAY_INVALID_REQUEST_MARKER)
-        ) {
+        // Vertex / wizard-proxy payload-shape rejection — retrying is
+        // futile because the next request body will be identically
+        // rejected. Prefer the proxy's structured envelope (which carries
+        // Vertex's actual error message), fall back to the legacy marker
+        // for old proxy builds and the rare empty-body fallback.
+        const structuredErr = !receivedSuccessResult
+          ? parseStructuredUpstreamError(partialOutput)
+          : null;
+        const isPayloadRejection =
+          (structuredErr !== null && isPayloadShapeRejection(structuredErr)) ||
+          (!receivedSuccessResult &&
+            partialOutput.includes(GATEWAY_INVALID_REQUEST_MARKER));
+        if (isPayloadRejection) {
           logToFile(
             'Agent error: GATEWAY_INVALID_REQUEST (payload rejected by upstream — not retrying)',
+            structuredErr ? { upstreamMessage: structuredErr.message } : {},
           );
           analytics.wizardCapture('agent gateway invalid request', {
             attempt,
+            // Capture the actual rejection reason when available — was
+            // truncated to "Invalid request sent to model provider" before
+            // the proxy started passing structured errors through.
+            'upstream message': structuredErr?.message?.slice(0, 2048) ?? null,
+            'upstream status': structuredErr?.status ?? null,
           });
           gatewayInvalidRequestDetected = true;
           break;
@@ -2863,18 +2900,29 @@ export async function runAgent(
         const errMsg =
           innerError instanceof Error ? innerError.message : String(innerError);
 
-        // Vertex / wizard-proxy "Invalid request" — payload-shape rejection.
-        // Same short-circuit as the post-stream branch: retrying is futile
-        // because the next request body will be identically rejected.
-        if (
-          !receivedSuccessResult &&
-          errMsg.includes(GATEWAY_INVALID_REQUEST_MARKER)
-        ) {
+        // Vertex / wizard-proxy payload-shape rejection — see post-stream
+        // branch for rationale. Try structured-error parse first, fall
+        // back to the legacy marker.
+        const structuredThrownErr = !receivedSuccessResult
+          ? parseStructuredUpstreamError(errMsg)
+          : null;
+        const isThrownPayloadRejection =
+          (structuredThrownErr !== null &&
+            isPayloadShapeRejection(structuredThrownErr)) ||
+          (!receivedSuccessResult &&
+            errMsg.includes(GATEWAY_INVALID_REQUEST_MARKER));
+        if (isThrownPayloadRejection) {
           logToFile(
             'Agent error: GATEWAY_INVALID_REQUEST (payload rejected by upstream — not retrying)',
+            structuredThrownErr
+              ? { upstreamMessage: structuredThrownErr.message }
+              : {},
           );
           analytics.wizardCapture('agent gateway invalid request', {
             attempt,
+            'upstream message':
+              structuredThrownErr?.message?.slice(0, 2048) ?? null,
+            'upstream status': structuredThrownErr?.status ?? null,
           });
           gatewayInvalidRequestDetected = true;
           break;
@@ -2893,14 +2941,18 @@ export async function runAgent(
           !authErrorDetected &&
           isTransientThrownSdkErrorMessage(errMsg);
         if (isTransientSdkError) {
+          // Cap at 2KB rather than 200 chars: Vertex JSON-schema rejection
+          // messages routinely exceed 200 chars and the most diagnostic
+          // part (the field name + expected type) was being truncated.
+          // Sentry stack traces are bigger and we keep them.
           logToFile(
             `Retrying after transient SDK error (next attempt: ${
               attempt + 2
-            } of ${MAX_RETRIES + 1}): ${errMsg.slice(0, 200)}`,
+            } of ${MAX_RETRIES + 1}): ${errMsg.slice(0, 2048)}`,
           );
           analytics.wizardCapture('agent sdk error retry', {
             attempt,
-            error: errMsg.slice(0, 200),
+            error: errMsg.slice(0, 2048),
           });
           publishRetryBanner({
             attempt: attempt + 2,
@@ -2931,7 +2983,7 @@ export async function runAgent(
       logToFile('Agent error: AUTH_ERROR');
       spinner.stop('Authentication failed');
       _activeStatusReporter = undefined;
-      return { error: AgentErrorType.AUTH_ERROR };
+      return exitWithError(AgentErrorType.AUTH_ERROR);
     }
 
     // Structured error signals via `report_status` (replaces text-marker regex).
@@ -2941,13 +2993,13 @@ export async function runAgent(
         logToFile('Agent error: MCP_MISSING');
         spinner.stop(detail || "Couldn't reach Amplitude's setup service");
         _activeStatusReporter = undefined;
-        return { error: AgentErrorType.MCP_MISSING, message: detail };
+        return exitWithError(AgentErrorType.MCP_MISSING, detail);
       }
       if (code === 'RESOURCE_MISSING') {
         logToFile('Agent error: RESOURCE_MISSING');
         spinner.stop(detail || "Couldn't load setup instructions");
         _activeStatusReporter = undefined;
-        return { error: AgentErrorType.RESOURCE_MISSING, message: detail };
+        return exitWithError(AgentErrorType.RESOURCE_MISSING, detail);
       }
       // Unknown structured error code — log it, let the regex-driven API-error
       // path below still run (API errors aren't reported via report_status).
@@ -2972,7 +3024,7 @@ export async function runAgent(
       logToFile('Agent error: MCP_MISSING (legacy text marker)');
       spinner.stop("Couldn't reach Amplitude's setup service");
       _activeStatusReporter = undefined;
-      return { error: AgentErrorType.MCP_MISSING, message: markerLine };
+      return exitWithError(AgentErrorType.MCP_MISSING, markerLine);
     }
     if (outputText.includes('[ERROR-RESOURCE-MISSING]')) {
       const idx = outputText.indexOf('[ERROR-RESOURCE-MISSING]');
@@ -2980,7 +3032,7 @@ export async function runAgent(
       logToFile('Agent error: RESOURCE_MISSING (legacy text marker)');
       spinner.stop("Couldn't load setup instructions");
       _activeStatusReporter = undefined;
-      return { error: AgentErrorType.RESOURCE_MISSING, message: markerLine };
+      return exitWithError(AgentErrorType.RESOURCE_MISSING, markerLine);
     }
 
     // Check for API errors (rate limits, etc.)
@@ -3003,7 +3055,7 @@ export async function runAgent(
     if (!receivedSuccessResult && outputText.includes('API Error: 429')) {
       logToFile('Agent error: RATE_LIMIT');
       spinner.stop('Rate limit exceeded');
-      return { error: AgentErrorType.RATE_LIMIT, message: apiErrorMessage };
+      return exitWithError(AgentErrorType.RATE_LIMIT, apiErrorMessage);
     }
 
     // Wizard-proxy / Vertex AI rejected the payload shape. Distinct from
@@ -3022,12 +3074,12 @@ export async function runAgent(
     ) {
       logToFile('Agent error: GATEWAY_INVALID_REQUEST');
       spinner.stop('Wizard request rejected by gateway');
-      return {
-        error: AgentErrorType.GATEWAY_INVALID_REQUEST,
-        message: apiErrorMessage.includes('Unknown')
+      return exitWithError(
+        AgentErrorType.GATEWAY_INVALID_REQUEST,
+        apiErrorMessage.includes('Unknown')
           ? GATEWAY_INVALID_REQUEST_MARKER
           : apiErrorMessage,
-      };
+      );
     }
 
     // Every attempt died with an upstream-gateway-shaped error and we
@@ -3043,16 +3095,13 @@ export async function runAgent(
         `Agent error: GATEWAY_DOWN (${upstreamGatewayFailures}/${attemptCount} attempts failed upstream)`,
       );
       spinner.stop('LLM gateway unavailable');
-      return {
-        error: AgentErrorType.GATEWAY_DOWN,
-        message: apiErrorMessage,
-      };
+      return exitWithError(AgentErrorType.GATEWAY_DOWN, apiErrorMessage);
     }
 
     if (!receivedSuccessResult && outputText.includes('API Error:')) {
       logToFile('Agent error: API_ERROR');
       spinner.stop('API error occurred');
-      return { error: AgentErrorType.API_ERROR, message: apiErrorMessage };
+      return exitWithError(AgentErrorType.API_ERROR, apiErrorMessage);
     }
 
     return completeWithSuccess();
@@ -3068,7 +3117,7 @@ export async function runAgent(
       logToFile('Agent error (caught): AUTH_ERROR');
       spinner.stop('Authentication failed');
       _activeStatusReporter = undefined;
-      return { error: AgentErrorType.AUTH_ERROR };
+      return exitWithError(AgentErrorType.AUTH_ERROR);
     }
 
     // If we already received a successful result, the error is from SDK cleanup
@@ -3091,7 +3140,7 @@ export async function runAgent(
     if (outputText.includes('API Error: 429')) {
       logToFile('Agent error (caught): RATE_LIMIT');
       spinner.stop('Rate limit exceeded');
-      return { error: AgentErrorType.RATE_LIMIT, message: apiErrorMessage };
+      return exitWithError(AgentErrorType.RATE_LIMIT, apiErrorMessage);
     }
 
     // See note in the non-throwing return path above — Vertex / wizard-proxy
@@ -3104,12 +3153,12 @@ export async function runAgent(
     ) {
       logToFile('Agent error (caught): GATEWAY_INVALID_REQUEST');
       spinner.stop('Wizard request rejected by gateway');
-      return {
-        error: AgentErrorType.GATEWAY_INVALID_REQUEST,
-        message: apiErrorMessage.includes('Unknown')
+      return exitWithError(
+        AgentErrorType.GATEWAY_INVALID_REQUEST,
+        apiErrorMessage.includes('Unknown')
           ? GATEWAY_INVALID_REQUEST_MARKER
           : apiErrorMessage,
-      };
+      );
     }
 
     // Backwards-compat fallback for bundled skills emitting legacy text
@@ -3119,14 +3168,14 @@ export async function runAgent(
       const markerLine = outputText.slice(idx, idx + 200).split('\n')[0];
       logToFile('Agent error (caught): MCP_MISSING (legacy text marker)');
       spinner.stop("Couldn't reach Amplitude's setup service");
-      return { error: AgentErrorType.MCP_MISSING, message: markerLine };
+      return exitWithError(AgentErrorType.MCP_MISSING, markerLine);
     }
     if (outputText.includes('[ERROR-RESOURCE-MISSING]')) {
       const idx = outputText.indexOf('[ERROR-RESOURCE-MISSING]');
       const markerLine = outputText.slice(idx, idx + 200).split('\n')[0];
       logToFile('Agent error (caught): RESOURCE_MISSING (legacy text marker)');
       spinner.stop("Couldn't load setup instructions");
-      return { error: AgentErrorType.RESOURCE_MISSING, message: markerLine };
+      return exitWithError(AgentErrorType.RESOURCE_MISSING, markerLine);
     }
 
     // See note in the non-throwing return path above — surface
@@ -3140,16 +3189,13 @@ export async function runAgent(
         `Agent error (caught): GATEWAY_DOWN (${upstreamGatewayFailures}/${attemptCount} attempts failed upstream)`,
       );
       spinner.stop('LLM gateway unavailable');
-      return {
-        error: AgentErrorType.GATEWAY_DOWN,
-        message: apiErrorMessage,
-      };
+      return exitWithError(AgentErrorType.GATEWAY_DOWN, apiErrorMessage);
     }
 
     if (outputText.includes('API Error:')) {
       logToFile('Agent error (caught): API_ERROR');
       spinner.stop('API error occurred');
-      return { error: AgentErrorType.API_ERROR, message: apiErrorMessage };
+      return exitWithError(AgentErrorType.API_ERROR, apiErrorMessage);
     }
 
     // No API error found, re-throw the original exception
@@ -3157,6 +3203,13 @@ export async function runAgent(
     getUI().log.error(`Error: ${(error as Error).message}`);
     logToFile('Agent run failed:', error);
     debug('Full error:', error);
+    // Record an unclassified terminal so the run-summary event still
+    // fires for orchestrators watching this run.
+    recordTerminal({
+      kind: 'error',
+      error: AgentErrorType.API_ERROR,
+      message: (error as Error).message,
+    });
     throw error;
   } finally {
     clearInterval(heartbeatInterval);
@@ -3168,6 +3221,41 @@ export async function runAgent(
     dashboardHandle?.dispose();
     clearRetryBanner();
     _activeStatusReporter = undefined;
+
+    // Consolidated run-summary event. One row per agent run carrying the
+    // counters orchestrators need to detect "user stuck in retry loop"
+    // patterns without having to stitch multiple per-attempt events.
+    // Fires from the finally block so it lands on every termination
+    // path (success, classified error, rethrown). First-write-wins on
+    // `terminalState` means a cleanup error doesn't clobber the real
+    // outcome.
+    try {
+      const summaryDurationMs = Date.now() - startTime;
+      analytics.wizardCapture('agent run summary', {
+        'duration ms': summaryDurationMs,
+        'duration seconds': Math.round(summaryDurationMs / 1000),
+        attempts: attemptCount,
+        'upstream gateway failures': upstreamGatewayFailures,
+        'gateway invalid request': gatewayInvalidRequestDetected,
+        'terminal status':
+          terminalState?.kind === 'success'
+            ? 'success'
+            : terminalState?.kind === 'error'
+            ? terminalState.error
+            : 'unknown',
+        'terminal message':
+          terminalState?.kind === 'error'
+            ? terminalState.message?.slice(0, 2048) ?? null
+            : null,
+        // Helps detect "many retries even though we ultimately succeeded" —
+        // a sign the gateway is degraded but not down.
+        'retried successfully':
+          terminalState?.kind === 'success' && upstreamGatewayFailures > 0,
+      });
+    } catch (e) {
+      // Never let a telemetry hiccup mask the real outcome.
+      logToFile('Agent run summary emit failed:', e);
+    }
   }
 }
 
