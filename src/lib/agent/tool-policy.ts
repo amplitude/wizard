@@ -1028,6 +1028,23 @@ export function createPreToolUseHook(
         typeof toolInput.command === 'string' ? toolInput.command : '';
       const decision = wizardCanUseTool(toolName, toolInput);
       if (decision.behavior === 'deny') {
+        // `decision.message` is a JSON-shaped structured deny envelope
+        // (see toWizardToolDenyMessage). The structured payload is
+        // correct for the agent (`permissionDecisionReason`), but the
+        // circuit-breaker / analytics `lastDenyReason` wants a plain
+        // human-readable string. Extract `guidance` (or fall back to
+        // `error`) so analytics see the same shape the other three
+        // trackBashDeny call sites use.
+        let humanReason = decision.message;
+        try {
+          const parsed = JSON.parse(decision.message) as {
+            guidance?: string;
+            error?: string;
+          };
+          humanReason = parsed.guidance ?? parsed.error ?? decision.message;
+        } catch {
+          // Not JSON — keep the raw message.
+        }
         return Promise.resolve(
           trackBashDeny(
             {
@@ -1038,7 +1055,7 @@ export function createPreToolUseHook(
               },
             },
             command,
-            decision.message,
+            humanReason,
           ),
         );
       }

@@ -3110,7 +3110,11 @@ describe('createPreToolUseHook', () => {
       expect(tripped).toHaveBeenCalledWith({
         consecutiveDenies: MAX_CONSECUTIVE_BASH_DENIES,
         lastCommand: 'curl example.com',
-        lastDenyReason: expect.stringContaining('Bash command'),
+        // The breaker now receives the human-readable `guidance` field
+        // extracted from the structured deny envelope, not the raw JSON
+        // blob. Match on the canonical "DO NOT retry" prefix that the
+        // tool-policy guidance starts with.
+        lastDenyReason: expect.stringContaining('DO NOT retry'),
       });
     });
 
