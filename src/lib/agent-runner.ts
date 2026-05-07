@@ -492,7 +492,11 @@ export async function runAgentWizard(
     writeFallbackReportIfMissing,
     archiveSetupReportFile,
     restoreSetupReportIfMissing,
+    persistDraftEventPlan,
   } = await import('./wizard-tools.js');
+  const { getLatestEventPlanDecision } = await import(
+    './agent/event-plan-feedback-state.js'
+  );
 
   // Initialise the file-change ledger BEFORE we touch ANY user file so
   // its preamble snapshot of the working tree (gitignore content,
@@ -526,7 +530,20 @@ export async function runAgentWizard(
   // Helper bound to this run's session. The fallback never overwrites
   // an agent-authored report (see writeFallbackReportIfMissing's
   // existsSync check), so it's safe to invoke from any teardown path.
+  //
+  // Before writing the report, check whether the run ended with an
+  // unresolved `confirm_event_plan` feedback record (the agent gave
+  // the user a plan, the user asked for changes, the agent never
+  // circled back). When that's the case, persist the proposed events
+  // as a DRAFT in `.amplitude/events.json` so the user doesn't lose
+  // both the plan AND their feedback — re-running the wizard can
+  // pick up where they left off, and the fallback report itself
+  // surfaces the unresolved-feedback state.
   const tryWriteFallback = (): void => {
+    const latest = getLatestEventPlanDecision();
+    if (latest && latest.decision === 'feedback' && latest.events.length > 0) {
+      persistDraftEventPlan(session.installDir, latest.events, latest.feedback);
+    }
     writeFallbackReportIfMissing({
       installDir: session.installDir,
       integration: session.integration,

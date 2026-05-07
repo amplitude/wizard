@@ -9,7 +9,9 @@ import {
   parseEnvKeys,
   mergeEnvValues,
   persistEventPlan,
+  persistDraftEventPlan,
   persistDashboard,
+  readDraftEventPlanMeta,
   cleanupIntegrationSkills,
   cleanupWizardArtifacts,
   ensureWizardArtifactsIgnored,
@@ -437,6 +439,175 @@ describe('persistEventPlan', () => {
     expect(persistEventPlan(tmpDir, [])).toBe(true);
     expect(JSON.parse(fs.readFileSync(canonical(tmpDir), 'utf8'))).toEqual([]);
     expect(fs.existsSync(legacy(tmpDir))).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// persistDraftEventPlan — outro safety net for unresolved
+// confirm_event_plan feedback. Writes a wrapper-shaped events.json with
+// `draft: true` and `lastFeedback`. Refuses to clobber an existing
+// non-draft (approved) plan.
+// ---------------------------------------------------------------------------
+
+describe('persistDraftEventPlan', () => {
+  let tmpDir: string;
+  const canonical = (dir: string) =>
+    path.join(dir, '.amplitude', 'events.json');
+
+  beforeEach(() => {
+    tmpDir = makeTmpDir();
+  });
+  afterEach(() => cleanup(tmpDir));
+
+  it('writes the wrapper shape with draft=true and lastFeedback', () => {
+    const events = [
+      { name: 'User Signed Up', description: 'when a user signs up' },
+    ];
+    expect(persistDraftEventPlan(tmpDir, events, 'add a prefix')).toBe(true);
+
+    const parsed = JSON.parse(fs.readFileSync(canonical(tmpDir), 'utf8'));
+    expect(parsed).toEqual({
+      events: [{ name: 'User Signed Up', description: 'when a user signs up' }],
+      draft: true,
+      lastFeedback: 'add a prefix',
+    });
+  });
+
+  it('surfaces the draft to readDraftEventPlanMeta', () => {
+    persistDraftEventPlan(
+      tmpDir,
+      [{ name: 'X', description: 'y' }],
+      'rename them all',
+    );
+    expect(readDraftEventPlanMeta(tmpDir)).toEqual({
+      lastFeedback: 'rename them all',
+    });
+  });
+
+  it('refuses to overwrite an existing approved (plain-array) plan', () => {
+    // Simulate a previous successful run that already wrote the
+    // canonical plain-array plan.
+    persistEventPlan(tmpDir, [
+      { name: 'Approved Event', description: 'kept around' },
+    ]);
+
+    const ok = persistDraftEventPlan(
+      tmpDir,
+      [{ name: 'Different Draft', description: 'should NOT land' }],
+      'never persisted',
+    );
+    expect(ok).toBe(false);
+
+    // The original approved plan is still on disk untouched.
+    const parsed = JSON.parse(fs.readFileSync(canonical(tmpDir), 'utf8'));
+    expect(parsed).toEqual([
+      { name: 'Approved Event', description: 'kept around' },
+    ]);
+    expect(readDraftEventPlanMeta(tmpDir)).toBeNull();
+  });
+
+  it('overwrites a previous draft with the latest feedback', () => {
+    persistDraftEventPlan(
+      tmpDir,
+      [{ name: 'First', description: 'x' }],
+      'first feedback',
+    );
+    expect(
+      persistDraftEventPlan(
+        tmpDir,
+        [{ name: 'Second', description: 'y' }],
+        'second feedback',
+      ),
+    ).toBe(true);
+
+    expect(readDraftEventPlanMeta(tmpDir)).toEqual({
+      lastFeedback: 'second feedback',
+    });
+    const parsed = JSON.parse(fs.readFileSync(canonical(tmpDir), 'utf8'));
+    expect(parsed.events).toEqual([{ name: 'Second', description: 'y' }]);
+  });
+
+  it('returns false when the working directory does not exist', () => {
+    const nonexistent = path.join(tmpDir, 'no', 'such', 'dir');
+    expect(persistDraftEventPlan(nonexistent, [], 'feedback')).toBe(false);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// readDraftEventPlanMeta — null for missing / approved / malformed files
+// ---------------------------------------------------------------------------
+
+describe('readDraftEventPlanMeta', () => {
+  let tmpDir: string;
+  beforeEach(() => {
+    tmpDir = makeTmpDir();
+  });
+  afterEach(() => cleanup(tmpDir));
+
+  it('returns null when events.json does not exist', () => {
+    expect(readDraftEventPlanMeta(tmpDir)).toBeNull();
+  });
+
+  it('returns null when events.json is a regular approved plan', () => {
+    persistEventPlan(tmpDir, [{ name: 'Foo', description: 'bar' }]);
+    expect(readDraftEventPlanMeta(tmpDir)).toBeNull();
+  });
+
+  it('returns null when events.json is malformed JSON', () => {
+    const file = path.join(tmpDir, '.amplitude', 'events.json');
+    fs.mkdirSync(path.dirname(file), { recursive: true });
+    fs.writeFileSync(file, '{not json');
+    expect(readDraftEventPlanMeta(tmpDir)).toBeNull();
+  });
+
+  it('returns the metadata when events.json is a draft wrapper', () => {
+    persistDraftEventPlan(
+      tmpDir,
+      [{ name: 'X', description: 'y' }],
+      'fix names',
+    );
+    expect(readDraftEventPlanMeta(tmpDir)).toEqual({
+      lastFeedback: 'fix names',
+    });
+  });
+});
+
+// ---------------------------------------------------------------------------
+// buildFallbackReport — surfaces the unresolved-feedback state when the
+// outro safety net wrote a draft events.json
+// ---------------------------------------------------------------------------
+
+describe('buildFallbackReport (draft events.json)', () => {
+  let tmpDir: string;
+  beforeEach(() => {
+    tmpDir = makeTmpDir();
+  });
+  afterEach(() => cleanup(tmpDir));
+
+  it('surfaces a "feedback was given but plan never finalized" notice when events.json is a draft', () => {
+    persistDraftEventPlan(
+      tmpDir,
+      [
+        { name: 'User Signed Up', description: 'signup completes' },
+        { name: 'Product Viewed', description: 'PDP mount' },
+      ],
+      'add a prefix',
+    );
+
+    const md = buildFallbackReport({
+      installDir: tmpDir,
+      integration: 'nextjs',
+    });
+
+    // The events still render so the user can see what was proposed
+    expect(md).toContain('| `User Signed Up` |');
+    expect(md).toContain('| `Product Viewed` |');
+    // The unresolved-feedback notice is present
+    expect(md).toContain('Feedback was given but the plan was never finalized');
+    expect(md).toContain('add a prefix');
+    // The "no event plan was persisted" copy must NOT be shown — the
+    // events ARE on disk, they just aren't finalized.
+    expect(md).not.toContain('No event plan was persisted');
   });
 });
 
