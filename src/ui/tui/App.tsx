@@ -71,28 +71,18 @@ export const App = ({ store }: AppProps) => {
 
   const separator = Layout.separatorChar.repeat(Math.max(0, width - 2));
 
-  // Short-circuit the normal layout when an event-plan prompt is active.
-  // The prompt previously rendered inline inside ConsoleView, but on
-  // tighter terminal heights the parent flex column squeezed it to zero
-  // rows — invisible to the user even though the wizard server had
-  // pendingPrompt set. Hoisting it up here gives it the entire terminal,
-  // bypasses every panel that could contend for vertical space, and keeps
-  // the keyboard handler trivially reachable. The full-screen view's own
-  // useInput owns Y/S/F and the feedback flow.
+  // When an event-plan prompt is active we replace the normal inner layout
+  // with the full-screen approver, but we keep a SINGLE stable outer tree
+  // shape (CommandModeContext > CtrlCHandler + outer Box). Returning a
+  // different root tree from the conditional — as we used to — caused
+  // Ink's log-update reconciler to leave stale frame content on screen
+  // until the user resized the terminal (which forces a clear-and-repaint).
+  // Reconciling a sibling-replacement instead lets Ink flush the next
+  // frame normally on both transitions (in and out). The full-screen
+  // view's own useInput owns Y/S/F and the feedback flow.
   const pendingPrompt = store.pendingPrompt;
-  if (pendingPrompt && pendingPrompt.kind === 'event-plan') {
-    return (
-      <CommandModeContext.Provider value={store.commandMode}>
-        <CtrlCHandler store={store} />
-        <EventPlanFullScreen
-          store={store}
-          events={pendingPrompt.events}
-          width={columns}
-          height={rows}
-        />
-      </CommandModeContext.Provider>
-    );
-  }
+  const showEventPlan =
+    pendingPrompt !== null && pendingPrompt.kind === 'event-plan';
 
   return (
     <CommandModeContext.Provider value={store.commandMode}>
@@ -107,55 +97,67 @@ export const App = ({ store }: AppProps) => {
         alignItems="center"
         justifyContent="flex-start"
       >
-        <Box flexDirection="column" width={width}>
-          {/* Journey stepper */}
-          <JourneyStepper store={store} width={width} />
-
-          {/* Live activity sub-line (compaction, retries, polls, MCP, cold-start).
-              Renders nothing when the wizard is idle. */}
-          <ActivityLine store={store} />
-
-          {/* Header bar */}
-          <HeaderBar
-            width={width}
-            orgName={store.session.selectedOrgName}
-            projectName={store.session.selectedProjectName}
-            envName={store.session.selectedEnvName}
+        {showEventPlan && pendingPrompt && pendingPrompt.kind === 'event-plan' ? (
+          <EventPlanFullScreen
+            key="event-plan"
+            store={store}
+            events={pendingPrompt.events}
+            width={columns}
+            height={rows}
           />
+        ) : (
+          <Box key="normal-layout" flexDirection="column" width={columns}>
+            <Box flexDirection="column" width={width}>
+              {/* Journey stepper */}
+              <JourneyStepper store={store} width={width} />
 
-          {/* Top separator */}
-          <Box paddingX={1}>
-            <Text color={Colors.border}>{separator}</Text>
-          </Box>
-        </Box>
+              {/* Live activity sub-line (compaction, retries, polls, MCP, cold-start).
+                  Renders nothing when the wizard is idle. */}
+              <ActivityLine store={store} />
 
-        {/* Content + console input */}
-        <ConsoleView store={store} width={width} height={consoleHeight}>
-          <Box
-            flexDirection="column"
-            flexGrow={1}
-            paddingX={Layout.paddingX}
-            overflow="hidden"
-          >
-            <ContentAreaContext.Provider
-              value={{ height: contentHeight, width: contentAreaWidth }}
-            >
-              <DissolveTransition
-                transitionKey={store.currentScreen}
-                width={contentAreaWidth}
-                height={contentHeight}
-                direction={direction}
+              {/* Header bar */}
+              <HeaderBar
+                width={width}
+                orgName={store.session.selectedOrgName}
+                projectName={store.session.selectedProjectName}
+                envName={store.session.selectedEnvName}
+              />
+
+              {/* Top separator */}
+              <Box paddingX={1}>
+                <Text color={Colors.border}>{separator}</Text>
+              </Box>
+            </Box>
+
+            {/* Content + console input */}
+            <ConsoleView store={store} width={width} height={consoleHeight}>
+              <Box
+                flexDirection="column"
+                flexGrow={1}
+                paddingX={Layout.paddingX}
+                overflow="hidden"
               >
-                <ScreenErrorBoundary
-                  store={store}
-                  retryToken={store.screenErrorRetry}
+                <ContentAreaContext.Provider
+                  value={{ height: contentHeight, width: contentAreaWidth }}
                 >
-                  {activeScreen}
-                </ScreenErrorBoundary>
-              </DissolveTransition>
-            </ContentAreaContext.Provider>
+                  <DissolveTransition
+                    transitionKey={store.currentScreen}
+                    width={contentAreaWidth}
+                    height={contentHeight}
+                    direction={direction}
+                  >
+                    <ScreenErrorBoundary
+                      store={store}
+                      retryToken={store.screenErrorRetry}
+                    >
+                      {activeScreen}
+                    </ScreenErrorBoundary>
+                  </DissolveTransition>
+                </ContentAreaContext.Provider>
+              </Box>
+            </ConsoleView>
           </Box>
-        </ConsoleView>
+        )}
       </Box>
     </CommandModeContext.Provider>
   );
