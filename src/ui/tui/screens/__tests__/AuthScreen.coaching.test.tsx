@@ -62,11 +62,16 @@ describe('AuthScreen — browser-fallback coaching', () => {
   });
 
   it('hides [R] until a loginUrl is generated, but always offers [M] and [Esc]', () => {
+    // Force the fresh-OAuth phase so we exercise the "Preparing your
+    // sign-in link" copy specifically. Default 'idle' / 'verifying-session'
+    // now correctly show "Verifying your session" — see follow-on test
+    // below.
     const store = makeStoreForSnapshot({
       introConcluded: true,
       region: 'us',
       loginUrl: null,
       pendingOrgs: null,
+      authPhase: 'opening-browser',
     });
     const { lastFrame } = render(<AuthScreen store={store} />);
     const frame = lastFrame() ?? '';
@@ -111,6 +116,29 @@ describe('AuthScreen — browser-fallback coaching', () => {
     const frame = lastFrame() ?? '';
     expect(frame).toContain('Preparing your sign-in link');
     expect(frame).not.toContain('Verifying your session');
+  });
+
+  // Follow-on regression: AuthScreen mounts before the authTask wakes up
+  // from its gate. During that window `authPhase` is still 'idle' — and
+  // the original ternary fell through to "Preparing your sign-in link",
+  // misleading users into thinking a browser launch was in flight when
+  // really the wizard was just waiting to start verifying the cached
+  // session. Treat 'idle' the same as 'verifying-session' so returning
+  // users see accurate copy from the moment AuthScreen renders.
+  it('shows "Verifying your session" copy when authPhase is idle (initial mount)', () => {
+    const store = makeStoreForSnapshot({
+      introConcluded: true,
+      region: 'us',
+      loginUrl: null,
+      pendingOrgs: null,
+      authPhase: 'idle',
+    });
+    const { lastFrame } = render(<AuthScreen store={store} />);
+    const frame = lastFrame() ?? '';
+    expect(frame).toContain('Verifying your session');
+    expect(frame).not.toContain('Preparing your sign-in link');
+    expect(frame).toContain('Enter API key manually');
+    expect(frame).toContain('Cancel');
   });
 
   it('uses signup-aware placeholder before loginUrl exists', () => {
