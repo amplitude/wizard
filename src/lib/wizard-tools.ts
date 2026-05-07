@@ -29,6 +29,7 @@ import { toWizardDashboardOpenUrl } from '../utils/dashboard-open-url';
 import type { SkillEntry, SkillMenu } from './wizard-tools/bundled-skills.js';
 import {
   bundledSkillExists,
+  isSkillTiersEnabled,
   loadBundledSkillMenu,
   readBundledSkillBody,
   readBundledSkillReference,
@@ -43,6 +44,11 @@ export {
   readBundledSkillReference,
   preStageSkills,
   installBundledSkill,
+  isSkillTiersEnabled,
+  buildSkillMenuFileContent,
+  writeSkillMenuFile,
+  SKILL_MENU_FILENAME,
+  PRE_STAGED_CONSTANT_SKILLS,
 } from './wizard-tools/bundled-skills.js';
 
 // Allow-listed hosts for remote skill downloads. The wizard ships skills
@@ -1239,160 +1245,164 @@ export async function createWizardToolsServer(options: WizardToolsOptions) {
     },
   );
 
-  /** Opt-in Tier-2 skill body delivery — see NEW_MIGRATION_PLAN Phase C / SKILLS_AND_CONTEXT_DESIGN.md */
-  const tieredSkillTools =
-    process.env.AMPLITUDE_WIZARD_SKILL_TIERS === '1'
-      ? [
-          tool(
-            'load_skill_menu',
-            'Return bundled skill ids + names by category for tiered skill loading. Read-only helper for AMPLITUDE_WIZARD_SKILL_TIERS=1.',
-            {
-              category: z
-                .string()
-                .optional()
-                .describe(
-                  'Optional category filter (integration, instrumentation, taxonomy, wizard).',
-                ),
-              reason: reasonField,
-            },
-            (args: { category?: string; reason: string }) => {
-              void args.reason;
-              const menu = loadBundledSkillMenu();
-              const categories = menu.categories;
-              if (args.category) {
-                const list = categories[args.category];
-                if (!list || list.length === 0) {
-                  return {
-                    content: [
-                      {
-                        type: 'text' as const,
-                        text: `No bundled skills found for category: ${args.category}`,
-                      },
-                    ],
-                    isError: true,
-                  };
-                }
+  /**
+   * Tier-1 / Tier-2 skill delivery — registers `load_skill_menu`,
+   * `load_skill`, and `load_skill_reference` when tiers are enabled
+   * (default-on; opt-out via `AMPLITUDE_WIZARD_SKILL_TIERS=0`). See
+   * NEW_MIGRATION_PLAN Phase C / SKILLS_AND_CONTEXT_DESIGN.md.
+   */
+  const tieredSkillTools = isSkillTiersEnabled()
+    ? [
+        tool(
+          'load_skill_menu',
+          'Return bundled skill ids + names by category for tiered skill loading. Available by default; opt out with AMPLITUDE_WIZARD_SKILL_TIERS=0.',
+          {
+            category: z
+              .string()
+              .optional()
+              .describe(
+                'Optional category filter (integration, instrumentation, taxonomy, wizard).',
+              ),
+            reason: reasonField,
+          },
+          (args: { category?: string; reason: string }) => {
+            void args.reason;
+            const menu = loadBundledSkillMenu();
+            const categories = menu.categories;
+            if (args.category) {
+              const list = categories[args.category];
+              if (!list || list.length === 0) {
                 return {
                   content: [
                     {
                       type: 'text' as const,
-                      text: JSON.stringify(
-                        {
-                          category: args.category,
-                          skills: list.map((s) => ({ id: s.id, name: s.name })),
-                        },
-                        null,
-                        2,
-                      ),
+                      text: `No bundled skills found for category: ${args.category}`,
                     },
                   ],
+                  isError: true,
                 };
               }
-              const out = Object.fromEntries(
-                Object.entries(categories).map(([name, entries]) => [
-                  name,
-                  entries.map((s) => ({ id: s.id, name: s.name })),
-                ]),
-              );
               return {
                 content: [
                   {
                     type: 'text' as const,
-                    text: JSON.stringify({ categories: out }, null, 2),
+                    text: JSON.stringify(
+                      {
+                        category: args.category,
+                        skills: list.map((s) => ({ id: s.id, name: s.name })),
+                      },
+                      null,
+                      2,
+                    ),
                   },
                 ],
               };
-            },
-          ),
-          tool(
-            'load_skill',
-            'Return SKILL.md for a bundled Amplitude skill id (single-step; no load_skill_menu loop). Opt-in: set AMPLITUDE_WIZARD_SKILL_TIERS=1. Use ids from the system skill menu / integration resolution only.',
-            {
-              skillId: z
-                .string()
-                .describe(
-                  'Bundled skill folder id (e.g. add-analytics-instrumentation)',
-                ),
-              reason: reasonField,
-            },
-            (args: { skillId: string; reason: string }) => {
-              void args.reason;
-              // Single traversal — readBundledSkillBody already walks every
-              // category subdir and returns null when missing, so an extra
-              // bundledSkillExists() probe just doubles the disk work.
-              const body = readBundledSkillBody(args.skillId);
-              if (body == null) {
-                return {
-                  content: [
-                    {
-                      type: 'text' as const,
-                      text: `Unknown or missing bundled skill: ${args.skillId}`,
-                    },
-                  ],
-                  isError: true,
-                };
-              }
-              logToFile(`load_skill: ${args.skillId} (${body.length} chars)`);
+            }
+            const out = Object.fromEntries(
+              Object.entries(categories).map(([name, entries]) => [
+                name,
+                entries.map((s) => ({ id: s.id, name: s.name })),
+              ]),
+            );
+            return {
+              content: [
+                {
+                  type: 'text' as const,
+                  text: JSON.stringify({ categories: out }, null, 2),
+                },
+              ],
+            };
+          },
+        ),
+        tool(
+          'load_skill',
+          'Return SKILL.md for a bundled Amplitude skill id (single-step; no load_skill_menu loop). Available by default (opt out with AMPLITUDE_WIZARD_SKILL_TIERS=0). Use ids from the system skill menu / integration resolution only. Do NOT call this repeatedly for the same skillId — bodies are cached for the run.',
+          {
+            skillId: z
+              .string()
+              .describe(
+                'Bundled skill folder id (e.g. add-analytics-instrumentation)',
+              ),
+            reason: reasonField,
+          },
+          (args: { skillId: string; reason: string }) => {
+            void args.reason;
+            // Single traversal — readBundledSkillBody already walks every
+            // category subdir and returns null when missing, so an extra
+            // bundledSkillExists() probe just doubles the disk work.
+            const body = readBundledSkillBody(args.skillId);
+            if (body == null) {
               return {
-                content: [{ type: 'text' as const, text: body }],
+                content: [
+                  {
+                    type: 'text' as const,
+                    text: `Unknown or missing bundled skill: ${args.skillId}`,
+                  },
+                ],
+                isError: true,
               };
-            },
-          ),
-          tool(
-            'load_skill_reference',
-            'Return a bundled skill reference markdown file by relative path. Path must be references/*.md. Opt-in: set AMPLITUDE_WIZARD_SKILL_TIERS=1.',
-            {
-              skillId: z
-                .string()
-                .describe(
-                  'Bundled skill folder id (e.g. add-analytics-instrumentation)',
-                ),
-              refPath: z
-                .string()
-                .regex(SKILL_REFERENCE_REL_PATH)
-                .describe(
-                  'Relative reference markdown path under the skill (e.g. references/browser-sdk-2.md)',
-                ),
-              reason: reasonField,
-            },
-            (args: { skillId: string; refPath: string; reason: string }) => {
-              void args.reason;
-              if (!bundledSkillExists(args.skillId)) {
-                return {
-                  content: [
-                    {
-                      type: 'text' as const,
-                      text: `Unknown or missing bundled skill: ${args.skillId}`,
-                    },
-                  ],
-                  isError: true,
-                };
-              }
-              const reference = readBundledSkillReference(
-                args.skillId,
-                args.refPath,
-              );
-              if (reference == null) {
-                return {
-                  content: [
-                    {
-                      type: 'text' as const,
-                      text: `Could not read reference ${args.refPath} for: ${args.skillId}`,
-                    },
-                  ],
-                  isError: true,
-                };
-              }
-              logToFile(
-                `load_skill_reference: ${args.skillId}/${args.refPath} (${reference.length} chars)`,
-              );
+            }
+            logToFile(`load_skill: ${args.skillId} (${body.length} chars)`);
+            return {
+              content: [{ type: 'text' as const, text: body }],
+            };
+          },
+        ),
+        tool(
+          'load_skill_reference',
+          'Return a bundled skill reference markdown file by relative path. Path must be references/*.md. Available by default (opt out with AMPLITUDE_WIZARD_SKILL_TIERS=0).',
+          {
+            skillId: z
+              .string()
+              .describe(
+                'Bundled skill folder id (e.g. add-analytics-instrumentation)',
+              ),
+            refPath: z
+              .string()
+              .regex(SKILL_REFERENCE_REL_PATH)
+              .describe(
+                'Relative reference markdown path under the skill (e.g. references/browser-sdk-2.md)',
+              ),
+            reason: reasonField,
+          },
+          (args: { skillId: string; refPath: string; reason: string }) => {
+            void args.reason;
+            if (!bundledSkillExists(args.skillId)) {
               return {
-                content: [{ type: 'text' as const, text: reference }],
+                content: [
+                  {
+                    type: 'text' as const,
+                    text: `Unknown or missing bundled skill: ${args.skillId}`,
+                  },
+                ],
+                isError: true,
               };
-            },
-          ),
-        ]
-      : [];
+            }
+            const reference = readBundledSkillReference(
+              args.skillId,
+              args.refPath,
+            );
+            if (reference == null) {
+              return {
+                content: [
+                  {
+                    type: 'text' as const,
+                    text: `Could not read reference ${args.refPath} for: ${args.skillId}`,
+                  },
+                ],
+                isError: true,
+              };
+            }
+            logToFile(
+              `load_skill_reference: ${args.skillId}/${args.refPath} (${reference.length} chars)`,
+            );
+            return {
+              content: [{ type: 'text' as const, text: reference }],
+            };
+          },
+        ),
+      ]
+    : [];
 
   // -- load_skill_menu / install_skill — DISABLED ───────────────────────────
   //
@@ -2066,14 +2076,18 @@ export const WIZARD_TOOL_NAMES = [
 ];
 
 /**
- * Tool names allowed for the inner agent, including opt-in experiments.
- * Default matches {@link WIZARD_TOOL_NAMES}; when `AMPLITUDE_WIZARD_SKILL_TIERS=1`,
- * appends `wizard-tools:load_skill` (must match tools registered in
- * {@link createWizardToolsServer}).
+ * Tool names allowed for the inner agent, including the tiered skill
+ * delivery tools.
+ *
+ * Tiered skill delivery is **default-on** (opt out with
+ * `AMPLITUDE_WIZARD_SKILL_TIERS=0`). When enabled, this appends
+ * `load_skill_menu` / `load_skill` / `load_skill_reference` to the
+ * canonical {@link WIZARD_TOOL_NAMES} list — must match the tools
+ * registered in {@link createWizardToolsServer}.
  */
 export function resolveWizardAllowedToolNames(): string[] {
   const names = [...WIZARD_TOOL_NAMES];
-  if (process.env.AMPLITUDE_WIZARD_SKILL_TIERS === '1') {
+  if (isSkillTiersEnabled()) {
     names.push(`${SERVER_NAME}:load_skill_menu`);
     names.push(`${SERVER_NAME}:load_skill`);
     names.push(`${SERVER_NAME}:load_skill_reference`);

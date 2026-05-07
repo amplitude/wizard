@@ -18,6 +18,47 @@ export interface SkillMenu {
 }
 
 // ---------------------------------------------------------------------------
+// Tier-1 / Tier-2 skill delivery feature flag
+// ---------------------------------------------------------------------------
+
+/**
+ * Resolve the AMPLITUDE_WIZARD_SKILL_TIERS feature flag.
+ *
+ * Default-on (per the perf-skill-tiers rollout): the wizard pre-stages only
+ * a Tier-1 menu and serves skill bodies via the `load_skill` /
+ * `load_skill_reference` tools. This collapses ~47K eagerly-staged tokens
+ * out of the cold-start prompt prefix, which on a real run was 12.8x over
+ * the 7.5K budget.
+ *
+ * Explicit opt-out: set `AMPLITUDE_WIZARD_SKILL_TIERS=0` to restore the
+ * previous eager-pre-stage path. Useful for debugging and as a safety
+ * valve if a regression slips through.
+ *
+ * Anything other than the literal string `'0'` (including unset, `'1'`,
+ * `'true'`, `''`) keeps tiers enabled — we treat the flag as default-on
+ * with a single explicit kill switch rather than a tristate.
+ */
+export function isSkillTiersEnabled(): boolean {
+  return process.env.AMPLITUDE_WIZARD_SKILL_TIERS !== '0';
+}
+
+/**
+ * Filename for the Tier-1 menu file written into the user's project.
+ * Lives at `<installDir>/.claude/skills/skill-menu.json`.
+ */
+export const SKILL_MENU_FILENAME = 'skill-menu.json';
+
+/**
+ * Tier-1 menu shape — what gets serialized into `skill-menu.json` and
+ * returned by the `load_skill_menu` MCP tool. Keep in sync between the
+ * file writer (`writeSkillMenuFile`) and the tool response so the agent
+ * can use either source interchangeably.
+ */
+export interface SkillMenuFileContent {
+  categories: Record<string, { id: string; name: string }[]>;
+}
+
+// ---------------------------------------------------------------------------
 // Bundled skill helpers
 // ---------------------------------------------------------------------------
 
@@ -262,42 +303,123 @@ export function readBundledSkillReference(
 }
 
 /**
- * Pre-stage a deterministic set of skills into the user's `.claude/skills/`
- * directory before the agent runs, so the agent can load them via the Skill
- * tool without having to call load_skill_menu / install_skill in a loop.
+ * The deterministic set of skills the wizard cares about pre-staging when
+ * tiers are off. Exported so tests can lock the contract and the menu
+ * writer can iterate without duplicating the list.
  *
- * The constant skills (taxonomy + instrumentation + dashboard) are always
- * the same; the integration skill is resolved per framework via the optional
- * resolver and may be null if no matching skill exists on disk.
+ * Order is documentation-only: each id corresponds to a folder under
+ * `skills/<category>/<id>/`. `bundledSkillExists` rejects ids that aren't
+ * actually bundled.
+ */
+export const PRE_STAGED_CONSTANT_SKILLS = [
+  'wizard-prompt-supplement',
+  'amplitude-quickstart-taxonomy-agent',
+  'add-analytics-instrumentation',
+  // Pre-staged so the agent can load it via the Skill tool BEFORE
+  // confirm_event_plan to detect existing analytics wrappers / helpers
+  // / hooks in the codebase. Without this, the agent reimplements
+  // events on top of the raw SDK and ignores the wrappers customers
+  // already use (Lendi feedback — see the corresponding commandment
+  // in `commandments.ts`). Referenced by the `instrument-events` and
+  // `discover-event-surfaces` skills as well, so pre-staging avoids
+  // a missing-skill error if those sub-skills run.
+  'discover-analytics-patterns',
+  // `amplitude-chart-dashboard-plan` is intentionally NOT pre-staged for
+  // the main run — chart and dashboard creation moved to the deferred
+  // `amplitude-wizard dashboard` command in DEFER_DASHBOARD_PLAN PR 4.
+  // The deferred command loads the skill explicitly when it runs (see
+  // `src/commands/dashboard.ts`). The skill source still lives under
+  // `skills/taxonomy/` so it can be resolved at that time.
+] as const;
+
+/**
+ * Build the Tier-1 menu payload from the bundled skills directory. The
+ * shape matches the JSON the `load_skill_menu` MCP tool returns, so the
+ * file written to `.claude/skills/skill-menu.json` is interchangeable
+ * with the tool response.
+ */
+export function buildSkillMenuFileContent(): SkillMenuFileContent {
+  const menu = loadBundledSkillMenu();
+  return {
+    categories: Object.fromEntries(
+      Object.entries(menu.categories).map(([name, entries]) => [
+        name,
+        entries.map((s) => ({ id: s.id, name: s.name })),
+      ]),
+    ),
+  };
+}
+
+/**
+ * Write the Tier-1 menu to `<installDir>/.claude/skills/skill-menu.json`.
  *
- * Returns the list of skill IDs that were successfully staged.
+ * Returns the absolute path on success. On error logs and returns null —
+ * the caller falls back to the in-prompt menu so a write failure never
+ * blocks the run.
+ */
+export function writeSkillMenuFile(installDir: string): string | null {
+  const skillsDir = path.join(installDir, '.claude', 'skills');
+  const menuPath = path.join(skillsDir, SKILL_MENU_FILENAME);
+  try {
+    fs.mkdirSync(skillsDir, { recursive: true });
+    const content = buildSkillMenuFileContent();
+    fs.writeFileSync(menuPath, JSON.stringify(content, null, 2), 'utf8');
+    logToFile(`writeSkillMenuFile: wrote ${menuPath}`);
+    return menuPath;
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    logToFile(`writeSkillMenuFile: failed: ${msg}`);
+    return null;
+  }
+}
+
+/**
+ * Pre-stage skills for the agent run.
+ *
+ * Two modes:
+ *
+ * - **Tiered (default — `AMPLITUDE_WIZARD_SKILL_TIERS` unset or `'1'`):**
+ *   Writes a single Tier-1 menu file at `.claude/skills/skill-menu.json`
+ *   containing `{ id, name }` per skill. Skill bodies stay in the wizard
+ *   package and are served on-demand via the `load_skill` /
+ *   `load_skill_reference` MCP tools. This is the default rollout per
+ *   the perf-skill-tiers audit (~47K eager skill-body tokens removed
+ *   from the cold-start prefix).
+ *
+ * - **Eager (opt-out — `AMPLITUDE_WIZARD_SKILL_TIERS=0`):**
+ *   Copies the constant skills (taxonomy + instrumentation + dashboard)
+ *   plus the resolved integration skill into `.claude/skills/<id>/`.
+ *   Preserves the previous behaviour exactly; useful for debugging or
+ *   for users who hit a tier-mode regression.
+ *
+ * Returns the list of skill IDs that were successfully staged. In tiered
+ * mode the list is empty (the menu is the only artifact written) but
+ * `integrationStaged` still reflects whether the resolver found a
+ * matching integration skill — callers use that signal to decide
+ * whether the prompt can pin a specific id.
  */
 export function preStageSkills(
   installDir: string,
   integrationSkillId: string | null,
 ): { staged: string[]; integrationStaged: boolean } {
-  const constantSkills = [
-    'wizard-prompt-supplement',
-    'amplitude-quickstart-taxonomy-agent',
-    'add-analytics-instrumentation',
-    // Pre-staged so the agent can load it via the Skill tool BEFORE
-    // confirm_event_plan to detect existing analytics wrappers / helpers
-    // / hooks in the codebase. Without this, the agent reimplements
-    // events on top of the raw SDK and ignores the wrappers customers
-    // already use (Lendi feedback — see the corresponding commandment
-    // in `commandments.ts`). Referenced by the `instrument-events` and
-    // `discover-event-surfaces` skills as well, so pre-staging avoids
-    // a missing-skill error if those sub-skills run.
-    'discover-analytics-patterns',
-    // `amplitude-chart-dashboard-plan` is intentionally NOT pre-staged for
-    // the main run — chart and dashboard creation moved to the deferred
-    // `amplitude-wizard dashboard` command in DEFER_DASHBOARD_PLAN PR 4.
-    // The deferred command loads the skill explicitly when it runs (see
-    // `src/commands/dashboard.ts`). The skill source still lives under
-    // `skills/taxonomy/` so it can be resolved at that time.
-  ];
+  if (isSkillTiersEnabled()) {
+    // Tiered mode: write only the menu. Skill bodies are served by the
+    // `load_skill` / `load_skill_reference` MCP tools at runtime.
+    writeSkillMenuFile(installDir);
+    const integrationStaged = Boolean(
+      integrationSkillId && bundledSkillExists(integrationSkillId),
+    );
+    logToFile(
+      `preStageSkills: tiered mode (menu only); integrationSkillId=${
+        integrationSkillId ?? 'null'
+      } resolved=${integrationStaged}`,
+    );
+    return { staged: [], integrationStaged };
+  }
+
+  // Eager mode (opt-out): preserve the legacy pre-stage behaviour.
   const staged: string[] = [];
-  for (const id of constantSkills) {
+  for (const id of PRE_STAGED_CONSTANT_SKILLS) {
     if (!bundledSkillExists(id)) {
       logToFile(`preStageSkills: skipping ${id} — not bundled`);
       continue;
@@ -321,7 +443,7 @@ export function preStageSkills(
       );
     }
   }
-  logToFile(`preStageSkills: staged [${staged.join(', ')}]`);
+  logToFile(`preStageSkills: eager mode staged [${staged.join(', ')}]`);
   return { staged, integrationStaged };
 }
 
