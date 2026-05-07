@@ -989,7 +989,7 @@ export class WizardStore {
   promptConfirm(message: string): Promise<boolean> {
     return new Promise((resolve) => {
       this.$pendingPrompt.set({ kind: 'confirm', message, resolve });
-      this.$version.set(this.$version.get() + 1);
+      this.emitChange();
     });
   }
 
@@ -997,7 +997,7 @@ export class WizardStore {
   promptChoice(message: string, options: string[]): Promise<string> {
     return new Promise((resolve) => {
       this.$pendingPrompt.set({ kind: 'choice', message, options, resolve });
-      this.$version.set(this.$version.get() + 1);
+      this.emitChange();
     });
   }
 
@@ -1010,7 +1010,7 @@ export class WizardStore {
       response: String(answer),
     });
     this.$pendingPrompt.set(null);
-    this.$version.set(this.$version.get() + 1);
+    this.emitChange();
     if (prompt.kind === 'confirm') {
       prompt.resolve(answer as boolean);
     } else {
@@ -1022,7 +1022,7 @@ export class WizardStore {
   promptEventPlan(events: PlannedEvent[]): Promise<EventPlanDecision> {
     return new Promise((resolve) => {
       this.$pendingPrompt.set({ kind: 'event-plan', events, resolve });
-      this.$version.set(this.$version.get() + 1);
+      this.emitChange();
     });
   }
 
@@ -1035,7 +1035,7 @@ export class WizardStore {
       response: typeof decision === 'object' ? 'feedback' : String(decision),
     });
     this.$pendingPrompt.set(null);
-    this.$version.set(this.$version.get() + 1);
+    this.emitChange();
     prompt.resolve(decision);
   }
 
