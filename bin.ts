@@ -147,6 +147,7 @@ import {
   planCommand,
   applyCommand,
   verifyCommand,
+  dashboardCommand,
   statusCommand,
   authCommand,
   mcpCommand,
@@ -586,6 +587,7 @@ void yargs(hideBin(process.argv))
   .command(planCommand)
   .command(applyCommand)
   .command(verifyCommand)
+  .command(dashboardCommand)
   .command(statusCommand)
   .command(authCommand)
   .command(mcpCommand)

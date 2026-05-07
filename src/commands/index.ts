@@ -15,6 +15,7 @@ export { projectsCommand } from './projects';
 export { planCommand } from './plan';
 export { applyCommand } from './apply';
 export { verifyCommand } from './verify';
+export { dashboardCommand } from './dashboard';
 export { statusCommand } from './status';
 export { authCommand } from './auth';
 export { mcpCommand } from './mcp';
