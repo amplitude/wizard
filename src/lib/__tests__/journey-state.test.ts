@@ -133,19 +133,6 @@ describe('classifyToolEvent', () => {
       ).toBeNull();
     });
 
-    it('does not flag Edit once dashboard has started', () => {
-      // Once the agent moves to dashboard creation, further file edits
-      // are no longer "wire up event tracking" work.
-      expect(
-        classifyToolEvent({
-          phase: 'pre',
-          toolName: 'Edit',
-          toolInput: { file_path: '/p/src/foo.ts' },
-          prevDerived: { plan: 'completed', dashboard: 'in_progress' },
-        }),
-      ).toBeNull();
-    });
-
     it('handles MultiEdit / Write / NotebookEdit identically to Edit', () => {
       for (const toolName of ['Write', 'MultiEdit', 'NotebookEdit']) {
         expect(
@@ -171,38 +158,46 @@ describe('classifyToolEvent', () => {
     });
   });
 
-  describe('dashboard', () => {
-    it('flags Amplitude MCP create_chart as dashboard in_progress', () => {
-      expect(
-        classifyToolEvent({
-          phase: 'pre',
-          toolName: 'mcp__amplitude__create_chart',
-          toolInput: { title: 'Funnel' },
-        }),
-      ).toEqual({ stepId: 'dashboard', status: 'in_progress' });
-    });
+  // ── DEFER_DASHBOARD_PLAN PR 4 regression guard ──────────────────────────
+  // The dashboard step (formerly step 5) is gone — chart and dashboard work
+  // moved to the deferred `amplitude-wizard dashboard` command. The
+  // classifier must NOT emit a 'dashboard' transition for any tool call.
+  // None of the chart-building Amplitude MCP tools nor the legacy
+  // `record_dashboard` wizard-tools call should advance the journey.
+  describe('dashboard step is no longer recognized (deferred to wizard dashboard command)', () => {
+    it.each([
+      'create_chart',
+      'create_dashboard',
+      'update_chart',
+      'update_dashboard',
+      'add_chart_to_dashboard',
+      'attach_chart_to_dashboard',
+      'query_dataset',
+      'save_chart_edits',
+      'get_chart_definition_params',
+      'verify_chart_definition',
+    ])(
+      'returns null for Amplitude MCP %s (was dashboard in_progress pre-PR4)',
+      (bare) => {
+        expect(
+          classifyToolEvent({
+            phase: 'pre',
+            toolName: `mcp__amplitude__${bare}`,
+            toolInput: {},
+            prevDerived: { plan: 'completed', wire: 'in_progress' },
+          }),
+        ).toBeNull();
+      },
+    );
 
-    it('flags Amplitude MCP create_dashboard as dashboard in_progress', () => {
-      expect(
-        classifyToolEvent({
-          phase: 'pre',
-          toolName: 'mcp__amplitude__create_dashboard',
-          toolInput: { title: 'Activation' },
-        }),
-      ).toEqual({ stepId: 'dashboard', status: 'in_progress' });
-    });
-
-    it('flags record_dashboard Pre as dashboard in_progress', () => {
+    it('returns null for record_dashboard Pre / Post (was dashboard transitions pre-PR4)', () => {
       expect(
         classifyToolEvent({
           phase: 'pre',
           toolName: 'mcp__wizard-tools__record_dashboard',
           toolInput: { dashboardUrl: 'https://app.amplitude.com/...' },
         }),
-      ).toEqual({ stepId: 'dashboard', status: 'in_progress' });
-    });
-
-    it('flags record_dashboard Post as dashboard completed', () => {
+      ).toBeNull();
       expect(
         classifyToolEvent({
           phase: 'post',
@@ -210,54 +205,26 @@ describe('classifyToolEvent', () => {
           toolInput: { dashboardUrl: 'https://app.amplitude.com/...' },
           toolResult: { ok: true },
         }),
-      ).toEqual({ stepId: 'dashboard', status: 'completed' });
+      ).toBeNull();
     });
 
-    it.each([
-      'query_dataset',
-      'save_chart_edits',
-      'get_chart_definition_params',
-      'verify_chart_definition',
-    ])(
-      'flags chart-building tool %s as dashboard in_progress',
-      (toolBareName) => {
-        expect(
-          classifyToolEvent({
-            phase: 'pre',
-            toolName: `mcp__amplitude__${toolBareName}`,
-            toolInput: {},
-          }),
-        ).toEqual({ stepId: 'dashboard', status: 'in_progress' });
-      },
-    );
-
-    it('keeps dashboard in_progress across a sequence of chart-building tools', () => {
-      // The agent typically chains query_dataset → get_chart_definition_params
-      // → verify_chart_definition → save_chart_edits → create_chart while
-      // building a chart. Each call should land on `in_progress` — never
-      // null, never oscillate to a different step.
-      const sequence = [
-        'query_dataset',
-        'get_chart_definition_params',
-        'verify_chart_definition',
-        'save_chart_edits',
-        'create_chart',
-      ];
-      for (const bare of sequence) {
-        expect(
-          classifyToolEvent({
-            phase: 'pre',
-            toolName: `mcp__amplitude__${bare}`,
-            toolInput: {},
-            prevDerived: { plan: 'completed', dashboard: 'in_progress' },
-          }),
-        ).toEqual({ stepId: 'dashboard', status: 'in_progress' });
-      }
+    it('keeps wire in_progress across an unexpected Amplitude MCP probe (no dashboard guard)', () => {
+      // Pre-PR4 this Edit would have been suppressed because dashboard
+      // was already in_progress. Now wire is the terminal step, so an
+      // edit after plan should still flip wire to in_progress regardless
+      // of any stray Amplitude MCP probe.
+      expect(
+        classifyToolEvent({
+          phase: 'pre',
+          toolName: 'Edit',
+          toolInput: { file_path: '/p/src/foo.ts' },
+          prevDerived: { plan: 'completed' },
+        }),
+      ).toEqual({ stepId: 'wire', status: 'in_progress' });
     });
 
     it('ignores read-only Amplitude MCP probes', () => {
-      // list_*, search_*, get_* are agent browsing — not load-bearing
-      // signals for the dashboard step.
+      // list_*, search_*, get_* are agent browsing — never load-bearing.
       expect(
         classifyToolEvent({
           phase: 'pre',

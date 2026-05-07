@@ -1190,7 +1190,7 @@ export const defaultCommand: CommandModule = {
             // Date.now() each render), and the Logs tab sits at
             // "Waiting for the agent to start writing logs…". From the
             // user's perspective the wizard looks hung. setRunPhase
-            // populates the canonical 5 tasks, stamps runStartedAt, and
+            // populates the canonical 4 tasks, stamps runStartedAt, and
             // is idempotent against agent-runner's later
             // getUI().startRun() call.
             tui.store.setRunPhase(RunPhaseEnum.Running);

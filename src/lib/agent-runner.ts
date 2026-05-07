@@ -63,9 +63,13 @@ const SUPPORT_EMAIL = 'wizard@amplitude.com';
  * places — `getUI().seedPostAgentSteps` to register the row, and
  * `getUI().setPostAgentStep(id, …)` from inside the step function to
  * update its status. Coupled by string but cheap to find-and-replace.
+ *
+ * Note: a `create-dashboard` step ran here in parallel with `commit-events`
+ * until DEFER_DASHBOARD_PLAN PR 4 — chart and dashboard creation moved to
+ * the deferred `amplitude-wizard dashboard` command. Only the events-commit
+ * step still runs as part of the main wizard.
  */
 export const POST_AGENT_STEP_COMMIT_EVENTS = 'commit-events';
-export const POST_AGENT_STEP_CREATE_DASHBOARD = 'create-dashboard';
 
 /**
  * Build the "you can bypass the Amplitude gateway with a direct Anthropic
@@ -223,6 +227,30 @@ export function classifyAgentOutcome(session: WizardSession): {
     dashboardComplete,
     eventsInstrumented,
   };
+}
+
+/**
+ * Build the "events instrumented; run `wizard dashboard` later" message
+ * shown in the outro and live status ticker once the main run finishes.
+ *
+ * DEFER_DASHBOARD_PLAN PR 4: chart and dashboard creation moved out of
+ * `wizard run` and into the deferred `amplitude-wizard dashboard`
+ * command. The main run's success state is "events instrumented", and
+ * we tell the user how (and when) to build the dashboard. Wording adapts
+ * based on whether the agent persisted a `dashboard-plan.json` artifact
+ * via `record_dashboard_plan` — when it did, we cite the plan path so
+ * the user can inspect or hand-edit the chart strategy before the
+ * deferred command runs.
+ *
+ * Pure for unit testing — no I/O, no UI calls.
+ */
+export function buildDashboardDeferredMessage(args: {
+  /** Path to the persisted plan artifact, or null if none was written. */
+  planPath: string | null;
+}): string {
+  return args.planPath
+    ? `Events instrumented! Run \`npx @amplitude/wizard dashboard\` once your app has sent the new events to Amplitude (usually a few minutes) to build a starter dashboard from the plan saved at ${args.planPath}.`
+    : `Events instrumented! Run \`npx @amplitude/wizard dashboard\` once your app has sent the new events to Amplitude (usually a few minutes) to build a starter dashboard.`;
 }
 
 /**
@@ -1138,18 +1166,14 @@ async function runAgentWizardBody(
         'agent error detail': detail,
       });
       // Surface a plain-English warning so the user knows what's
-      // recoverable. Without this they'd see a normal success outro
-      // with no hint that the dashboard step actually failed.
-      // Copy stays jargon-free — same standard as PR #336.
-      const what = dashboardComplete
-        ? 'a late tooling step'
-        : 'the dashboard creation step';
+      // recoverable. Copy stays jargon-free — same standard as PR #336.
+      // Dashboard creation is deferred (PR 4 of DEFER_DASHBOARD_PLAN.md),
+      // so a soft MCP failure here only matters if the agent was probing
+      // the Amplitude MCP read-only — events are still instrumented.
       getUI().pushStatus(
-        `Note: ${what} couldn't reach Amplitude's setup service — your SDK + events are instrumented. ${
-          dashboardComplete
-            ? ''
-            : 'Build the dashboard manually at https://app.amplitude.com using the event names in your code. '
-        }Detail: ${detail || errorType}`,
+        `Note: a late tooling step couldn't reach Amplitude's setup service — your SDK + events are instrumented. Detail: ${
+          detail || errorType
+        }`,
       );
       // Fall through to env-var upload, MCP install, Slack, Outro —
       // they don't depend on agentResult.error being null.
@@ -1337,14 +1361,17 @@ async function runAgentWizardBody(
 
   // Surface the post-agent steps as a visible sub-list under the agent's
   // task list so the user sees forward motion through what was previously
-  // a silent gap (5/5 agent tasks ✓ + a static "Creating charts…" footer
-  // for up to 90s reads as a hung wizard). Each step transitions
-  // pending → in_progress → completed | skipped from inside the step
-  // function itself (commitPlannedEventsStep / createDashboardStep);
-  // the FinalizingPanel renders the queue with per-step elapsed time.
-  // Step ids are coupled to the labels here intentionally — the step
-  // function calls setPostAgentStep with the matching id and owns its
-  // own outcome. agent-runner just seeds + invokes.
+  // a silent gap (4/4 agent tasks ✓ + a static footer for up to 90s reads
+  // as a hung wizard). Each step transitions pending → in_progress →
+  // completed | skipped from inside the step function itself
+  // (commitPlannedEventsStep); the FinalizingPanel renders the queue with
+  // per-step elapsed time.
+  //
+  // History: a `create-dashboard` step ran here in parallel with
+  // commit-events until DEFER_DASHBOARD_PLAN PR 4 — chart and dashboard
+  // creation moved to the deferred `amplitude-wizard dashboard` command.
+  // The final-success message and (optionally) a `dashboard-plan.json`
+  // hand-off replace the inline dashboard step.
   getUI().seedPostAgentSteps([
     {
       id: POST_AGENT_STEP_COMMIT_EVENTS,
@@ -1352,48 +1379,50 @@ async function runAgentWizardBody(
       activeForm: 'Saving your event plan to Amplitude',
       status: 'pending',
     },
-    {
-      id: POST_AGENT_STEP_CREATE_DASHBOARD,
-      label: 'Create your starter dashboard',
-      activeForm: 'Creating your starter dashboard in Amplitude',
-      status: 'pending',
-    },
   ]);
+
+  // Mark `wire` complete now that the agent stream has terminated AND the
+  // events.json artifact is on disk. Without dashboard as a downstream
+  // step, the renderer's sequential cascade no longer rolls wire up to
+  // completed automatically — we signal it here.
+  if (agentEventsInstrumented(session)) {
+    try {
+      getUI().applyJourneyTransition('wire', 'completed');
+    } catch (err) {
+      logToFile(
+        `[agent-runner] applyJourneyTransition('wire','completed') threw: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+    }
+  }
 
   // Commit the instrumented event plan to the Amplitude tracking plan as
   // planned events so the names show up in the Data tab immediately — even
   // before any track() call fires in the user's app.
-  // Commit planned events (tracking plan API) and dashboard fallback run on
-  // independent I/O — overlap them to shorten the post-agent gap. Each step
-  // owns its own `setPostAgentStep` lifecycle and session mutations on
-  // disjoint fields (`commit` → API / `create-dashboard` → local artifacts).
-  const [plannedEventsSummary] = await Promise.all([
-    commitPlannedEventsStep(
-      agentResult.plannedEvents ?? [],
-      accessToken,
-      appId,
-      session,
-      cloudRegion,
-    ),
-    (async (): Promise<void> => {
-      try {
-        const { createDashboardStep } = await import(
-          '../steps/create-dashboard.js'
-        );
-        await createDashboardStep({
-          session,
-          accessToken,
-          integration: config.metadata.integration,
-        });
-      } catch (err) {
-        logToFile(
-          `[agent-runner] createDashboardStep threw: ${
-            err instanceof Error ? err.message : String(err)
-          }`,
-        );
-      }
-    })(),
-  ]);
+  const plannedEventsSummary = await commitPlannedEventsStep(
+    agentResult.plannedEvents ?? [],
+    accessToken,
+    appId,
+    session,
+    cloudRegion,
+  );
+
+  // Dashboard-deferred analytics breadcrumb. Lets us track which runs
+  // would have built a dashboard inline pre-PR4 vs which actually
+  // produce a dashboard-plan.json hand-off for the deferred command.
+  // `record_dashboard_plan` (when the agent emits one) writes the plan
+  // file directly — we don't synthesize one here from `plannedEvents`,
+  // we just observe whether it landed.
+  const { getDashboardPlanFile } = await import('../utils/storage-paths.js');
+  const dashboardPlanPath = getDashboardPlanFile(session.installDir);
+  const dashboardPlanWritten = fsSync.existsSync(dashboardPlanPath);
+  analytics.wizardCapture('dashboard deferred', {
+    integration: config.metadata.integration,
+    'plan written': dashboardPlanWritten,
+    'plan path': dashboardPlanWritten ? dashboardPlanPath : '',
+    'events instrumented': agentEventsInstrumented(session),
+  });
 
   // MCP installation is handled by McpScreen — no prompt here
 
@@ -1415,6 +1444,15 @@ async function runAgentWizardBody(
     });
   }
 
+  // Deferred-dashboard hand-off message. Always shown on success now that
+  // the main run no longer creates a dashboard inline — `wire` is the
+  // terminal step and chart/dashboard creation is owned by the
+  // `amplitude-wizard dashboard` subcommand. Wording adapts based on
+  // whether the agent persisted a chart plan via `record_dashboard_plan`.
+  const dashboardDeferredMessage = buildDashboardDeferredMessage({
+    planPath: dashboardPlanWritten ? dashboardPlanPath : null,
+  });
+
   const changes = [
     ...config.ui.getOutroChanges(frameworkContext),
     Object.keys(envVars).length > 0
@@ -1424,7 +1462,21 @@ async function runAgentWizardBody(
       ? `Uploaded environment variables to your hosting provider`
       : '',
     plannedEventsSummary,
+    dashboardDeferredMessage,
   ].filter(Boolean);
+
+  // Surface the same line in the live status ticker so the user sees it
+  // even before the OutroScreen renders (esp. in --agent / --ci modes
+  // where the outro panel may not fully render).
+  try {
+    getUI().pushStatus(dashboardDeferredMessage);
+  } catch (err) {
+    logToFile(
+      `[agent-runner] pushStatus(dashboardDeferred) threw: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
+  }
 
   session.outroData = {
     kind: OutroKind.Success,
@@ -1714,10 +1766,15 @@ function buildIntegrationPrompt(
   // routinely picked the wizard team's own dev project (802868) and created
   // dashboards there; the user's setup report linked to a project they
   // don't own.
+  // Note: this run no longer creates charts or dashboards — DEFER_DASHBOARD_PLAN
+  // PR 4 moved that work to the deferred `amplitude-wizard dashboard` command.
+  // The appId guidance is still load-bearing for the wizard's `record_dashboard_plan`
+  // hand-off (which writes the orgId/projectId pair into the persisted plan) and
+  // for any read-only Amplitude MCP probes the integration skill might do.
   const appIdGuidance =
     context.appId === 0
-      ? `- Amplitude App ID: not set by the wizard (0). When you call the Amplitude MCP, get the appId from \`get_context().defaultAppId\` — that's the project tied to the API key above. NEVER pick a different appId from \`appsByCategory\` or any other listing in the get_context response. Every chart / dashboard you create MUST belong to that exact project. If \`defaultAppId\` is missing or null, halt with report_status kind="error", code="RESOURCE_MISSING", detail="Could not resolve project from API key" — do not guess.`
-      : `- Amplitude App ID (shown in Amplitude UI as "Project ID"): ${context.appId}. Every chart / dashboard you create MUST use this exact appId. Do NOT call \`get_context\` to pick a different one — the wizard already resolved it and the API key above belongs to this project.`;
+      ? `- Amplitude App ID: not set by the wizard (0). If you need the appId for any read-only Amplitude MCP probe or for the deferred-dashboard hand-off, get it from \`get_context().defaultAppId\` — that's the project tied to the API key above. NEVER pick a different appId from \`appsByCategory\` or any other listing in the get_context response. If \`defaultAppId\` is missing or null, halt with report_status kind="error", code="RESOURCE_MISSING", detail="Could not resolve project from API key" — do not guess. (Note: do not create charts or dashboards in this run — those are owned by the deferred \`amplitude-wizard dashboard\` command.)`
+      : `- Amplitude App ID (shown in Amplitude UI as "Project ID"): ${context.appId}. Use this appId for any deferred-dashboard plan hand-off you persist. Do NOT call \`get_context\` to pick a different one — the wizard already resolved it and the API key above belongs to this project. (Note: do not create charts or dashboards in this run — those are owned by the deferred \`amplitude-wizard dashboard\` command.)`;
 
   const additionalLines = config.prompts.getAdditionalContextLines
     ? config.prompts.getAdditionalContextLines(frameworkContext)
@@ -1739,7 +1796,7 @@ function buildIntegrationPrompt(
 
   const skillsIntro = preStagedIntegrationSkillId
     ? `The wizard has pre-staged supporting skills into \`.claude/skills/\` and pinned one integration skill id for this run — load them with the Skill tool. Do NOT call load_skill_menu or install_skill (disabled).`
-    : `The wizard has pre-staged taxonomy, instrumentation, and chart-plan skills into \`.claude/skills/\` (load with the Skill tool). STEP 1 explains the integration workflow — do NOT call load_skill_menu or install_skill (disabled).`;
+    : `The wizard has pre-staged taxonomy and instrumentation skills into \`.claude/skills/\` (load with the Skill tool). STEP 1 explains the integration workflow — do NOT call load_skill_menu or install_skill (disabled).`;
 
   return `You are setting up Amplitude analytics in this ${
     config.metadata.name
@@ -1759,14 +1816,15 @@ ${appIdGuidance}
     config.prompts.packageInstallation ?? DEFAULT_PACKAGE_INSTALLATION
   }${additionalContext}
 
-Instructions (follow in order — your **system prompt commandments** carry the cross-cutting rules: TodoWrite checklist labels, Bash/env policy, parallel discovery, \`confirm_event_plan\` + \`.amplitude/events.json\`, \`record_dashboard\`, setup report + \`<wizard-report>\`, MCP \`reason\` on every wizard-tools call, and package-install background tasks. Do not contradict them):
+Instructions (follow in order — your **system prompt commandments** carry the cross-cutting rules: TodoWrite checklist labels, Bash/env policy, parallel discovery, \`confirm_event_plan\` + \`.amplitude/events.json\`, setup report + \`<wizard-report>\`, MCP \`reason\` on every wizard-tools call, and package-install background tasks. Do not contradict them):
 
 ${integrationSkillStep}
 
 STEP 2: Run the integration skill's numbered workflow reference files in order (e.g. \`1.0-*\`, \`1.1-*\`, …). Never paste secrets into source — use env vars; details live in commandments + \`wizard-prompt-supplement/references/api-keys-and-env.md\`.
 
-STEP 3–5 (env, instrumentation, dashboard): After STEP 1–2, execute the phased work those skills describe. Load pre-staged skills by filesystem path with the Skill tool — \`.claude/skills/amplitude-quickstart-taxonomy-agent/SKILL.md\`, \`.claude/skills/add-analytics-instrumentation/SKILL.md\`, \`.claude/skills/amplitude-chart-dashboard-plan/SKILL.md\` — and follow each skill's workflow. Do **not** call \`load_skill_menu\` / \`install_skill\` for these IDs. Autocapture overlap, \`confirm_event_plan\` timing, and \`record_dashboard\` + todo gating are specified in \`wizard-prompt-supplement/references/\` (see the supplement SKILL index).
+STEP 3–4 (env + instrumentation): After STEP 1–2, execute the phased work those skills describe. Load pre-staged skills by filesystem path with the Skill tool — \`.claude/skills/amplitude-quickstart-taxonomy-agent/SKILL.md\` and \`.claude/skills/add-analytics-instrumentation/SKILL.md\` — and follow each skill's workflow. Do **not** call \`load_skill_menu\` / \`install_skill\` for these IDs. Autocapture overlap and \`confirm_event_plan\` timing are specified in \`wizard-prompt-supplement/references/\` (see the supplement SKILL index).
 
+Chart + dashboard creation are NOT part of this run — they happen in a separate \`amplitude-wizard dashboard\` command after event ingestion catches up. Do not load \`amplitude-chart-dashboard-plan\`, do not call \`record_dashboard\` / \`create_chart\` / \`create_dashboard\` / \`query_dataset\` / \`save_chart_edits\` / any Amplitude MCP chart or dashboard tool. If your taxonomy work surfaces a clear chart strategy, you MAY (optionally) call the wizard-tools \`record_dashboard_plan\` tool ONCE at the very end of the run to hand the plan off to the deferred command — but do not block instrumentation on it. STOP after the setup report is written; \`wire\` is the terminal step.
 
 `;
 }

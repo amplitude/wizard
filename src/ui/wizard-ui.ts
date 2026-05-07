@@ -228,7 +228,7 @@ export interface WizardUI {
   /**
    * Apply a deterministic journey transition derived from a tool call
    * the agent just issued (see `src/lib/journey-state.ts`). One of the
-   * five canonical steps moves to `in_progress` or `completed`. Once
+   * four canonical steps moves to `in_progress` or `completed`. Once
    * `completed`, a step can never regress.
    */
   applyJourneyTransition(

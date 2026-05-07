@@ -17,6 +17,13 @@
  * couldn't load the wrapper-detection skill and reimplemented every
  * event on top of the raw SDK, ignoring the codebase's existing
  * `trackEvent()` wrapper. Lock the entry in.
+ *
+ * `amplitude-chart-dashboard-plan` was removed from the constant set in
+ * DEFER_DASHBOARD_PLAN PR 4 — chart and dashboard creation moved to the
+ * deferred `amplitude-wizard dashboard` command, which loads the skill
+ * itself when invoked. Pre-staging it for the main run would re-introduce
+ * the 168k-token compaction stall the audit measured. The negative test
+ * below pins that drop.
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
@@ -74,16 +81,42 @@ describe('preStageSkills', () => {
   it('keeps the other constant skills staged (no regression)', () => {
     const { staged } = preStageSkills(installDir, null);
 
-    // These four were the original constant set before
-    // discover-analytics-patterns joined. Verify they still ship so a
-    // future edit to the constants list doesn't accidentally drop one.
+    // The original constant set, minus `amplitude-chart-dashboard-plan`
+    // which moved to the deferred `amplitude-wizard dashboard` command
+    // in DEFER_DASHBOARD_PLAN PR 4. The deferred command stages /
+    // loads that skill on its own; the main run no longer pre-stages
+    // it. (The next case below pins the negative — main run must NOT
+    // ship it.)
     for (const id of [
       'wizard-prompt-supplement',
       'amplitude-quickstart-taxonomy-agent',
       'add-analytics-instrumentation',
-      'amplitude-chart-dashboard-plan',
     ]) {
       expect(staged, `${id} fell out of preStageSkills`).toContain(id);
     }
+  });
+
+  it('does NOT stage amplitude-chart-dashboard-plan in the main run (DEFER_DASHBOARD_PLAN PR 4)', () => {
+    // Regression guard: chart and dashboard creation moved out of
+    // `wizard run` in PR 4. The skill source still lives under
+    // `skills/taxonomy/` (so `bundledSkillExists` stays true) and the
+    // deferred `amplitude-wizard dashboard` command loads it
+    // explicitly when invoked. But the main run's pre-stage list must
+    // skip it — otherwise the agent wastes 168k tokens on chart
+    // strategy mid-instrumentation, which is precisely the failure
+    // mode this PR removes.
+    const { staged } = preStageSkills(installDir, null);
+    expect(staged).not.toContain('amplitude-chart-dashboard-plan');
+    // And nothing should land on disk under the canonical pre-stage
+    // location either — the deferred command writes its own copy when
+    // it runs.
+    const stagedSkillMd = path.join(
+      installDir,
+      '.claude',
+      'skills',
+      'amplitude-chart-dashboard-plan',
+      'SKILL.md',
+    );
+    expect(fs.existsSync(stagedSkillMd)).toBe(false);
   });
 });

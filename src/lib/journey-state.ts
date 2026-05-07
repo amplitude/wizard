@@ -2,7 +2,7 @@
  * Journey state classifier — derives canonical-step transitions from the
  * agent's tool calls instead of from free-form `TodoWrite` text.
  *
- * The 5-step journey rendered in the TUI (see `canonical-tasks.ts`) was
+ * The 4-step journey rendered in the TUI (see `canonical-tasks.ts`) was
  * historically driven by the agent's `TodoWrite` output. That coupling
  * was brittle: the LLM drifted on long runs, renamed steps on retry,
  * and occasionally regressed completed steps when re-emitting stale
@@ -10,10 +10,14 @@
  * with a deterministic derivation: each step transitions on a specific
  * tool call (or pattern of tool calls) the agent must make to do its
  * job. PRs #474 (structured `fileWrites` instead of regex over
- * `statusMessages`), #479 (`record_dashboard` as the dashboard
- * completion signal), and #480 (`tool_use` observation drives the
- * dashboard pill) established this pattern; this module finishes it
- * for the journey stepper.
+ * `statusMessages`), #479 / #480 (legacy `record_dashboard` signal,
+ * since removed by PR 4 of DEFER_DASHBOARD_PLAN.md) established this
+ * pattern; this module finishes it for the journey stepper.
+ *
+ * History: a fifth `dashboard` step lived here until DEFER_DASHBOARD_PLAN
+ * PR 4 — chart and dashboard creation moved to the deferred
+ * `amplitude-wizard dashboard` command, so the in-loop classifier no
+ * longer tracks them. `wire` is the terminal step.
  *
  * The function is pure — no I/O, no store reference. Wire-up happens
  * in `agent-interface.ts` (`PreToolUse` / `PostToolUse` hook
@@ -54,8 +58,7 @@ export interface ClassifyToolEventInput {
 
 /**
  * Strip the standard MCP server prefix (`mcp__<server>__`) so callers can
- * pattern-match on the bare tool name. Mirrors `create-dashboard.ts`'s
- * `describeAgentToolUse` helper — a tool named
+ * pattern-match on the bare tool name. A tool named
  * `mcp__amplitude__create_chart` exposes `create_chart`. Returns the input
  * unchanged when no prefix matches.
  */
@@ -65,11 +68,10 @@ function bareToolName(name: string): string {
 }
 
 /**
- * Match the wizard-tools MCP server's `confirm_event_plan` /
- * `record_dashboard` tools regardless of which prefix the SDK reports
- * (`mcp__wizard-tools__*` in production, `mcp__amplitude-wizard__*` in
- * some test fixtures, bare names elsewhere). The tool list is owned by
- * `src/lib/wizard-tools.ts`.
+ * Match the wizard-tools MCP server's tools regardless of which prefix
+ * the SDK reports (`mcp__wizard-tools__*` in production,
+ * `mcp__amplitude-wizard__*` in some test fixtures, bare names
+ * elsewhere). The tool list is owned by `src/lib/wizard-tools.ts`.
  */
 function isWizardTool(toolName: string, bare: string): boolean {
   return (
@@ -128,60 +130,25 @@ function readStringField(value: unknown, key: string): string | undefined {
  *      the call returning means the agent finished the planning step;
  *      the user's verdict on the plan is orthogonal).
  *   4. **wire** — any Edit/Write tool firing AFTER plan has completed.
- *      Pre → in_progress. There is no completion signal on write-tool Post
- *      (historically, the first Post flipped the pill to "done" while
- *      multi-file instrumentation continued). The store's sequential cascade
- *      in `renderJourneyTasks` rolls wire up to `completed` when step 5 starts.
- *   5. **dashboard** — Amplitude MCP `create_chart` / `create_dashboard` /
- *      `update_chart` / `update_dashboard` tools, plus the chart-building
- *      pipeline that feeds them (`query_dataset`, `save_chart_edits`,
- *      `get_chart_definition_params`, `verify_chart_definition`), all
- *      flip dashboard to `in_progress`. Completion remains
- *      `mcp__wizard-tools__record_dashboard` (Post → completed).
+ *      Pre → in_progress. Wire is the terminal step; it transitions to
+ *      `completed` from the agent-runner post-loop boundary
+ *      (`finalizeWireStep`) once the agent stream ends and an
+ *      events.json artifact is on disk. There is no per-tool completion
+ *      signal — wiring spans many files and the first PostToolUse on a
+ *      write would falsely flip the pill to "done" while the agent is
+ *      still mid-instrumentation.
  *
- * Ordering is sequential — when step N's trigger fires, the renderer
- * marks steps 1..N-1 completed automatically. So we only need to emit
- * the "frontmost" transition for each event; cascading is the store's
- * job.
+ * History: a fifth `dashboard` step used to live here, with triggers on
+ * Amplitude MCP `create_chart` / `create_dashboard` / `record_dashboard`
+ * / chart-builder tools. DEFER_DASHBOARD_PLAN PR 4 deleted it — chart +
+ * dashboard creation now happens in the deferred
+ * `amplitude-wizard dashboard` command, after event ingestion catches up.
  */
 export function classifyToolEvent(
   input: ClassifyToolEventInput,
 ): JourneyTransition | null {
   const { phase, toolName, toolInput, prevDerived } = input;
   const bare = bareToolName(toolName);
-
-  // ── Step 5: dashboard ──
-  // Most-specific signal: record_dashboard PostToolUse → completed.
-  if (
-    phase === 'post' &&
-    bare === 'record_dashboard' &&
-    isWizardTool(toolName, bare)
-  ) {
-    return { stepId: 'dashboard', status: 'completed' };
-  }
-  // Any Amplitude MCP write call → dashboard in_progress.
-  // record_dashboard PreToolUse also lands here (we mark in_progress on
-  // the call attempt; PostToolUse upgrades it to completed above).
-  if (
-    phase === 'pre' &&
-    (bare === 'create_chart' ||
-      bare === 'create_dashboard' ||
-      bare === 'update_chart' ||
-      bare === 'update_dashboard' ||
-      bare === 'add_chart_to_dashboard' ||
-      bare === 'attach_chart_to_dashboard' ||
-      // Chart-building pipeline that precedes create_chart. Without
-      // these the journey UI sat on `wire = in_progress` for ~3 minutes
-      // while the agent was actually doing dashboard work (audit
-      // finding from run aeef7c6e). See DEFER_DASHBOARD_PLAN.md PR 1.
-      bare === 'query_dataset' ||
-      bare === 'save_chart_edits' ||
-      bare === 'get_chart_definition_params' ||
-      bare === 'verify_chart_definition' ||
-      (bare === 'record_dashboard' && isWizardTool(toolName, bare)))
-  ) {
-    return { stepId: 'dashboard', status: 'in_progress' };
-  }
 
   // ── Step 3: plan ──
   if (bare === 'confirm_event_plan' && isWizardTool(toolName, bare)) {
@@ -208,13 +175,15 @@ export function classifyToolEvent(
   // We deliberately don't try to detect "is this a track() callsite" —
   // the agent is instructed to confirm_event_plan THEN write track calls,
   // so the temporal gate is sufficient and avoids parsing edit content.
+  //
+  // No `dashboard` guard any more — the dashboard step is gone, and wire
+  // is now the terminal step. Agent-runner flips wire to `completed` at
+  // the post-agent boundary (see `finalizeWireStep`), not here.
   if (
     phase === 'pre' &&
     WRITE_TOOLS.has(toolName) &&
     prevDerived?.plan === 'completed' &&
-    prevDerived?.wire !== 'completed' &&
-    prevDerived?.dashboard !== 'in_progress' &&
-    prevDerived?.dashboard !== 'completed'
+    prevDerived?.wire !== 'completed'
   ) {
     return { stepId: 'wire', status: 'in_progress' };
   }

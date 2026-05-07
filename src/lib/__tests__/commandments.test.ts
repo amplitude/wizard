@@ -4,13 +4,17 @@
  * The wizard renders the agent's TodoWrite list as the progress bar the
  * user stares at for the entire run. Drift in those labels (or the
  * denominator) translates 1:1 to drift in user perception. This test
- * locks down the contract: exactly 5 todos, in this order, with these
+ * locks down the contract: exactly 4 todos, in this order, with these
  * exact strings — anything else needs an explicit, intentional change
  * to commandments AND this test in the same PR.
  *
+ * History: this list was 5 todos until DEFER_DASHBOARD_PLAN PR 4 — chart
+ * and dashboard creation moved to the deferred `amplitude-wizard dashboard`
+ * command, so the main run's checklist drops the dashboard step.
+ *
  * If you find yourself updating the labels here, pause: every
  * additional engineering-internal label (CSP, env-vars, build verify,
- * setup-report) is a step backward. The 5 are deliberate user-visible
+ * setup-report) is a step backward. The 4 are deliberate user-visible
  * milestones; engineering phases roll up.
  */
 
@@ -27,7 +31,7 @@ const REQUIRED_TODOS = CANONICAL_LABELS;
 describe('TodoWrite user-journey commandment', () => {
   const text = getWizardCommandments();
 
-  it('lists exactly five user-visible todos in order', () => {
+  it('lists exactly four user-visible todos in order', () => {
     let cursor = 0;
     for (const label of REQUIRED_TODOS) {
       const idx = text.indexOf(label, cursor);
@@ -57,17 +61,57 @@ describe('TodoWrite user-journey commandment', () => {
     }
   });
 
-  it('mandates the denominator stay 5 from first frame to last', () => {
-    // Drift in the denominator (5 → 8 → 12) was the original "the
-    // wizard is broken" signal. Lock the 5/5 invariant in.
-    expect(text).toMatch(/X\s*\/\s*5\s*tasks complete/);
-    expect(text).toMatch(/denominator MUST stay 5/);
+  it('mandates the denominator stay 4 from first frame to last', () => {
+    // Drift in the denominator (4 → 6 → 9) was the original "the
+    // wizard is broken" signal. Lock the 4/4 invariant in. Was 5/5
+    // until DEFER_DASHBOARD_PLAN PR 4 — see the file header for context.
+    expect(text).toMatch(/X\s*\/\s*4\s*tasks complete/);
+    expect(text).toMatch(/denominator MUST stay 4/);
   });
 
   it('does not re-introduce the open-ended "every high-level area" wording', () => {
     // The bug-source phrase from the prior commandment. Specific
     // negative test so a sloppy re-merge can't bring it back.
     expect(text).not.toContain('every high-level area of work');
+  });
+
+  it('does not list the dropped dashboard step or in-loop chart MCP tools', () => {
+    // DEFER_DASHBOARD_PLAN PR 4 regression guard. The 5th step
+    // ("Build your starter dashboard") and the inline call-list
+    // (`record_dashboard`, `create_chart`, `create_dashboard`) MUST
+    // NOT be the kind of work the agent thinks it should do during
+    // `wizard run` — those moved to the deferred
+    // `amplitude-wizard dashboard` command. The commandments may
+    // mention these tool names ONLY in negative form ("do not call ...").
+    expect(text).not.toContain('Build your starter dashboard');
+    expect(text).not.toContain('5. Build your starter dashboard');
+    // The denominator must NOT advertise five steps.
+    expect(text).not.toMatch(/X\s*\/\s*5\s*tasks complete/);
+    // If `record_dashboard` is mentioned at all it MUST be in a
+    // negative ("do not") clause. This regex guards against a future
+    // copy edit that re-introduces the tool name as something the
+    // agent should call.
+    const recordDashboardOccurrences = text.match(/record_dashboard/g) ?? [];
+    if (recordDashboardOccurrences.length > 0) {
+      // Every mention must sit alongside a "do not" / "MUST NOT" /
+      // "deferred" cue. Use a coarse window check rather than a
+      // literal regex so the wording can evolve.
+      const allMentionsAreNegative = text
+        .split(/record_dashboard/)
+        .slice(0, -1)
+        .every((preceding, idx) => {
+          const after = text.split(/record_dashboard/)[idx + 1] ?? '';
+          const window = `${preceding.slice(-200)}record_dashboard${after.slice(
+            0,
+            200,
+          )}`;
+          return /(do not|MUST NOT|deferred|do NOT)/i.test(window);
+        });
+      expect(
+        allMentionsAreNegative,
+        'every commandments mention of `record_dashboard` must sit in a "do not call" / "deferred" clause',
+      ).toBe(true);
+    }
   });
 
   // Regression — the Excalidraw run review surfaced two bash denies
@@ -162,9 +206,9 @@ describe('browser-only commandment gating', () => {
     // Sample a few rules that must appear on every run regardless of
     // platform: the package-manager tool requirement, the retry budget,
     // the Read-before-Write rule, and the post-instrumentation events
-    // post-instrumentation report guidance (which the wizard's post-agent
-    // dashboard step depends on). If any of these silently moves into the browser-only block,
-    // this test fails and the omission is caught before it ships.
+    // / setup report guidance. If any of these silently moves into the
+    // browser-only block, this test fails and the omission is caught
+    // before it ships.
     const universalSentinels = [
       'detect_package_manager',
       'Retry budget for ANY tool failure',

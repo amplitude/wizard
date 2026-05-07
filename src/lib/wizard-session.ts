@@ -728,22 +728,15 @@ export interface WizardSession {
   checklistDashboardUrl: string | null;
 
   /**
-   * Lifecycle phase of the post-agent dashboard fallback step
-   * (`createDashboardStep` in src/steps/create-dashboard.ts).
+   * Legacy lifecycle phase of the post-agent dashboard fallback step.
    *
-   *   `null`         — fallback hasn't started, or the agent already produced
-   *                    `.amplitude/dashboard.json` so the fallback short-circuits.
-   *   `in_progress`  — fallback is actively running its sub-agent + MCP calls.
-   *                    RunScreen surfaces this as a 6th synthetic task so the
-   *                    "X / 5 tasks complete" header stops lying while the
-   *                    spinner is spinning.
-   *   `completed`    — fallback finished (success or graceful skip).
-   *
-   * When the in-loop agent calls `record_dashboard` (the post-#PR-XXX path),
-   * this field stays null end-to-end and the RunScreen never shows a 6th task.
-   * The 6th task only appears when the agent didn't do its job and the
-   * fallback actually fires — that's the rare case we still want to be
-   * transparent about.
+   * DEFER_DASHBOARD_PLAN PR 4 removed the in-loop dashboard fallback —
+   * chart and dashboard creation moved to the deferred
+   * `amplitude-wizard dashboard` command. The session field stays in the
+   * shape so existing serialized checkpoints and the AgentUI/InkUI
+   * adapters do not break, but the value is `null` end-to-end on every
+   * main-run path now. PR 5 will remove the field along with the rest
+   * of the dashboard-fallback plumbing.
    */
   dashboardFallbackPhase: 'in_progress' | 'completed' | null;
 

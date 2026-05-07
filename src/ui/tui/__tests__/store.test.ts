@@ -259,20 +259,20 @@ describe('WizardStore', () => {
       expect(store.session.runStartedAt).toBe(stamped);
     });
 
-    it('setRunPhase(Running) pre-populates the canonical 5 tasks', () => {
+    it('setRunPhase(Running) pre-populates the canonical 4 tasks', () => {
       // Empty list while the agent cold-starts is a known abandonment
       // moment. Pre-populate at the Running transition so the user sees
-      // "0 done · 5 to go" from frame 1.
+      // "0 done · 4 to go" from frame 1. Was 5 tasks pre-DEFER_DASHBOARD_PLAN
+      // PR 4; dashboard moved to the deferred `wizard dashboard` command.
       const store = createStore();
       expect(store.tasks).toHaveLength(0);
       store.setRunPhase(RunPhase.Running);
-      expect(store.tasks).toHaveLength(5);
+      expect(store.tasks).toHaveLength(4);
       expect(store.tasks.map((t) => t.label)).toEqual([
         'Detect your project setup',
         'Install Amplitude',
         'Plan and approve events to track',
         'Wire up event tracking',
-        'Build your starter dashboard',
       ]);
       expect(store.tasks.every((t) => t.status === TaskStatus.Pending)).toBe(
         true,
@@ -1295,24 +1295,29 @@ describe('WizardStore', () => {
   });
 
   describe('applyJourneyTransition', () => {
-    // The 5-step user-visible journey is driven by deterministic tool-call
+    // The 4-step user-visible journey is driven by deterministic tool-call
     // signals classified in `src/lib/journey-state.ts`. These tests pin
     // the store-side semantics: a transition updates the named step's
     // status, applies a monotonic guard (completed steps cannot regress),
     // and the renderer cascades earlier steps to completed when a later
     // step advances (sequential ordering invariant).
+    //
+    // History: a fifth `dashboard` step lived here until DEFER_DASHBOARD_PLAN
+    // PR 4 — chart and dashboard creation moved to the deferred
+    // `amplitude-wizard dashboard` command. Wire is now the terminal step
+    // and is flipped to completed by the agent-runner post-loop boundary
+    // rather than by a downstream cascade.
 
-    it('renders exactly the five canonical steps from frame 1', () => {
+    it('renders exactly the four canonical steps from frame 1', () => {
       const store = createStore();
       store.applyJourneyTransition('install', 'in_progress');
 
-      expect(store.tasks).toHaveLength(5);
+      expect(store.tasks).toHaveLength(4);
       expect(store.tasks.map((t) => t.label)).toEqual([
         'Detect your project setup',
         'Install Amplitude',
         'Plan and approve events to track',
         'Wire up event tracking',
-        'Build your starter dashboard',
       ]);
     });
 
@@ -1335,19 +1340,19 @@ describe('WizardStore', () => {
       expect(store.tasks[1].status).toBe(TaskStatus.Completed);
       expect(store.tasks[2].status).toBe(TaskStatus.Completed);
       expect(store.tasks[3].status).toBe(TaskStatus.InProgress);
-      expect(store.tasks[4].status).toBe(TaskStatus.Pending);
     });
 
-    it('cascades wire to completed when dashboard becomes in_progress', () => {
-      // Wire stays derived `in_progress` for the whole multi-file
-      // instrumentation phase; the row must not read "done" until the
-      // journey moves on to dashboard (see `journey-state.ts` wire rules).
+    it('flips wire to completed when explicitly transitioned (terminal step)', () => {
+      // Wire is terminal post-DEFER_DASHBOARD_PLAN PR 4 — there is no
+      // downstream step to cascade-roll it into completed. The
+      // agent-runner post-loop calls applyJourneyTransition('wire',
+      // 'completed') directly once the agent stream ends and events.json
+      // is on disk; the renderer must mark it Completed.
       const store = createStore();
       store.applyJourneyTransition('wire', 'in_progress');
-      store.applyJourneyTransition('dashboard', 'in_progress');
+      store.applyJourneyTransition('wire', 'completed');
 
-      expect(store.tasks[3].status).toBe(TaskStatus.Completed); // wire (cascade)
-      expect(store.tasks[4].status).toBe(TaskStatus.InProgress); // dashboard
+      expect(store.tasks[3].status).toBe(TaskStatus.Completed);
     });
 
     it('promotes a stale in_progress step to completed when a later step is also in_progress', () => {
@@ -1368,7 +1373,6 @@ describe('WizardStore', () => {
       expect(store.tasks[1].status).toBe(TaskStatus.Completed); // install (was in_progress, cascaded)
       expect(store.tasks[2].status).toBe(TaskStatus.Completed); // plan (cascade)
       expect(store.tasks[3].status).toBe(TaskStatus.InProgress); // wire (frontier)
-      expect(store.tasks[4].status).toBe(TaskStatus.Pending); // dashboard
     });
 
     it('forces monotonic progress — completed steps cannot regress', () => {
@@ -1404,21 +1408,20 @@ describe('WizardStore', () => {
     // syncTodos no longer drives status — it only refreshes the
     // `activeForm` flavor text shown beside each canonical step. Status
     // is owned by `applyJourneyTransition`. The list is always rendered
-    // as the canonical 5 rows, regardless of TodoWrite content.
+    // as the canonical 4 rows, regardless of TodoWrite content.
 
-    it('renders exactly the five canonical steps even with no derived status', () => {
+    it('renders exactly the four canonical steps even with no derived status', () => {
       const store = createStore();
       store.syncTodos([
         { content: 'Install Amplitude', status: 'in_progress' },
       ]);
 
-      expect(store.tasks).toHaveLength(5);
+      expect(store.tasks).toHaveLength(4);
       expect(store.tasks.map((t) => t.label)).toEqual([
         'Detect your project setup',
         'Install Amplitude',
         'Plan and approve events to track',
         'Wire up event tracking',
-        'Build your starter dashboard',
       ]);
     });
 
@@ -1677,14 +1680,14 @@ describe('WizardStore', () => {
       expect(store.statusMessages).toEqual(['']);
     });
 
-    it('syncTodos with empty array seeds the canonical 5 as pending', () => {
-      // The user-visible list is locked to the canonical 5. With no
-      // derived journey state and an empty TodoWrite, all 5 rows still
+    it('syncTodos with empty array seeds the canonical 4 as pending', () => {
+      // The user-visible list is locked to the canonical 4. With no
+      // derived journey state and an empty TodoWrite, all 4 rows still
       // render so the user sees the journey ahead.
       const store = createStore();
       store.syncTodos([]);
 
-      expect(store.tasks).toHaveLength(5);
+      expect(store.tasks).toHaveLength(4);
       expect(store.tasks.every((t) => t.status === TaskStatus.Pending)).toBe(
         true,
       );
