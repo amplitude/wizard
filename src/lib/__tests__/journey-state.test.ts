@@ -1,5 +1,8 @@
 import { describe, it, expect } from 'vitest';
-import { classifyToolEvent } from '../journey-state';
+import {
+  classifyToolEvent,
+  classifyToolEventTransitions,
+} from '../journey-state';
 
 describe('classifyToolEvent', () => {
   describe('detect', () => {
@@ -283,5 +286,137 @@ describe('classifyToolEvent', () => {
         }),
       ).toBeNull();
     });
+  });
+});
+
+// ── Transitive completion (PR #600 regression fix) ─────────────────────────
+//
+// PR #600 inlines pre-flight context (package manager, project layout) into
+// the agent's prompt, so the agent now skips `detect_package_manager` on
+// most runs and jumps straight to `Bash(yarn add ...)`. Pre-PR-600 the
+// explicit detect tool call drove Detect → completed via the dedicated
+// trigger; post-PR-600 Detect would stay `pending` while Install lit up.
+//
+// `classifyToolEventTransitions` cascades preceding-step completion when a
+// downstream step transitions, so the on-disk derived state matches the
+// UI's render-time cascade.
+describe('classifyToolEventTransitions (cascade)', () => {
+  it('returns [] when the underlying classifier returns null', () => {
+    expect(
+      classifyToolEventTransitions({
+        phase: 'pre',
+        toolName: 'mcp__wizard-tools__check_env_keys',
+        toolInput: {},
+      }),
+    ).toEqual([]);
+  });
+
+  it('emits a single transition for detect (no preceding steps)', () => {
+    expect(
+      classifyToolEventTransitions({
+        phase: 'pre',
+        toolName: 'Read',
+        toolInput: { file_path: '/p/package.json' },
+      }),
+    ).toEqual([{ stepId: 'detect', status: 'in_progress' }]);
+  });
+
+  it('first Bash(yarn add) cascades detect → completed before install → in_progress', () => {
+    // The headline regression: agent skipped detect_package_manager because
+    // pre-flight context already disclosed the package manager. Install
+    // fires first; we cascade Detect to completed so the journey is
+    // monotonic and the user sees forward progress.
+    const transitions = classifyToolEventTransitions({
+      phase: 'pre',
+      toolName: 'Bash',
+      toolInput: { command: 'yarn add @amplitude/analytics-browser' },
+    });
+
+    expect(transitions).toEqual([
+      { stepId: 'detect', status: 'completed' },
+      { stepId: 'install', status: 'in_progress' },
+    ]);
+  });
+
+  it('first confirm_event_plan cascades detect + install → completed before plan → in_progress', () => {
+    const transitions = classifyToolEventTransitions({
+      phase: 'pre',
+      toolName: 'mcp__wizard-tools__confirm_event_plan',
+      toolInput: {},
+    });
+
+    expect(transitions).toEqual([
+      { stepId: 'detect', status: 'completed' },
+      { stepId: 'install', status: 'completed' },
+      { stepId: 'plan', status: 'in_progress' },
+    ]);
+  });
+
+  it('first wire-Edit cascades detect + install → completed (plan already completed)', () => {
+    // Wire only fires after plan is completed (its existing gate). The
+    // cascade fills in detect + install if they're still missing —
+    // common when pre-flight context skipped detect AND the agent
+    // hand-waved install (e.g., a Python framework that uses pip
+    // implicitly via the Bash classifier we already capture).
+    const transitions = classifyToolEventTransitions({
+      phase: 'pre',
+      toolName: 'Edit',
+      toolInput: { file_path: '/p/src/app.tsx' },
+      prevDerived: { plan: 'completed' },
+    });
+
+    expect(transitions).toEqual([
+      { stepId: 'detect', status: 'completed' },
+      { stepId: 'install', status: 'completed' },
+      { stepId: 'wire', status: 'in_progress' },
+    ]);
+  });
+
+  it('does not re-emit a step that is already completed (monotonicity)', () => {
+    // Detect already completed via the pre-flight detect_package_manager
+    // path; the install Bash should NOT re-emit a redundant Detect
+    // completion in the cascade.
+    const transitions = classifyToolEventTransitions({
+      phase: 'pre',
+      toolName: 'Bash',
+      toolInput: { command: 'pnpm add @amplitude/unified' },
+      prevDerived: { detect: 'completed' },
+    });
+
+    expect(transitions).toEqual([{ stepId: 'install', status: 'in_progress' }]);
+  });
+
+  it('upgrades a preceding in_progress step to completed via cascade (never demotes)', () => {
+    // Install is currently in_progress. The agent then calls
+    // confirm_event_plan — Install must roll forward to completed, not
+    // stay in_progress, so the journey UI shows a single in_progress
+    // pill on the leading-edge step (plan).
+    const transitions = classifyToolEventTransitions({
+      phase: 'pre',
+      toolName: 'mcp__wizard-tools__confirm_event_plan',
+      toolInput: {},
+      prevDerived: { detect: 'completed', install: 'in_progress' },
+    });
+
+    expect(transitions).toEqual([
+      { stepId: 'install', status: 'completed' },
+      { stepId: 'plan', status: 'in_progress' },
+    ]);
+  });
+
+  it('returns transitions in journey order so a sequential dispatcher applies them top-down', () => {
+    const transitions = classifyToolEventTransitions({
+      phase: 'pre',
+      toolName: 'mcp__wizard-tools__confirm_event_plan',
+      toolInput: {},
+    });
+
+    const order = ['detect', 'install', 'plan', 'wire'];
+    let prevIdx = -1;
+    for (const t of transitions) {
+      const idx = order.indexOf(t.stepId);
+      expect(idx).toBeGreaterThanOrEqual(prevIdx);
+      prevIdx = idx;
+    }
   });
 });
