@@ -162,3 +162,104 @@ export function readLocalEventPlan(
 
   return parsed.filter((e) => e.name.trim().length > 0);
 }
+
+/**
+ * Like {@link readLocalEventPlan} but preserves optional `callsites` arrays
+ * written by `persistEventPlan`. Used by the batch-merge path so earlier
+ * batches' callsite annotations survive when subsequent batches are merged in.
+ */
+export function readLocalEventPlanRich(installDir: string): Array<{
+  name: string;
+  description: string;
+  callsites?: Array<{ filePath: string; anchor?: string }>;
+}> {
+  const candidates = [
+    getEventsFile(installDir),
+    path.join(installDir, '.amplitude-events.json'),
+  ];
+
+  let winner: string | null = null;
+  let winnerMtime = -Infinity;
+  for (const candidate of candidates) {
+    try {
+      const stat = fs.statSync(candidate);
+      const mtime = stat.mtimeMs;
+      if (mtime > winnerMtime) {
+        winner = candidate;
+        winnerMtime = mtime;
+      }
+    } catch (e) {
+      const err = e as NodeJS.ErrnoException;
+      if (err.code !== 'ENOENT') {
+        logToFile(
+          `[readLocalEventPlanRich] stat ${candidate} failed: ${
+            err.message ?? err
+          }`,
+        );
+      }
+    }
+  }
+
+  if (!winner) return [];
+
+  let raw: string;
+  try {
+    raw = fs.readFileSync(winner, 'utf8');
+  } catch (e) {
+    const err = e as NodeJS.ErrnoException;
+    logToFile(
+      `[readLocalEventPlanRich] read ${winner} failed: ${err.message ?? err}`,
+    );
+    return [];
+  }
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    logToFile(`[readLocalEventPlanRich] ${winner} could not be parsed as JSON`);
+    return [];
+  }
+
+  if (
+    parsed &&
+    typeof parsed === 'object' &&
+    !Array.isArray(parsed) &&
+    Array.isArray((parsed as { events?: unknown }).events)
+  ) {
+    parsed = (parsed as { events: unknown[] }).events;
+  }
+
+  if (!Array.isArray(parsed)) return [];
+
+  return (parsed as Array<Record<string, unknown>>)
+    .map((e) => {
+      const name =
+        (e.name as string) ??
+        (e.event as string) ??
+        (e.eventName as string) ??
+        (e.event_name as string) ??
+        '';
+      const description =
+        (e.description as string) ??
+        (e.event_description as string) ??
+        (e.eventDescription as string) ??
+        (e.eventDescriptionAndReasoning as string) ??
+        '';
+      const result: {
+        name: string;
+        description: string;
+        callsites?: Array<{ filePath: string; anchor?: string }>;
+      } = {
+        name,
+        description,
+      };
+      if (Array.isArray(e.callsites) && e.callsites.length > 0) {
+        result.callsites = (
+          e.callsites as Array<{ filePath: string; anchor?: string }>
+        ).filter((c) => c && typeof c.filePath === 'string');
+      }
+      return result;
+    })
+    .filter((e) => e.name.trim().length > 0);
+}
