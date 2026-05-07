@@ -508,7 +508,7 @@ describe('clearStoredCredentials', () => {
 
 // ── Phase G-1: legacy ~/.ampli.json mirror writes are disabled ──────────────
 //
-// Per FINAL_NEW_MIGRATION_PLAN.md §5 Phase G-1, OAuth state writes target
+// Per MIGRATION_PLAN.md §5 Phase G-1, OAuth state writes target
 // only the canonical `~/.amplitude/wizard/oauth-session.json`. The legacy
 // `~/.ampli.json` mirror is read for back-compat but no longer written.
 

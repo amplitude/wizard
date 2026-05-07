@@ -9,11 +9,12 @@
 
 ## 1. Why this plan
 
-The strategic direction (in-repo evolution, AI-SDK target, phased extraction) is right. The earlier write-ups got that part. This plan binds three things they were silent on:
+The strategic direction (in-repo evolution, AI-SDK target, phased extraction) is right. The earlier write-ups got that part. This plan binds four things they were silent on:
 
 1. **The 12-PR stack already in flight.** PRs #541→#553 are landing the gateway sanitizer, the install-presentation seam, the `load_skill` tier tools, the AI-SDK gateway probe, the AI-SDK Anthropic factory, the `wizard-tools` skill-module split, and `get_event_plan` on the external MCP — i.e. most of Phase A and Phases B-D's seams. The execution plan must order itself **on top of** that stack, not in parallel with it.
 2. **Performance is the success metric, but no budgets are stated.** The wizard already has `src/lib/middleware/benchmarks/` (cache, cost, duration, token, turn, compaction, context-size trackers). `wizard-rewrite/benchmarks/` has bundle-size, cache-hits, first-token-latency, prefix-size, and tool-exec-time bench files. We can land hard budgets immediately.
 3. **Eval gating is undefined.** PR #537 scaffolds `evals/` with NDJSON contract, fs-snapshot, scorer registry, layer 0+1 scorers, and 7 ring-1 scenarios — but no fixtures yet and no CI gate. AI-SDK migration parity has to be measured against this harness or it will drift.
+4. **Ambient-host strategy is implicit.** The plan treats `--agent` (NDJSON, wizard-runs-its-own-LLM) as the canonical ambient surface. That's wrong: an MCP-server-mode primary is structurally better and is already 80% built (`src/lib/wizard-mcp-server.ts` + `agent-ops.ts`). This revision adds Phase A.5 and binds it via §3 decision 11.
 
 This plan adds: a verified ground-truth section, a perf-budget regime, an eval-gate definition for the AI-SDK cutover, and an explicit merge order for the existing stack.
 
@@ -54,6 +55,7 @@ These decisions bind the rest of the document. Reopen only with explicit approva
 8. **Tool-first decomposition.** Every important LLM-driven decision is a typed tool call with Zod-validated input/output, not a free-form prompt-and-parse. The agent loop is an orchestrator over tools; deterministic logic stays out of the loop. This makes each decision (a) replayable from a recorded fixture, (b) independently scored, (c) swappable at the tool boundary without refactoring the loop, (d) generatable as an MCP tool for ambient-agent mode without a second implementation.
 9. **Per-call-site eval coverage.** Every LLM call in the wizard ships with a fixture and a scorer. New tool = new fixture + scorer in the same PR. No exception path. The §7.2 cutover gate is the *floor*; per-call coverage is the *base*.
 10. **Model tiering per call site.** Use the cheapest capable model per call. Haiku for one-shot structured outputs (skill selection, framework disambiguation, single-decision confirmations); Sonnet for the inner agent loop and reasoning-heavy instrumentation; Opus only when explicitly justified at the call site. Decision lives next to the tool definition; no global model knob.
+11. **Ambient-host MCP-server-mode is the primary integration surface.** When the wizard detects it is running inside another AI coding agent (Claude Code, Cursor, Cline, Codex, Copilot), the CLI auto-routes to `amplitude-wizard mcp serve` instead of running its own LLM agent. The wizard's `--agent` NDJSON path remains the fallback for non-MCP ambient harnesses (CI runners, generic agents) and the explicit opt-out for users who want the wizard agent inside an MCP host. The MCP server gains write tools (`propose_event_plan`, `apply_instrumentation`, `verify_ingestion`) gated on `confirmedApply: z.literal(true)`.
 
 ---
 
@@ -101,6 +103,18 @@ Estimates are order-of-magnitude. Phases A and parts of B-D are largely *in flig
 - Add a structured `gateway_400_invalid_request` exit/event with a remediation pointer.
 
 **Done when:** the `--agent` mode 400 rate inside Claude Code / Cursor / Cline is ≤1% across 7 days of telemetry, measured via the existing `wizardCapture` analytics.
+
+### Phase A.5 — Ambient routing + MCP-server-mode write surface (parallel with A end / B start)
+
+**In flight:** none. New phase.
+
+**Remaining:**
+- Vendor the harness-detection table from `wizard-rewrite/src/lib/wizard-detect-nested-agent.ts:54-67` into `src/lib/detect-nested-agent.ts`. Add the `host` slug; export `decideAmbientRouting()` mirroring `wizard-rewrite/src/cli/ambient-mode.ts:64-94`.
+- Port `detectSubscriptionAnthropicToken` from the same file; refuse at `bin.ts` entry point.
+- Extend `src/lib/wizard-mcp-server.ts` with three write tools (`propose_event_plan`, `apply_instrumentation`, `verify_ingestion`) generated from the same Zod sources as `agent-ops.ts`. Each gated on a `z.literal(true)` confirmation flag.
+- Port `wizard-rewrite/src/mcp/mcp-apps.ts` (250 LOC) into `src/lib/wizard-mcp-server/mcp-apps.ts`. Adopt SEP-1865 directives on `_meta["mcp-apps/ui"]` for `confirm`, `confirm_event_plan`, framework `choose`. Capability-gated; non-supporting hosts fall through to text content.
+
+**Done when:** running `claude` inside a project with the wizard MCP server registered runs end-to-end (detect → propose → confirm → apply → verify) with zero wizard-side LLM calls, and the same flow downgrades cleanly inside Cursor (no MCP Apps → text content).
 
 ### Phase B — Presentation + orchestration decoupling (in flight, 1-2 weeks remaining)
 
@@ -229,6 +243,7 @@ Port the five `*.bench.ts` files and the `baseline.json` / `results.json` shape 
 | Compaction events per run (median) | `compaction-tracker.ts` | 0 | budget warning if >0 in median |
 | Bundle size (npm tarball) | `bundle-size.bench.ts` | ≤ 110% of last release | block PR |
 | Tool exec time (read_file, p50) | `tool-exec-time.bench.ts` | ≤ 50 ms | budget warning |
+| LLM calls per wizard run in MCP-server-mode (host LLM drives, wizard makes none) | `wizard-mcp-server.ts` instrumentation | **0** | block PR |
 
 Budgets are enforced at PR time; the cache-read budget is a *warning* not a *block* until Phase C closes (otherwise we'd be gating the migration on its own outcome).
 
@@ -292,6 +307,8 @@ Failing any of these for two consecutive scheduled runs reverts the default flip
 ### 7.4 Per-call-site eval coverage (the floor)
 
 The §7.2 cutover gate is the ceiling test. The floor is: **every LLM call in the wizard has its own fixture and scorer**, and a new call cannot land without them. This is a binding consequence of strategic posture decisions 8 and 9.
+
+Per-call-site coverage applies to the *fallback* `--agent` path. The MCP-server-mode path (§3 decision 11) is covered by the existing tool-call evals in `evals/scenarios/` running through the host LLM as the orchestrator — those scorers don't need a `runCallSite` wrapper because each MCP tool *is* a deterministic call site, and the wizard makes zero LLM calls at the wizard layer in that mode (so there is nothing to eval at the wizard's LLM boundary).
 
 **Critical alignment with PR #560:** per-call-site coverage **shares** PR #560's runner — it is not a parallel framework. Concretely, both end-to-end scenarios (PR #560's `evals/scenarios/`) and per-call-site fixtures (this section's `evals/call-sites/`) feed the **same** `score()` function in `evals/runner/score.ts` consuming the **same** `Artifact` shape from `evals/runner/types.ts`. Only the *artifact source* differs.
 
@@ -605,6 +622,8 @@ The wizard client is responsible for:
 
 This split stays even when both sides are green: defense in depth.
 
+When the wizard runs in MCP-server-mode (per §3 decision 11), the proxy's responsibility shrinks: the proxy is only invoked for tools that explicitly call into Amplitude APIs (`get_auth_token`, `verify_ingestion` if it polls live ingestion). The wizard makes zero LLM calls in this mode — the proxy hardening discussion above applies only to the `--agent` fallback path.
+
 ---
 
 ## 10. Resolved decisions
@@ -619,6 +638,8 @@ The six questions previously open in earlier drafts of this plan are decided. Ea
 6. **OTel GenAI telemetry: deferred out of 2.0.** Phase F ships ESM packaging + dead-dep cleanup only. OpenTelemetry GenAI semantic conventions are revisited in a 2.x minor when there is bandwidth to do them properly. Reduces 2.0 scope; losses are limited to delaying parity with an industry convention that is still hardening anyway. Existing structured logger + Sentry + per-turn middleware benchmarks remain the wizard's observability surface for 2.0.
 
 7. **Storage migration: stop writing `ampli.json`; adopt the modern paths exclusively.** New writes target `~/.amplitude/wizard/` (user state) and `<installDir>/.amplitude/` (project metadata) — the same model `wizard-rewrite` and `wizard-v2` use. Read-side compat for `~/.ampli.json` and per-project `ampli.json` stays for one minor cycle (one-shot copy-forward on first read), then dropped. The wizard already uses the modern paths for new state; this decision retires the dual-write mirror and the 845 LOC of legacy `ampli-config.ts` + `ampli-settings.ts` that maintain it. Active migration tracked in Phase G.
+
+8. **MCP Apps (SEP-1865) adoption: opt-in additively, ship in Phase A.5.** Carry the directive on `_meta["mcp-apps/ui"]` matching `wizard-rewrite/src/mcp/mcp-apps.ts:165-177`. Hosts without `experimental["mcp-apps"]` capability see the legacy text payload unchanged. No flag, no version gate; capability negotiation handles the spread. Migrate `confirm_event_plan` first (highest UX win), then `confirm` and framework `choose`.
 
 ---
 
@@ -638,6 +659,9 @@ The six questions previously open in earlier drafts of this plan are decided. Ea
 | `WIZARD_OAUTH_TOKEN` rotation breaks CI | §7.5 | Document rotation runbook; provision quarterly-validity tokens; fail loudly on expiry rather than silent-refresh. Bypass-token thunder PR available if rotation pain becomes operational. |
 | Org secret leaks via redaction gap | §7.5 | Token added to `src/lib/observability/logger.ts` + NDJSON redactor allowlist with a unit-test assertion that the literal value never appears in any log path. |
 | Fork-PR contributors lose eval signal | §7.5 | Binding policy: evals + benches don't run on fork PRs. Build + lint + unit tests still run. Bot comment explains the policy. |
+| Two-LLM contention inside ambient hosts (host LLM + wizard LLM) | A.5 / D | MCP-server-mode (§3 decision 11) eliminates by construction — the wizard makes no LLM calls in that mode. NDJSON `--agent` fallback retains the issue, but `--agent` users opted into it explicitly. |
+| MCP Apps spec churn (`mcp-apps` vs `mcpApps` vs renamed `_meta` key) | A.5 | Capability check accepts both spellings (`wizard-rewrite/src/mcp/mcp-apps.ts:154`); meta-key string is namespaced (`mcp-apps/ui`) and stable in the SEP. Worst case: 1-line patch. |
+| Ambient detection false-negatives (new harness lands without env signal) → wizard falls back to `--agent` and the host-agent harness conflict resurfaces | A.5 | Detection table is in-tree, easy to update; document a `WIZARD_AMBIENT_HOST=<slug>` override env for users on bleeding-edge harnesses. Fallback retains the same Phase A sanitizer fixes so the failure mode degrades gracefully rather than regressing. |
 
 ---
 
@@ -651,6 +675,7 @@ The six questions previously open in earlier drafts of this plan are decided. Ea
 6. **Open the paired `browser-sdk-2.md` dedup PR** (wizard + context-hub) once #544-#546 land. Per §10 decision 1, lands in Phase C.
 7. **Open a Phase G-1 PR** to stop the `ampli.json` dual-write. Smallest, safest start: makes new writes go to modern paths only; leaves all read paths intact. Per §10 decision 7.
 8. **Archive `wizard-rewrite` and `wizard-v2`** once D-6 ships (Agent SDK deletion). Until then, keep them as reference implementations cited from the in-tree code.
+9. **Open the Phase A.5 PR** standing up the full MCP write surface: port the rewrite's nested-agent detection table, `decideAmbientRouting`, the MCP write-tool surface (`propose_event_plan`, `apply_instrumentation`, `verify_ingestion`), and the MCP Apps directive layer. Sequence: lands after #553 (`get_event_plan` proves the Zod-source generation pattern) and in parallel with the Phase B presentation seam.
 
 ---
 
