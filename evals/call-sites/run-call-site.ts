@@ -21,17 +21,12 @@
  */
 
 import { existsSync, readFileSync } from 'node:fs';
-import { dirname, resolve } from 'node:path';
+import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 import type { CallSite } from './registry.js';
 import { resolveCallSitePath } from './registry.js';
-import type {
-  CallSiteArtifact,
-  CallSiteFixture,
-  CallSiteScorer,
-} from './types.js';
-import type { ScorerResult } from '../runner/types.js';
+import type { CallSiteArtifact, CallSiteFixture } from './types.js';
 
 function newRunId(): string {
   return `cs-${Date.now().toString(36)}-${Math.random()
@@ -204,62 +199,3 @@ export async function runCallSite(
     output,
   };
 }
-
-/**
- * Run a single scorer against a fresh artifact. Convenience wrapper
- * for the unit-test path so each scorer test is two lines.
- */
-export async function runCallSiteScorer(
-  scorer: CallSiteScorer,
-  options: RunCallSiteOptions,
-): Promise<{ artifact: CallSiteArtifact; result: ScorerResult }> {
-  const artifact = await runCallSite(options);
-  const fixture = loadFixture(options.callSite, {
-    fixturePathOverride: options.fixturePathOverride,
-    repoRoot: options.repoRoot,
-  });
-  const result = scorer.evaluate(artifact, fixture);
-  return { artifact, result };
-}
-
-/**
- * Resolve repo root from this module's URL. Useful for callers that
- * don't already have it on hand (e.g. a CI workflow invoking the
- * runner via `tsx`). Kept here rather than in `registry.ts` because
- * `dirname` + `fileURLToPath` are runner concerns.
- */
-export function resolveRepoRoot(): string {
-  return resolve(dirname(fileURLToPath(import.meta.url)), '..', '..');
-}
-
-/**
- * Convenience: stitch a list of NDJSON event-shaped objects into a
- * minimal pseudo-`Artifact` so streaming-site scorers can call into
- * existing layered runner scorers without any change to the
- * downstream scorer signature.
- *
- * NOT used by the bundled scorers (they consume `CallSiteArtifact`
- * directly), but the scaffolding is here for the future
- * `liftToRunnerScorer` adapter path.
- */
-export function ndjsonAsRunLog(events: unknown[]): unknown[] {
-  return events;
-}
-
-/** Helper for tests that need a deterministic fixture path. */
-export function fixturePathFor(callSite: CallSite, repoRoot?: string): string {
-  return resolveCallSitePath(callSite.fixture, repoRoot);
-}
-
-/** Helper: golden path next to fixture. */
-export function goldenPathFor(
-  callSite: CallSite,
-  repoRoot?: string,
-): string | undefined {
-  if (!callSite.golden) return undefined;
-  return resolveCallSitePath(callSite.golden, repoRoot);
-}
-
-/** Re-export commonly needed paths for scenario tests. */
-export const callSiteDir = (callSiteId: string, repoRoot?: string): string =>
-  resolveCallSitePath(`evals/call-sites/${callSiteId}`, repoRoot);

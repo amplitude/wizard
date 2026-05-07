@@ -4,9 +4,10 @@
  * Per MIGRATION_PLAN.md §7.4, streaming sites get a layered (L0/L1)
  * check on the resulting NDJSON slice. We don't re-implement the
  * runner's layered scorers — instead we apply two cheap structural
- * assertions directly here, and rely on `liftToRunnerScorer` (in
- * `evals/call-sites/types.ts`) to feed the artifact into the full
- * runner stack when callers want deeper coverage.
+ * assertions directly here. If a future caller needs deeper coverage,
+ * the right shape is a small `CallSiteScorer → Scorer` adapter (the
+ * older sketched-but-unused `liftToRunnerScorer` was removed; recreate
+ * from `evals/runner/types.ts: Scorer` when wiring is on the menu).
  *
  * Bundled checks:
  *
@@ -14,10 +15,6 @@
  *     mid-stream version flip is a hard fail.
  *   - L1: the slice contains exactly one terminal `run_completed`
  *     and a `setup_complete` whose outcome agrees with it.
- *
- * Anything richer (file-touched, env-var-prefix, confirmed-events-
- * tracked) is the job of the existing runner scorers and will land
- * once `liftToRunnerScorer` is wired into the registry runner.
  */
 
 import type {

@@ -15,11 +15,7 @@
  * narrower shape behind the same interface.
  */
 
-import type {
-  Artifact,
-  Scorer as RunnerScorer,
-  ScorerResult,
-} from '../runner/types.js';
+import type { ScorerResult } from '../runner/types.js';
 
 /** Re-export so call-site scorers import from one place. */
 export type { ScorerResult } from '../runner/types.js';
@@ -98,34 +94,9 @@ export interface CallSiteScorer {
   ) => ScorerResult;
 }
 
-/**
- * Adapter: lift a `CallSiteScorer` to the runner's `Scorer` shape so
- * the same `score()` function can run it. The lifted scorer reads
- * `artifact.runLog`-shaped data only — fs/stderr fields are ignored.
- *
- * NOT used by the unit tests below (which call `evaluate` directly),
- * but exported for §7.4's "shared score() function" promise.
- */
-export function liftToRunnerScorer(
-  callSiteScorer: CallSiteScorer,
-  fixture: CallSiteFixture,
-  criterion = 0,
-): RunnerScorer {
-  return {
-    id: callSiteScorer.id,
-    layer: callSiteScorer.layer,
-    criterion,
-    description: callSiteScorer.description,
-    evaluate(artifact: Artifact) {
-      const csArtifact: CallSiteArtifact = {
-        runId: artifact.runId,
-        fixtureId: fixture.id,
-        callSiteId: fixture.callSiteId,
-        finishedAt: artifact.finishedAt,
-        source: artifact.source as 'live' | 'golden' | 'mock',
-        output: artifact.runLog,
-      };
-      return callSiteScorer.evaluate(csArtifact, fixture);
-    },
-  };
-}
+// Note: a `liftToRunnerScorer` adapter (CallSiteScorer → RunnerScorer)
+// was previously sketched here but never wired into the runner. It was
+// removed in favour of having call-site scorers evaluate directly
+// against `CallSiteArtifact`. If §7.4's "shared score() function"
+// promise needs that adapter later, recreate it from the runner's
+// `Scorer` shape — see `evals/runner/types.ts`.
