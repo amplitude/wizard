@@ -98,7 +98,7 @@ Do NOT add a fifth — internal steps (env var writes, Content Security Policy e
 
 The wizard runs explicit cleanup hooks AFTER your run (see \`cleanupIntegrationSkills\`, \`cleanupWizardArtifacts\`, \`archiveSetupReportFile\` in \`src/lib/wizard-tools.ts\`). \`rm\` is denied by the bash allowlist regardless of path. Same rule for \`mv\` / \`cp\` of these paths. If you find a stale wizard file, leave it and note in the setup report; the next wizard run handles migration.`,
 
-  'When running Grep or Glob to discover analytics patterns or instrumentation surfaces, always pass `head_limit: 20` and exclude `node_modules/**`, `dist/**`, `build/**`, `**/*.test.*`, `**/*.spec.*`. If the unfiltered result is large, use `output_mode: "count"` first to size the search, then narrow the pattern or path before requesting filenames. Wide unfiltered Grep results trigger context compaction and slow the run.',
+  'When running Grep to discover analytics patterns or instrumentation surfaces, always pass `head_limit: 20` and exclude `node_modules/**`, `dist/**`, `build/**`, `**/*.test.*`, `**/*.spec.*` via the `glob` parameter. If the unfiltered result is large, use `output_mode: "count"` first to size the search, then narrow the pattern or path before requesting filenames. Wide unfiltered Grep results trigger context compaction and slow the run.',
 
   `Lint / format / build at end-of-run MUST be scoped to files you edited — never project-wide.
 
