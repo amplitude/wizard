@@ -14,7 +14,10 @@ import AdmZip from 'adm-zip';
 import { z } from 'zod';
 import { logToFile } from '../utils/debug';
 import { atomicWriteJSON } from '../utils/atomic-write';
-import { readLocalEventPlan } from './event-plan-parser.js';
+import {
+  readLocalEventPlan,
+  readLocalEventPlanRich,
+} from './event-plan-parser.js';
 import { recordEventPlanDecision } from './agent/event-plan-feedback-state.js';
 import {
   ensureDir,
@@ -2215,10 +2218,16 @@ For codebases with >50 events the wizard runs the WRITE phase in chunks of ~25 e
         let toPersist: typeof events = events;
         if (!isFirstBatch) {
           // Merge with existing on-disk plan so we don't lose earlier batches.
-          const existing = readLocalEventPlan(workingDirectory);
+          // Use the rich reader that preserves callsites so annotations from
+          // prior batches accumulate across compaction boundaries.
+          const existing = readLocalEventPlanRich(workingDirectory);
           const byName = new Map<
             string,
-            { name: string; description: string }
+            {
+              name: string;
+              description: string;
+              callsites?: Array<{ filePath: string; anchor?: string }>;
+            }
           >();
           for (const e of existing) byName.set(e.name, e);
           for (const e of events) byName.set(e.name, e);
