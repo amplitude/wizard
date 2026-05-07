@@ -86,6 +86,7 @@ const mockUIInstance = {
   heartbeat: vi.fn(),
   setEventPlan: vi.fn(),
   setRetryState: vi.fn(),
+  setCurrentActivity: vi.fn(),
 };
 vi.mock('../../ui', () => ({
   getUI: () => mockUIInstance,
@@ -800,6 +801,62 @@ describe('runAgent', () => {
       expect(queryCallCount).toBe(6); // MAX_RETRIES=5 → 6 total attempts
     });
 
+    // Bugbot thread (PR #594): "Outer retry loop activity not cleared on
+    // exhaustion". The outer retry loop sets a `rate-limit-retry` activity
+    // before each backoff sleep but used to skip flipping the
+    // `retryBannerOwnsActivity` flag. When all retries exhausted,
+    // `clearRetryBanner()` in the finally block saw the flag = false and
+    // skipped the activity clear, leaving "Waiting Ns before retry…" stuck
+    // on screen after the run errored out. With the ownership flag in
+    // place, the finally clear correctly wipes the stale activity.
+    it('clears the rate-limit-retry activity even when retries exhaust', async () => {
+      vi.useFakeTimers();
+
+      mockQuery.mockImplementation(
+        (params: { options: Record<string, unknown> }) => {
+          const signal = params.options.abortSignal as AbortSignal;
+          // eslint-disable-next-line require-yield
+          return (async function* () {
+            await new Promise<never>((_, reject) => {
+              signal.addEventListener('abort', () =>
+                reject(new Error('Stall aborted')),
+              );
+            });
+          })();
+        },
+      );
+
+      const runPromise = runAgent(
+        defaultAgentConfig,
+        'test prompt',
+        defaultOptions,
+        mockSpinner as unknown as SpinnerHandle,
+        { successMessage: 'Done', errorMessage: 'Failed' },
+      );
+
+      const rejectCheck = expect(runPromise).rejects.toThrow('Stall aborted');
+      await vi.advanceTimersByTimeAsync(1_500_000);
+      await rejectCheck;
+
+      // Pull every setCurrentActivity call. The outer retry loop should
+      // have published at least one rate-limit-retry activity (one per
+      // backoff sleep), and the finally-block clear MUST have flushed
+      // it back to null on exhaustion.
+      const calls = (mockUIInstance.setCurrentActivity as Mock).mock.calls.map(
+        (c) => c[0],
+      );
+      const lastCall = calls[calls.length - 1];
+
+      const sawRateLimitRetry = calls.some(
+        (c) => c && typeof c === 'object' && c.kind === 'rate-limit-retry',
+      );
+      expect(sawRateLimitRetry).toBe(true);
+      // The very last setCurrentActivity call on the way out of runAgent
+      // must be a clear. Without the ownership flag fix, the last call
+      // would still be the stale "Waiting Ns before retry" activity.
+      expect(lastCall).toBeNull();
+    });
+
     it('classifies all-attempts-failed-with-400-terminated as GATEWAY_DOWN', async () => {
       // Regression test for the production incident where every retry
       // attempt died with the same upstream-gateway signature. The
@@ -1465,6 +1522,109 @@ describe('isStallNonProgressMessage', () => {
       expect(isStallNonProgressMessage(42)).toBe(false);
       expect(isStallNonProgressMessage({})).toBe(false);
     });
+  });
+});
+
+describe('runAgent activity-line behavior (Bugbot fixes)', () => {
+  let mockSpinner: {
+    start: Mock;
+    stop: Mock;
+    message: Mock;
+  };
+
+  const defaultOptions: WizardOptions = {
+    debug: false,
+    installDir: '/test/dir',
+    forceInstall: false,
+    default: false,
+    authOnboardingPath: 'sign_in',
+    localMcp: false,
+    ci: false,
+    menu: false,
+    benchmark: false,
+  };
+
+  const defaultAgentConfig = {
+    workingDirectory: '/test/dir',
+    mcpServers: {},
+    model: 'claude-opus-4-5-20251101',
+  };
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    resetRetryBudgetForTests();
+
+    mockSpinner = {
+      start: vi.fn(),
+      stop: vi.fn(),
+      message: vi.fn(),
+    };
+
+    mockUIInstance.spinner.mockReturnValue(mockSpinner);
+    Object.values(mockUIInstance.log).forEach((fn) => fn.mockReset());
+  });
+
+  // Bugbot thread (PR #594): "Compaction activity cleared immediately by SDK
+  // status message". The SDK emits `system { subtype: 'status', status:
+  // 'compacting' }` during the compaction window. Without this guard, the
+  // first-pass branch that clears stall-cleared activities would wipe the
+  // compaction activity within milliseconds of `onPreCompact` setting it,
+  // leaving the user staring at 30-90s of silence.
+  //
+  // Simulates the production sequence:
+  //   onPreCompact fires → setCurrentActivity({ kind: 'compaction', … })
+  //   SDK yields `system status: compacting`
+  //   …silent compaction window (30-90s)…
+  //   SDK yields the post-compaction first message → activity clears
+  //
+  // The test seeds the mock so we can observe which side-effect each
+  // message produces. The `compacting` envelope must NOT trigger a
+  // setCurrentActivity(null) — that's the bug.
+  it('does NOT clear currentActivity when the SDK emits status:compacting', async () => {
+    let lastIndex = -1;
+    let compactingClearedAt: number | null = null;
+
+    // Track the call index at the point each envelope is consumed by
+    // recording the count of setCurrentActivity calls before/after.
+    function* compactingThenSuccess() {
+      // Snapshot count BEFORE compacting is consumed.
+      const before = (mockUIInstance.setCurrentActivity as Mock).mock.calls
+        .length;
+      yield {
+        type: 'system',
+        subtype: 'status',
+        status: 'compacting',
+      };
+      // Snapshot count AFTER compacting is consumed.
+      const after = (mockUIInstance.setCurrentActivity as Mock).mock.calls
+        .length;
+      // Compacting must not have emitted a clear. With the bug, after = before+1
+      // because setCurrentActivity(null) fired. With the fix, after === before.
+      if (after > before) compactingClearedAt = after;
+      lastIndex = after;
+      yield {
+        type: 'result',
+        subtype: 'success',
+        is_error: false,
+        result: 'done',
+      };
+    }
+    mockQuery.mockReturnValue(compactingThenSuccess());
+
+    await runAgent(
+      defaultAgentConfig,
+      'test prompt',
+      defaultOptions,
+      mockSpinner as unknown as SpinnerHandle,
+      { successMessage: 'ok', errorMessage: 'fail' },
+    );
+
+    // Compacting must NOT have triggered an activity clear on its own.
+    expect(compactingClearedAt).toBeNull();
+    // Sanity: we observed the generator make progress past the compacting
+    // envelope (i.e. lastIndex was actually written), so the assertion isn't
+    // a vacuous truth from a never-consumed generator.
+    expect(lastIndex).toBeGreaterThanOrEqual(0);
   });
 });
 

@@ -2303,6 +2303,13 @@ export async function runAgent(
         // 2-30s of jittered backoff before the next attempt issues. Cleared
         // either by the setCurrentActivity(null) on the first real message
         // or by the retry-banner clear at the top of the next attempt.
+        //
+        // We MUST set `retryBannerOwnsActivity = true` here so that
+        // `clearRetryBanner()` — which fires from the runAgent finally
+        // block when retries are exhausted — actually clears this stale
+        // "Waiting Ns before retry…" line on its way out. Without the
+        // flag the ownership guard skips the clear and the stale activity
+        // sticks around after the run errors out.
         try {
           const waitSec = Math.max(1, Math.round(backoffMs / 1000));
           getUI().setCurrentActivity({
@@ -2313,6 +2320,7 @@ export async function runAgent(
             startedAt: Date.now(),
             estimatedDurationSec: waitSec,
           });
+          retryBannerOwnsActivity = true;
         } catch {
           // UI may not be initialised in some test paths.
         }
@@ -2960,10 +2968,30 @@ export async function runAgent(
             // the only way a real message lands is for cold-start to have
             // finished, the compaction round-trip to have completed, or the
             // retry sleep to have elapsed. Cheap noop when already idle.
-            try {
-              getUI().setCurrentActivity(null);
-            } catch {
-              // UI may not be initialised in some test paths.
+            //
+            // EXCEPTION: `system { subtype: 'status', status: 'compacting' }`.
+            // `isStallNonProgressMessage` correctly classifies this as real
+            // work (compaction IS work), but the `compacting` envelope fires
+            // *during* the compaction window — the same window where
+            // `onPreCompact` just published the "Compacting context…"
+            // activity. Clearing here would wipe that activity within
+            // milliseconds of it being set, leaving the user staring at
+            // 30-90s of silence with no indicator. Skip the clear so the
+            // compaction activity persists; the next NON-status message
+            // (the post-compaction user-prompt-submit / first model
+            // message) clears it on its own pass through this branch.
+            const isCompactingStatus =
+              typeof rawMessage === 'object' &&
+              rawMessage !== null &&
+              (rawMessage as Record<string, unknown>).type === 'system' &&
+              (rawMessage as Record<string, unknown>).subtype === 'status' &&
+              (rawMessage as Record<string, unknown>).status === 'compacting';
+            if (!isCompactingStatus) {
+              try {
+                getUI().setCurrentActivity(null);
+              } catch {
+                // UI may not be initialised in some test paths.
+              }
             }
           }
 

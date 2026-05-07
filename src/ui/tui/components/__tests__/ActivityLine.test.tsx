@@ -141,4 +141,29 @@ describe('ActivityLine', () => {
     });
     expect(frameOf(store, () => 1_000_000)).toBe('');
   });
+
+  // Bugbot thread (PR #594): "Layout overflows by 1 row when ActivityLine
+  // visible". The component reserves exactly 1 row of vertical space when
+  // active, and 0 rows when idle. App.tsx subtracts that row from the
+  // content + console heights so the chrome+content total still equals
+  // `rows`. If this invariant ever changes (e.g. a 2-row variant ships)
+  // the App.tsx layout math has to update with it.
+  it('renders exactly one line of output when active', () => {
+    const startedAt = 1_000_000;
+    const store = makeStoreWithActivity({
+      kind: 'compaction',
+      message: 'Compacting context.',
+      startedAt,
+    });
+    const out = frameOf(store, () => startedAt);
+    // Trim trailing newline from Ink's frame output (always present),
+    // then count the remaining newlines to get the visual row count.
+    const rows = out.replace(/\n$/, '').split('\n').length;
+    expect(rows).toBe(1);
+  });
+
+  it('renders zero lines of output when idle (no row reserved)', () => {
+    const store = makeStoreWithActivity(null);
+    expect(frameOf(store)).toBe('');
+  });
 });

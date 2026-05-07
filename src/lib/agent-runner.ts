@@ -1130,7 +1130,7 @@ async function runAgentWizardBody(
           getUI().setCurrentActivity({
             kind: 'compaction',
             message:
-              'Compacting context — keeping the relevant pieces, dropping the rest. This can take 30-90 seconds.',
+              'Compacting context (this can take a few minutes) — keeping the relevant pieces, dropping the rest.',
             startedAt: Date.now(),
             estimatedDurationSec: 60,
           });
