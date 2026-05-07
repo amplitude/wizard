@@ -511,6 +511,18 @@ void yargs(hideBin(process.argv))
       describe: 'internal: AMPLITUDE_WIZARD_SKIP_BOOTSTRAP env-var passthrough',
       type: 'boolean',
     },
+    // AMPLITUDE_WIZARD_SKILL_TIERS=1 opts the agent into the tiered
+    // skill-loading prototype (load_skill_menu / load_skill /
+    // load_skill_reference + system-prompt slice). Read directly via
+    // process.env in src/lib/wizard-tools.ts and src/lib/agent/
+    // skill-tier-prompt.ts; this hidden shadow exists only so
+    // `.env('AMPLITUDE_WIZARD')` auto-mapping doesn't crash `.strict()`
+    // with "Unknown argument: skillTiers" when the env var is exported.
+    'skill-tiers': {
+      hidden: true,
+      describe: 'internal: AMPLITUDE_WIZARD_SKILL_TIERS env-var passthrough',
+      type: 'boolean',
+    },
     // Force the env-selection prompt to emit a `needs_input` for
     // `app_selection` even when there's a single match. The skill
     // always passes this so the user gets to confirm which app the

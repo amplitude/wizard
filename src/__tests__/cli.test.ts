@@ -1541,6 +1541,63 @@ describe('--email and --full-name flags', () => {
   });
 });
 
+// ── AMPLITUDE_WIZARD_* env-var passthrough (yargs strict-mode shadows) ────────
+
+describe('AMPLITUDE_WIZARD env-var passthrough', () => {
+  const originalArgv = process.argv;
+  const originalExit = process.exit;
+  const originalSkillTiers = process.env.AMPLITUDE_WIZARD_SKILL_TIERS;
+
+  beforeEach(() => {
+    vi.clearAllMocks();
+    process.exit = vi.fn() as unknown as typeof process.exit;
+  });
+
+  afterEach(() => {
+    process.argv = originalArgv;
+    process.exit = originalExit;
+    if (originalSkillTiers === undefined) {
+      delete process.env.AMPLITUDE_WIZARD_SKILL_TIERS;
+    } else {
+      process.env.AMPLITUDE_WIZARD_SKILL_TIERS = originalSkillTiers;
+    }
+    vi.resetModules();
+  });
+
+  // Regression: `.env('AMPLITUDE_WIZARD')` auto-maps every AMPLITUDE_WIZARD_*
+  // env var to a yargs argv key (AMPLITUDE_WIZARD_SKILL_TIERS → --skill-tiers
+  // / `skillTiers`). Under `.strict()`, unknown keys crash the wizard with
+  // "Unknown argument: skillTiers" — including on `--help` and every
+  // subcommand. The hidden `skill-tiers` shadow option in bin.ts keeps strict
+  // mode happy without exposing the flag in --help. The env var itself is
+  // read directly via process.env in wizard-tools.ts / skill-tier-prompt.ts.
+  test('AMPLITUDE_WIZARD_SKILL_TIERS=1 does not trip yargs strict mode', async () => {
+    const stderrCalls: string[] = [];
+    const origStderrWrite = process.stderr.write.bind(process.stderr);
+    process.stderr.write = ((chunk: unknown) => {
+      stderrCalls.push(String(chunk));
+      return true;
+    }) as typeof process.stderr.write;
+
+    process.env.AMPLITUDE_WIZARD_SKILL_TIERS = '1';
+    defaultAuthMocks();
+    simulateRegionSelect('us');
+
+    try {
+      await runCLI(['--ci', '--install-dir', '/tmp/test']);
+      await waitFor(() => mockRunWizard.mock.calls.length > 0, 10_000);
+    } finally {
+      process.stderr.write = origStderrWrite;
+    }
+
+    // The wizard must reach runWizard — strict-mode rejection would have
+    // triggered process.exit(1) with "Unknown argument: skillTiers" on stderr
+    // before the command handler ran.
+    expect(mockRunWizard).toHaveBeenCalled();
+    expect(stderrCalls.join('')).not.toMatch(/Unknown argument: skillTiers/i);
+  }, 15_000);
+});
+
 // NOTE: A 200-line `describe.skip('CLI argument parsing', ...)` block lived
 // here previously, marked "kept for regression coverage". Because the entire
 // suite was `.skip`-ed, it provided zero coverage — and several individual
