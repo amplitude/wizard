@@ -2257,7 +2257,7 @@ This tool does not persist or prompt; it's a pure computation. Follow up with co
       const payload = {
         totalEvents,
         paginated,
-        chunkSize: effectiveChunk,
+        chunkSize,
         suggestedBatches,
       };
       logToFile(

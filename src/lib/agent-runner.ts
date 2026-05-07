@@ -1531,7 +1531,7 @@ async function runAgentWizardBody(
   // codebases hit the wizard before the chunked write phase is end-to-end
   // wired through the SDK (the schema + tools land in this PR; the
   // multi-session driver is a follow-up — see PR description).
-  {
+  try {
     const eventCount = agentResult.plannedEvents?.length ?? 0;
     const { shouldPaginate, resolveChunkSize, buildBatches } = await import(
       './event-plan-pagination.js'
@@ -1551,6 +1551,12 @@ async function runAgentWizardBody(
       'total batches': totalBatches,
       integration: config.metadata.integration,
     });
+  } catch (err) {
+    logToFile(
+      `[agent-runner] pagination analytics threw: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
   }
 
   const plannedEventsSummary = await commitPlannedEventsStep(
