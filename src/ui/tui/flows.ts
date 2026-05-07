@@ -85,6 +85,10 @@ export interface FlowEntry {
    * defined" (a flow-definition-time wall): `isWall` is a runtime
    * decision based on session state, so the same entry can revert
    * normally in one state and be a hard wall in another.
+   *
+   * Today the only `isWall` user is the signup-ceremony entries, gated
+   * on `signupCommittedWall` (BA-114). The browser-OAuth callback case
+   * is tracked separately as BA-122.
    */
   isWall?: (session: WizardSession) => boolean;
 }
@@ -103,6 +107,15 @@ export interface FlowEntry {
  *
  * `signupInFlight` covers the in-flight POST window, written
  * exclusively by `WizardStore.runSignupAttempt`'s try/finally.
+ *
+ * Scope: this wall applies to **back-nav only** (Esc / `goBack`). Slash
+ * commands that funnel through `_resetCeremonyKeys` (e.g. `/region` →
+ * `setRegionForced`, `switchToLogin`) are out of scope by design — they
+ * represent explicit user intent ("I picked the wrong region; restart
+ * from there") that should not be silently blocked while a brief POST
+ * is in flight. If a slash command fires mid-POST, the ceremony state
+ * is wiped atomically alongside `signupInFlight` and the response is
+ * dropped on the floor — same outcome as user `/exit` mid-POST.
  */
 function signupCommittedWall(s: WizardSession): boolean {
   return s.signupAuth !== null || s.signupInFlight;
