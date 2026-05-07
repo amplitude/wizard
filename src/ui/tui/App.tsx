@@ -60,10 +60,7 @@ export const App = ({ store }: AppProps) => {
   const activity = store.session.currentActivity;
   const activityRows =
     activity && activity.kind !== 'idle' ? ACTIVITY_LINE_HEIGHT : 0;
-  const contentHeight = Math.max(
-    5,
-    rows - CHROME_HEIGHT - activityRows,
-  );
+  const contentHeight = Math.max(5, rows - CHROME_HEIGHT - activityRows);
   const consoleHeight = rows - 3 - activityRows;
   const contentAreaWidth = Math.max(10, width - Layout.paddingX * 2);
   const direction = store.lastNavDirection === 'pop' ? 'right' : 'left';
@@ -97,7 +94,9 @@ export const App = ({ store }: AppProps) => {
         alignItems="center"
         justifyContent="flex-start"
       >
-        {showEventPlan && pendingPrompt && pendingPrompt.kind === 'event-plan' ? (
+        {showEventPlan &&
+        pendingPrompt &&
+        pendingPrompt.kind === 'event-plan' ? (
           <EventPlanFullScreen
             key="event-plan"
             store={store}
@@ -106,7 +105,12 @@ export const App = ({ store }: AppProps) => {
             height={rows}
           />
         ) : (
-          <Box key="normal-layout" flexDirection="column" width={columns}>
+          <Box
+            key="normal-layout"
+            flexDirection="column"
+            width={columns}
+            alignItems="center"
+          >
             <Box flexDirection="column" width={width}>
               {/* Journey stepper */}
               <JourneyStepper store={store} width={width} />
