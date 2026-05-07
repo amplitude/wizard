@@ -5,6 +5,7 @@ import { fetchAmplitudeUser, type AmplitudeUserInfo } from '../lib/api.js';
 import { createLogger } from '../lib/observability/logger.js';
 import type { AmplitudeZone } from '../lib/constants.js';
 import { analytics } from './analytics.js';
+import { assertNever } from './assert-never.js';
 
 const log = createLogger('signup-or-auth');
 
@@ -230,38 +231,50 @@ export async function performSignupOrAuth(
     return { kind: 'error', message };
   }
 
-  if (result.kind === 'requires_redirect') {
-    log.debug('direct signup → redirect');
-    trackSignupAttempt({ status: 'requires_redirect', zone: input.zone });
-    return { kind: 'redirect' };
-  }
-  if (result.kind === 'needs_information') {
-    log.debug('direct signup → needs_information', {
-      requiredFields: result.requiredFields,
-    });
-    trackSignupAttempt({ status: 'needs_information', zone: input.zone });
-    return {
-      kind: 'needs_information',
-      requiredFields: result.requiredFields,
-    };
-  }
-  if (result.kind === 'error') {
-    log.debug('direct signup → error', {
-      message: result.message,
-      code: result.code,
-    });
-    // The schema's `.refine()` on `required` rejects shapes the wizard
-    // can't act on, and `direct-signup.ts` surfaces that with
-    // `code: 'unsupported_required_shape'`. Emit a distinct telemetry
-    // status so the wire-contract drift is visible separately from
-    // generic signup errors — one funnel query reveals when the server
-    // adds a required field the wizard doesn't yet handle.
-    const status: SignupAttemptStatus =
-      result.code === 'unsupported_required_shape'
-        ? 'needs_information_unsupported'
-        : 'signup_error';
-    trackSignupAttempt({ status, zone: input.zone });
-    return { kind: 'error', message: result.message };
+  // Exhaustive switch on the direct-signup result. `default: assertNever`
+  // makes a future arm a compile error — the wrapper is the closest
+  // layer to the wire and a silent fall-through into the success path
+  // below would attempt to read `result.tokens` on a shape that doesn't
+  // have it. TS narrowing already protects us here, but matching the
+  // explicit pattern used at SigningUpScreen.tsx and runDirectSignupIfRequested
+  // keeps the contract uniform across all consumers of DirectSignupResult.
+  switch (result.kind) {
+    case 'requires_redirect':
+      log.debug('direct signup → redirect');
+      trackSignupAttempt({ status: 'requires_redirect', zone: input.zone });
+      return { kind: 'redirect' };
+    case 'needs_information':
+      log.debug('direct signup → needs_information', {
+        requiredFields: result.requiredFields,
+      });
+      trackSignupAttempt({ status: 'needs_information', zone: input.zone });
+      return {
+        kind: 'needs_information',
+        requiredFields: result.requiredFields,
+      };
+    case 'error': {
+      log.debug('direct signup → error', {
+        message: result.message,
+        code: result.code,
+      });
+      // The schema's `.refine()` on `required` rejects shapes the wizard
+      // can't act on, and `direct-signup.ts` surfaces that with
+      // `code: 'unsupported_required_shape'`. Emit a distinct telemetry
+      // status so the wire-contract drift is visible separately from
+      // generic signup errors — one funnel query reveals when the server
+      // adds a required field the wizard doesn't yet handle.
+      const status: SignupAttemptStatus =
+        result.code === 'unsupported_required_shape'
+          ? 'needs_information_unsupported'
+          : 'signup_error';
+      trackSignupAttempt({ status, zone: input.zone });
+      return { kind: 'error', message: result.message };
+    }
+    case 'success':
+      // Fall through to the persistence + user-fetch block below.
+      break;
+    default:
+      assertNever(result);
   }
 
   const tokens = {
