@@ -393,12 +393,6 @@ export const dashboardCommand: CommandModule = {
     }),
   handler: (argv) => {
     void (async () => {
-      const installDir =
-        (argv['install-dir'] as string | undefined) ?? process.cwd();
-      const ingestionTimeoutMs =
-        (argv['ingestion-timeout-ms'] as number | undefined) ??
-        DEFAULT_INGESTION_TIMEOUT_MS;
-
       // Wire real implementations. Imports are dynamic so the command
       // module stays cheap to load (CLI startup parses argv before
       // dispatching, and we don't want to pay for the agent SDK + MCP
@@ -412,6 +406,7 @@ export const dashboardCommand: CommandModule = {
         { persistDashboard },
         { getMcpUrlFromZone },
         { decodeJwtZone },
+        { resolveInstallDir },
       ] = await Promise.all([
         import('../lib/dashboard-plan.js'),
         import('../lib/credential-resolution.js'),
@@ -421,7 +416,20 @@ export const dashboardCommand: CommandModule = {
         import('../lib/wizard-tools.js'),
         import('../utils/urls.js'),
         import('../utils/jwt-exp.js'),
+        import('../utils/install-dir.js'),
       ]);
+
+      // Expand `~` and resolve relatives at the trust boundary so
+      // `readDashboardPlan` / `persistDashboard` see an absolute path.
+      // `buildSession` does this internally via Zod, but the raw
+      // `installDir` we pass through `runDashboardCommand` must be
+      // pre-resolved.
+      const installDir = resolveInstallDir(
+        argv['install-dir'] as string | undefined,
+      );
+      const ingestionTimeoutMs =
+        (argv['ingestion-timeout-ms'] as number | undefined) ??
+        DEFAULT_INGESTION_TIMEOUT_MS;
 
       const ui = getUI();
       try {
