@@ -808,6 +808,63 @@ describe('WizardStore', () => {
     });
   });
 
+  // ── runSignupAttempt wrapper ──────────────────────────────────────
+
+  describe('runSignupAttempt', () => {
+    // The wrapper is the load-bearing piece for the back-nav wall:
+    // signupInFlight must be true exactly while the network call is
+    // pending and false otherwise, regardless of whether the call
+    // resolves, rejects, or aborts. Without these tests the contract
+    // is only exercised indirectly via SigningUpScreen and a future
+    // refactor could silently break it.
+
+    it('flips signupInFlight true while the awaited fn is pending', async () => {
+      const store = createStore();
+      expect(store.session.signupInFlight).toBe(false);
+
+      let observedDuringAwait: boolean | null = null;
+      let release: (() => void) | null = null;
+      const pending = new Promise<void>((resolve) => {
+        release = resolve;
+      });
+
+      const wrapped = store.runSignupAttempt(async () => {
+        observedDuringAwait = store.session.signupInFlight;
+        await pending;
+      });
+
+      // Yield so runSignupAttempt's setKey + the inner fn's first
+      // microtask run before we read the observed value.
+      await Promise.resolve();
+      expect(observedDuringAwait).toBe(true);
+      expect(store.session.signupInFlight).toBe(true);
+
+      release!();
+      await wrapped;
+      expect(store.session.signupInFlight).toBe(false);
+    });
+
+    it('clears signupInFlight after the awaited fn resolves', async () => {
+      const store = createStore();
+      const result = await store.runSignupAttempt(async () => 'ok');
+      expect(result).toBe('ok');
+      expect(store.session.signupInFlight).toBe(false);
+    });
+
+    it('clears signupInFlight after the awaited fn rejects', async () => {
+      const store = createStore();
+      const boom = new Error('boom');
+      await expect(
+        store.runSignupAttempt(async () => {
+          throw boom;
+        }),
+      ).rejects.toBe(boom);
+      // try/finally must clear regardless of throw — the wall would
+      // otherwise stay stuck-on after a thrown signup attempt.
+      expect(store.session.signupInFlight).toBe(false);
+    });
+  });
+
   // ── postAgentSteps (FinalizingPanel state) ────────────────────────
 
   describe('post-agent step queue', () => {
