@@ -12,7 +12,11 @@ import type {
   EventPlanDecision,
 } from '../wizard-ui.js';
 import type { WizardStore } from './store.js';
-import type { RetryState, PostAgentStep } from '../../lib/wizard-session.js';
+import type {
+  RetryState,
+  PostAgentStep,
+  WizardActivity,
+} from '../../lib/wizard-session.js';
 import { toCredentialAppId } from '../../lib/wizard-session.js';
 import { Overlay } from './router.js';
 import { RunPhase, OutroKind } from './session-constants.js';
@@ -112,6 +116,10 @@ export class InkUI implements WizardUI {
 
   setRetryState(state: RetryState | null): void {
     this.store.setRetryState(state);
+  }
+
+  setCurrentActivity(activity: WizardActivity | null): void {
+    this.store.setCurrentActivity(activity);
   }
 
   startRun(): void {

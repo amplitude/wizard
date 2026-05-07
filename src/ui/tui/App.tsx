@@ -21,6 +21,7 @@ import { ConsoleView } from './components/ConsoleView.js';
 import { CtrlCHandler } from './components/CtrlCHandler.js';
 import { HeaderBar } from './components/HeaderBar.js';
 import { JourneyStepper } from './components/JourneyStepper.js';
+import { ActivityLine } from './components/ActivityLine.js';
 import { useStdoutDimensions } from './hooks/useStdoutDimensions.js';
 import { useWizardStore } from './hooks/useWizardStore.js';
 import { DissolveTransition } from './primitives/index.js';
@@ -29,6 +30,8 @@ import { Colors, Layout } from './styles.js';
 
 /** Height reserved for stepper + header + separators + hint bar + input. */
 const CHROME_HEIGHT = 8;
+/** Extra row consumed when the live ActivityLine is visible. */
+const ACTIVITY_LINE_HEIGHT = 1;
 
 function getContentWidth(terminalColumns: number): number {
   if (terminalColumns < Layout.minWidth) return terminalColumns;
@@ -50,7 +53,17 @@ export const App = ({ store }: AppProps) => {
   useWizardStore(store);
 
   const width = getContentWidth(columns);
-  const contentHeight = Math.max(5, rows - CHROME_HEIGHT);
+  // ActivityLine adds 1 row of top chrome when visible. Subtract it from
+  // both the content area and the ConsoleView height so the layout still
+  // fits within `rows` and we don't clip the input/hint bar.
+  const activity = store.session.currentActivity;
+  const activityRows =
+    activity && activity.kind !== 'idle' ? ACTIVITY_LINE_HEIGHT : 0;
+  const contentHeight = Math.max(
+    5,
+    rows - CHROME_HEIGHT - activityRows,
+  );
+  const consoleHeight = rows - 3 - activityRows;
   const contentAreaWidth = Math.max(10, width - Layout.paddingX * 2);
   const direction = store.lastNavDirection === 'pop' ? 'right' : 'left';
   const activeScreen: ReactNode = screens[store.currentScreen] ?? null;
@@ -74,6 +87,10 @@ export const App = ({ store }: AppProps) => {
           {/* Journey stepper */}
           <JourneyStepper store={store} width={width} />
 
+          {/* Live activity sub-line (compaction, retries, polls, MCP, cold-start).
+              Renders nothing when the wizard is idle. */}
+          <ActivityLine store={store} />
+
           {/* Header bar */}
           <HeaderBar
             width={width}
@@ -89,7 +106,7 @@ export const App = ({ store }: AppProps) => {
         </Box>
 
         {/* Content + console input */}
-        <ConsoleView store={store} width={width} height={rows - 3}>
+        <ConsoleView store={store} width={width} height={consoleHeight}>
           <Box
             flexDirection="column"
             flexGrow={1}

@@ -895,6 +895,21 @@ async function runAgentWizardBody(
   const skipAmplitudeMcp =
     config.prompts.buildPrompt !== undefined || !accessToken;
 
+  // Cold-start phase 1: skill staging. The next ~30s is bundled-skill copy
+  // + on-disk resolution; surface it on the activity line so the user
+  // doesn't read the silence as a hung process. Cleared on the matching
+  // setCurrentActivity(null) below once initialization completes.
+  try {
+    getUI().setCurrentActivity({
+      kind: 'cold-start',
+      message: 'Loading skills...',
+      startedAt: Date.now(),
+      estimatedDurationSec: 90,
+    });
+  } catch (err) {
+    logToFile('cold-start: setCurrentActivity (skills) failed', err);
+  }
+
   // Pre-stage all bundled skills the agent will need into the user's
   // .claude/skills/ directory. The taxonomy / instrumentation / dashboard
   // skills are constants; the integration skill is resolved per framework
@@ -1043,6 +1058,20 @@ async function runAgentWizardBody(
   // outro hook needed.
   getUI().startRun();
 
+  // Cold-start phase 2: agent SDK init (MCP server connect, model handshake,
+  // system-prompt cache prime). Frequently the longest single block of pre-
+  // first-message silence on a fresh run.
+  try {
+    getUI().setCurrentActivity({
+      kind: 'cold-start',
+      message: 'Initializing agent...',
+      startedAt: Date.now(),
+      estimatedDurationSec: 90,
+    });
+  } catch (err) {
+    logToFile('cold-start: setCurrentActivity (init) failed', err);
+  }
+
   const agent = await getAgent(
     {
       workingDirectory: session.installDir,
@@ -1100,12 +1129,30 @@ async function runAgentWizardBody(
       onFeatureComplete: featureProgress?.onFeatureComplete,
       // Fires just before the SDK summarizes context. Refresh the on-disk
       // checkpoint so a compaction crash leaves the user with a resumable
-      // state, and capture an analytics breadcrumb for cost/quality analysis.
+      // state, capture an analytics breadcrumb for cost/quality analysis,
+      // and surface a live activity-line so the user knows the 30-90s
+      // silence is the SDK packing the conversation, not a hung process.
+      // The matching `setCurrentActivity(null)` lives on the next
+      // UserPromptSubmit / first-message branch in agent-interface.ts —
+      // there's no PostCompact hook, but compaction always ends with a
+      // user-prompt-submit + first model message, so clearing on the
+      // first non-`requesting` message after PreCompact is enough.
       onPreCompact: ({ trigger }) => {
         try {
           saveCheckpoint(session, 'pre_compact');
         } catch (err) {
           logToFile('PreCompact: saveCheckpoint failed', err);
+        }
+        try {
+          getUI().setCurrentActivity({
+            kind: 'compaction',
+            message:
+              'Compacting context (this can take a few minutes) — keeping the relevant pieces, dropping the rest.',
+            startedAt: Date.now(),
+            estimatedDurationSec: 60,
+          });
+        } catch (err) {
+          logToFile('PreCompact: setCurrentActivity failed', err);
         }
         analytics.wizardCapture('agent compaction triggered', {
           trigger,
@@ -1720,8 +1767,22 @@ async function pollForDataIngestion(
       logToFile('[pollForDataIngestion] aborted via wizard signal');
       return;
     }
+    const waitMs = Math.min(interPollWaitMs, remaining);
+    // Surface the inter-poll wait on the activity line — without this the
+    // user sees nothing for the full backoff cycle (5-30s). Cleared after
+    // the wait; the next poll tick refreshes the line.
+    try {
+      const waitSec = Math.max(1, Math.round(waitMs / 1000));
+      ui.setCurrentActivity({
+        kind: 'ingestion-poll',
+        message: `Waiting for events to reach Amplitude (polling every ${waitSec}s). Trigger an action in your app to send an event.`,
+        startedAt: Date.now(),
+        estimatedDurationSec: waitSec,
+      });
+    } catch (err) {
+      logToFile('[pollForDataIngestion] setCurrentActivity failed', err);
+    }
     await new Promise<void>((resolve) => {
-      const waitMs = Math.min(interPollWaitMs, remaining);
       const timer = setTimeout(() => {
         wizardSignal.removeEventListener('abort', onAbort);
         resolve();
@@ -1732,6 +1793,11 @@ async function pollForDataIngestion(
       };
       wizardSignal.addEventListener('abort', onAbort, { once: true });
     });
+    try {
+      ui.setCurrentActivity(null);
+    } catch (err) {
+      logToFile('[pollForDataIngestion] clear activity failed', err);
+    }
     interPollWaitMs = nextDataIngestionPollWaitMs(interPollWaitMs);
   }
 

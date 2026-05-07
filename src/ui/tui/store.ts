@@ -22,6 +22,7 @@ import {
   type CloudRegion,
   type RetryState,
   type PostAgentStep,
+  type WizardActivity,
   buildSession,
   toCredentialAppId,
 } from '../../lib/wizard-session.js';
@@ -61,7 +62,14 @@ export {
   SlackOutcome,
   PostAgentStepStatus,
 };
-export type { ScreenName, OutroData, WizardSession, RetryState, PostAgentStep };
+export type {
+  ScreenName,
+  OutroData,
+  WizardSession,
+  RetryState,
+  PostAgentStep,
+  WizardActivity,
+};
 
 export interface TaskItem {
   label: string;
@@ -1300,6 +1308,17 @@ export class WizardStore {
 
   setRetryState(state: RetryState | null): void {
     this.$session.setKey('retryState', state);
+    this.emitChange();
+  }
+
+  /**
+   * Update the live activity-line shown under the journey stepper. Pass
+   * `null` to return to idle (the default — sub-line goes away). Same call
+   * site replaces a prior activity, which is why the message + startedAt are
+   * captured by the caller rather than tracked per-kind here.
+   */
+  setCurrentActivity(activity: WizardActivity | null): void {
+    this.$session.setKey('currentActivity', activity);
     this.emitChange();
   }
 

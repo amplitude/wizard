@@ -2338,4 +2338,98 @@ describe('WizardStore', () => {
       expect(store.fileWrites[1].status).toBe('applied');
     });
   });
+
+  // ── Live activity transitions (stall visibility) ─────────────────
+  describe('setCurrentActivity', () => {
+    it('starts with no current activity', () => {
+      const store = createStore();
+      expect(store.session.currentActivity).toBeNull();
+    });
+
+    it('sets and clears each stall kind', () => {
+      const store = createStore();
+      const cb = vi.fn();
+      store.subscribe(cb);
+      cb.mockClear();
+
+      store.setCurrentActivity({
+        kind: 'compaction',
+        message:
+          'Compacting context — keeping the relevant pieces, dropping the rest.',
+        startedAt: 1_000,
+        estimatedDurationSec: 60,
+      });
+      expect(store.session.currentActivity?.kind).toBe('compaction');
+      expect(cb).toHaveBeenCalled();
+
+      cb.mockClear();
+      store.setCurrentActivity({
+        kind: 'rate-limit-retry',
+        message:
+          'Rate limited by Anthropic. Waiting 12s before retry (attempt 2/5).',
+        startedAt: 2_000,
+      });
+      expect(store.session.currentActivity?.kind).toBe('rate-limit-retry');
+      expect(
+        store.session.currentActivity?.estimatedDurationSec,
+      ).toBeUndefined();
+      expect(cb).toHaveBeenCalled();
+
+      cb.mockClear();
+      store.setCurrentActivity({
+        kind: 'cold-start',
+        message: 'Loading skills...',
+        startedAt: 3_000,
+        estimatedDurationSec: 90,
+      });
+      expect(store.session.currentActivity?.kind).toBe('cold-start');
+      expect(cb).toHaveBeenCalled();
+
+      cb.mockClear();
+      store.setCurrentActivity({
+        kind: 'ingestion-poll',
+        message: 'Waiting for events to reach Amplitude (polling every 10s).',
+        startedAt: 4_000,
+        estimatedDurationSec: 10,
+      });
+      expect(store.session.currentActivity?.kind).toBe('ingestion-poll');
+      expect(cb).toHaveBeenCalled();
+
+      cb.mockClear();
+      store.setCurrentActivity({
+        kind: 'mcp-tool',
+        message: 'Querying Amplitude (query_dataset)...',
+        startedAt: 5_000,
+        estimatedDurationSec: 30,
+      });
+      expect(store.session.currentActivity?.kind).toBe('mcp-tool');
+      expect(cb).toHaveBeenCalled();
+
+      // Regression: clearing back to idle wipes the field. Without this,
+      // a stale "Compacting context" line would persist after a run resumes
+      // because the activity-line component renders any non-null value.
+      cb.mockClear();
+      store.setCurrentActivity(null);
+      expect(store.session.currentActivity).toBeNull();
+      expect(cb).toHaveBeenCalled();
+    });
+
+    it('replaces activity in place rather than queueing', () => {
+      const store = createStore();
+      store.setCurrentActivity({
+        kind: 'cold-start',
+        message: 'Loading skills...',
+        startedAt: 1,
+      });
+      store.setCurrentActivity({
+        kind: 'cold-start',
+        message: 'Initializing agent...',
+        startedAt: 2,
+      });
+      expect(store.session.currentActivity?.message).toBe(
+        'Initializing agent...',
+      );
+      expect(store.session.currentActivity?.startedAt).toBe(2);
+    });
+  });
 });
