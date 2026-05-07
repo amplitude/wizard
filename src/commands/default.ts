@@ -994,6 +994,12 @@ export const defaultCommand: CommandModule = {
               });
               tui.store.setLoginUrl(null);
 
+              // Keep AuthPhase at 'verifying-session' here — fetchUser
+              // is the verification step, no browser is opening yet.
+              // performAmplitudeAuth may have gone through fresh OAuth
+              // and left the phase at 'awaiting-callback'.
+              tui.store.setAuthPhase('verifying-session');
+
               const STALE_TOKEN_PROBE_MS = 8_000;
               const probeAuth = auth;
               const probeFetchUser = async () => {
