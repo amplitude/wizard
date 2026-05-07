@@ -339,3 +339,55 @@ describe('discovery parallelism commandment', () => {
     expect(text).toMatch(/Read-before-Write/);
   });
 });
+
+/**
+ * Pre-flight context — the wizard injects a structured Markdown block at
+ * the top of the first user message containing every value the agent used
+ * to probe for at cold-start (cwd, framework, package manager, env files,
+ * AMPLITUDE_* key presence, org/project/region, project-binding state).
+ * The commandment below tells the agent to trust that block on turn 1
+ * instead of fanning out `detect_package_manager` / `check_env_keys` /
+ * Glob+Read calls that re-derive the same answers — but keeps the
+ * discovery tools available for genuine mid-run verification.
+ *
+ * The rule pairs with the `discovery parallelism` rule above (it is
+ * fine for the agent to parallelize when it must probe; this rule says
+ * "you usually don't have to probe at all"). It must also stay
+ * authoritative: if it ever gets watered down, the cold-start
+ * regression — and the hallucination-prone discovery loop — comes
+ * straight back.
+ */
+describe('pre-flight context commandment', () => {
+  const text = getWizardCommandments();
+
+  it('points the agent at the pre-flight block in the first user message', () => {
+    // The exact header rendered by `buildPreflightContext` — anchoring on
+    // it keeps the rule and the helper in lockstep across copy edits.
+    expect(text).toContain('# Pre-flight context');
+    expect(text).toMatch(/first user message/i);
+  });
+
+  it('explicitly forbids reflexive cold-start probes', () => {
+    // The two MCP discovery tools the agent reflexively burned on every
+    // run before this commandment. Both must be named — naming only one
+    // lets the model rationalize calling the other.
+    expect(text).toMatch(
+      /Do NOT call `detect_package_manager`, `check_env_keys`/,
+    );
+    // And the Glob/Read fanout for `package.json` / lockfiles / `.env*`
+    // — second-most-common cold-start probe pattern.
+    expect(text).toMatch(/package\.json/);
+    expect(text).toMatch(/lockfile/i);
+    expect(text).toMatch(/\.env/);
+  });
+
+  it('keeps the discovery tools available for mid-run verification', () => {
+    // We're not removing the tools — only suppressing the start-of-run
+    // probe. If the agent genuinely needs to verify a value the user
+    // changed mid-run, it should still be allowed to call them. The
+    // "remain registered" / "verify a specific value" carve-out is what
+    // keeps the rule from breaking edge-case correctness.
+    expect(text).toMatch(/remain registered/i);
+    expect(text).toMatch(/verify/i);
+  });
+});
