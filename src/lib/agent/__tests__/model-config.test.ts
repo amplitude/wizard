@@ -66,6 +66,15 @@ describe('selectModel', () => {
     expect(selectModel('standard', true)).toBe('claude-sonnet-4-6');
   });
 
+  // The SDK rejects a fallback equal to the primary; if an operator pins
+  // WIZARD_CLAUDE_MODEL to the fallback alias, the wizard would crash on
+  // every run. Defensively ignore such overrides and keep the default.
+  it('ignores WIZARD_CLAUDE_MODEL overrides that collide with the SDK fallback', () => {
+    vi.stubEnv('WIZARD_CLAUDE_MODEL', FALLBACK_MODEL_DIRECT);
+    expect(selectModel('standard', true)).toBe('claude-sonnet-4-6');
+    expect(selectModel('standard', false)).toBe('anthropic/claude-sonnet-4-6');
+  });
+
   // The Claude Agent SDK rejects a `fallbackModel` equal to the primary
   // `model` with `Fallback model cannot be the same as the main model`,
   // failing the run before the agent makes any progress. Pin the

@@ -46,14 +46,22 @@ export function selectModel(mode: ModelTier, useDirectApiKey: boolean): string {
 
 function standardAlias(): string {
   const override = process.env.WIZARD_CLAUDE_MODEL?.trim();
-  return override && override.length > 0 ? override : 'claude-sonnet-4-6';
+  if (override && override.length > 0) {
+    // The Agent SDK rejects a fallback equal to the primary with
+    // "Fallback model cannot be the same as the main model". If the
+    // operator pins the standard tier to the same alias the SDK uses
+    // for fallback, fall through to the default to keep the invariant.
+    if (override === FALLBACK_MODEL_DIRECT) {
+      return 'claude-sonnet-4-6';
+    }
+    return override;
+  }
+  return 'claude-sonnet-4-6';
 }
 
 function haikuAlias(): string {
   const override = process.env.WIZARD_HAIKU_MODEL?.trim();
-  return override && override.length > 0
-    ? override
-    : 'claude-haiku-4-5-20251001';
+  return override && override.length > 0 ? override : HAIKU_MODEL_DIRECT;
 }
 
 /**
