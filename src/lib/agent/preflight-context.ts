@@ -213,7 +213,11 @@ function renderProject(input: PreflightContextInput): string {
 
 function renderAmplitude(input: PreflightContextInput): string {
   const lines: string[] = ['## Amplitude state'];
-  const auth = input.userEmail ? `signed in (${input.userEmail})` : 'signed in';
+  // `userEmail: null` means the wizard hasn't observed an authenticated
+  // session — don't tell the agent the user is signed in. The taxonomy
+  // / dashboard skills branch on this and would silently skip the
+  // sign-in prompt if we reported "signed in" without an email.
+  const auth = input.userEmail ? `signed in (${input.userEmail})` : '?';
   lines.push(line('auth', auth));
   if (input.selectedOrgName || input.selectedOrgId) {
     const value = input.selectedOrgName

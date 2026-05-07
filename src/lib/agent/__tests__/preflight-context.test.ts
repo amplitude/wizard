@@ -251,6 +251,7 @@ describe('buildPreflightContext', () => {
       cloudRegion: 'us',
       projectBound: false,
     });
+    expect(out).toMatch(/auth: \?/);
     expect(out).toMatch(/org: \?/);
     expect(out).toMatch(/project: \?/);
     expect(out).toMatch(/bound: no/);
