@@ -12,6 +12,7 @@ import type {
   OutroData,
   RetryState,
   PostAgentStep,
+  WizardActivity,
 } from '../lib/wizard-session';
 
 /** Result returned by the confirm_event_plan tool to the agent. */
@@ -176,6 +177,21 @@ export interface WizardUI {
    * NDJSON event.
    */
   setRetryState(state: RetryState | null): void;
+
+  /**
+   * Surface a long-running activity (compaction, retry sleep, cold-start,
+   * ingestion poll, MCP tool call) so the TUI can render a live "we're
+   * doing something" sub-line under the journey stepper. Pass `null` to
+   * clear when the underlying op finishes. Cosmetic only — the underlying
+   * behaviour (retries, polls, compaction) is unchanged whether activities
+   * are emitted or not.
+   *
+   * - InkUI:    delegates to the store; activity-line component reads it.
+   * - LoggingUI: no-op (activity intent already comes through `pushStatus`).
+   * - AgentUI:  emits a `progress: current_activity` NDJSON event; clears
+   *             with `kind: 'idle'` so consumers can detect transitions.
+   */
+  setCurrentActivity(activity: WizardActivity | null): void;
 
   // ── Display state ──────────────────────────────────────────────────
   /** Set the detected framework label (e.g., "Django with Wagtail CMS") */

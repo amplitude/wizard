@@ -353,6 +353,37 @@ export interface RetryState {
   startedAt: number;
 }
 
+/**
+ * Live "current activity" — surfaces long-running stalls (compaction, retry
+ * sleeps, cold-start, ingestion polls, MCP tool calls) so the TUI can render a
+ * sub-line under the journey stepper instead of going silent for 30-90s.
+ *
+ * Set by the lib layer via `WizardUI.setCurrentActivity(activity | null)` and
+ * cleared the moment the underlying operation finishes. Pure UX surface — the
+ * underlying behavior is unchanged when activities are emitted or omitted.
+ */
+export type ActivityKindValue =
+  | 'idle'
+  | 'compaction'
+  | 'rate-limit-retry'
+  | 'cold-start'
+  | 'ingestion-poll'
+  | 'mcp-tool';
+
+export interface WizardActivity {
+  kind: ActivityKindValue;
+  /** Human-readable status. Rendered verbatim under the stepper. */
+  message: string;
+  /** Wall-clock ms the activity started. Drives elapsed-time display. */
+  startedAt: number;
+  /**
+   * Best-effort upper bound for how long the activity typically takes.
+   * Surfaced as "(typically Ns)" so the user sees expected duration without
+   * chasing logs. Omitted when no useful estimate is available.
+   */
+  estimatedDurationSec?: number;
+}
+
 export interface WizardSession {
   // From CLI args
   debug: boolean;
@@ -672,6 +703,14 @@ export interface WizardSession {
   // Runtime
   serviceStatus: { description: string; statusPageUrl: string } | null;
   retryState: RetryState | null;
+  /**
+   * Current long-running activity (compaction, retry sleep, cold-start,
+   * ingestion poll, MCP call). `null` when the wizard is doing something
+   * the user can already see (per-message streaming, screen transitions);
+   * non-null only while a stall is in-flight. Surfaces as the activity-line
+   * sub-row under the journey stepper.
+   */
+  currentActivity: WizardActivity | null;
   outroData: OutroData | null;
 
   // Additional features queue (drained via stop hook after main integration)
@@ -1049,6 +1088,7 @@ export function buildSession(args: {
     apiKeyNotice: null,
     serviceStatus: null,
     retryState: null,
+    currentActivity: null,
     outroData: null,
     introConcluded: false,
     requiresAccountConfirmation: false,

@@ -21,6 +21,7 @@ import { ConsoleView } from './components/ConsoleView.js';
 import { CtrlCHandler } from './components/CtrlCHandler.js';
 import { HeaderBar } from './components/HeaderBar.js';
 import { JourneyStepper } from './components/JourneyStepper.js';
+import { ActivityLine } from './components/ActivityLine.js';
 import { useStdoutDimensions } from './hooks/useStdoutDimensions.js';
 import { useWizardStore } from './hooks/useWizardStore.js';
 import { DissolveTransition } from './primitives/index.js';
@@ -73,6 +74,10 @@ export const App = ({ store }: AppProps) => {
         <Box flexDirection="column" width={width}>
           {/* Journey stepper */}
           <JourneyStepper store={store} width={width} />
+
+          {/* Live activity sub-line (compaction, retries, polls, MCP, cold-start).
+              Renders nothing when the wizard is idle. */}
+          <ActivityLine store={store} />
 
           {/* Header bar */}
           <HeaderBar

@@ -1631,12 +1631,18 @@ function publishRetryBanner(input: {
   maxRetries: number;
   errorStatus: number | null;
   reason: string;
+  /**
+   * Optional sleep-until timestamp (ms). When provided, the activity-line
+   * shows "Waiting Ns before retry…" so the user sees the sleep tick down.
+   * When omitted the banner still shows but no countdown surfaces.
+   */
+  nextRetryAtMs?: number;
 }): void {
   const stormStartedAt = bannerStormAnchor.stamp();
   const state: RetryState = {
     attempt: input.attempt,
     maxRetries: input.maxRetries,
-    nextRetryAtMs: Date.now(),
+    nextRetryAtMs: input.nextRetryAtMs ?? Date.now(),
     errorStatus: input.errorStatus,
     reason: input.reason,
     startedAt: stormStartedAt,
@@ -1646,12 +1652,48 @@ function publishRetryBanner(input: {
   } catch {
     // UI may not be initialised during some test paths.
   }
+  // Mirror onto the activity-line so users see live "Rate limited — waiting
+  // Ns before retry (attempt N/N)" instead of a silent UI during the sleep
+  // before the next attempt. The retry banner already covers the post-stream
+  // / catch-path branches; we additionally surface the same intent on the
+  // activity line because the banner is amber chrome and easy to miss.
+  try {
+    const waitSec = input.nextRetryAtMs
+      ? Math.max(0, Math.round((input.nextRetryAtMs - Date.now()) / 1000))
+      : null;
+    const statusLabel =
+      input.errorStatus === 429
+        ? 'Rate limited by Anthropic'
+        : input.errorStatus
+        ? `Anthropic returned ${input.errorStatus}`
+        : input.reason || 'Connection issue';
+    const message =
+      waitSec !== null && waitSec > 0
+        ? `${statusLabel}. Waiting ${waitSec}s before retry (attempt ${input.attempt}/${input.maxRetries}).`
+        : `${statusLabel}. Retrying (attempt ${input.attempt}/${input.maxRetries}).`;
+    getUI().setCurrentActivity({
+      kind: 'rate-limit-retry',
+      message,
+      startedAt: Date.now(),
+      estimatedDurationSec: waitSec ?? undefined,
+    });
+  } catch {
+    // UI may not be initialised during some test paths.
+  }
 }
 
 function clearRetryBanner(): void {
   bannerStormAnchor.reset();
   try {
     getUI().setRetryState(null);
+  } catch {
+    // UI may not be initialised during some test paths.
+  }
+  // Pair with publishRetryBanner — clearing the banner without clearing the
+  // activity line would leave a stale "Waiting Ns before retry…" sub-line
+  // until the next progress message landed.
+  try {
+    getUI().setCurrentActivity(null);
   } catch {
     // UI may not be initialised during some test paths.
   }
@@ -2246,6 +2288,24 @@ export async function runAgent(
             MAX_RETRIES + 1
           })...`,
         );
+        // Surface the backoff sleep on the activity line so the user sees
+        // the wait tick down. Without this, the wizard sits silent through
+        // 2-30s of jittered backoff before the next attempt issues. Cleared
+        // either by the setCurrentActivity(null) on the first real message
+        // or by the retry-banner clear at the top of the next attempt.
+        try {
+          const waitSec = Math.max(1, Math.round(backoffMs / 1000));
+          getUI().setCurrentActivity({
+            kind: 'rate-limit-retry',
+            message: `Retrying connection. Waiting ${waitSec}s before retry (attempt ${
+              attempt + 1
+            }/${MAX_RETRIES + 1}).`,
+            startedAt: Date.now(),
+            estimatedDurationSec: waitSec,
+          });
+        } catch {
+          // UI may not be initialised in some test paths.
+        }
         await new Promise((resolve) => setTimeout(resolve, backoffMs));
         // Clear per-attempt output so stale error markers don't affect the fresh run
         collectedText.length = 0;
@@ -2672,6 +2732,57 @@ export async function runAgent(
                 }
               };
 
+              // Read the bare tool name from a hook input payload —
+              // matches both `tool_name` (Claude Agent SDK) and
+              // `toolName` (older SDK shape) to stay compatible across
+              // versions; same defensive parse the journey classifier
+              // uses above.
+              const readToolName = (
+                input: Record<string, unknown>,
+              ): string | null => {
+                if (typeof input.tool_name === 'string') return input.tool_name;
+                if (typeof input.toolName === 'string') return input.toolName;
+                return null;
+              };
+
+              // Surface long-running Amplitude MCP tool calls on the
+              // activity line so the user sees "Querying Amplitude for
+              // <event>…" instead of a static spinner during a 10-30s
+              // `query_dataset` round-trip. We only highlight
+              // `mcp__amplitude__*` (the read-only Amplitude MCP) — the
+              // wizard-tools MCP (env vars, package manager) is sub-second
+              // and would just churn the line.
+              const onAmplitudeMcpPre = (
+                input: Record<string, unknown>,
+              ): void => {
+                const toolName = readToolName(input);
+                if (!toolName) return;
+                if (!toolName.startsWith('mcp__amplitude__')) return;
+                const bare = toolName.slice('mcp__amplitude__'.length);
+                try {
+                  getUI().setCurrentActivity({
+                    kind: 'mcp-tool',
+                    message: `Querying Amplitude (${bare})...`,
+                    startedAt: Date.now(),
+                    estimatedDurationSec: 30,
+                  });
+                } catch {
+                  // UI may not be initialised in some test paths.
+                }
+              };
+              const onAmplitudeMcpPost = (
+                input: Record<string, unknown>,
+              ): void => {
+                const toolName = readToolName(input);
+                if (!toolName) return;
+                if (!toolName.startsWith('mcp__amplitude__')) return;
+                try {
+                  getUI().setCurrentActivity(null);
+                } catch {
+                  // UI may not be initialised in some test paths.
+                }
+              };
+
               // Compose: inner observer + authoritative gate run concurrently.
               // The observer is decision-neutral (emits NDJSON for outer-agent
               // telemetry only) so its return value is discarded; the gate's
@@ -2686,6 +2797,7 @@ export async function runAgent(
                 hookOpts,
               ) => {
                 advanceJourney('pre', input);
+                onAmplitudeMcpPre(input);
                 const observer = innerHooks
                   .PreToolUse(input, toolUseID, hookOpts)
                   .catch((err: unknown) => {
@@ -2704,6 +2816,7 @@ export async function runAgent(
                 hookOpts,
               ) => {
                 advanceJourney('post', input);
+                onAmplitudeMcpPost(input);
                 const observer = innerHooks
                   .PostToolUse(input, toolUseID, hookOpts)
                   .catch((err: unknown) => {
@@ -2832,6 +2945,16 @@ export async function runAgent(
               'unknown';
             lastMessageType = rawType;
             resetStaleTimer();
+            // Real progress arrived — clear any cold-start / compaction /
+            // rate-limit-retry activity. Same line clears all three because
+            // the only way a real message lands is for cold-start to have
+            // finished, the compaction round-trip to have completed, or the
+            // retry sleep to have elapsed. Cheap noop when already idle.
+            try {
+              getUI().setCurrentActivity(null);
+            } catch {
+              // UI may not be initialised in some test paths.
+            }
           }
 
           // A post-stream retry banner is active from a previous attempt's

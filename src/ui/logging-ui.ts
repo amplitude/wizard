@@ -9,7 +9,11 @@ import {
   type SpinnerHandle,
   type EventPlanDecision,
 } from './wizard-ui';
-import type { RetryState, PostAgentStep } from '../lib/wizard-session';
+import type {
+  RetryState,
+  PostAgentStep,
+  WizardActivity,
+} from '../lib/wizard-session';
 
 export class LoggingUI implements WizardUI {
   intro(message: string): void {
@@ -181,6 +185,17 @@ export class LoggingUI implements WizardUI {
         state.maxRetries
       }${eta > 0 ? ` in ${eta}s` : ''}`,
     );
+  }
+
+  setCurrentActivity(activity: WizardActivity | null): void {
+    // CI logs already surface the same intent through `pushStatus`. Echo
+    // long-running activity once on transition so a CI tail shows the same
+    // "we're not stuck" signal without spamming on every poll tick.
+    if (!activity) return;
+    const eta = activity.estimatedDurationSec
+      ? ` (typically ${activity.estimatedDurationSec}s)`
+      : '';
+    console.error(`▶  ${activity.message}${eta}`);
   }
 
   startRun(): void {

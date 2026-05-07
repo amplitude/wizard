@@ -5,7 +5,11 @@
  */
 
 import type { WizardUI, SpinnerHandle, EventPlanDecision } from './wizard-ui';
-import type { RetryState, PostAgentStep } from '../lib/wizard-session';
+import type {
+  RetryState,
+  PostAgentStep,
+  WizardActivity,
+} from '../lib/wizard-session';
 import type {
   AgentEventType,
   NeedsInputChoice,
@@ -1147,6 +1151,39 @@ export class AgentUI implements WizardUI {
       });
     } else {
       emit('diagnostic', 'retry cleared', { data: { kind: 'retry_cleared' } });
+    }
+  }
+
+  /**
+   * Surface a long-running activity to NDJSON consumers. Emits a
+   * `progress: current_activity` line with the full payload (kind, message,
+   * elapsed-time anchor, optional duration estimate). Clearing fires with
+   * `kind: 'idle'` so consumers can detect transitions without bookkeeping.
+   *
+   * Additive — existing NDJSON consumers ignore unknown event types and
+   * the underlying lib-layer behavior is unchanged whether activities are
+   * emitted or omitted.
+   */
+  setCurrentActivity(activity: WizardActivity | null): void {
+    if (activity) {
+      emit('progress', activity.message, {
+        data: {
+          kind: 'current_activity',
+          activityKind: activity.kind,
+          message: activity.message,
+          startedAt: activity.startedAt,
+          estimatedDurationSec: activity.estimatedDurationSec,
+        },
+      });
+    } else {
+      emit('progress', 'activity cleared', {
+        data: {
+          kind: 'current_activity',
+          activityKind: 'idle',
+          message: '',
+          startedAt: Date.now(),
+        },
+      });
     }
   }
 
