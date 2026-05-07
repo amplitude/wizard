@@ -1911,7 +1911,7 @@ For codebases with >50 events the wizard runs the WRITE phase in chunks of ~25 e
       chunkSize: z
         .number()
         .int()
-        .min(1)
+        .min(5)
         .optional()
         .describe(
           'Events per batch (declared by the agent for transparency). Default 25; configurable via AMPLITUDE_WIZARD_EVENT_PLAN_CHUNK_SIZE. The runner is the source of truth for chunking — this field is informational.',
