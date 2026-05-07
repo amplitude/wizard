@@ -17,6 +17,14 @@ import {
   WIZARD_USER_AGENT,
 } from './constants';
 import {
+  GATEWAY_INVALID_REQUEST_MARKER,
+  extractApiErrorHttpStatusFromPattern,
+  extractHttpStatusLooseFromMessage,
+  findTransientSdkOutputPattern,
+  isThrownErrorCountedAsUpstreamGatewayFailure,
+  isTransientThrownSdkErrorMessage,
+} from './agent/transient-llm-retry.js';
+import {
   AuthOnboardingPath,
   type AdditionalFeature,
   ADDITIONAL_FEATURE_PROMPTS,
@@ -242,14 +250,6 @@ export enum AgentErrorType {
    */
   GATEWAY_INVALID_REQUEST = 'WIZARD_GATEWAY_INVALID_REQUEST',
 }
-
-/**
- * Verbatim error wrapper Thunder's `wizard-proxy` returns when Vertex AI
- * rejects the upstream request body (see Thunder's
- * `src/wizard-proxy/router.ts:917-974` — the proxy clamps every 400 from
- * the model provider to this exact string and hides the real reason).
- */
-const GATEWAY_INVALID_REQUEST_MARKER = 'Invalid request sent to model provider';
 
 const DEFAULT_MAX_TURNS = 200;
 /**
@@ -1439,18 +1439,6 @@ export async function runAgentLocally(
       reject(err);
     });
   });
-}
-
-/** Pull a 3-digit status out of an `API Error: NNN ...` pattern. */
-function extractHttpStatus(pattern: string): number | null {
-  const m = pattern.match(/API Error: (\d{3})/);
-  return m ? Number(m[1]) : null;
-}
-
-/** Extract the first HTTP status seen in an error message, if any. */
-function extractHttpStatusFromMessage(msg: string): number | null {
-  const m = msg.match(/\b([4-5]\d{2})\b/);
-  return m ? Number(m[1]) : null;
 }
 
 /**
@@ -2767,16 +2755,8 @@ export async function runAgent(
           break;
         }
 
-        const transientErrorMatchers = [
-          { pattern: 'API Error: 400', label: 'api_400' },
-          { pattern: 'API Error: 408', label: 'api_408' },
-          { pattern: 'API Error: 503', label: 'api_503' },
-          { pattern: 'API Error: 529', label: 'api_529' },
-          { pattern: 'DEADLINE_EXCEEDED', label: 'deadline_exceeded' },
-        ];
-        const matchedTransientError = transientErrorMatchers.find((m) =>
-          partialOutput.includes(m.pattern),
-        );
+        const matchedTransientError =
+          findTransientSdkOutputPattern(partialOutput);
         // Track upstream-gateway-shaped failures on EVERY attempt that
         // ended that way (even the last one, where we won't retry). This
         // is what lets the post-loop classifier compare
@@ -2809,7 +2789,9 @@ export async function runAgent(
           publishRetryBanner({
             attempt: attempt + 2,
             maxRetries: MAX_RETRIES + 1,
-            errorStatus: extractHttpStatus(matchedTransientError.pattern),
+            errorStatus: extractApiErrorHttpStatusFromPattern(
+              matchedTransientError.pattern,
+            ),
             reason: matchedTransientError.pattern.includes('API Error')
               ? 'Upstream error'
               : `Upstream ${matchedTransientError.label}`,
@@ -2902,27 +2884,14 @@ export async function runAgent(
         // (including the final one). Mirrors the post-stream branch.
         if (
           !receivedSuccessResult &&
-          (errMsg.includes('API Error: 400') ||
-            errMsg.includes('DEADLINE_EXCEEDED'))
+          isThrownErrorCountedAsUpstreamGatewayFailure(errMsg)
         ) {
           upstreamGatewayFailures++;
         }
         const isTransientSdkError =
           attempt < MAX_RETRIES &&
           !authErrorDetected &&
-          (errMsg.includes('tool_use') ||
-            errMsg.includes('tool_result') ||
-            errMsg.includes('API Error: 400') ||
-            errMsg.includes('API Error: 408') ||
-            errMsg.includes('API Error: 503') ||
-            errMsg.includes('API Error: 529') ||
-            errMsg.includes('DEADLINE_EXCEEDED') ||
-            // Hook bridge race during prior-attempt teardown — see
-            // issue #297. Defense in depth on top of `drainPriorResponse`:
-            // if a `Stream closed` does still bubble out, treat it as
-            // transient and retry cleanly instead of crashing the run.
-            errMsg.includes('Stream closed') ||
-            errMsg.includes('invalid_request_error'));
+          isTransientThrownSdkErrorMessage(errMsg);
         if (isTransientSdkError) {
           logToFile(
             `Retrying after transient SDK error (next attempt: ${
@@ -2936,7 +2905,7 @@ export async function runAgent(
           publishRetryBanner({
             attempt: attempt + 2,
             maxRetries: MAX_RETRIES + 1,
-            errorStatus: extractHttpStatusFromMessage(errMsg),
+            errorStatus: extractHttpStatusLooseFromMessage(errMsg),
             reason: 'Transient error',
           });
           postStreamRetryActive = true;
