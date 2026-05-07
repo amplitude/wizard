@@ -179,14 +179,25 @@ export function readLocalEventPlan(
  * Like {@link readLocalEventPlan} but preserves optional `callsites` arrays
  * written by `persistEventPlan`. Used by the batch-merge path so earlier
  * batches' callsite annotations survive when subsequent batches are merged in.
+ *
+ * Returns `null` when no event-plan file exists or the JSON couldn't be parsed
+ * — so callers can distinguish "missing / unparseable, don't merge" from
+ * "parsed cleanly but contained zero events" (`[]`). Mirrors the
+ * {@link parseEventPlanContent} contract.
+ *
+ * Defensively coerces every field to a string. A user-edited `events.json`
+ * with a numeric `name` or `null` `description` would otherwise crash inside
+ * `String.prototype.trim` — we treat any non-string field value as an
+ * effectively empty string and drop the entry via the same name-required
+ * filter that `readLocalEventPlan` uses.
  */
 export function readLocalEventPlanRich(installDir: string): Array<{
   name: string;
   description: string;
   callsites?: Array<{ filePath: string; anchor?: string }>;
-}> {
+}> | null {
   const file = readFreshestEventPlanFile(installDir, 'readLocalEventPlanRich');
-  if (!file) return [];
+  if (!file) return null;
 
   let parsed: unknown;
   try {
@@ -195,7 +206,7 @@ export function readLocalEventPlanRich(installDir: string): Array<{
     logToFile(
       `[readLocalEventPlanRich] ${file.path} could not be parsed as JSON`,
     );
-    return [];
+    return null;
   }
 
   if (
@@ -207,22 +218,28 @@ export function readLocalEventPlanRich(installDir: string): Array<{
     parsed = (parsed as { events: unknown[] }).events;
   }
 
-  if (!Array.isArray(parsed)) return [];
+  if (!Array.isArray(parsed)) {
+    logToFile(
+      `[readLocalEventPlanRich] ${file.path} did not contain a JSON array`,
+    );
+    return null;
+  }
 
-  return (parsed as Array<Record<string, unknown>>)
+  // Coerce every field through `coerceToString` so a user-edited file with
+  // numeric / null / object values can't crash the merge path.
+  return (parsed as Array<unknown>)
+    .filter((e): e is Record<string, unknown> => isPlainObject(e))
     .map((e) => {
       const name =
-        (e.name as string) ??
-        (e.event as string) ??
-        (e.eventName as string) ??
-        (e.event_name as string) ??
-        '';
+        coerceToString(e.name) ||
+        coerceToString(e.event) ||
+        coerceToString(e.eventName) ||
+        coerceToString(e.event_name);
       const description =
-        (e.description as string) ??
-        (e.event_description as string) ??
-        (e.eventDescription as string) ??
-        (e.eventDescriptionAndReasoning as string) ??
-        '';
+        coerceToString(e.description) ||
+        coerceToString(e.event_description) ||
+        coerceToString(e.eventDescription) ||
+        coerceToString(e.eventDescriptionAndReasoning);
       const result: {
         name: string;
         description: string;
@@ -232,11 +249,43 @@ export function readLocalEventPlanRich(installDir: string): Array<{
         description,
       };
       if (Array.isArray(e.callsites) && e.callsites.length > 0) {
-        result.callsites = (
-          e.callsites as Array<{ filePath: string; anchor?: string }>
-        ).filter((c) => c && typeof c.filePath === 'string');
+        const callsites = (e.callsites as Array<unknown>)
+          .filter((c): c is Record<string, unknown> => isPlainObject(c))
+          .map((c) => {
+            // filePath / anchor are paths and identifiers — keep the strict
+            // string requirement so a stray number doesn't get coerced into
+            // a misleading path like "123".
+            if (typeof c.filePath !== 'string' || c.filePath.length === 0) {
+              return null;
+            }
+            return typeof c.anchor === 'string' && c.anchor.length > 0
+              ? { filePath: c.filePath, anchor: c.anchor }
+              : { filePath: c.filePath };
+          })
+          .filter(
+            (c): c is { filePath: string; anchor?: string } => c !== null,
+          );
+        if (callsites.length > 0) result.callsites = callsites;
       }
       return result;
     })
     .filter((e) => e.name.trim().length > 0);
+}
+
+/**
+ * Coerce arbitrary JSON values to a safe string. Returns `''` for null,
+ * undefined, objects, arrays, booleans, and NaN — all of which would
+ * otherwise either crash `.trim()` or produce nonsense like `'[object
+ * Object]'` downstream. Numbers and bigints are stringified via `String()`.
+ */
+function coerceToString(value: unknown): string {
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number')
+    return Number.isFinite(value) ? String(value) : '';
+  if (typeof value === 'bigint') return String(value);
+  return '';
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
