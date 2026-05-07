@@ -17,18 +17,62 @@ function renderMenu(payload: SkillMenuPayload): string {
 
 /**
  * Trim the menu so the rendered JSON fits within the prompt budget while
- * remaining syntactically valid. Drops one entry at a time from the largest
- * category until under budget; if every category has been emptied we return
- * `null` so the caller can fall back to a "menu too large" note.
+ * remaining syntactically valid. Drops entries from the largest category
+ * until the menu fits; if every category has been emptied we return `null`
+ * so the caller can fall back to a "menu too large" note.
+ *
+ * Performance: a naive "drop one, re-stringify" loop is O(N^2) on N entries
+ * (each JSON.stringify walks the whole structure) and made the regression
+ * test for an oversized menu flake on Node 24 in CI. Instead we estimate
+ * each entry's serialized cost once, drop entries while updating a running
+ * length estimate, and re-stringify only as a final correctness check.
  */
 function fitMenuToBudget(payload: SkillMenuPayload): string | null {
   let rendered = renderMenu(payload);
+  if (rendered.length <= MAX_SKILL_MENU_PROMPT_CHARS) return rendered;
+
+  // Per-entry serialized length plus the comma that separates it from a
+  // sibling. This over-counts by one comma per category (the last entry has
+  // no trailing comma) but the final renderMenu() call below settles the
+  // exact length, so the estimate just needs to be a safe upper bound.
+  const entryCost = new Map<{ id: string; name: string }, number>();
+  for (const entries of Object.values(payload.categories)) {
+    for (const entry of entries) {
+      entryCost.set(entry, JSON.stringify(entry).length + 1);
+    }
+  }
+
+  let estimated = rendered.length;
+  while (estimated > MAX_SKILL_MENU_PROMPT_CHARS) {
+    let largestName: string | null = null;
+    let largestLen = 0;
+    for (const [name, entries] of Object.entries(payload.categories)) {
+      if (entries.length > largestLen) {
+        largestLen = entries.length;
+        largestName = name;
+      }
+    }
+    if (largestName == null) return null;
+    const entries = payload.categories[largestName];
+    const removed = entries.pop();
+    if (!removed) return null;
+    estimated -= entryCost.get(removed) ?? 0;
+  }
+
+  // Final exact check — handles slight under/over-estimation from the
+  // per-entry cost approximation above.
+  rendered = renderMenu(payload);
   while (rendered.length > MAX_SKILL_MENU_PROMPT_CHARS) {
-    const largest = Object.entries(payload.categories)
-      .filter(([, entries]) => entries.length > 0)
-      .sort(([, a], [, b]) => b.length - a.length)[0];
-    if (!largest) return null;
-    largest[1].pop();
+    let largestName: string | null = null;
+    let largestLen = 0;
+    for (const [name, entries] of Object.entries(payload.categories)) {
+      if (entries.length > largestLen) {
+        largestLen = entries.length;
+        largestName = name;
+      }
+    }
+    if (largestName == null) return null;
+    payload.categories[largestName].pop();
     rendered = renderMenu(payload);
   }
   return rendered;
