@@ -622,7 +622,15 @@ describe('TUI auth task: region determines OAuth zone', () => {
     },
   );
 
-  test('forceFresh is false when ampli.json exists (returning user)', async () => {
+  // Pre-fix `forceFresh` was wired to `!ampliConfigExists(installDir)`,
+  // which after Phase G-1 (#573 stopped writing ampli.json on healthy
+  // projects) flipped true on every cold-start in a fresh dir — popping
+  // the OAuth browser even for users with a perfectly valid wizard-owned
+  // token. The right gate is "do we have a usable user-level OAuth
+  // token?", which `performAmplitudeAuth` already answers via
+  // `getStoredToken`. We pass `forceFresh: false` unconditionally and
+  // let it decide.
+  test('forceFresh is false when ampli.json exists (returning user, legacy project)', async () => {
     mockAmpliConfigExists.mockReturnValue(true);
     simulateRegionSelect('us');
 
@@ -634,7 +642,7 @@ describe('TUI auth task: region determines OAuth zone', () => {
     );
   });
 
-  test('forceFresh is true when no ampli.json (new project)', async () => {
+  test('forceFresh is also false when no ampli.json (cached token still authoritative)', async () => {
     mockAmpliConfigExists.mockReturnValue(false);
     simulateRegionSelect('us');
 
@@ -642,7 +650,7 @@ describe('TUI auth task: region determines OAuth zone', () => {
     await waitFor(() => mockPerformAmplitudeAuth.mock.calls.length > 0);
 
     expect(mockPerformAmplitudeAuth).toHaveBeenCalledWith(
-      expect.objectContaining({ forceFresh: true }),
+      expect.objectContaining({ forceFresh: false }),
     );
   });
 

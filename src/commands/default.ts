@@ -629,9 +629,6 @@ export const defaultCommand: CommandModule = {
             if (tui.store.session.credentials !== null) return;
 
             try {
-              const { ampliConfigExists } = await import(
-                '../lib/ampli-config.js'
-              );
               const { performAmplitudeAuth } = await import(
                 '../utils/oauth.js'
               );
@@ -677,14 +674,23 @@ export const defaultCommand: CommandModule = {
                   }
                 });
               });
-              // Read the live installDir from the store after the intro
-              // wait — the user may have switched directories on the
-              // welcome screen, and `forceFresh` should reflect the
-              // ampli.json status of the directory we're actually
-              // about to instrument.
-              const forceFresh = !ampliConfigExists(
-                tui.store.session.installDir,
-              );
+              // `forceFresh` was previously gated on `ampliConfigExists`,
+              // which became wrong after Phase G-1 (#573) stopped writing
+              // `ampli.json` on healthy projects. The result was that EVERY
+              // cold-start in a directory without an existing project-binding
+              // file flipped `forceFresh=true` and skipped the wizard's
+              // user-level OAuth token cache, so a returning user with a
+              // valid token in `~/.amplitude/wizard/oauth-session.json` saw
+              // the browser pop unprompted on every fresh install dir.
+              //
+              // The right gate is "is this a returning user?" — answered by
+              // the user-level OAuth token, NOT by per-project state.
+              // `performAmplitudeAuth` already checks `getStoredToken()` and
+              // opens the browser only when no usable token exists, so we
+              // can simply default to `false` here. The per-project
+              // requiresAccountConfirmation flow still handles the
+              // "this codebase is bound to a different project" case.
+              const forceFresh = false;
 
               const { resolveZone } = await import('../lib/zone-resolution.js');
               const zone = resolveZone(

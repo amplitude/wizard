@@ -17,6 +17,7 @@ import {
   findFlaskAppFile,
   IGNORE_PATTERNS,
 } from './utils';
+import { hasPythonProjectMarkers } from '../python/preflight';
 
 type FlaskContext = {
   projectType?: FlaskProjectType;
@@ -50,6 +51,10 @@ export const FLASK_AGENT_CONFIG: FrameworkConfig<FlaskContext> = {
     getInstalledVersion: (options: WizardOptions) => getFlaskVersion(options),
     detect: async (options) => {
       const { installDir } = options;
+
+      // Bail before recursive globs on JS-heavy repos with no python at
+      // root. See `frameworks/python/preflight.ts`.
+      if (!hasPythonProjectMarkers(installDir)) return false;
 
       const requirementsFiles = await fg(
         [
