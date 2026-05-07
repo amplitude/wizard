@@ -61,7 +61,18 @@ function standardAlias(): string {
 
 function haikuAlias(): string {
   const override = process.env.WIZARD_HAIKU_MODEL?.trim();
-  return override && override.length > 0 ? override : HAIKU_MODEL_DIRECT;
+  if (override && override.length > 0) {
+    // Mirror the standardAlias() guard: the Agent SDK rejects a fallback
+    // equal to the primary with "Fallback model cannot be the same as the
+    // main model". An operator pinning Haiku to the same alias the SDK
+    // uses for fallback would trip the same invariant — fall through to
+    // the default.
+    if (override === FALLBACK_MODEL_DIRECT) {
+      return HAIKU_MODEL_DIRECT;
+    }
+    return override;
+  }
+  return HAIKU_MODEL_DIRECT;
 }
 
 /**
