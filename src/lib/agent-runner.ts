@@ -460,6 +460,18 @@ export async function runAgentWizard(
   } = await import('./wizard-tools.js');
   ensureWizardArtifactsIgnored(session.installDir);
 
+  // Initialise the file-change ledger BEFORE the agent has touched
+  // anything so its preamble snapshot of the working tree (gitignore
+  // content, presence of `.amplitude/`) reflects the truly-pre-wizard
+  // state. PreToolUse / PostToolUse hooks consume the ledger via
+  // `getFileChangeLedger()` — see inner-lifecycle.ts. The cancel path
+  // (wizardAbort + the cleanup hook below) reverses the ledger so a
+  // cancelled run leaves the user's repo unchanged.
+  const { initFileChangeLedger, getFileChangeLedger } = await import(
+    './file-change-ledger.js'
+  );
+  initFileChangeLedger(session.installDir);
+
   // Move any prior `amplitude-setup-report.md` to
   // `amplitude-setup-report.previous.md` BEFORE the run starts so the
   // outro never advertises a stale report from a previous run (e.g.
@@ -505,6 +517,70 @@ export async function runAgentWizard(
     restoreSetupReportIfMissing(session.installDir),
   );
 
+  // Hoisted so the rollback cleanup closure (registered below) can read
+  // it. Set inside the try-block once the body returns truthy. Cleanup
+  // hooks fire from `wizardAbort()` synchronously before this assignment
+  // runs on the cancel path, so the gate evaluates to `false` exactly
+  // when we want it to (= run the rollback).
+  let success = false;
+
+  // Reverse the file-change ledger on every non-success teardown.
+  //
+  // Fires from `wizardAbort()` (cancel / error / Ctrl+C) AND from the
+  // agent-runner try/finally below (body returns false / throws). Both
+  // call sites are guarded by the ledger's `rolledBack` flag — running
+  // twice is a no-op the second time, so ordering doesn't matter.
+  //
+  // We deliberately do NOT clear the ledger on success: a successful
+  // run leaves writes in place by definition, and `runRollbackIfNotSuccessful`
+  // is gated on the `success` flag set later in this function.
+  //
+  // Closure references `success` (declared just below) so we can short-
+  // circuit when the run reached the success branch — registering the
+  // cleanup here keeps the wiring in one block, but the gate fires
+  // whenever the cleanup runs.
+  const runRollbackIfNotSuccessful = (): void => {
+    if (success) return;
+    const ledger = getFileChangeLedger();
+    if (!ledger) return;
+    try {
+      const result = ledger.rollback();
+      const reverted = result.filesReverted;
+      const removed = result.filesRemoved;
+      if (reverted === 0 && removed === 0) {
+        logToFile('[ledger] rollback: nothing to revert');
+        return;
+      }
+      const message = `Wizard cancelled. Your repo has been restored to its pre-wizard state. (${reverted} file${
+        reverted === 1 ? '' : 's'
+      } reverted, ${removed} file${removed === 1 ? '' : 's'} removed.)`;
+      logToFile(`[ledger] ${message}`);
+      // Best-effort surface to the user. `getUI()` may not be reachable
+      // (very early failure paths); swallow either way.
+      try {
+        getUI().pushStatus(message);
+      } catch {
+        /* surfaced to log already */
+      }
+      if (result.failures.length > 0) {
+        logToFile(
+          `[ledger] rollback: ${result.failures.length} failure${
+            result.failures.length === 1 ? '' : 's'
+          }: ${result.failures
+            .map((f) => `${f.path} (${f.reason})`)
+            .join(', ')}`,
+        );
+      }
+    } catch (err) {
+      logToFile(
+        `[ledger] rollback threw: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+    }
+  };
+  registerPriorityCleanup(runRollbackIfNotSuccessful);
+
   // Cleanup runs ONLY on the success path. Cancel / error / Ctrl+C all
   // preserve the wizard's working artifacts (`.amplitude/` metadata,
   // installed integration skills) so a re-run can pick up where the user
@@ -519,7 +595,6 @@ export async function runAgentWizard(
   // user to re-confirm their entire instrumentation plan from scratch.
   // The gitignore made the cleanup redundant for its stated purpose
   // (preventing `git add .` pollution).
-  let success = false;
   try {
     success = await runAgentWizardBody(
       config,
@@ -540,6 +615,13 @@ export async function runAgentWizard(
     // stays absent and the OutroScreen hides "View setup report".
     if (!success) {
       restoreSetupReportIfMissing(session.installDir);
+      // Mirror what `wizardAbort()` does on cancel/error: reverse the
+      // file-change ledger so a body-thrown exception (uncaught
+      // upstream) or a non-throwing early `return false` (version-check
+      // failure) still restores the user's working tree. The ledger's
+      // `rolledBack` flag makes this a no-op when wizardAbort already
+      // ran on this path.
+      runRollbackIfNotSuccessful();
     }
   }
   // Cleanup runs only when the body explicitly signals success. Other

@@ -43,6 +43,7 @@ import {
   type InnerAgentStartedData,
 } from './agent-events.js';
 import type { HookCallback } from './agent-hooks.js';
+import { getFileChangeLedger } from './file-change-ledger.js';
 
 /**
  * Type guard: returns the UI cast to AgentUI if we're in agent mode,
@@ -158,6 +159,14 @@ export function createInnerLifecycleHooks(config: InnerLifecycleConfig): {
           // when inner-lifecycle hooks fire from a probe call). Swallow —
           // a missing pre-event is harmless, the apply-side handles it.
         }
+        // Capture the pre-write content into the rollback ledger so a
+        // cancelled / errored run can revert this file. No-op when no
+        // ledger has been initialised (probe calls, unit tests).
+        try {
+          getFileChangeLedger()?.recordPreWrite(path);
+        } catch {
+          // Ledger capture must never break the agent loop. Swallow.
+        }
       }
     }
     return Promise.resolve({});
@@ -204,6 +213,16 @@ export function createInnerLifecycleHooks(config: InnerLifecycleConfig): {
         });
       } catch {
         // See preToolUse — same defensive swallow.
+      }
+      // Finalise the rollback ledger entry with the new on-disk content.
+      // For Edit/MultiEdit/NotebookEdit `obj.content` will be null and
+      // the ledger re-reads from disk to capture the final form. The
+      // ledger's `recordPostWrite` is a no-op when no ledger is
+      // initialised.
+      try {
+        getFileChangeLedger()?.recordPostWrite(path, content);
+      } catch {
+        // Ledger capture must never break the agent loop. Swallow.
       }
     }
     return Promise.resolve({});
