@@ -57,7 +57,7 @@
     "@sentry/node": "10.47.0",
     "adm-zip": "~0.5.17",
     "ai": "^6.0.175",
-    "axios": "1.13.5",
+    "axios": "1.15.2",
     "chalk": "2.4.2",
     "cli-highlight": "2.1.11",
     "client-oauth2": "4.3.3",
