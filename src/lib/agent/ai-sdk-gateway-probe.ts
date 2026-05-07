@@ -70,7 +70,7 @@ export async function maybeRunAiSdkGatewayProbe(args: {
     const provider = createAnthropic({
       ...(baseURL ? { baseURL } : {}),
       ...auth,
-      fetch: sanitizingFetch,
+      ...(baseURL ? { fetch: sanitizingFetch } : {}),
     });
 
     const result = streamText({

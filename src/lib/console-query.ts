@@ -194,7 +194,7 @@ async function queryConsoleWithVercelAiSdk(
     ...(baseURL ? { baseURL } : {}),
     ...auth,
     headers: parseAnthropicCustomHeaderBlock(customHeaders),
-    fetch: sanitizingFetch,
+    ...(baseURL ? { fetch: sanitizingFetch } : {}),
   });
 
   const result = streamText({
