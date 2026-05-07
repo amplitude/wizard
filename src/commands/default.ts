@@ -721,14 +721,18 @@ export const defaultCommand: CommandModule = {
               //
               // On signup success, the wrapper already fetched the real user
               // profile (with provisioning retry) and persisted tokens to
-              // ~/.ampli.json — so we carry its userInfo through and skip the
-              // redundant fetch + storeToken below.
+              // ~/.ampli.json. SigningUpScreen mirrors the wrapper-fetched
+              // userInfo onto `session.signupAuth.userInfo`, so reading it
+              // here lets us skip the redundant fetch + storeToken below.
+              // When the wrapper's fetch failed (provisioning lag exhausted
+              // retries), `signupAuth.userInfo` is null and we fall through
+              // to the probe path — same outcome as before.
               let auth: Awaited<
                 ReturnType<typeof performAmplitudeAuth>
               > | null = null;
               const signupUserInfo: Awaited<
                 ReturnType<typeof fetchAmplitudeUser>
-              > | null = null;
+              > | null = tui.store.session.signupAuth?.userInfo ?? null;
               // True iff direct signup produced fresh tokens in this run.
               // Used by the downstream fetchAmplitudeUser catch to
               // distinguish a provisioning-lag recovery (signup succeeded,
