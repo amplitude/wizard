@@ -1,0 +1,63 @@
+{
+  "id": "propose-event-plan-nextjs-baseline",
+  "callSiteId": "propose_event_plan",
+  "description": "Baseline propose_event_plan fixture for a Next.js App Router project. Mirrors the input the wizard sends to the agent during the taxonomy step (events.json shape, framework, project context). Scorer asserts shape + naming conventions on the recorded output.",
+  "kind": "structured-output",
+  "input": {
+    "framework": "nextjs",
+    "projectContext": {
+      "name": "demo-app",
+      "description": "Marketing site with auth, pricing, and a checkout flow.",
+      "primaryRoutes": [
+        "/",
+        "/pricing",
+        "/signup",
+        "/login",
+        "/dashboard",
+        "/checkout"
+      ]
+    },
+    "existingEvents": [],
+    "maxEvents": 25
+  },
+  "recordedOutput": {
+    "events": [
+      {
+        "name": "page_viewed",
+        "description": "Fired when any page in the app loads.",
+        "properties": [
+          { "name": "path", "type": "string" },
+          { "name": "referrer", "type": "string" }
+        ]
+      },
+      {
+        "name": "sign_up_started",
+        "description": "User clicked sign up CTA.",
+        "properties": [{ "name": "source", "type": "string" }]
+      },
+      {
+        "name": "sign_up_completed",
+        "description": "User completed sign up form.",
+        "properties": [{ "name": "method", "type": "string" }]
+      },
+      {
+        "name": "sign_in_completed",
+        "description": "User signed in successfully.",
+        "properties": [{ "name": "method", "type": "string" }]
+      },
+      {
+        "name": "checkout_started",
+        "description": "User initiated checkout flow.",
+        "properties": [{ "name": "plan", "type": "string" }]
+      },
+      {
+        "name": "checkout_completed",
+        "description": "User completed payment.",
+        "properties": [
+          { "name": "plan", "type": "string" },
+          { "name": "amount_usd", "type": "number" }
+        ]
+      }
+    ]
+  }
+}

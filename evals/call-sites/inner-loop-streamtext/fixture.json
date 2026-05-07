@@ -1,0 +1,17 @@
+{
+  "id": "inner-loop-streamtext-nextjs-baseline",
+  "callSiteId": "inner-loop-streamtext",
+  "description": "Smoke fixture for the inner-loop streamText call site (post-D-3). Covers a minimal Next.js project with an instrumentation goal. Live golden capture requires WIZARD_OAUTH_TOKEN; the bundled golden.ndjson is a smoke-shape recording, not a full-fidelity inner-loop trace. Re-record once §7.5 wizard-side OAuth wiring lands.",
+  "kind": "streaming",
+  "input": {
+    "framework": "nextjs",
+    "instrumentationGoal": "Instrument page_viewed, sign_up_completed, and checkout_completed in the marketing app under fixtures/working/.",
+    "projectFiles": [
+      "src/app/page.tsx",
+      "src/app/layout.tsx",
+      "src/app/AmplitudeProvider.tsx",
+      "package.json"
+    ],
+    "model": "claude-sonnet-4-7"
+  }
+}

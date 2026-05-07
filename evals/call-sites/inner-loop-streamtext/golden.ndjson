@@ -1,0 +1,8 @@
+{"v":1,"@timestamp":"2026-05-06T11:00:00.000Z","type":"lifecycle","message":"inner_agent_started","data":{"event":"inner_agent_started","model":"claude-sonnet-4-7","phase":"apply"},"data_version":1}
+{"v":1,"@timestamp":"2026-05-06T11:00:01.000Z","type":"lifecycle","message":"file_change_planned","data":{"event":"file_change_planned","path":"src/app/AmplitudeProvider.tsx","action":"create"},"data_version":1}
+{"v":1,"@timestamp":"2026-05-06T11:00:02.000Z","type":"lifecycle","message":"file_change_applied","data":{"event":"file_change_applied","path":"src/app/AmplitudeProvider.tsx","action":"create"},"data_version":1}
+{"v":1,"@timestamp":"2026-05-06T11:00:03.000Z","type":"lifecycle","message":"event_plan_confirmed","data":{"event":"event_plan_confirmed","events":["page_viewed","sign_up_completed","checkout_completed"]},"data_version":1}
+{"v":1,"@timestamp":"2026-05-06T11:00:04.000Z","type":"lifecycle","message":"verification_started","data":{"event":"verification_started"},"data_version":1}
+{"v":1,"@timestamp":"2026-05-06T11:00:05.000Z","type":"lifecycle","message":"verification_result","data":{"event":"verification_result","ok":true},"data_version":1}
+{"v":1,"@timestamp":"2026-05-06T11:00:06.000Z","type":"lifecycle","message":"setup_complete","data":{"event":"setup_complete","outcome":"success"},"data_version":1}
+{"v":1,"@timestamp":"2026-05-06T11:00:07.000Z","type":"result","message":"run_completed","data":{"event":"run_completed","outcome":"success"},"data_version":1}
