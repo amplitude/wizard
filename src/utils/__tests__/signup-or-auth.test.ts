@@ -452,6 +452,42 @@ describe('performSignupOrAuth', () => {
     }
   });
 
+  it('falls back to pending sentinel when fetchAmplitudeUser hangs after direct-signup success', async () => {
+    vi.useFakeTimers();
+    try {
+      const { performDirectSignup } = await import('../direct-signup.js');
+      vi.mocked(performDirectSignup).mockResolvedValue({
+        kind: 'success',
+        tokens: {
+          accessToken: 'direct-access',
+          idToken: 'direct-id',
+          refreshToken: 'direct-refresh',
+          expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+          zone: 'us',
+        },
+      });
+      const { fetchAmplitudeUser } = await import('../../lib/api.js');
+      vi.mocked(fetchAmplitudeUser).mockReturnValue(new Promise(() => {}));
+      const { replaceStoredUser } = await import('../ampli-settings.js');
+
+      const pending = performSignupOrAuth({
+        email: 'ada@example.com',
+        fullName: 'Ada Lovelace',
+        zone: 'us',
+      });
+      await vi.runAllTimersAsync();
+      const result = await pending;
+
+      expect(replaceStoredUser).toHaveBeenCalledWith(
+        expect.objectContaining({ id: 'pending' }),
+        expect.anything(),
+      );
+      expect(result).toMatchObject({ accessToken: 'direct-access' });
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
   it('emits agentic signup attempted with status=user_fetch_failed when fetch retries exhaust', async () => {
     vi.useFakeTimers();
     try {
@@ -489,6 +525,28 @@ describe('performSignupOrAuth', () => {
     } finally {
       vi.useRealTimers();
     }
+  });
+
+  it('does not emit signup_error telemetry when direct signup reports caller abort', async () => {
+    const { performDirectSignup } = await import('../direct-signup.js');
+    vi.mocked(performDirectSignup).mockResolvedValue({
+      kind: 'error',
+      code: 'aborted',
+      message: 'aborted',
+    });
+    const { analytics } = await import('../analytics');
+
+    const result = await performSignupOrAuth({
+      email: 'ada@example.com',
+      fullName: 'Ada Lovelace',
+      zone: 'us',
+    });
+
+    expect(result).toEqual({ kind: 'error', message: 'aborted' });
+    expect(analytics.wizardCapture).not.toHaveBeenCalledWith(
+      AGENTIC_SIGNUP_ATTEMPTED_EVENT,
+      { status: 'signup_error', zone: 'us' },
+    );
   });
 
   it('retries fetchAmplitudeUser when the new account has no env with an API key yet', async () => {

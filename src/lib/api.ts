@@ -163,9 +163,15 @@ export class ApiError extends Error {
  * `projects` at this boundary so the rest of the wizard only sees the
  * user-facing terminology.
  */
+export interface FetchAmplitudeUserOptions {
+  timeoutMs?: number;
+  signal?: AbortSignal;
+}
+
 export async function fetchAmplitudeUser(
   idToken: string,
   zone: AmplitudeZone,
+  options: FetchAmplitudeUserOptions = {},
 ): Promise<AmplitudeUserInfo> {
   const { dataApiUrl } = AMPLITUDE_ZONE_SETTINGS[zone];
   try {
@@ -178,6 +184,8 @@ export async function fetchAmplitudeUser(
           'Content-Type': 'application/json',
           'User-Agent': WIZARD_USER_AGENT,
         },
+        timeout: options.timeoutMs,
+        signal: options.signal,
       },
     );
 

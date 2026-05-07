@@ -118,6 +118,20 @@ function provisioningUrl(zone: AmplitudeZone): string {
   return `${OUTBOUND_URLS.app[zone]}/t/agentic/signup/v1`;
 }
 
+function isCallerAbort(error: unknown, signal?: AbortSignal): boolean {
+  if (signal?.aborted) return true;
+  if (axios.isCancel(error)) return true;
+  if (error instanceof Error) {
+    const maybeCode = (error as Error & { code?: string }).code;
+    return (
+      error.name === 'AbortError' ||
+      error.name === 'CanceledError' ||
+      maybeCode === 'ERR_CANCELED'
+    );
+  }
+  return false;
+}
+
 export interface DirectSignupInput {
   email: string;
   /**
@@ -201,6 +215,9 @@ export async function performDirectSignup(
       signal: input.signal,
     });
   } catch (e) {
+    if (isCallerAbort(e, input.signal)) {
+      return { kind: 'error', message: 'aborted', code: 'aborted' };
+    }
     return {
       kind: 'error',
       message: e instanceof Error ? e.message : String(e),
@@ -303,6 +320,9 @@ export async function performDirectSignup(
       },
     );
   } catch (e) {
+    if (isCallerAbort(e, input.signal)) {
+      return { kind: 'error', message: 'aborted', code: 'aborted' };
+    }
     return {
       kind: 'error',
       message: `Token exchange failed: ${

@@ -394,6 +394,31 @@ describe('performDirectSignup', () => {
     expect(result.kind).toBe('error');
   });
 
+  it('returns aborted when the provisioning POST is cancelled by the caller', async () => {
+    const controller = new AbortController();
+    vi.spyOn(axios, 'post').mockImplementation(async () => {
+      controller.abort();
+      const err = new Error('canceled') as Error & { code?: string };
+      err.code = 'ERR_CANCELED';
+      throw err;
+    });
+
+    try {
+      const result = await performDirectSignup({
+        ...INPUT,
+        signal: controller.signal,
+      });
+
+      expect(result.kind).toBe('error');
+      if (result.kind === 'error') {
+        expect(result.code).toBe('aborted');
+        expect(result.message).toBe('aborted');
+      }
+    } finally {
+      vi.restoreAllMocks();
+    }
+  });
+
   it('routes EU requests to app.eu.amplitude.com', async () => {
     let observedUrl = '';
     server.use(
@@ -424,6 +449,37 @@ describe('performDirectSignup', () => {
     expect(result.kind).toBe('error');
     if (result.kind === 'error') {
       expect(result.message).toContain('Token exchange failed');
+    }
+  });
+
+  it('returns aborted when the token exchange POST is cancelled by the caller', async () => {
+    const controller = new AbortController();
+    vi.spyOn(axios, 'post').mockImplementation(async (url: string) => {
+      if (url.includes('/t/agentic/signup/v1')) {
+        return {
+          status: 200,
+          data: { type: 'oauth', oauth: { code: 'auth-code-xyz' } },
+        };
+      }
+      controller.abort();
+      const err = new Error('canceled') as Error & { code?: string };
+      err.code = 'ERR_CANCELED';
+      throw err;
+    });
+
+    try {
+      const result = await performDirectSignup({
+        ...INPUT,
+        signal: controller.signal,
+      });
+
+      expect(result.kind).toBe('error');
+      if (result.kind === 'error') {
+        expect(result.code).toBe('aborted');
+        expect(result.message).toBe('aborted');
+      }
+    } finally {
+      vi.restoreAllMocks();
     }
   });
 

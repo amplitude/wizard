@@ -43,6 +43,16 @@ interface SigningUpScreenProps {
   store: WizardStore;
 }
 
+function requiredFieldsSatisfied(
+  requiredFields: string[] | null,
+  fullName: string | null,
+): boolean {
+  if (requiredFields === null) return false;
+  return requiredFields.every((field) =>
+    field === 'full_name' ? fullName !== null : false,
+  );
+}
+
 export const SigningUpScreen = ({ store }: SigningUpScreenProps) => {
   useWizardStore(store);
 
@@ -54,7 +64,7 @@ export const SigningUpScreen = ({ store }: SigningUpScreenProps) => {
   // explicitly fixing. Without ToS, send email-only and let the server
   // route us to needs_information so the ToS screen renders next.
   const fullName =
-    session.tosAccepted === true ? (session.signupFullName ?? null) : null;
+    session.tosAccepted === true ? session.signupFullName ?? null : null;
 
   useAsyncEffect(
     async (signal) => {
@@ -87,6 +97,21 @@ export const SigningUpScreen = ({ store }: SigningUpScreenProps) => {
       // error makes the contributor pick a behavior on purpose.
       switch (result.kind) {
         case 'success':
+          if (
+            session.tosAccepted !== true ||
+            !requiredFieldsSatisfied(session.signupRequiredFields, fullName)
+          ) {
+            log.warn(
+              'signup: server returned success before required ceremony inputs were satisfied; abandoning',
+              {
+                hasRequiredFields: session.signupRequiredFields !== null,
+                tosAccepted: session.tosAccepted,
+                hasFullName: fullName !== null,
+              },
+            );
+            store.setSignupAbandoned(true);
+            return;
+          }
           // `setSignupAuth` folds in `signupTokensObtained=true`
           // atomically — the TUI auth-task gate releases on
           // `signupAuth` and reads `signupTokensObtained`; both must
@@ -120,8 +145,9 @@ export const SigningUpScreen = ({ store }: SigningUpScreenProps) => {
           // `full_name` and the server is still asking for it), but
           // the cost of the guard is one branch and the failure mode
           // it prevents has zero in-band recovery.
-          const alreadySatisfied = result.requiredFields.every((field) =>
-            field === 'full_name' ? fullName !== null : false,
+          const alreadySatisfied = requiredFieldsSatisfied(
+            result.requiredFields,
+            fullName,
           );
           if (alreadySatisfied) {
             log.warn(

@@ -9,8 +9,84 @@ import { assertNever } from './assert-never.js';
 
 const log = createLogger('signup-or-auth');
 
-// Retry delays for post-signup provisioning: worst-case total wait ~3.5s.
+// Retry delays for post-signup provisioning. The delay budget is ~3.5s;
+// each Data API call is separately bounded below so a hung user fetch
+// can't strand the TUI auth gate forever after tokens were issued.
 const PROVISIONING_RETRY_DELAYS_MS = [500, 1000, 2000];
+const USER_FETCH_TIMEOUT_MS = 5_000;
+
+class UserFetchTimeoutError extends Error {
+  constructor(timeoutMs: number) {
+    super(`fetchAmplitudeUser timed out after ${timeoutMs}ms`);
+    this.name = 'TimeoutError';
+  }
+}
+
+function abortError(): Error {
+  const err = new Error('aborted');
+  err.name = 'AbortError';
+  return err;
+}
+
+function isTimeoutOrAbort(error: unknown): boolean {
+  return (
+    error instanceof UserFetchTimeoutError ||
+    (error instanceof Error &&
+      (error.name === 'AbortError' || error.name === 'CanceledError'))
+  );
+}
+
+async function abortableDelay(
+  delayMs: number,
+  signal?: AbortSignal,
+): Promise<void> {
+  if (signal?.aborted) throw abortError();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let onAbort: (() => void) | undefined;
+  try {
+    await new Promise<void>((resolve, reject) => {
+      timer = setTimeout(resolve, delayMs);
+      if (signal) {
+        onAbort = () => reject(abortError());
+        signal.addEventListener('abort', onAbort, { once: true });
+      }
+    });
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+    if (signal && onAbort) signal.removeEventListener('abort', onAbort);
+  }
+}
+
+async function fetchAmplitudeUserBounded(
+  idToken: string,
+  zone: AmplitudeZone,
+  signal?: AbortSignal,
+): Promise<AmplitudeUserInfo> {
+  if (signal?.aborted) throw abortError();
+  let timer: ReturnType<typeof setTimeout> | undefined;
+  let onAbort: (() => void) | undefined;
+  try {
+    return await Promise.race([
+      fetchAmplitudeUser(idToken, zone, {
+        timeoutMs: USER_FETCH_TIMEOUT_MS,
+        signal,
+      }),
+      new Promise<never>((_, reject) => {
+        timer = setTimeout(
+          () => reject(new UserFetchTimeoutError(USER_FETCH_TIMEOUT_MS)),
+          USER_FETCH_TIMEOUT_MS,
+        );
+        if (signal) {
+          onAbort = () => reject(abortError());
+          signal.addEventListener('abort', onAbort, { once: true });
+        }
+      }),
+    ]);
+  } finally {
+    if (timer !== undefined) clearTimeout(timer);
+    if (signal && onAbort) signal.removeEventListener('abort', onAbort);
+  }
+}
 
 function hasEnvWithApiKey(userInfo: AmplitudeUserInfo): boolean {
   return userInfo.orgs.some((org) =>
@@ -44,14 +120,18 @@ type FetchUserResult =
 async function fetchUserWithProvisioningRetry(
   idToken: string,
   zone: AmplitudeZone,
+  signal?: AbortSignal,
 ): Promise<FetchUserResult> {
   let userInfo: AmplitudeUserInfo | null = null;
   let lastError: unknown = null;
   let retryCount = 0;
   try {
-    userInfo = await fetchAmplitudeUser(idToken, zone);
+    userInfo = await fetchAmplitudeUserBounded(idToken, zone, signal);
   } catch (err) {
     lastError = err;
+    if (isTimeoutOrAbort(err)) {
+      return { ok: false, retryCount, error: lastError };
+    }
   }
   for (const delayMs of PROVISIONING_RETRY_DELAYS_MS) {
     if (userInfo && hasEnvWithApiKey(userInfo)) {
@@ -61,16 +141,23 @@ async function fetchUserWithProvisioningRetry(
       delayMs,
       threw: lastError !== null,
     });
-    await new Promise<void>((resolve) => setTimeout(resolve, delayMs));
+    try {
+      await abortableDelay(delayMs, signal);
+    } catch (err) {
+      return { ok: false, retryCount, error: err };
+    }
     retryCount += 1;
     try {
-      userInfo = await fetchAmplitudeUser(idToken, zone);
+      userInfo = await fetchAmplitudeUserBounded(idToken, zone, signal);
       lastError = null;
     } catch (err) {
       // Keep any prior successful userInfo — losing it here would make us
       // fall back to the pending sentinel when we already have real user
       // data from an earlier attempt that just didn't yet have an env.
       lastError = err;
+      if (isTimeoutOrAbort(err)) {
+        return { ok: false, retryCount, error: lastError };
+      }
     }
   }
   if (userInfo) {
@@ -257,6 +344,9 @@ export async function performSignupOrAuth(
         message: result.message,
         code: result.code,
       });
+      if (result.code === 'aborted') {
+        return { kind: 'error', message: result.message };
+      }
       // The schema's `.refine()` on `required` rejects shapes the wizard
       // can't act on, and `direct-signup.ts` surfaces that with
       // `code: 'unsupported_required_shape'`. Emit a distinct telemetry
@@ -294,6 +384,7 @@ export async function performSignupOrAuth(
   const fetchResult = await fetchUserWithProvisioningRetry(
     tokens.idToken,
     input.zone,
+    input.signal,
   );
   if (fetchResult.ok) {
     userInfo = fetchResult.userInfo;
