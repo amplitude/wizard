@@ -78,6 +78,16 @@ function printUsage() {
   );
 }
 
+// `streamText` exposes several lazy promises (`text`, `finishReason`,
+// `usage`). When a stream rejects (e.g. retry-exhausted 429) and the
+// caller only awaits `textStream`, the others become unhandled
+// rejections that kill Node before we can write the results file.
+// Log them so a flake doesn't lose a multi-minute harness run.
+process.on('unhandledRejection', (reason) => {
+  const msg = reason instanceof Error ? reason.message : String(reason);
+  console.error(`# unhandled rejection (suppressed): ${msg.slice(0, 240)}`);
+});
+
 async function main() {
   const args = parseArgs(process.argv);
   const fixturePath = pathResolve(
@@ -138,6 +148,7 @@ async function main() {
     }),
   );
 
+  let firstCall = true;
   for (const prompt of fixture.prompts) {
     for (const modelRole of ['haiku', 'sonnet']) {
       for (let attempt = 1; attempt <= args.runs; attempt += 1) {
@@ -163,6 +174,22 @@ async function main() {
           `  ${prompt.id} :: ${modelRole} #${attempt} :: ${status} ` +
             `(ttft=${fmtMs(row.ttftMs)} total=${fmtMs(row.totalMs)})`,
         );
+        // Fail-loud smoke check: if the very first call 404s, the
+        // gateway baseURL is almost certainly wrong (the AI SDK
+        // appends `/messages`, the gateway expects `/v1/messages`).
+        // Bailing on the first row keeps a misconfigured run from
+        // burning through every prompt × model × attempt before the
+        // operator notices.
+        if (firstCall && row.error && /404|Not Found/i.test(row.error)) {
+          throw new Error(
+            `First harness call returned 404. The Vercel AI SDK posts to ` +
+              `\`\${baseURL}/messages\`; the Amplitude gateway expects ` +
+              `\`/v1/messages\`. Resolved baseURL was ` +
+              `${authForRunner.baseURL ?? '(none)'}. ` +
+              `Original error: ${row.error}`,
+          );
+        }
+        firstCall = false;
       }
     }
   }

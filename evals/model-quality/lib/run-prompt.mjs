@@ -137,24 +137,57 @@ function stringifyError(err) {
  * direct API key fallback (`ANTHROPIC_API_KEY`).
  *
  * Returns `null` if neither path is configured.
+ *
+ * Gateway baseURL contract: the Amplitude wizard gateway listens on
+ * `/wizard/v1/messages` (mirrors Anthropic's `/v1/messages` route).
+ * The Claude Agent SDK appends `/v1/messages` to its `ANTHROPIC_BASE_URL`,
+ * so the wizard sets that env to `https://core.amplitude.com/wizard`
+ * (no `/v1`). The Vercel AI SDK's `@ai-sdk/anthropic` provider is
+ * different — it appends only `/messages` to the configured `baseURL`
+ * (see `node_modules/@ai-sdk/anthropic/dist/index.mjs` —
+ * `${this.config.baseURL}/messages`). So passing the bare gateway URL
+ * to `createAnthropic` produces `…/wizard/messages`, which the gateway
+ * answers with a 404 nginx page.
+ *
+ * Fix: append `/v1` here when we're on the gateway path so the AI SDK's
+ * `${baseURL}/messages` resolves to `…/wizard/v1/messages`. Idempotent —
+ * if the operator already supplied a URL ending in `/v1` via
+ * `ANTHROPIC_BASE_URL` or `WIZARD_LLM_PROXY_URL`, leave it alone.
  */
 export function resolveHarnessAuth() {
   const oauthToken = process.env.WIZARD_OAUTH_TOKEN?.trim();
   if (oauthToken) {
-    const baseURL =
+    const rawBase =
       process.env.ANTHROPIC_BASE_URL?.trim() ||
       process.env.WIZARD_LLM_PROXY_URL?.trim() ||
       'https://core.amplitude.com/wizard';
-    return { kind: 'oauth', baseURL, authToken: oauthToken };
+    return {
+      kind: 'oauth',
+      baseURL: ensureV1Suffix(rawBase),
+      authToken: oauthToken,
+    };
   }
   const apiKey = process.env.ANTHROPIC_API_KEY?.trim();
   if (apiKey) {
     const baseURL = process.env.ANTHROPIC_BASE_URL?.trim();
     return baseURL
-      ? { kind: 'api-key', baseURL, apiKey }
+      ? { kind: 'api-key', baseURL: ensureV1Suffix(baseURL), apiKey }
       : { kind: 'api-key', apiKey };
   }
   return null;
+}
+
+/**
+ * Append `/v1` to a gateway / proxy URL when it isn't already there so
+ * `@ai-sdk/anthropic` resolves `${baseURL}/messages` to
+ * `…/v1/messages`. Idempotent. Trims trailing slashes so we don't end
+ * up with `…//v1`.
+ */
+export function ensureV1Suffix(rawBase) {
+  if (!rawBase || typeof rawBase !== 'string') return rawBase;
+  const trimmed = rawBase.replace(/\/+$/, '');
+  if (/\/v\d+$/.test(trimmed)) return trimmed;
+  return `${trimmed}/v1`;
 }
 
 /**

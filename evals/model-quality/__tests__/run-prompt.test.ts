@@ -13,7 +13,12 @@
 import { describe, it, expect } from 'vitest';
 
 // @ts-expect-error — .mjs import path; vitest resolves via Node ESM loader.
-import { runPrompt, authToRunnerShape } from '../lib/run-prompt.mjs';
+import {
+  runPrompt,
+  authToRunnerShape,
+  ensureV1Suffix,
+  resolveHarnessAuth,
+} from '../lib/run-prompt.mjs';
 // @ts-expect-error — .mjs import path; vitest resolves via Node ESM loader.
 import { MODEL_ALIASES } from '../lib/scorers.mjs';
 
@@ -180,6 +185,90 @@ describe('runPrompt', () => {
     expect(authToRunnerShape(null)).toEqual({});
     expect(authToRunnerShape(undefined)).toEqual({});
     expect(authToRunnerShape({ kind: 'mystery' })).toEqual({});
+  });
+
+  describe('ensureV1Suffix', () => {
+    it('appends /v1 when missing', () => {
+      expect(ensureV1Suffix('https://core.amplitude.com/wizard')).toBe(
+        'https://core.amplitude.com/wizard/v1',
+      );
+    });
+
+    it('strips trailing slash before appending', () => {
+      expect(ensureV1Suffix('https://core.amplitude.com/wizard/')).toBe(
+        'https://core.amplitude.com/wizard/v1',
+      );
+    });
+
+    it('is idempotent when /v1 already present', () => {
+      expect(ensureV1Suffix('https://core.amplitude.com/wizard/v1')).toBe(
+        'https://core.amplitude.com/wizard/v1',
+      );
+    });
+
+    it('leaves any /vN suffix alone (no double-suffixing)', () => {
+      expect(ensureV1Suffix('https://api.anthropic.com/v2')).toBe(
+        'https://api.anthropic.com/v2',
+      );
+    });
+
+    it('passes through falsy values unchanged', () => {
+      expect(ensureV1Suffix('')).toBe('');
+      expect(ensureV1Suffix(undefined as unknown as string)).toBeUndefined();
+    });
+  });
+
+  describe('resolveHarnessAuth gateway baseURL', () => {
+    const ENV_KEYS = [
+      'WIZARD_OAUTH_TOKEN',
+      'ANTHROPIC_BASE_URL',
+      'WIZARD_LLM_PROXY_URL',
+      'ANTHROPIC_API_KEY',
+    ];
+    const saved: Record<string, string | undefined> = {};
+
+    function snapshotEnv() {
+      for (const k of ENV_KEYS) saved[k] = process.env[k];
+    }
+    function restoreEnv() {
+      for (const k of ENV_KEYS) {
+        if (saved[k] === undefined) delete process.env[k];
+        else process.env[k] = saved[k];
+      }
+    }
+
+    it('appends /v1 to default gateway URL on OAuth path', () => {
+      snapshotEnv();
+      try {
+        for (const k of ENV_KEYS) delete process.env[k];
+        process.env.WIZARD_OAUTH_TOKEN = 'tok';
+        const auth = resolveHarnessAuth();
+        expect(auth).toEqual({
+          kind: 'oauth',
+          baseURL: 'https://core.amplitude.com/wizard/v1',
+          authToken: 'tok',
+        });
+      } finally {
+        restoreEnv();
+      }
+    });
+
+    it('respects an operator-supplied /v1 URL without double-suffixing', () => {
+      snapshotEnv();
+      try {
+        for (const k of ENV_KEYS) delete process.env[k];
+        process.env.WIZARD_OAUTH_TOKEN = 'tok';
+        process.env.ANTHROPIC_BASE_URL = 'https://my-proxy.example/wizard/v1';
+        const auth = resolveHarnessAuth();
+        expect(auth).toEqual({
+          kind: 'oauth',
+          baseURL: 'https://my-proxy.example/wizard/v1',
+          authToken: 'tok',
+        });
+      } finally {
+        restoreEnv();
+      }
+    });
   });
 
   it('forwards system + maxOutputTokens when provided', async () => {
