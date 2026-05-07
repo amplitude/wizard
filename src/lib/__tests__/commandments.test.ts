@@ -247,7 +247,8 @@ describe('browser-only commandment gating', () => {
  * `discover-analytics-patterns` skill before `confirm_event_plan`, so
  * existing wrappers / hooks / typed-Ampli calls went unnoticed. The
  * commandment below pins the requirement, and the skill is now
- * pre-staged via `preStageSkills` so the Skill tool can load it by id.
+ * pre-staged via `preStageSkills` so `mcp__wizard-tools__load_skill` can
+ * load it by id.
  *
  * If this rule disappears (or moves out of the pre-confirm-event-plan
  * phase) the failure mode the customer hit comes back, so lock both
@@ -258,7 +259,7 @@ describe('discover-analytics-patterns commandment', () => {
 
   it('mandates loading discover-analytics-patterns before the event plan', () => {
     // Skill name is the durable sentinel — the agent matches on it
-    // exactly when calling the Skill tool.
+    // exactly when calling `mcp__wizard-tools__load_skill`.
     expect(text).toContain('discover-analytics-patterns');
     // The "BEFORE confirm_event_plan" ordering is what makes the rule
     // matter — pattern discovery has to happen before the plan is
