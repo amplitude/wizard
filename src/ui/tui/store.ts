@@ -652,19 +652,14 @@ export class WizardStore {
   }
 
   /**
-   * Wipe every piece of ceremony state at once. Used by both
-   * `setSignupEmail(null)` and `backToWelcome` so the reset semantics
-   * stay in one place. Treats the ceremony as a single conceptual unit
-   * keyed to email being present — backing out past the email step
-   * invalidates everything it produced.
-   *
-   * Intentionally does NOT touch `signupEmail` itself — callers are
-   * already setting it to null around this call (or, in
-   * `backToWelcome`, doing so via raw setKey for batched-write
-   * reasons). Splitting the email write from the ceremony reset keeps
-   * this helper composable.
+   * Wipe every piece of ceremony state at once. Used by `setSignupEmail(null)`,
+   * `switchToLogin`, `backToWelcome`, and `setRegionForced` so the reset
+   * semantics stay in one place. Treats the ceremony as a single conceptual
+   * unit keyed to email — backing out past the email step invalidates
+   * everything it produced.
    */
   private _resetCeremonyKeys(): void {
+    this.$session.setKey('signupEmail', null);
     this.$session.setKey('signupRequiredFields', null);
     this.$session.setKey('signupAuth', null);
     this.$session.setKey('signupAbandoned', false);
@@ -690,16 +685,17 @@ export class WizardStore {
   }
 
   setSignupEmail(email: string | null): void {
-    this.$session.setKey('signupEmail', email);
-    // Clearing the email means the user backed out of (or rewound past)
-    // the signup ceremony — invalidate every piece of ceremony state
-    // that was keyed to the previous email. Without this, a subsequent
-    // forward pass consumes a stale `signupRequiredFields` from the
-    // prior probe POST and routes the user back through ToS/name
-    // collection with the wrong response cached.
     if (email === null) {
+      // Clearing the email means the user backed out of (or rewound
+      // past) the signup ceremony — invalidate every piece of
+      // ceremony state that was keyed to the previous email
+      // (including `signupEmail` itself). Without this, a subsequent
+      // forward pass consumes a stale `signupRequiredFields` from the
+      // prior probe POST and routes the user back through ToS/name
+      // collection with the wrong response cached.
       this._resetCeremonyKeys();
     } else {
+      this.$session.setKey('signupEmail', email);
       // Only fire on positive captures. Back-nav reverts call this
       // setter with `null` and must not pollute the funnel with false
       // "captured" events — caught by Cursor Bugbot on PR #539.
@@ -768,10 +764,9 @@ export class WizardStore {
 
   switchToLogin(): void {
     this.$session.setKey('authOnboardingPath', AuthOnboardingPath.SignIn);
-    this.$session.setKey('signupEmail', null);
-    // Funnel the rest of the ceremony cleanup through the shared helper
-    // so any future ceremony field added to `_resetCeremonyKeys` gets
-    // cleared on the signup→login switch automatically. The inline
+    // Funnel the ceremony cleanup through the shared helper so any
+    // future ceremony field added to `_resetCeremonyKeys` gets cleared
+    // on the signup→login switch automatically. The inline
     // `signupFullName = null` we used to do here was already a subset
     // of the helper's reset; the previous shape would silently drift
     // (leaving e.g. `signupRequiredFields` or `signupTokensObtained`
@@ -908,13 +903,14 @@ export class WizardStore {
     this.$session.setKey('region', null);
 
     if (isCreateAccountOnboarding(this.session)) {
-      // Wipe ceremony state via the shared helper (signupRequiredFields
-      // + signupAuth + signupAbandoned + signupFullName + tosAccepted)
-      // — same writes `setSignupEmail(null)` does, so back-to-Welcome
-      // and Esc-back-from-screens stay in sync without a "keep these
-      // matched" comment.
+      // Wipe ceremony state via the shared helper — same writes
+      // `setSignupEmail(null)` does, so back-to-Welcome and
+      // Esc-back-from-screens stay in sync without a "keep these
+      // matched" comment. The non-ceremony writes below (magic link,
+      // pending OAuth intermediates, pendingOrgs) live alongside the
+      // create-account flow but aren't part of the ceremony state
+      // machine, so they're cleared inline.
       this._resetCeremonyKeys();
-      this.$session.setKey('signupEmail', null);
       this.$session.setKey('signupMagicLinkUrl', null);
       this.$session.setKey('pendingAuthAccessToken', null);
       this.$session.setKey('pendingAuthIdToken', null);
