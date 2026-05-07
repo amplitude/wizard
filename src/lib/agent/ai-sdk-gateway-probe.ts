@@ -15,7 +15,7 @@
  * gate short-circuits well before any AI SDK code is touched.
  */
 import { logToFile } from '../../utils/debug.js';
-import { resolveWizardAnthropicAuthFromEnv } from './wizard-ai-sdk-anthropic.js';
+import { resolveAnthropicAuth } from './anthropic-auth.js';
 
 export type AiSdkGatewayProbeResult =
   | { status: 'skipped'; reason: string }
@@ -44,7 +44,7 @@ export async function maybeRunAiSdkGatewayProbe(args: {
   }
 
   const baseURL = process.env.ANTHROPIC_BASE_URL?.trim();
-  const auth = resolveWizardAnthropicAuthFromEnv();
+  const auth = resolveAnthropicAuth();
   if (!baseURL && !auth.apiKey) {
     return {
       status: 'skipped',

@@ -20,7 +20,6 @@ import {
 import { safeParseSDKMessage } from './middleware/schemas.js';
 import { resolveWizardAllowedToolNames } from './wizard-tools.js';
 import { getConsoleQueryStack } from './agent/console-query-stack.js';
-import { createWizardAiSdkAnthropic } from './agent/wizard-ai-sdk-anthropic.js';
 import { getAgentDriver } from './agent-driver.js';
 import { parseAnthropicCustomHeaderBlock } from '../utils/custom-headers.js';
 
@@ -171,7 +170,14 @@ async function queryConsoleWithVercelAiSdk(
   systemAndHistory: string,
   agentConfig: AgentRunConfig,
 ): Promise<string> {
-  const { streamText } = await import('ai');
+  // Dynamic imports keep `ai` and `@ai-sdk/anthropic` (transitively pulled by
+  // `wizard-ai-sdk-anthropic.ts`) out of every wizard run. They only load when
+  // AMPLITUDE_WIZARD_AI_SDK_CONSOLE actually routes a console query through
+  // this path.
+  const [{ streamText }, { createWizardAiSdkAnthropic }] = await Promise.all([
+    import('ai'),
+    import('./agent/wizard-ai-sdk-anthropic.js'),
+  ]);
 
   const customHeaders = buildAgentEnv(
     agentConfig.wizardMetadata ?? {},
