@@ -80,33 +80,3 @@ export const OutroKind = {
   Cancel: 'cancel',
 } as const;
 export type OutroKind = (typeof OutroKind)[keyof typeof OutroKind];
-
-/**
- * Long-running stalls the wizard surfaces in the TUI's "current activity"
- * line. Each kind corresponds to a specific source of silent dead-time the
- * user would otherwise read as "stuck":
- *
- * - `compaction`        — SDK collapsing conversation history (30-90s).
- * - `rate-limit-retry`  — outer retry loop sleeping before re-issuing a 429
- *                         / transient gateway error.
- * - `cold-start`        — pre-first-message setup: skill staging, framework
- *                         detection, agent SDK initialization.
- * - `ingestion-poll`    — polling Amplitude for first events (post-#510
- *                         backoff, ~5-30s per cycle).
- * - `mcp-tool`          — long-running Amplitude MCP call from inside the
- *                         agent (e.g. `query_dataset` on a large project).
- * - `idle`              — no active stall; render falls back to its default
- *                         (status messages / journey stepper).
- *
- * Sentinel values intentionally use kebab-case so the same string flows
- * through the AgentUI NDJSON contract verbatim.
- */
-export const ActivityKind = {
-  Idle: 'idle',
-  Compaction: 'compaction',
-  RateLimitRetry: 'rate-limit-retry',
-  ColdStart: 'cold-start',
-  IngestionPoll: 'ingestion-poll',
-  McpTool: 'mcp-tool',
-} as const;
-export type ActivityKind = (typeof ActivityKind)[keyof typeof ActivityKind];

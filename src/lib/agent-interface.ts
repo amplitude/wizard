@@ -1621,6 +1621,11 @@ export async function runAgentLocally(
  */
 const bannerStormAnchor = createStormAnchor();
 
+// Tracks whether publishRetryBanner has set a rate-limit-retry activity that we
+// own. clearRetryBanner only clears the activity line if we set it, so it
+// can't silently wipe an unrelated activity (e.g. mcp-tool, compaction).
+let retryBannerOwnsActivity = false;
+
 /**
  * Publish a retry banner to the UI. Used from the post-stream and catch-path
  * retry sites — the middleware-based path handles live `api_retry` messages.
@@ -1677,6 +1682,7 @@ function publishRetryBanner(input: {
       startedAt: Date.now(),
       estimatedDurationSec: waitSec ?? undefined,
     });
+    retryBannerOwnsActivity = true;
   } catch {
     // UI may not be initialised during some test paths.
   }
@@ -1691,11 +1697,15 @@ function clearRetryBanner(): void {
   }
   // Pair with publishRetryBanner — clearing the banner without clearing the
   // activity line would leave a stale "Waiting Ns before retry…" sub-line
-  // until the next progress message landed.
-  try {
-    getUI().setCurrentActivity(null);
-  } catch {
-    // UI may not be initialised during some test paths.
+  // until the next progress message landed. Only clear if we set it; otherwise
+  // we'd silently wipe an unrelated activity (mcp-tool, compaction, etc.).
+  if (retryBannerOwnsActivity) {
+    retryBannerOwnsActivity = false;
+    try {
+      getUI().setCurrentActivity(null);
+    } catch {
+      // UI may not be initialised during some test paths.
+    }
   }
 }
 
