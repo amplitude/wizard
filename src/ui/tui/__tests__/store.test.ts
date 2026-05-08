@@ -705,7 +705,12 @@ describe('WizardStore', () => {
       store.session.signupEmail = 'ada@example.com';
       store.session.signupFullName = 'Ada Lovelace';
       store.session.tosAccepted = true;
-      store.session.signupRequiredFields = ['full_name'];
+      store.session.signupRequiredFields = ['full_name', 'terms_acceptance'];
+      store.session.legalDocumentBundle = {
+        terms_of_service: 'https://amplitude.com/terms',
+        privacy_policy: 'https://amplitude.com/privacy',
+      };
+      store.session.legalDocumentSource = 'local';
       store.session.signupAbandoned = false;
       store.session.signupTokensObtained = true;
       store.session.signupAuth = {
@@ -723,6 +728,11 @@ describe('WizardStore', () => {
       expect(store.session.signupFullName).toBeNull();
       expect(store.session.tosAccepted).toBeNull();
       expect(store.session.signupRequiredFields).toBeNull();
+      // Lock-step with tosAccepted: legal-doc state must reset together so
+      // a stale bundle can't ride into a follow-up POST whose acceptance
+      // got cleared.
+      expect(store.session.legalDocumentBundle).toBeNull();
+      expect(store.session.legalDocumentSource).toBeNull();
       expect(store.session.signupAuth).toBeNull();
       expect(store.session.signupAbandoned).toBe(false);
       expect(store.session.signupTokensObtained).toBe(false);
@@ -2148,7 +2158,12 @@ describe('WizardStore', () => {
       store.session.signupEmail = 'ada@example.com';
       store.session.signupFullName = 'Ada Lovelace';
       store.session.tosAccepted = true;
-      store.session.signupRequiredFields = ['full_name'];
+      store.session.signupRequiredFields = ['full_name', 'terms_acceptance'];
+      store.session.legalDocumentBundle = {
+        terms_of_service: 'https://amplitude.com/terms',
+        privacy_policy: 'https://amplitude.com/privacy',
+      };
+      store.session.legalDocumentSource = 'local';
       store.session.signupAbandoned = false;
       store.session.signupTokensObtained = true;
       store.session.signupAuth = {
@@ -2166,6 +2181,9 @@ describe('WizardStore', () => {
       expect(store.session.signupFullName).toBeNull();
       expect(store.session.tosAccepted).toBeNull();
       expect(store.session.signupRequiredFields).toBeNull();
+      // Lock-step with tosAccepted — same invariant as in setRegionForced.
+      expect(store.session.legalDocumentBundle).toBeNull();
+      expect(store.session.legalDocumentSource).toBeNull();
       expect(store.session.signupAuth).toBeNull();
       expect(store.session.signupAbandoned).toBe(false);
       expect(store.session.signupTokensObtained).toBe(false);
@@ -2278,10 +2296,18 @@ describe('WizardStore', () => {
       const internal = store as unknown as {
         $session: { setKey: (k: string, v: unknown) => void };
       };
-      internal.$session.setKey('signupRequiredFields', ['full_name']);
+      internal.$session.setKey('signupRequiredFields', [
+        'full_name',
+        'terms_acceptance',
+      ]);
       internal.$session.setKey('signupAbandoned', false);
       internal.$session.setKey('signupFullName', 'Ada Lovelace');
       internal.$session.setKey('tosAccepted', true);
+      internal.$session.setKey('legalDocumentBundle', {
+        terms_of_service: 'https://amplitude.com/terms',
+        privacy_policy: 'https://amplitude.com/privacy',
+      });
+      internal.$session.setKey('legalDocumentSource', 'local');
       internal.$session.setKey('signupTokensObtained', true);
       internal.$session.setKey('signupAuth', {
         idToken: 'i',
@@ -2299,11 +2325,64 @@ describe('WizardStore', () => {
       expect(store.session.signupAbandoned).toBe(false);
       expect(store.session.signupFullName).toBeNull();
       expect(store.session.tosAccepted).toBeNull();
+      // Lock-step with tosAccepted: legal-doc state is tied to the same
+      // probe response, so it must reset alongside acceptance to prevent
+      // a stale bundle from riding into a follow-up POST whose acceptance
+      // got cleared.
+      expect(store.session.legalDocumentBundle).toBeNull();
+      expect(store.session.legalDocumentSource).toBeNull();
       // signupTokensObtained gates the post-TUI auth task's "hydrate
       // from disk" branch — leaving it true after a ceremony reset
       // would silently re-use the prior user's tokens on the next
       // forward pass.
       expect(store.session.signupTokensObtained).toBe(false);
+    });
+
+    it('resetToS clears tosAccepted AND legalDocument{Bundle,Source} lock-step', () => {
+      // The user backs out of the ToS screen post-acceptance. resetToS
+      // must clear the acceptance flag AND the URL bundle that informed
+      // it. Asymmetric reset would let a stale bundle ride into a
+      // follow-up POST after a re-accept on possibly-rotated URLs.
+      const store = createStore();
+      const internal = store as unknown as {
+        $session: { setKey: (k: string, v: unknown) => void };
+      };
+      internal.$session.setKey('tosAccepted', true);
+      internal.$session.setKey('legalDocumentBundle', {
+        terms_of_service: 'https://amplitude.com/terms',
+        privacy_policy: 'https://amplitude.com/privacy',
+      });
+      internal.$session.setKey('legalDocumentSource', 'local');
+
+      store.resetToS();
+
+      expect(store.session.tosAccepted).toBeNull();
+      expect(store.session.legalDocumentBundle).toBeNull();
+      expect(store.session.legalDocumentSource).toBeNull();
+    });
+
+    it('acceptTermsOfService leaves legalDocumentBundle intact', () => {
+      // Forward direction is acceptance, not URL re-supply: the URLs
+      // should already have been written by signup-or-auth on the prior
+      // probe response. acceptTermsOfService just flips the flag.
+      const store = createStore();
+      const internal = store as unknown as {
+        $session: { setKey: (k: string, v: unknown) => void };
+      };
+      internal.$session.setKey('legalDocumentBundle', {
+        terms_of_service: 'https://amplitude.com/terms',
+        privacy_policy: 'https://amplitude.com/privacy',
+      });
+      internal.$session.setKey('legalDocumentSource', 'local');
+
+      store.acceptTermsOfService();
+
+      expect(store.session.tosAccepted).toBe(true);
+      expect(store.session.legalDocumentBundle).toEqual({
+        terms_of_service: 'https://amplitude.com/terms',
+        privacy_policy: 'https://amplitude.com/privacy',
+      });
+      expect(store.session.legalDocumentSource).toBe('local');
     });
 
     it('setSignupFullName with a string fires analytics and sets the value', () => {

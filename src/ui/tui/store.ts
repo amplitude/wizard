@@ -706,6 +706,12 @@ export class WizardStore {
     // semantics on the next forward pass).
     this.$session.setKey('signupFullName', null);
     this.$session.setKey('tosAccepted', null);
+    // `legalDocumentBundle` and `legalDocumentSource` are tied to the
+    // same probe response as `tosAccepted` — reset together so a stale
+    // bundle can't ride into a follow-up POST whose acceptance got
+    // cleared, or into a re-probe that should see fresh URLs from BE.
+    this.$session.setKey('legalDocumentBundle', null);
+    this.$session.setKey('legalDocumentSource', null);
     // `signupTokensObtained` gates whether the post-TUI auth task
     // hydrates from disk vs. opens browser OAuth. If we leave a stale
     // `true` after a ceremony reset, the next forward pass would
@@ -760,12 +766,28 @@ export class WizardStore {
 
   resetToS(): void {
     this.$session.setKey('tosAccepted', null);
+    // Reset alongside `tosAccepted` — same invariant rationale as in
+    // `_resetCeremonyKeys`. Keeping them lock-step prevents a stale
+    // bundle from riding into a follow-up POST whose acceptance got
+    // cleared by back-nav.
+    this.$session.setKey('legalDocumentBundle', null);
+    this.$session.setKey('legalDocumentSource', null);
     analytics.wizardCapture('back navigation', { to: 'tos' });
     this.emitChange();
   }
 
-  setSignupRequiredFields(fields: string[] | null): void {
+  setSignupRequiredFields(fields: WizardSession['signupRequiredFields']): void {
     this.$session.setKey('signupRequiredFields', fields);
+    this.emitChange();
+  }
+
+  setLegalDocumentBundle(bundle: WizardSession['legalDocumentBundle']): void {
+    this.$session.setKey('legalDocumentBundle', bundle);
+    this.emitChange();
+  }
+
+  setLegalDocumentSource(source: WizardSession['legalDocumentSource']): void {
+    this.$session.setKey('legalDocumentSource', source);
     this.emitChange();
   }
 

@@ -1,5 +1,5 @@
 import type { AmplitudeAuthResult } from './oauth.js';
-import { performDirectSignup } from './direct-signup.js';
+import { performDirectSignup, type RequiredKey } from './direct-signup.js';
 import { replaceStoredUser, type StoredUser } from './ampli-settings.js';
 import { fetchAmplitudeUser, type AmplitudeUserInfo } from '../lib/api.js';
 import { createLogger } from '../lib/observability/logger.js';
@@ -176,7 +176,7 @@ export type PerformSignupOrAuthResult =
        */
       dashboardUrl: string | null;
     })
-  | { kind: 'needs_information'; requiredFields: string[] }
+  | { kind: 'needs_information'; requiredFields: RequiredKey[] }
   | { kind: 'redirect' }
   | { kind: 'error'; message: string };
 
