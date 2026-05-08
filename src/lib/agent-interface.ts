@@ -3866,6 +3866,18 @@ export async function runAgent(
     eventPlanHandle?.dispose();
     dashboardHandle?.dispose();
     clearRetryBanner();
+    // Belt-and-braces: every activity setter inside the run has a paired
+    // clear (cold-start clears on first message; mcp-tool clears on
+    // PostToolUse; rate-limit-retry clears via clearRetryBanner above).
+    // But aborted / crashed runs can exit the loop with one of those still
+    // active — leaving the ActivityLine spinning forever after the
+    // OutroScreen has rendered. Force-clear here so the post-run UI is
+    // guaranteed clean regardless of which path we exit on.
+    try {
+      getUI().setCurrentActivity(null);
+    } catch {
+      // UI may not be initialised in some test paths.
+    }
     _activeStatusReporter = undefined;
 
     // Consolidated run-summary event. One row per agent run carrying the
