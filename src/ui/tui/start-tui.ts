@@ -98,8 +98,20 @@ export function startTUI(
   // that fought Ink's internal raw-mode reader on some terminals and
   // dropped the keypress entirely. useInput is the supported Ink API
   // and delivers Ctrl+C reliably as `key.ctrl && input === 'c'`.
+  // patchConsole: false — Ink defaults patchConsole to true, which
+  // intercepts ANY console.log / console.error / console.warn
+  // (including from third-party deps: Anthropic SDK, Claude Agent SDK,
+  // react-reconciler dev warnings, fetch polyfills, OAuth lib, dotenv)
+  // and calls log-update.clear() → writes the message → restoreLastOutput().
+  // If the restored frame matches log-update's cached "last output",
+  // log-update silently skips subsequent writes until the terminal is
+  // resized — which is the bug users hit where post-Run screen
+  // transitions only render after a manual resize. The wizard already
+  // routes all diagnostics to the structured log file via createLogger /
+  // logToFile, so we don't need Ink's console patch.
   const { unmount: inkUnmount } = render(createElement(App, { store }), {
     exitOnCtrlC: false,
+    patchConsole: false,
   });
 
   // Reset terminal colors on exit. process.on('exit') doesn't fire on
