@@ -52,9 +52,13 @@ function validExitCodesForOutcome(outcome: string): number[] {
 export const scorer: Scorer = {
   id: 'L1-exit-code-matches-outcome',
   layer: 1,
-  criterion: 19,
+  // 0 — this is a runner contract assertion (assertion 4), not a row
+  // in the 19-point quality checklist. Criterion 19 is the
+  // setup-report scorer (`setup-complete-shape.ts`); reusing 19 here
+  // collided with that and mislabeled the report.
+  criterion: 0,
   description:
-    'Process exit code must be consistent with run_completed.outcome.',
+    'Process exit code must be consistent with run_completed.outcome (contract assertion 4).',
   evaluate(artifact: Artifact, _scenario: Scenario) {
     const rc = findRunCompleted(artifact);
     if (!rc) {

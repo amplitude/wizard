@@ -76,4 +76,20 @@ describe('parseScenario', () => {
   it('rejects a wrong-typed ring', () => {
     expect(() => parseScenario({ ...VALID_BASE, ring: 4 })).toThrow();
   });
+
+  it('defaults useDetection to true (passes --integration to the wizard)', () => {
+    const s = parseScenario(VALID_BASE);
+    expect(s.useDetection).toBe(true);
+  });
+
+  it('accepts an explicit useDetection override', () => {
+    const s = parseScenario({ ...VALID_BASE, useDetection: false });
+    expect(s.useDetection).toBe(false);
+  });
+
+  it('rejects a wrong-typed useDetection', () => {
+    expect(() =>
+      parseScenario({ ...VALID_BASE, useDetection: 'sometimes' }),
+    ).toThrow();
+  });
 });

@@ -33,6 +33,7 @@ const INIT_PATTERNS = [
 const NAMED_IMPORT_PATTERN =
   /\bimport\s*\{[^}]*\binit\b[^}]*\}\s*from\s*['"]@amplitude\/(unified|analytics-[a-z-]+)['"]/;
 const BARE_INIT_CALL = /\binit\s*\(/g;
+const AMPLITUDE_DOT_INIT = /\bamplitude\.init\s*\(/gi;
 
 function countInitCallsInFile(text: string): number {
   let count = 0;
@@ -41,10 +42,14 @@ function countInitCallsInFile(text: string): number {
     if (matches) count += matches.length;
   }
   if (NAMED_IMPORT_PATTERN.test(text)) {
-    const matches = text.match(BARE_INIT_CALL);
-    // Each `init(` after a named import counts as a real call. We
-    // already counted `amplitude.init(` above; subtract the overlap.
-    if (matches) count += matches.length;
+    // BARE_INIT_CALL also matches the `init(` portion of any
+    // `amplitude.init(` we already counted via INIT_PATTERNS — the `.`
+    // is a non-word char, so `\binit(` matches both forms. Subtract
+    // the overlap so a file with a single `amplitude.init(` and a
+    // named-init import isn't double-counted.
+    const bareMatches = text.match(BARE_INIT_CALL)?.length ?? 0;
+    const amplitudeDotMatches = text.match(AMPLITUDE_DOT_INIT)?.length ?? 0;
+    count += bareMatches - amplitudeDotMatches;
   }
   return count;
 }
