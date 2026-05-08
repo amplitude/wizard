@@ -25,6 +25,7 @@ import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 
 import { runLive, runReplay } from '../runner/invoke-wizard.js';
+import { runJudge } from '../runner/judge.js';
 import { assertContract, parseStream } from '../runner/parse-stream.js';
 import { runRuntimeProbe } from '../runner/runtime.js';
 import { parseScenario } from '../runner/scenario-schema.js';
@@ -49,15 +50,27 @@ interface CliArgs {
    * scenario). Nightly + pre-release rings flip this on.
    */
   runtime: boolean;
+  /**
+   * Run the Layer 6 LLM judge. Opt-in because every call spends tokens
+   * and adds 30-90s of wall-clock per scenario; the spec restricts this
+   * to nightly Ring 2 by default. Requires `ANTHROPIC_API_KEY`.
+   */
+  judge: boolean;
 }
 
 function parseArgs(argv: string[]): CliArgs {
-  const args: CliArgs = { scenarioId: '', live: false, runtime: false };
+  const args: CliArgs = {
+    scenarioId: '',
+    live: false,
+    runtime: false,
+    judge: false,
+  };
   const rest: string[] = [];
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--live') args.live = true;
     else if (a === '--runtime') args.runtime = true;
+    else if (a === '--judge') args.judge = true;
     else if (a === '--reports-dir') args.reportsDir = argv[++i];
     else if (a === '--wizard-bin') args.wizardBin = argv[++i];
     else if (a.startsWith('--')) {
@@ -66,7 +79,7 @@ function parseArgs(argv: string[]): CliArgs {
   }
   if (rest.length !== 1) {
     throw new Error(
-      'usage: pnpm evals:run <scenario-id> [--live] [--runtime] [--reports-dir <path>] [--wizard-bin <cmd>]',
+      'usage: pnpm evals:run <scenario-id> [--live] [--runtime] [--judge] [--reports-dir <path>] [--wizard-bin <cmd>]',
     );
   }
   args.scenarioId = rest[0];
@@ -156,6 +169,13 @@ async function main() {
   // either way.
   if (args.runtime && scenario.runtimeProbe) {
     artifact.runtimeResult = await runRuntimeProbe({ scenario, workingDir });
+  }
+
+  // Optionally run the Layer 6 LLM judge. Costs tokens + 30-90s of
+  // wall-clock per scenario; the spec restricts this to opt-in PR runs
+  // (`evals:full` label / `[evals]` trigger) and nightly Ring 2.
+  if (args.judge) {
+    artifact.judgeResult = await runJudge({ scenario, artifact, workingDir });
   }
 
   // Score against the workingDir the runner returned, then tear it

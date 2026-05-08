@@ -47,6 +47,8 @@ import { scorer as l3BuildPasses } from '../scorers/layer3-build/build-passes.js
 
 import { scorer as l4RuntimeProbe } from '../scorers/layer4-runtime/runtime-probe.js';
 
+import { scorer as l6JudgeVerdict } from '../scorers/layer6-judge/judge-verdict.js';
+
 /**
  * The full scorer stack. Order matters — Layer 0 runs first; if any
  * Layer 0 scorer hard-fails, downstream layers are skipped.
@@ -79,6 +81,8 @@ export const SCORERS: Scorer[] = [
   l3BuildPasses,
   // Layer 4 — runtime probe (opt-in via scenario.runtimeProbe).
   l4RuntimeProbe,
+  // Layer 6 — LLM judge (opt-in via --judge + ANTHROPIC_API_KEY).
+  l6JudgeVerdict,
 ];
 
 export interface ScoreOptions {

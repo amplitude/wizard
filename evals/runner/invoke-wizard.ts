@@ -29,6 +29,7 @@ import { join } from 'node:path';
 import { redactString } from '../../src/lib/observability/redact.js';
 import { captureFsSnapshot } from './fs-snapshot.js';
 import { parseStream } from './parse-stream.js';
+import type { JudgeResult } from './judge.js';
 import type {
   Artifact,
   BuildResult,
@@ -435,6 +436,15 @@ export function runReplay(options: ReplayOptions): RunnerResult {
     ) as RuntimeResult;
   }
 
+  // Optional `golden/judge-result.json` pins a recorded LLM-judge
+  // response for the L6 scorer. Useful for snapshot-style coverage
+  // without re-spending tokens on every replay run.
+  const judgePath = join(goldenDir, 'judge-result.json');
+  let judgeResult: JudgeResult | undefined;
+  if (existsSync(judgePath)) {
+    judgeResult = JSON.parse(readFileSync(judgePath, 'utf8')) as JudgeResult;
+  }
+
   return {
     artifact: {
       runId: newRunId(),
@@ -448,6 +458,7 @@ export function runReplay(options: ReplayOptions): RunnerResult {
       stderr,
       buildResult,
       runtimeResult,
+      judgeResult,
       secondRunLog,
       source: 'golden',
     },

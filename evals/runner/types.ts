@@ -9,6 +9,7 @@
  */
 
 import type { AgentEventEnvelope } from '../../src/lib/agent-events.js';
+import type { JudgeResult } from './judge.js';
 import type { Scenario } from './scenario-schema.js';
 
 /**
@@ -136,6 +137,14 @@ export interface Artifact {
    * fine — the L4 scorer skip-passes with weight 0.
    */
   runtimeResult?: RuntimeResult;
+  /**
+   * LLM-judge result for Layer 6 grading. Populated when the runner
+   * is invoked with `--judge` and `ANTHROPIC_API_KEY` is set. Goldens
+   * may pin a `golden/judge-result.json` to make replay coverage
+   * deterministic. Absence is fine — the L6 scorer skip-passes with
+   * weight 0.
+   */
+  judgeResult?: JudgeResult;
   /**
    * Source of the artifact. `live` = freshly spawned wizard. `golden`
    * = pre-recorded NDJSON + a baseline snapshot loaded from disk.
