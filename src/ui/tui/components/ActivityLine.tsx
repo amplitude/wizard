@@ -21,8 +21,8 @@
  *
  * Cold-start over-time hint: when a `cold-start` activity blows past its
  * estimated duration we swap the suffix from "typically ~Ns" to "this can
- * take up to 60s on first run" so a slow first-run still reads as expected
- * behavior instead of a hung process.
+ * take up to Ns on first run" (upper bound rounded to the next 30s
+ * boundary, floor 60s) so it never contradicts the visible elapsed counter.
  */
 
 import { Box, Text } from 'ink';
@@ -59,21 +59,22 @@ export const ActivityLine = ({ store, now = Date.now }: ActivityLineProps) => {
     Math.floor((now() - activity.startedAt) / 1000),
   );
   // Cold-start specific: once we've exceeded the estimate, swap the
-  // suffix to a "this can take up to 60s on first run" message so a
+  // suffix to a "this can take up to Ns on first run" message so a
   // slow first-run reads as known-duration patience instead of unknown
-  // silence. Other activity kinds (compaction, retry, ingestion poll,
-  // MCP) keep the static "typically ~Ns" copy because their callers
-  // already update `message` mid-flight (e.g. retry shows the
-  // attempt-counter live).
+  // silence. The upper bound is max(60, ceil(elapsed/30)*30) so it
+  // never falls below the visible elapsed counter.
   const isColdStartOverTime =
     activity.kind === 'cold-start' &&
     activity.estimatedDurationSec !== undefined &&
     elapsedSec > activity.estimatedDurationSec;
   const eta = isColdStartOverTime
-    ? ', this can take up to 60s on first run'
+    ? `, this can take up to ${Math.max(
+        60,
+        Math.ceil(elapsedSec / 30) * 30,
+      )}s on first run`
     : activity.estimatedDurationSec
-      ? `, typically ~${activity.estimatedDurationSec}s`
-      : '';
+    ? `, typically ~${activity.estimatedDurationSec}s`
+    : '';
   // Reference `tick` so React doesn't dead-code-eliminate the interval.
   void tick;
 
