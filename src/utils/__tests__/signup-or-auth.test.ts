@@ -112,7 +112,11 @@ describe('performSignupOrAuth', () => {
     expect(result.kind).toBe('error');
     expect(analytics.wizardCapture).toHaveBeenCalledWith(
       AGENTIC_SIGNUP_ATTEMPTED_EVENT,
-      { status: 'needs_information_unsupported', zone: 'us' },
+      {
+        status: 'needs_information_unsupported',
+        zone: 'us',
+        'legal document source': 'unused',
+      },
     );
   });
 
@@ -133,7 +137,11 @@ describe('performSignupOrAuth', () => {
 
     expect(analytics.wizardCapture).toHaveBeenCalledWith(
       AGENTIC_SIGNUP_ATTEMPTED_EVENT,
-      { status: 'signup_error', zone: 'us' },
+      {
+        status: 'signup_error',
+        zone: 'us',
+        'legal document source': 'unused',
+      },
     );
   });
 
@@ -168,7 +176,11 @@ describe('performSignupOrAuth', () => {
 
     expect(analytics.wizardCapture).toHaveBeenCalledWith(
       AGENTIC_SIGNUP_ATTEMPTED_EVENT,
-      { status: 'requires_redirect', zone: 'us' },
+      {
+        status: 'requires_redirect',
+        zone: 'us',
+        'legal document source': 'unused',
+      },
     );
   });
 
@@ -207,7 +219,11 @@ describe('performSignupOrAuth', () => {
 
     expect(analytics.wizardCapture).toHaveBeenCalledWith(
       AGENTIC_SIGNUP_ATTEMPTED_EVENT,
-      { status: 'signup_error', zone: 'us' },
+      {
+        status: 'signup_error',
+        zone: 'us',
+        'legal document source': 'unused',
+      },
     );
   });
 
@@ -227,7 +243,11 @@ describe('performSignupOrAuth', () => {
     // failures apart from the server's clean error path in telemetry.
     expect(analytics.wizardCapture).toHaveBeenCalledWith(
       AGENTIC_SIGNUP_ATTEMPTED_EVENT,
-      { status: 'wrapper_exception', zone: 'us' },
+      {
+        status: 'wrapper_exception',
+        zone: 'us',
+        'legal document source': 'unused',
+      },
     );
   });
 
@@ -334,6 +354,7 @@ describe('performSignupOrAuth', () => {
         zone: 'us',
         'has env with api key': true,
         'user fetch retry count': 0,
+        'legal document source': 'unused',
       },
     );
   });
@@ -484,6 +505,7 @@ describe('performSignupOrAuth', () => {
           status: 'user_fetch_failed',
           zone: 'us',
           'user fetch retry count': 3,
+          'legal document source': 'unused',
         },
       );
     } finally {

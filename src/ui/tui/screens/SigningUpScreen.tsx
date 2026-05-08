@@ -124,12 +124,19 @@ export const SigningUpScreen = ({ store }: SigningUpScreenProps) => {
           // Ctrl+C.
           //
           // Today this can only fire as a server bug (we just sent
-          // `full_name` and the server is still asking for it), but
-          // the cost of the guard is one branch and the failure mode
-          // it prevents has zero in-band recovery.
-          const alreadySatisfied = result.requiredFields.every((field) =>
-            field === 'full_name' ? fullName !== null : false,
-          );
+          // a complete body and the server is still asking for these
+          // fields), but the cost of the guard is one switch and the
+          // failure mode it prevents has zero in-band recovery.
+          const alreadySatisfied = result.requiredFields.every((field) => {
+            switch (field) {
+              case 'full_name':
+                return fullName !== null;
+              case 'terms_acceptance':
+                return store.session.tosAccepted === true;
+              default:
+                return assertNever(field);
+            }
+          });
           if (alreadySatisfied) {
             log.warn(
               'signup: server re-requested already-provided fields; abandoning',
@@ -139,6 +146,14 @@ export const SigningUpScreen = ({ store }: SigningUpScreenProps) => {
             return;
           }
           store.setSignupRequiredFields(result.requiredFields);
+          // Persist the legal-doc URLs the parser produced for this
+          // probe response. The ToSScreen reads from session.legalDocumentBundle
+          // (no fallback at the screen — parser already normalized via the
+          // spoof block when BE flag is OFF) and the follow-up POST body
+          // pulls from the same field. Source is recorded so subsequent
+          // telemetry arms can tag attempts without re-threading it.
+          store.setLegalDocumentBundle(result.legalDocumentBundle);
+          store.setLegalDocumentSource(result.legalDocumentSource);
           return;
         }
         case 'redirect':

@@ -30,7 +30,12 @@ describe('SigningUpScreen alreadySatisfied', () => {
     const mod = await import('../../../../utils/signup-or-auth.js');
     (mod.performSignupOrAuth as ReturnType<typeof vi.fn>).mockResolvedValue({
       kind: 'needs_information',
-      requiredFields: ['full_name'],
+      requiredFields: ['full_name', 'terms_acceptance'],
+      legalDocumentBundle: {
+        terms_of_service: 'https://amplitude.com/terms',
+        privacy_policy: 'https://amplitude.com/privacy',
+      },
+      legalDocumentSource: 'local',
     });
 
     const { SigningUpScreen } = await import('../SigningUpScreen.js');
@@ -65,7 +70,12 @@ describe('SigningUpScreen alreadySatisfied', () => {
     const mod = await import('../../../../utils/signup-or-auth.js');
     (mod.performSignupOrAuth as ReturnType<typeof vi.fn>).mockResolvedValue({
       kind: 'needs_information',
-      requiredFields: ['full_name'],
+      requiredFields: ['full_name', 'terms_acceptance'],
+      legalDocumentBundle: {
+        terms_of_service: 'https://amplitude.com/terms',
+        privacy_policy: 'https://amplitude.com/privacy',
+      },
+      legalDocumentSource: 'local',
     });
 
     const { SigningUpScreen } = await import('../SigningUpScreen.js');
@@ -85,7 +95,18 @@ describe('SigningUpScreen alreadySatisfied', () => {
     await new Promise((r) => setTimeout(r, 50));
 
     expect(store.session.signupAbandoned).toBe(false);
-    expect(store.session.signupRequiredFields).toEqual(['full_name']);
+    expect(store.session.signupRequiredFields).toEqual([
+      'full_name',
+      'terms_acceptance',
+    ]);
+    // Wire-through invariant: when the wrapper returns
+    // needs_information, the screen writes both legal-doc fields into
+    // the session lock-step with signupRequiredFields.
+    expect(store.session.legalDocumentBundle).toEqual({
+      terms_of_service: 'https://amplitude.com/terms',
+      privacy_policy: 'https://amplitude.com/privacy',
+    });
+    expect(store.session.legalDocumentSource).toBe('local');
 
     unmount();
   });

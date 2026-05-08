@@ -123,6 +123,20 @@ export type AgenticSignupAttemptedProperties = {
   zone: AmplitudeZone;
   'has env with api key'?: boolean;
   'user fetch retry count'?: number;
+  /**
+   * Where the legal-document URLs that informed this attempt's
+   * `terms_acceptance` slot came from:
+   *   - 'server' — BE provided them in `needs_information.terms_acceptance.documents`
+   *   - 'local' — parser's spoof block synthesized them from local constants
+   *   - 'unused' — this attempt's body carried no `terms_acceptance` (probe
+   *     POST, existing-user redirect, error before terms collection, etc.)
+   *
+   * Set on every status arm so dashboards can slice adoption by URL
+   * source and tie it to the eventual outcome (success vs. unsupported
+   * vs. signup_error). Becomes the primary adoption metric once the BE
+   * flag flips ON across env tiers.
+   */
+  'legal document source'?: 'server' | 'local' | 'unused';
 };
 
 export const trackSignupAttempt = (
@@ -176,7 +190,28 @@ export type PerformSignupOrAuthResult =
        */
       dashboardUrl: string | null;
     })
-  | { kind: 'needs_information'; requiredFields: RequiredKey[] }
+  | {
+      kind: 'needs_information';
+      requiredFields: RequiredKey[];
+      /**
+       * Legal-doc URLs the parser produced for this probe response.
+       * Non-null in Phase A whenever `'terms_acceptance' in requiredFields`
+       * (which the parser's spoof guarantees for new agentic signups).
+       * Caller writes this into `session.legalDocumentBundle` so the ToS
+       * screen and the follow-up POST can both pull from one place.
+       */
+      legalDocumentBundle: {
+        terms_of_service: string;
+        privacy_policy: string;
+      } | null;
+      /**
+       * Source of `legalDocumentBundle`'s URLs — passed through from the
+       * direct-signup parser. Caller writes this into
+       * `session.legalDocumentSource` so subsequent telemetry arms can
+       * read the source without re-threading it through the wrapper.
+       */
+      legalDocumentSource: 'server' | 'local';
+    }
   | { kind: 'redirect' }
   | { kind: 'error'; message: string };
 
@@ -227,7 +262,11 @@ export async function performSignupOrAuth(
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     log.warn('direct signup threw unexpectedly', { message });
-    trackSignupAttempt({ status: 'wrapper_exception', zone: input.zone });
+    trackSignupAttempt({
+      status: 'wrapper_exception',
+      zone: input.zone,
+      'legal document source': 'unused',
+    });
     return { kind: 'error', message };
   }
 
@@ -241,16 +280,29 @@ export async function performSignupOrAuth(
   switch (result.kind) {
     case 'requires_redirect':
       log.debug('direct signup → redirect');
-      trackSignupAttempt({ status: 'requires_redirect', zone: input.zone });
+      trackSignupAttempt({
+        status: 'requires_redirect',
+        zone: input.zone,
+        // Existing-user redirect path; this attempt's body carried no
+        // `terms_acceptance` (no probe-and-collect cycle happens here).
+        'legal document source': 'unused',
+      });
       return { kind: 'redirect' };
     case 'needs_information':
       log.debug('direct signup → needs_information', {
         requiredFields: result.requiredFields,
+        legalDocumentSource: result.legalDocumentSource,
       });
-      trackSignupAttempt({ status: 'needs_information', zone: input.zone });
+      trackSignupAttempt({
+        status: 'needs_information',
+        zone: input.zone,
+        'legal document source': result.legalDocumentSource,
+      });
       return {
         kind: 'needs_information',
         requiredFields: result.requiredFields,
+        legalDocumentBundle: result.legalDocumentBundle,
+        legalDocumentSource: result.legalDocumentSource,
       };
     case 'error': {
       log.debug('direct signup → error', {
@@ -274,7 +326,15 @@ export async function performSignupOrAuth(
         result.code === 'unsupported_required_shape'
           ? 'needs_information_unsupported'
           : 'signup_error';
-      trackSignupAttempt({ status, zone: input.zone });
+      trackSignupAttempt({
+        status,
+        zone: input.zone,
+        // Error arms can fire either before or after a needs_information
+        // round-trip; the wrapper doesn't know which. Tag as 'unused' here
+        // and revisit in the discriminated-union refactor (next commit),
+        // which surfaces the source via `input.kind` directly.
+        'legal document source': 'unused',
+      });
       return { kind: 'error', message: result.message };
     }
     case 'success':
@@ -358,12 +418,19 @@ export async function performSignupOrAuth(
       zone: input.zone,
       'has env with api key': fetchResult.hasEnvWithApiKey,
       'user fetch retry count': fetchResult.retryCount,
+      // The success-arm tag is set to 'unused' here pending the
+      // discriminated-union refactor (next commit), which surfaces the
+      // source of the body's `terms_acceptance` slot via `input.kind`
+      // so we can tag 'server' / 'local' on follow-up successes
+      // accurately.
+      'legal document source': 'unused',
     });
   } else {
     trackSignupAttempt({
       status: 'user_fetch_failed',
       zone: input.zone,
       'user fetch retry count': fetchResult.retryCount,
+      'legal document source': 'unused',
     });
   }
 
