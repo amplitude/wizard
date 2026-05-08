@@ -87,6 +87,9 @@ export const FinalizingPanel = ({ steps }: FinalizingPanelProps) => {
             : step.status === PostAgentStepStatus.Skipped
             ? Colors.subtle
             : Colors.muted;
+        // Same label-resolution invariant as ProgressList: an in-progress
+        // step shows ONLY its activeForm; otherwise it shows ONLY the
+        // canonical label. Never the two concatenated.
         const label =
           step.status === PostAgentStepStatus.InProgress
             ? step.activeForm
@@ -95,8 +98,8 @@ export const FinalizingPanel = ({ steps }: FinalizingPanelProps) => {
 
         return (
           <Box key={step.id} flexDirection="row">
-            <Box flexShrink={0}>
-              <Text color={color}>{icon} </Text>
+            <Box flexShrink={0} width={2}>
+              <Text color={color}>{icon}</Text>
             </Box>
             <Box flexGrow={1} flexShrink={1} flexDirection="row" gap={1}>
               <Text color={isPending ? Colors.muted : undefined}>{label}</Text>
