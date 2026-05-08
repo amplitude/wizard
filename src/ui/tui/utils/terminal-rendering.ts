@@ -101,23 +101,92 @@ function hexToAnsi(hex: string): string {
   return `\x1b[38;2;${r};${g};${b}m`;
 }
 
-// Scoped Marked instance — does not mutate the global singleton.
-const terminalMarked = new Marked();
-terminalMarked.use(
-  markedTerminal({
-    firstHeading: (s: string) =>
-      `\x1b[1m${hexToAnsi(Brand.blueOnDark)}${s}\x1b[0m`,
-    heading: (s: string) => `\x1b[1m${hexToAnsi(Brand.lilac)}${s}\x1b[0m`,
-    showSectionPrefix: false,
-    reflowText: true,
-    width: 100,
-  }) as Parameters<typeof terminalMarked.use>[0],
-);
+/**
+ * Build a Marked instance scoped to a particular reflow / table width.
+ *
+ * Two width-related fixes baked in here, both visible on the Setup
+ * Report (`amplitude-setup-report.md`) which is the most common
+ * markdown surface the wizard renders:
+ *
+ *   1. cli-table3's default `style.head` is `['red']`, which makes
+ *      every Markdown table header render bright red — read by users
+ *      as "error" since red carries that semantic everywhere else in
+ *      the UI. Override `style.head` to bold-only and `style.border`
+ *      to plain so the table reads as supporting chrome, not an error
+ *      indicator. The body cells get the brand body color.
+ *
+ *   2. Markdown tables produced by the agent (Event / Description /
+ *      File rows) are commonly wider than the terminal viewport.
+ *      cli-table3 emits a single fixed-width line per row regardless
+ *      of viewport, so when ReportViewer renders it inside a
+ *      `<Text wrap="truncate">`, EVERY row gets a stray "…" glyph at
+ *      the right edge. Constraining `colWidths` to the visible width
+ *      and enabling `wordWrap: true` lets the table fit and removes
+ *      the trailing-ellipsis decoration.
+ *
+ * `width` is in terminal columns. Defaults to 100 for non-Ink
+ * callers (e.g. unit tests, CLI commands not driven by Ink).
+ */
+function buildTerminalMarked(width: number): Marked {
+  // Reserve a few columns for ConsoleView padding / outer borders so
+  // the table never quite reaches the right edge — matches how the
+  // rest of the TUI lays out content.
+  const renderWidth = Math.max(40, width - 4);
+
+  // 4-column breakdown for the Setup Report's primary table (Event,
+  // Description, File). We don't know the column count statically, so
+  // we hand cli-table3 a generous max and let `wordWrap` reflow within
+  // each cell. cli-table3 ignores `colWidths` entries past the column
+  // count, so over-specifying is safe.
+  const eventCol = Math.max(14, Math.floor(renderWidth * 0.18));
+  const fileCol = Math.max(20, Math.floor(renderWidth * 0.32));
+  // Description gets whatever's left after borders (3 vertical bars +
+  // 6 cell paddings = ~9 cols of chrome).
+  const descCol = Math.max(20, renderWidth - eventCol - fileCol - 9);
+
+  const m = new Marked();
+  m.use(
+    markedTerminal({
+      firstHeading: (s: string) =>
+        `\x1b[1m${hexToAnsi(Brand.blueOnDark)}${s}\x1b[0m`,
+      heading: (s: string) => `\x1b[1m${hexToAnsi(Brand.lilac)}${s}\x1b[0m`,
+      showSectionPrefix: false,
+      reflowText: true,
+      width: renderWidth,
+      tableOptions: {
+        // Override cli-table3's red default head + greyed border so
+        // the table reads as neutral chrome, not error state.
+        style: {
+          head: [], // bold-only via marked-terminal's own table wrap
+          border: [],
+          'padding-left': 1,
+          'padding-right': 1,
+        },
+        colWidths: [eventCol, descCol, fileCol],
+        wordWrap: true,
+      },
+    }) as Parameters<typeof m.use>[0],
+  );
+  return m;
+}
+
+// Default instance for non-width-aware callers. The ReportViewer
+// path passes its own width via `renderMarkdown(md, cols)`.
+const defaultTerminalMarked = buildTerminalMarked(100);
 
 /**
  * Render a markdown string to ANSI-styled terminal output.
  * Supports headings, code blocks, tables, lists, bold/italic, and links.
+ *
+ * @param md     Markdown source.
+ * @param width  Terminal columns to fit the output to. When omitted,
+ *               renders against a 100-column default — fine for
+ *               anything that isn't trying to fit the actual viewport.
  */
-export function renderMarkdown(md: string): string {
-  return terminalMarked.parse(md) as string;
+export function renderMarkdown(md: string, width?: number): string {
+  const m =
+    typeof width === 'number' && width > 0
+      ? buildTerminalMarked(width)
+      : defaultTerminalMarked;
+  return m.parse(md) as string;
 }

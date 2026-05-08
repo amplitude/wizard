@@ -26,20 +26,32 @@ interface ReportViewerProps {
 }
 
 export const ReportViewer = ({ filePath }: ReportViewerProps) => {
-  const [, rows] = useStdoutDimensions();
+  const [cols, rows] = useStdoutDimensions();
   const visibleLines = Math.max(5, rows - CHROME_ROWS);
 
   const [lines, setLines] = useState<string[]>([]);
   const [offset, setOffset] = useState(0);
   const prevRawRef = useRef<string>('');
+  // Cache the cols used for the last render so we know whether to
+  // re-parse on resize. Re-parsing cost is dominated by `marked`,
+  // which is fine for the rare resize event but wasteful on every
+  // re-render (the picker re-mounts on each keypress).
+  const prevColsRef = useRef<number>(0);
 
   useEffect(() => {
     const updateContent = () => {
       try {
         const raw = fs.readFileSync(filePath, 'utf-8');
-        if (raw === prevRawRef.current) return; // skip redundant re-renders
+        if (raw === prevRawRef.current && prevColsRef.current === cols) {
+          return; // skip redundant re-renders
+        }
         prevRawRef.current = raw;
-        const rendered = renderMarkdown(raw);
+        prevColsRef.current = cols;
+        // Pass terminal width so cli-table3 sizes columns to fit the
+        // viewport instead of overflowing past the right edge — without
+        // this, every line of the Setup Report's events table got a
+        // stray "…" decoration from `<Text wrap="truncate">` below.
+        const rendered = renderMarkdown(raw, cols);
         // marked-terminal wraps long headings/code blocks across multiple
         // lines but only emits the closing reset at the end of the block.
         // When we split on \n and render each line in its own <Text>, any
@@ -67,7 +79,10 @@ export const ReportViewer = ({ filePath }: ReportViewerProps) => {
     });
 
     return () => handle.dispose();
-  }, [filePath]);
+    // `cols` is included so a terminal resize re-parses the markdown
+    // with the new viewport width. Without this dependency, the table
+    // column widths would stay locked to the cols at first mount.
+  }, [filePath, cols]);
 
   const maxOffset = Math.max(0, lines.length - visibleLines);
 

@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { linkify, makeLink } from '../terminal-rendering.js';
+import { linkify, makeLink, renderMarkdown } from '../terminal-rendering.js';
 
 function strip(ansi: string): string {
   // eslint-disable-next-line no-control-regex
@@ -94,5 +94,52 @@ describe('linkify', () => {
     expect(out).toContain(makeLink('label', 'https://b.example'));
     expect(out).not.toContain('LINKIFIED');
     expect(out).not.toContain('\u0000');
+  });
+});
+
+describe('renderMarkdown — Setup Report polish', () => {
+  // Regression guards for the two visible bugs in the Setup Report
+  // sub-view at the Done phase: red table headers (cli-table3 default)
+  // and tables wider than the terminal viewport (which then triggered
+  // a stray ellipsis glyph on every row from <Text wrap="truncate">).
+  const SAMPLE_TABLE = [
+    '| Event | Description | File |',
+    '|-------|-------------|------|',
+    '| User Signed Up | Fires on signup | src/auth.ts |',
+    '| User Signed In | Fires on login | src/auth.ts |',
+    '',
+  ].join('\n');
+
+  // eslint-disable-next-line no-control-regex
+  const RED_SGR_RE = /\[(31|91)m/;
+  // eslint-disable-next-line no-control-regex
+  const ANY_SGR_RE = /\[[0-9;]*m/g;
+  const stripAnsi = (s: string) => s.replace(ANY_SGR_RE, '');
+
+  it('does not color the table header in red (cli-table3 default)', () => {
+    const out = renderMarkdown(SAMPLE_TABLE, 80);
+    // cli-table3 default colors head cells red (ANSI [31m). Assert no
+    // red SGR appears anywhere in the rendered output — the override
+    // sets style.head: [] so the header is bold-only.
+    expect(out).not.toMatch(RED_SGR_RE);
+  });
+
+  it('fits the rendered table inside the requested terminal width', () => {
+    const out = renderMarkdown(SAMPLE_TABLE, 80);
+    const widest = Math.max(
+      ...out.split('\n').map((line) => stripAnsi(line).length),
+    );
+    // The previous behavior shipped a 100-col table irrespective of
+    // viewport, which triggered the trailing-ellipsis decoration when
+    // ReportViewer truncated each line. Constraining to the requested
+    // width is the load-bearing assertion here.
+    expect(widest).toBeLessThanOrEqual(80);
+  });
+
+  it('still renders headings using the brand accent (not red)', () => {
+    const out = renderMarkdown('# My report\n', 80);
+    // Brand.blueOnDark = #4083FF → ANSI 24-bit "38;2;64;131;255".
+    expect(out).toContain('38;2;64;131;255');
+    expect(out).not.toMatch(RED_SGR_RE);
   });
 });
