@@ -728,17 +728,27 @@ export const runDirectSignupIfRequested = async (
   }
   let tokens: Awaited<ReturnType<typeof performSignupOrAuth>>;
   try {
+    // Non-TUI callers always send the initial probe. The wizard's
+    // collection screens don't fire in CI / agent / classic modes —
+    // these paths gate on `session.signupFullName` being already
+    // populated upstream and never traverse the `needs_information`
+    // round-trip. So this is always `kind: 'initial'`.
+    //
     // No `signal` here: CI / agent / classic modes have no in-band
     // cancellation surface (no Esc handler, no unmount lifecycle), so
     // there is nothing to thread through. The TUI path passes a signal
     // from SigningUpScreen's useAsyncEffect; this entry point doesn't.
     tokens = await performSignupOrAuth({
+      kind: 'initial',
       email: session.signupEmail,
-      fullName: session.signupFullName,
       zone,
     });
   } catch (err) {
-    trackSignupAttempt({ status: 'wrapper_exception', zone });
+    trackSignupAttempt({
+      status: 'wrapper_exception',
+      zone,
+      'legal document source': 'unused',
+    });
     getUI().log.warn(
       `Direct signup errored: ${
         err instanceof Error ? err.message : String(err)

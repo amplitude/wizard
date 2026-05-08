@@ -46,8 +46,13 @@ describe('performSignupOrAuth', () => {
     const { analytics } = await import('../analytics');
 
     const result = await performSignupOrAuth({
+      kind: 'follow_up',
       email: null,
       fullName: 'Ada Lovelace',
+      legalDocumentBundle: {
+        terms_of_service: 'https://amplitude.com/terms',
+        privacy_policy: 'https://amplitude.com/privacy',
+      },
       zone: 'us',
     });
 
@@ -67,8 +72,8 @@ describe('performSignupOrAuth', () => {
     });
 
     const result = await performSignupOrAuth({
+      kind: 'initial',
       email: 'ada@example.com',
-      fullName: null,
       zone: 'us',
     });
 
@@ -104,8 +109,8 @@ describe('performSignupOrAuth', () => {
     const { analytics } = await import('../analytics');
 
     const result = await performSignupOrAuth({
+      kind: 'initial',
       email: 'ada@example.com',
-      fullName: null,
       zone: 'us',
     });
 
@@ -130,8 +135,8 @@ describe('performSignupOrAuth', () => {
     const { analytics } = await import('../analytics');
 
     await performSignupOrAuth({
+      kind: 'initial',
       email: 'ada@example.com',
-      fullName: null,
       zone: 'us',
     });
 
@@ -152,8 +157,13 @@ describe('performSignupOrAuth', () => {
     });
 
     const result = await performSignupOrAuth({
+      kind: 'follow_up',
       email: 'ada@example.com',
       fullName: 'Ada Lovelace',
+      legalDocumentBundle: {
+        terms_of_service: 'https://amplitude.com/terms',
+        privacy_policy: 'https://amplitude.com/privacy',
+      },
       zone: 'us',
     });
 
@@ -169,8 +179,13 @@ describe('performSignupOrAuth', () => {
     const { analytics } = await import('../analytics');
 
     await performSignupOrAuth({
+      kind: 'follow_up',
       email: 'ada@example.com',
       fullName: 'Ada Lovelace',
+      legalDocumentBundle: {
+        terms_of_service: 'https://amplitude.com/terms',
+        privacy_policy: 'https://amplitude.com/privacy',
+      },
       zone: 'us',
     });
 
@@ -192,8 +207,13 @@ describe('performSignupOrAuth', () => {
     });
 
     const result = await performSignupOrAuth({
+      kind: 'follow_up',
       email: 'ada@example.com',
       fullName: 'Ada Lovelace',
+      legalDocumentBundle: {
+        terms_of_service: 'https://amplitude.com/terms',
+        privacy_policy: 'https://amplitude.com/privacy',
+      },
       zone: 'us',
     });
 
@@ -212,8 +232,13 @@ describe('performSignupOrAuth', () => {
     const { analytics } = await import('../analytics');
 
     await performSignupOrAuth({
+      kind: 'follow_up',
       email: 'ada@example.com',
       fullName: 'Ada Lovelace',
+      legalDocumentBundle: {
+        terms_of_service: 'https://amplitude.com/terms',
+        privacy_policy: 'https://amplitude.com/privacy',
+      },
       zone: 'us',
     });
 
@@ -233,8 +258,13 @@ describe('performSignupOrAuth', () => {
     const { analytics } = await import('../analytics');
 
     await performSignupOrAuth({
+      kind: 'follow_up',
       email: 'ada@example.com',
       fullName: 'Ada Lovelace',
+      legalDocumentBundle: {
+        terms_of_service: 'https://amplitude.com/terms',
+        privacy_policy: 'https://amplitude.com/privacy',
+      },
       zone: 'us',
     });
 
@@ -274,8 +304,13 @@ describe('performSignupOrAuth', () => {
     const { replaceStoredUser } = await import('../ampli-settings.js');
 
     const result = await performSignupOrAuth({
+      kind: 'follow_up',
       email: 'ada@example.com',
       fullName: 'Ada Lovelace',
+      legalDocumentBundle: {
+        terms_of_service: 'https://amplitude.com/terms',
+        privacy_policy: 'https://amplitude.com/privacy',
+      },
       zone: 'us',
     });
 
@@ -311,8 +346,13 @@ describe('performSignupOrAuth', () => {
     });
 
     const result = await performSignupOrAuth({
+      kind: 'follow_up',
       email: 'ada@example.com',
       fullName: 'Ada Lovelace',
+      legalDocumentBundle: {
+        terms_of_service: 'https://amplitude.com/terms',
+        privacy_policy: 'https://amplitude.com/privacy',
+      },
       zone: 'us',
     });
 
@@ -342,8 +382,13 @@ describe('performSignupOrAuth', () => {
     const { analytics } = await import('../analytics');
 
     await performSignupOrAuth({
+      kind: 'follow_up',
       email: 'ada@example.com',
       fullName: 'Ada Lovelace',
+      legalDocumentBundle: {
+        terms_of_service: 'https://amplitude.com/terms',
+        privacy_policy: 'https://amplitude.com/privacy',
+      },
       zone: 'us',
     });
 
@@ -382,8 +427,13 @@ describe('performSignupOrAuth', () => {
     const { replaceStoredUser } = await import('../ampli-settings.js');
 
     await performSignupOrAuth({
+      kind: 'follow_up',
       email: 'ada@example.com',
       fullName: 'Ada Lovelace',
+      legalDocumentBundle: {
+        terms_of_service: 'https://amplitude.com/terms',
+        privacy_policy: 'https://amplitude.com/privacy',
+      },
       zone: 'us',
     });
 
@@ -456,8 +506,13 @@ describe('performSignupOrAuth', () => {
       const { replaceStoredUser } = await import('../ampli-settings.js');
 
       const pending = performSignupOrAuth({
+        kind: 'follow_up',
         email: 'ada@example.com',
         fullName: 'Ada Lovelace',
+        legalDocumentBundle: {
+          terms_of_service: 'https://amplitude.com/terms',
+          privacy_policy: 'https://amplitude.com/privacy',
+        },
         zone: 'us',
       });
       await vi.runAllTimersAsync();
@@ -492,8 +547,13 @@ describe('performSignupOrAuth', () => {
       const { analytics } = await import('../analytics');
 
       const pending = performSignupOrAuth({
+        kind: 'follow_up',
         email: 'ada@example.com',
         fullName: 'Ada Lovelace',
+        legalDocumentBundle: {
+          terms_of_service: 'https://amplitude.com/terms',
+          privacy_policy: 'https://amplitude.com/privacy',
+        },
         zone: 'us',
       });
       await vi.runAllTimersAsync();
@@ -528,8 +588,13 @@ describe('performSignupOrAuth', () => {
     const { analytics } = await import('../analytics');
 
     const result = await performSignupOrAuth({
+      kind: 'follow_up',
       email: 'ada@example.com',
       fullName: 'Ada Lovelace',
+      legalDocumentBundle: {
+        terms_of_service: 'https://amplitude.com/terms',
+        privacy_policy: 'https://amplitude.com/privacy',
+      },
       zone: 'us',
     });
 

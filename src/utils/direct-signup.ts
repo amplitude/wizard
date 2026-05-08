@@ -172,27 +172,54 @@ function isCallerAbort(error: unknown, signal?: AbortSignal): boolean {
   return false;
 }
 
-export interface DirectSignupInput {
-  email: string;
-  /**
-   * Optional. Omit on the probe POST so the server can decide whether the
-   * account is new (→ `needs_information`) or already exists (→ redirect).
-   * Required on the follow-up POST when the wizard has collected the field
-   * the server asked for.
-   */
-  fullName?: string;
-  zone: AmplitudeZone;
-  /**
-   * Aborts both the provisioning POST and the token-exchange POST when
-   * fired. Threaded from the screen's `useAsyncEffect` so unmounting
-   * (Esc back, /exit, navigation) cancels in-flight network work
-   * before it can settle and trigger downstream side effects (token
-   * persistence). Without this, a cancelled ceremony can still leak
-   * `replaceStoredUser` writes that make the next launch think the
-   * user is signed in.
-   */
-  signal?: AbortSignal;
-}
+/**
+ * Discriminated input to `performDirectSignup`.
+ *
+ * - `kind: 'initial'` — the wizard hasn't heard from the BE yet during
+ *   this ceremony. Body carries only `email` (plus envelope fields).
+ *   The BE decides what's needed and responds `needs_information`,
+ *   `requires_redirect` (existing user), or `oauth` (success).
+ *
+ * - `kind: 'follow_up'` — the wizard received `needs_information` on a
+ *   prior call, the user has now satisfied every required field, and
+ *   we're submitting the complete body. `fullName` and
+ *   `legalDocumentBundle` are both required at the type level — the
+ *   discriminated union enforces that callers can't construct a
+ *   `'follow_up'` shape without all of them.
+ *
+ * Why this is binary: the wizard's flow gate (`requiredSatisfied` in
+ * `flows.ts`) prevents `SigningUp` from re-firing until every required
+ * field is collected. There's no "I have full_name but not yet
+ * terms_acceptance" intermediate state that hits the network — re-fires
+ * only happen after all required fields are filled.
+ */
+export type DirectSignupInput =
+  | {
+      kind: 'initial';
+      email: string;
+      zone: AmplitudeZone;
+      /**
+       * Aborts both the provisioning POST and the token-exchange POST
+       * when fired. Threaded from the screen's `useAsyncEffect` so
+       * unmounting (Esc back, /exit, navigation) cancels in-flight
+       * network work before it can settle and trigger downstream side
+       * effects (token persistence). Without this, a cancelled ceremony
+       * can still leak `replaceStoredUser` writes that make the next
+       * launch think the user is signed in.
+       */
+      signal?: AbortSignal;
+    }
+  | {
+      kind: 'follow_up';
+      email: string;
+      fullName: string;
+      legalDocumentBundle: {
+        terms_of_service: string;
+        privacy_policy: string;
+      };
+      zone: AmplitudeZone;
+      signal?: AbortSignal;
+    };
 
 export type DirectSignupResult =
   | {
@@ -250,23 +277,42 @@ export async function performDirectSignup(
   // auth code. We send it for server-side correlation; there's no echo to
   // verify against (unlike browser OAuth `state`).
   const state = crypto.randomBytes(16).toString('hex');
-  log.debug('[direct-signup] POST', { url, zone: input.zone });
+  log.debug('[direct-signup] POST', {
+    url,
+    zone: input.zone,
+    kind: input.kind,
+  });
 
-  // Build the request body conditionally — omit `full_name` entirely when
-  // unset, instead of sending it as an empty string. The server treats
-  // `!body.full_name` as "no name provided" and responds `needs_information`;
-  // sending `""` would either be rejected by the server's zod (`min(1)`)
-  // or — worse, depending on coercion — be accepted as a valid name.
-  const requestBody: Record<string, unknown> = {
+  // Build the request body via discriminated switch — `'initial'` shapes
+  // produce the bare envelope, `'follow_up'` shapes add `full_name` and
+  // `terms_acceptance`. The type system enforces "follow_up always has
+  // both collected fields" at the call site, so the body construction
+  // here doesn't need runtime guards on optional fields.
+  const baseBody = {
     email: input.email,
     scopes: ['openid', 'offline'],
     state,
     client_id: oAuthClientId,
     redirect_uri: `http://localhost:${OAUTH_PORT}/callback`,
   };
-  if (input.fullName !== undefined && input.fullName.length > 0) {
-    requestBody.full_name = input.fullName;
-  }
+
+  const requestBody: Record<string, unknown> =
+    input.kind === 'initial'
+      ? baseBody
+      : {
+          ...baseBody,
+          full_name: input.fullName,
+          terms_acceptance: {
+            terms_of_service: {
+              url: input.legalDocumentBundle.terms_of_service,
+              accepted: true,
+            },
+            privacy_policy: {
+              url: input.legalDocumentBundle.privacy_policy,
+              accepted: true,
+            },
+          },
+        };
 
   let response;
   try {

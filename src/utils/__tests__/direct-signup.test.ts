@@ -29,11 +29,29 @@ beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
 afterEach(() => server.resetHandlers());
 afterAll(() => server.close());
 
+// `kind: 'follow_up'` is the shape used by tests that exercise the
+// success/error paths after fields have been collected — they mock a
+// success/redirect/error response from the provisioning endpoint, so
+// the body the wizard would actually send doesn't matter for those
+// tests; what matters is that the input is type-valid.
 const INPUT = {
+  kind: 'follow_up',
   email: 'ada@example.com',
   fullName: 'Ada Lovelace',
-  zone: 'us' as const,
-};
+  legalDocumentBundle: {
+    terms_of_service: 'https://amplitude.com/terms',
+    privacy_policy: 'https://amplitude.com/privacy',
+  },
+  zone: 'us',
+} as const;
+
+// Initial-shape input for tests that exercise the probe path
+// (needs_information / requires_redirect responses).
+const INITIAL_INPUT = {
+  kind: 'initial',
+  email: 'ada@example.com',
+  zone: 'us',
+} as const;
 
 describe('performDirectSignup', () => {
   it('happy path: exchanges oauth code for tokens and returns success', async () => {
@@ -140,6 +158,7 @@ describe('performDirectSignup', () => {
     );
 
     const result = await performDirectSignup({
+      kind: 'initial',
       email: 'ada@example.com',
       zone: 'us',
     });
@@ -187,6 +206,7 @@ describe('performDirectSignup', () => {
     );
 
     const result = await performDirectSignup({
+      kind: 'initial',
       email: 'ada@example.com',
       zone: 'us',
     });
@@ -236,6 +256,7 @@ describe('performDirectSignup', () => {
       );
 
       const result = await performDirectSignup({
+        kind: 'initial',
         email: 'ada@example.com',
         zone: 'us',
       });
@@ -266,6 +287,7 @@ describe('performDirectSignup', () => {
     );
 
     const result = await performDirectSignup({
+      kind: 'initial',
       email: 'ada@example.com',
       zone: 'us',
     });
@@ -306,6 +328,7 @@ describe('performDirectSignup', () => {
     );
 
     const result = await performDirectSignup({
+      kind: 'initial',
       email: 'ada@example.com',
       zone: 'us',
     });
@@ -353,6 +376,7 @@ describe('performDirectSignup', () => {
     );
 
     const result = await performDirectSignup({
+      kind: 'initial',
       email: 'ada@example.com',
       zone: 'us',
     });
@@ -399,6 +423,7 @@ describe('performDirectSignup', () => {
     );
 
     const result = await performDirectSignup({
+      kind: 'initial',
       email: 'ada@example.com',
       zone: 'us',
     });
@@ -459,6 +484,7 @@ describe('performDirectSignup', () => {
       );
 
       const result = await performDirectSignup({
+        kind: 'initial',
         email: 'ada@example.com',
         zone: 'us',
       });
@@ -488,7 +514,11 @@ describe('performDirectSignup', () => {
       }),
     );
 
-    await performDirectSignup({ email: 'ada@example.com', zone: 'us' });
+    await performDirectSignup({
+      kind: 'initial',
+      email: 'ada@example.com',
+      zone: 'us',
+    });
 
     expect(observedBody).not.toBeNull();
     expect(observedBody!).not.toHaveProperty('full_name');
@@ -509,6 +539,45 @@ describe('performDirectSignup', () => {
 
     expect(observedBody).not.toBeNull();
     expect(observedBody!.full_name).toBe('Ada Lovelace');
+    // Discriminated-union invariant: a `kind: 'follow_up'` input
+    // always carries a complete `terms_acceptance` slot in the body.
+    // Verifies that the body-construction switch produces both
+    // documents with `accepted: true`.
+    expect(observedBody!.terms_acceptance).toEqual({
+      terms_of_service: {
+        url: 'https://amplitude.com/terms',
+        accepted: true,
+      },
+      privacy_policy: {
+        url: 'https://amplitude.com/privacy',
+        accepted: true,
+      },
+    });
+  });
+
+  it('omits terms_acceptance from the request body on initial-shape input', async () => {
+    let observedBody: Record<string, unknown> | null = null;
+    server.use(
+      http.post(PROVISIONING_URL, async ({ request }) => {
+        observedBody = (await request.json()) as Record<string, unknown>;
+        return HttpResponse.json({
+          type: 'needs_information',
+          needs_information: {
+            schema: {
+              type: 'object',
+              properties: { full_name: { type: 'string' } },
+              required: ['full_name'],
+            },
+          },
+        });
+      }),
+    );
+
+    await performDirectSignup(INITIAL_INPUT);
+
+    expect(observedBody).not.toBeNull();
+    expect(observedBody!).not.toHaveProperty('terms_acceptance');
+    expect(observedBody!).not.toHaveProperty('full_name');
   });
 
   it('returns requires_redirect on requires_auth response', async () => {
@@ -886,11 +955,7 @@ describe('performDirectSignup', () => {
     );
 
     try {
-      await performDirectSignup({
-        email: 'ada@example.com',
-        fullName: 'Ada Lovelace',
-        zone: 'us',
-      });
+      await performDirectSignup(INPUT);
       expect(observedUrl).toBe('http://localhost:9999/custom-path');
     } finally {
       if (original === undefined) {

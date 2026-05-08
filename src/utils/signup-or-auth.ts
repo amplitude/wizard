@@ -145,25 +145,45 @@ export const trackSignupAttempt = (
   analytics.wizardCapture(AGENTIC_SIGNUP_ATTEMPTED_EVENT, properties);
 };
 
-export interface SignupOrAuthInput {
-  email: string | null;
-  /**
-   * Optional. Omit on the probe POST so the server can decide whether the
-   * account is new (→ `needs_information`) or already exists (→ redirect).
-   * Pass it on the follow-up POST after the wizard collected it.
-   */
-  fullName?: string | null;
-  zone: AmplitudeZone;
-  /**
-   * Threaded from the screen's `useAsyncEffect`. Aborts the in-flight
-   * provisioning + token-exchange POSTs and gates the post-success
-   * persistence (`replaceStoredUser`) so a cancelled ceremony doesn't
-   * leak tokens to disk. Without this, `/exit` mid-POST would still
-   * persist tokens and the next launch would think the user is signed
-   * in.
-   */
-  signal?: AbortSignal;
-}
+/**
+ * Wrapper input — mirrors `DirectSignupInput`'s discriminated union with
+ * one accommodation: `email` may be `null` here. The wrapper short-circuits
+ * to a `'missing email'` error before reaching `performDirectSignup`, so
+ * the underlying call always sees a non-null email.
+ *
+ * The screen at the call site (`SigningUpScreen.tsx`) decides which kind
+ * to build based on `session.signupRequiredFields !== null` (BE-driven:
+ * has the BE returned `needs_information` at least once during this
+ * ceremony?). Data-completeness is enforced separately by the flow gate
+ * (`requiredSatisfied` in `flows.ts`) — by the time SigningUp re-fires,
+ * every required field is collected.
+ */
+export type SignupOrAuthInput =
+  | {
+      kind: 'initial';
+      email: string | null;
+      zone: AmplitudeZone;
+      /**
+       * Threaded from the screen's `useAsyncEffect`. Aborts the in-flight
+       * provisioning + token-exchange POSTs and gates the post-success
+       * persistence (`replaceStoredUser`) so a cancelled ceremony doesn't
+       * leak tokens to disk. Without this, `/exit` mid-POST would still
+       * persist tokens and the next launch would think the user is
+       * signed in.
+       */
+      signal?: AbortSignal;
+    }
+  | {
+      kind: 'follow_up';
+      email: string | null;
+      fullName: string;
+      legalDocumentBundle: {
+        terms_of_service: string;
+        privacy_policy: string;
+      };
+      zone: AmplitudeZone;
+      signal?: AbortSignal;
+    };
 
 /**
  * Discriminated-union result of {@link performSignupOrAuth}.
@@ -244,21 +264,36 @@ export async function performSignupOrAuth(
     log.debug('missing email; skipping direct signup');
     return { kind: 'error', message: 'missing email' };
   }
-  const fullName = input.fullName ?? null;
+  // Narrow the discriminated input to the underlying-typed shape that
+  // `performDirectSignup` accepts. Email-non-null guard above lets us
+  // upgrade `email: string | null` to `email: string` here. No optional-
+  // field reassembly: the wrapper passes the discriminator through so
+  // direct-signup builds the body via its own switch.
+  const directSignupInput =
+    input.kind === 'initial'
+      ? {
+          kind: 'initial' as const,
+          email: input.email,
+          zone: input.zone,
+          signal: input.signal,
+        }
+      : {
+          kind: 'follow_up' as const,
+          email: input.email,
+          fullName: input.fullName,
+          legalDocumentBundle: input.legalDocumentBundle,
+          zone: input.zone,
+          signal: input.signal,
+        };
 
-  log.debug('attempting direct signup', { hasFullName: fullName !== null });
+  log.debug('attempting direct signup', { kind: input.kind });
   // performDirectSignup is contracted to catch its own network/parse errors
   // and return { kind: 'error' }. The try/catch here is belt-and-suspenders
   // enforcement against an unexpected throw — emit `wrapper_exception`
   // telemetry so a thrown error is distinguishable from a clean error arm.
   let result: Awaited<ReturnType<typeof performDirectSignup>>;
   try {
-    result = await performDirectSignup({
-      email: input.email,
-      ...(fullName !== null ? { fullName } : {}),
-      zone: input.zone,
-      signal: input.signal,
-    });
+    result = await performDirectSignup(directSignupInput);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     log.warn('direct signup threw unexpectedly', { message });
@@ -378,10 +413,14 @@ export async function performSignupOrAuth(
         zone: input.zone,
       },
     );
-    // `fullName` is required by the server when this success arm fires, so
-    // it's non-null here despite being optional in the input — the server
-    // would have returned `needs_information` otherwise.
-    const parts = (fullName ?? '').trim().split(/\s+/);
+    // `fullName` is required by the server when this success arm fires.
+    // On a follow-up call, `input.fullName` is present (discriminated
+    // union enforces it). On an initial-call success arm, the BE returned
+    // tokens straight away without needing the field — fall back to an
+    // empty string here.
+    const fullNameForFallback =
+      input.kind === 'follow_up' ? input.fullName : '';
+    const parts = fullNameForFallback.trim().split(/\s+/);
     user = {
       id: 'pending',
       firstName: parts[0] ?? '',
