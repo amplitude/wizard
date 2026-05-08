@@ -2007,6 +2007,7 @@ export class WizardStore {
     this.router.pushOverlay(overlay);
     this.$version.set(this.$version.get() + 1);
     this._detectTransition();
+    triggerRerender();
   }
 
   popOverlay(): void {
@@ -2014,6 +2015,7 @@ export class WizardStore {
     this.router.popOverlay();
     this.$version.set(this.$version.get() + 1);
     this._detectTransition();
+    triggerRerender();
   }
 
   // ── Screen transition analytics ─────────────────────────────────
