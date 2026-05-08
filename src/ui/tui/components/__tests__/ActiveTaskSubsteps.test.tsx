@@ -121,6 +121,33 @@ describe('ActiveTaskSubsteps — rendering', () => {
   it('exposes DEFAULT_MAX_SUBSTEPS at 3 (pinned UX)', () => {
     expect(DEFAULT_MAX_SUBSTEPS).toBe(3);
   });
+
+  it('renders substep rows tight (no blank line between rows)', () => {
+    // Regression: Ink/Yoga gives a row 2 lines of vertical space when a
+    // child has flexGrow={1} + truncated text, which produced a blank row
+    // between every substep. We pin each row at height={1}; this test
+    // guards against the spacing regression returning.
+    const activities: ToolActivity[] = [
+      activity('Reading App.tsx', 'completed'),
+      activity('Reading index.tsx', 'completed'),
+      activity('Editing index.tsx', 'in_progress'),
+    ];
+    const { lastFrame, unmount } = render(
+      <ActiveTaskSubsteps activities={activities} width={120} />,
+    );
+    const stripped = stripAnsi(lastFrame() ?? '');
+    const lines = stripped.split('\n').filter((l) => l.length > 0);
+    expect(lines).toHaveLength(3);
+    expect(lines[0]).toContain('Reading App.tsx');
+    expect(lines[1]).toContain('Reading index.tsx');
+    expect(lines[2]).toContain('Editing index.tsx');
+    // No blank rows between substeps.
+    const between = stripped.split('\n').slice(0, 5);
+    expect(between[0]).toContain('Reading App.tsx');
+    expect(between[1]).toContain('Reading index.tsx');
+    expect(between[2]).toContain('Editing index.tsx');
+    unmount();
+  });
 });
 
 describe('WizardStore.recordToolActivity — buffer behavior', () => {
