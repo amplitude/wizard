@@ -80,6 +80,159 @@ describe('maybeRunAiSdkGatewayProbe', () => {
   });
 });
 
+describe('maybeRunAiSdkGatewayProbe memoization', () => {
+  afterEach(() => {
+    vi.unstubAllEnvs();
+    vi.resetModules();
+  });
+
+  it('only invokes the underlying network call once for the same baseURL+token across two calls (cache hit on second)', async () => {
+    vi.stubEnv('AMPLITUDE_WIZARD_AI_SDK_PROBE', '1');
+    vi.stubEnv('ANTHROPIC_BASE_URL', 'https://core.amplitude.com/wizard');
+    vi.stubEnv('ANTHROPIC_AUTH_TOKEN', 'oauth-token-xyz');
+    vi.stubEnv('ANTHROPIC_API_KEY', '');
+
+    const mockCreateWizardAiSdkAnthropic = vi.fn(() => () => 'fake-model');
+    const mockStreamText = vi.fn(() => ({
+      textStream: (async function* () {
+        yield 'wizard_ai_sdk_probe_ok';
+      })(),
+    }));
+
+    vi.doMock('../wizard-ai-sdk-anthropic.js', () => ({
+      createWizardAiSdkAnthropic: mockCreateWizardAiSdkAnthropic,
+      ensureV1Suffix: (raw: string | undefined) => {
+        if (!raw) return raw;
+        const trimmed = raw.replace(/\/+$/, '');
+        return /\/v\d+$/.test(trimmed) ? trimmed : `${trimmed}/v1`;
+      },
+    }));
+    vi.doMock('ai', () => ({ streamText: mockStreamText }));
+
+    const { maybeRunAiSdkGatewayProbe, __resetGatewayProbeCacheForTesting } =
+      await import('../ai-sdk-gateway-probe.js');
+    __resetGatewayProbeCacheForTesting();
+
+    const r1 = await maybeRunAiSdkGatewayProbe({
+      useLocalClaude: false,
+      useDirectApiKey: false,
+    });
+    const r2 = await maybeRunAiSdkGatewayProbe({
+      useLocalClaude: false,
+      useDirectApiKey: false,
+    });
+
+    expect(r1.status).toBe('ok');
+    expect(r2.status).toBe('ok');
+    // The expensive bits (factory construction + stream completion) must run
+    // exactly once even though the probe was called twice.
+    expect(mockCreateWizardAiSdkAnthropic).toHaveBeenCalledTimes(1);
+    expect(mockStreamText).toHaveBeenCalledTimes(1);
+  });
+
+  it('does not memoize failures — a transient error retries on the next call', async () => {
+    vi.stubEnv('AMPLITUDE_WIZARD_AI_SDK_PROBE', '1');
+    vi.stubEnv('ANTHROPIC_BASE_URL', 'https://core.amplitude.com/wizard');
+    vi.stubEnv('ANTHROPIC_AUTH_TOKEN', 'oauth-token-xyz');
+    vi.stubEnv('ANTHROPIC_API_KEY', '');
+
+    const mockCreateWizardAiSdkAnthropic = vi.fn(() => () => 'fake-model');
+    let callCount = 0;
+    const mockStreamText = vi.fn(() => {
+      callCount += 1;
+      if (callCount === 1) {
+        // First call simulates a transient gateway hiccup. The probe's
+        // `for await (… of textStream)` catches the throw and returns
+        // `{ status: 'error', … }` rather than re-throwing.
+        const failingStream: AsyncIterable<string> = {
+          [Symbol.asyncIterator]() {
+            return {
+              next() {
+                return Promise.reject(new Error('gateway 503'));
+              },
+            };
+          },
+        };
+        return { textStream: failingStream };
+      }
+      return {
+        textStream: (async function* () {
+          yield 'wizard_ai_sdk_probe_ok';
+        })(),
+      };
+    });
+
+    vi.doMock('../wizard-ai-sdk-anthropic.js', () => ({
+      createWizardAiSdkAnthropic: mockCreateWizardAiSdkAnthropic,
+      ensureV1Suffix: (raw: string | undefined) => {
+        if (!raw) return raw;
+        const trimmed = raw.replace(/\/+$/, '');
+        return /\/v\d+$/.test(trimmed) ? trimmed : `${trimmed}/v1`;
+      },
+    }));
+    vi.doMock('ai', () => ({ streamText: mockStreamText }));
+
+    const { maybeRunAiSdkGatewayProbe, __resetGatewayProbeCacheForTesting } =
+      await import('../ai-sdk-gateway-probe.js');
+    __resetGatewayProbeCacheForTesting();
+
+    const r1 = await maybeRunAiSdkGatewayProbe({
+      useLocalClaude: false,
+      useDirectApiKey: false,
+    });
+    const r2 = await maybeRunAiSdkGatewayProbe({
+      useLocalClaude: false,
+      useDirectApiKey: false,
+    });
+
+    expect(r1.status).toBe('error');
+    expect(r2.status).toBe('ok');
+    // Both attempts hit streamText because the failure was not cached.
+    expect(mockStreamText).toHaveBeenCalledTimes(2);
+  });
+
+  it('treats different baseURLs as separate cache entries', async () => {
+    vi.stubEnv('AMPLITUDE_WIZARD_AI_SDK_PROBE', '1');
+    vi.stubEnv('ANTHROPIC_AUTH_TOKEN', 'oauth-token-xyz');
+    vi.stubEnv('ANTHROPIC_API_KEY', '');
+
+    const mockCreateWizardAiSdkAnthropic = vi.fn(() => () => 'fake-model');
+    const mockStreamText = vi.fn(() => ({
+      textStream: (async function* () {
+        yield 'wizard_ai_sdk_probe_ok';
+      })(),
+    }));
+
+    vi.doMock('../wizard-ai-sdk-anthropic.js', () => ({
+      createWizardAiSdkAnthropic: mockCreateWizardAiSdkAnthropic,
+      ensureV1Suffix: (raw: string | undefined) => {
+        if (!raw) return raw;
+        const trimmed = raw.replace(/\/+$/, '');
+        return /\/v\d+$/.test(trimmed) ? trimmed : `${trimmed}/v1`;
+      },
+    }));
+    vi.doMock('ai', () => ({ streamText: mockStreamText }));
+
+    const { maybeRunAiSdkGatewayProbe, __resetGatewayProbeCacheForTesting } =
+      await import('../ai-sdk-gateway-probe.js');
+    __resetGatewayProbeCacheForTesting();
+
+    vi.stubEnv('ANTHROPIC_BASE_URL', 'https://core.amplitude.com/wizard');
+    await maybeRunAiSdkGatewayProbe({
+      useLocalClaude: false,
+      useDirectApiKey: false,
+    });
+    vi.stubEnv('ANTHROPIC_BASE_URL', 'https://eu.amplitude.com/wizard');
+    await maybeRunAiSdkGatewayProbe({
+      useLocalClaude: false,
+      useDirectApiKey: false,
+    });
+
+    // Distinct baseURLs do not share cache entries.
+    expect(mockStreamText).toHaveBeenCalledTimes(2);
+  });
+});
+
 describe('enforceAiSdkProbeStrict', () => {
   afterEach(() => {
     vi.unstubAllEnvs();
