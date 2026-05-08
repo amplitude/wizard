@@ -36,6 +36,26 @@ export interface FsSnapshot {
 }
 
 /**
+ * Result of running the scenario's `buildCommand` against the
+ * post-wizard working tree. Layer 3 grades against this — exit code
+ * 0 = the integration still compiles, anything else = the wizard's
+ * change broke the build.
+ *
+ * `stderrTail` is the last ~80 lines of redacted stderr; the full
+ * stream isn't preserved because typical build logs are large and
+ * triagers only need the failure context. `installExitCode` is
+ * tracked separately because an `install` failure is a different
+ * class of bug than a `build` failure (lockfile drift vs. type
+ * error).
+ */
+export interface BuildResult {
+  exitCode: number;
+  installExitCode?: number;
+  stderrTail: string;
+  durationMs: number;
+}
+
+/**
  * The artifact a scenario produces. Scorers consume this; they never
  * re-spawn the wizard or touch the live filesystem.
  *
@@ -67,6 +87,14 @@ export interface Artifact {
    * any token-shape match here as a redactor-failure hard fail.
    */
   stderr: string;
+  /**
+   * Result of `pnpm install && pnpm build` (or scenario.buildCommand)
+   * inside the working tree. Live runs always populate this if the
+   * scenario opts in via `runBuild: true`. Goldens may pin a recorded
+   * outcome via `golden/build-result.json`. Absence is fine — the L3
+   * scorer treats undefined as "no build attempted, no signal."
+   */
+  buildResult?: BuildResult;
   /**
    * Source of the artifact. `live` = freshly spawned wizard. `golden`
    * = pre-recorded NDJSON + a baseline snapshot loaded from disk.

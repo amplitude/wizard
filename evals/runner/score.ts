@@ -41,6 +41,8 @@ import { scorer as l2NoVendorAdditions } from '../scorers/layer2-static/no-vendo
 import { scorer as l2ServerSdkUsage } from '../scorers/layer2-static/server-sdk-usage.js';
 import { scorer as l2PropertyKeyNaming } from '../scorers/layer2-static/property-key-naming.js';
 
+import { scorer as l3BuildPasses } from '../scorers/layer3-build/build-passes.js';
+
 /**
  * The full scorer stack. Order matters — Layer 0 runs first; if any
  * Layer 0 scorer hard-fails, downstream layers are skipped.
@@ -67,6 +69,8 @@ export const SCORERS: Scorer[] = [
   l2NoVendorAdditions,
   l2InitOptionsCommented,
   l2PropertyKeyNaming,
+  // Layer 3 — build / typecheck.
+  l3BuildPasses,
 ];
 
 export interface ScoreOptions {
@@ -110,7 +114,7 @@ export function score(options: ScoreOptions): Report {
       if (result.hardFail) hardFailed = true;
     }
     // Downstream layers — only run when no Layer 0 hard fail.
-    // Loops over every layer > 0 so Layer 2+ scorers participate
+    // Loops over every layer > 0 so future layers (4, 5, 6, ...) slot in
     // automatically as they're added to SCORERS.
     const downstream = SCORERS.filter((s) => s.layer > 0);
     if (!hardFailed) {

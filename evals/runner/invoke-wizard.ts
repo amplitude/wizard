@@ -29,7 +29,7 @@ import { join } from 'node:path';
 import { redactString } from '../../src/lib/observability/redact.js';
 import { captureFsSnapshot } from './fs-snapshot.js';
 import { parseStream } from './parse-stream.js';
-import type { Artifact, FsSnapshot, Scenario } from './types.js';
+import type { Artifact, BuildResult, FsSnapshot, Scenario } from './types.js';
 
 /**
  * Generate a short, sortable run ID. Prefer crypto.randomUUID over a
@@ -395,6 +395,17 @@ export function runReplay(options: ReplayOptions): RunnerResult {
   const stderrPath = join(goldenDir, 'stderr.txt');
   const stderr = existsSync(stderrPath) ? readFileSync(stderrPath, 'utf8') : '';
 
+  // Optional `golden/build-result.json` pins a pre-recorded
+  // {@link BuildResult} for the L3 scorer. Absence is fine — L3 then
+  // skip-passes with weight 0 (no signal, no penalty).
+  const buildResultPath = join(goldenDir, 'build-result.json');
+  let buildResult: BuildResult | undefined;
+  if (existsSync(buildResultPath)) {
+    buildResult = JSON.parse(
+      readFileSync(buildResultPath, 'utf8'),
+    ) as BuildResult;
+  }
+
   const parsed = parseStream(ndjson);
   const fsSnapshot: FsSnapshot = captureFsSnapshot(pristineDir, goldenWorking);
 
@@ -409,6 +420,7 @@ export function runReplay(options: ReplayOptions): RunnerResult {
       runLog: parsed.events,
       fsSnapshot,
       stderr,
+      buildResult,
       source: 'golden',
     },
     // Replay reads file content from the pre-recorded golden working
