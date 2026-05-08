@@ -300,6 +300,17 @@ export class FileChangeLedger {
   }
 
   /**
+   * Resolved install directory the ledger was constructed with. Exposed so
+   * read-only consumers (e.g. {@link summarizeLedgerPath}) can normalize a
+   * raw lookup path the same way `recordPreWrite` / `recordPostWrite` did
+   * before storing the entry — otherwise a relative or `..`-bearing path
+   * would silently miss the lookup.
+   */
+  getInstallDir(): string {
+    return this.installDir;
+  }
+
+  /**
    * Reverse the ledger. Walks entries in last-in-first-out order so a
    * file written then edited is restored from its first-recorded
    * `beforeContent`.

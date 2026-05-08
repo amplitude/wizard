@@ -270,11 +270,21 @@ export function createInnerLifecycleHooks(config: InnerLifecycleConfig): {
       try {
         const ui = getAgentUI();
         if (ui) {
-          const summary = summarizeLedgerPath(getFileChangeLedger(), path);
+          // `includePatch: false` skips the redundant `createPatch` call —
+          // we only consume additions/deletions/hunks here, so paying for
+          // the unified-patch text on every PostToolUse is pure waste.
+          const summary = summarizeLedgerPath(getFileChangeLedger(), path, {
+            includePatch: false,
+          });
           if (summary) {
+            // `summary.operation` reflects the ledger's filesystem-derived
+            // truth (was the file there pre-write?). The toolName-derived
+            // `operation` above hardcodes Write→'create' even when Write
+            // overwrote an existing file — wrong for the orchestrator-
+            // facing NDJSON contract.
             ui.emitFileChanged({
               path,
-              operation,
+              operation: summary.operation,
               additions: summary.additions,
               deletions: summary.deletions,
               hunks: summary.hunks,

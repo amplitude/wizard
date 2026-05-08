@@ -39,7 +39,10 @@ import {
   parseCreateProjectSlashInput,
 } from '../console-commands.js';
 import { getFileChangeLedger } from '../../../lib/file-change-ledger.js';
-import { summarizeLedgerDiffs } from '../../../lib/file-change-diff.js';
+import {
+  summarizeLedgerDiffs,
+  summarizeLedgerPath,
+} from '../../../lib/file-change-diff.js';
 import { formatChangeCounts } from './DiffViewer.js';
 import path from 'node:path';
 import { analytics } from '../../../utils/analytics.js';
@@ -298,7 +301,53 @@ function executeCommand(raw: string, store: WizardStore): string | void {
       // a tree of touched files with +N/-M counts (no path arg) or
       // the additions/deletions for one file (path arg).
       const arg = parseDiffSlashInput(raw) ?? '';
-      const diffs = summarizeLedgerDiffs(getFileChangeLedger());
+      const ledger = getFileChangeLedger();
+      // Detail mode (`/diff <path>`): use the purpose-built single-path
+      // helper so we don't burn `structuredPatch`+`createPatch` on every
+      // unrelated file in the ledger just to discard them. The summary
+      // mode below still needs the full sweep for the +N/-M tree.
+      if (arg) {
+        // Resolve relative paths against installDir so users can type
+        // `/diff src/amplitude.ts` instead of pasting an absolute path.
+        const target = path.isAbsolute(arg)
+          ? arg
+          : path.resolve(store.session.installDir, arg);
+        const found = summarizeLedgerPath(ledger, target);
+        if (!found) {
+          // Fallback: walk the ledger entries directly so a user-friendly
+          // suffix match (e.g. `/diff amplitude.ts` matching
+          // `<installDir>/src/lib/amplitude.ts`) still works without
+          // forcing a second full diff sweep up-front.
+          const entries = ledger?.getEntries() ?? [];
+          const suffix = path.sep + arg;
+          const suffixEntry = entries.find((e) => e.path.endsWith(suffix));
+          const suffixFound = suffixEntry
+            ? summarizeLedgerPath(ledger, suffixEntry.path)
+            : null;
+          if (!suffixFound) {
+            store.setCommandFeedback(
+              `No diff captured for "${arg}". Try /diff with no argument to see all changed files.`,
+              15_000,
+            );
+            break;
+          }
+          store.setCommandFeedback(
+            `${suffixFound.operation.toUpperCase()} ${suffixFound.path}  ${formatChangeCounts(suffixFound.additions, suffixFound.deletions)}\n\n${suffixFound.patch}`,
+            60_000,
+          );
+          break;
+        }
+        // Surface the patch body in the feedback channel. The slash console
+        // can't easily render syntax-coloured diffs inline, but the unified
+        // patch text is itself readable and copy-pasteable.
+        store.setCommandFeedback(
+          `${found.operation.toUpperCase()} ${found.path}  ${formatChangeCounts(found.additions, found.deletions)}\n\n${found.patch}`,
+          60_000,
+        );
+        break;
+      }
+      // Summary mode (no arg): walk the whole ledger.
+      const diffs = summarizeLedgerDiffs(ledger);
       if (diffs.length === 0) {
         store.setCommandFeedback(
           'No file changes captured yet — the agent has not written anything in this session.',
@@ -306,45 +355,20 @@ function executeCommand(raw: string, store: WizardStore): string | void {
         );
         break;
       }
-      if (!arg) {
-        const totalAdd = diffs.reduce((s, d) => s + d.additions, 0);
-        const totalDel = diffs.reduce((s, d) => s + d.deletions, 0);
-        const lines = diffs.map((d) => {
-          // Use path.sep so this works on Windows. Belt-and-braces: also
-          // accept the unit-test/POSIX form by checking either separator.
-          const rel = d.path.startsWith(store.session.installDir + path.sep)
-            ? path.relative(store.session.installDir, d.path)
-            : d.path;
-          return `${d.operation.toUpperCase().padEnd(6)} ${rel}  ${formatChangeCounts(d.additions, d.deletions)}`;
-        });
-        const summary = `${diffs.length} file${
-          diffs.length === 1 ? '' : 's'
-        } changed (+${totalAdd}/-${totalDel})\n${lines.join('\n')}`;
-        store.setCommandFeedback(summary, 30_000);
-        break;
-      }
-      // Resolve relative paths against installDir so users can type
-      // `/diff src/amplitude.ts` instead of pasting an absolute path.
-      const target = path.isAbsolute(arg)
-        ? arg
-        : path.resolve(store.session.installDir, arg);
-      const found =
-        diffs.find((d) => d.path === target) ??
-        diffs.find((d) => d.path.endsWith(path.sep + arg));
-      if (!found) {
-        store.setCommandFeedback(
-          `No diff captured for "${arg}". Try /diff with no argument to see all changed files.`,
-          15_000,
-        );
-        break;
-      }
-      // Surface the patch body in the feedback channel. The slash console
-      // can't easily render syntax-coloured diffs inline, but the unified
-      // patch text is itself readable and copy-pasteable.
-      store.setCommandFeedback(
-        `${found.operation.toUpperCase()} ${found.path}  ${formatChangeCounts(found.additions, found.deletions)}\n\n${found.patch}`,
-        60_000,
-      );
+      const totalAdd = diffs.reduce((s, d) => s + d.additions, 0);
+      const totalDel = diffs.reduce((s, d) => s + d.deletions, 0);
+      const lines = diffs.map((d) => {
+        // Use path.sep so this works on Windows. Belt-and-braces: also
+        // accept the unit-test/POSIX form by checking either separator.
+        const rel = d.path.startsWith(store.session.installDir + path.sep)
+          ? path.relative(store.session.installDir, d.path)
+          : d.path;
+        return `${d.operation.toUpperCase().padEnd(6)} ${rel}  ${formatChangeCounts(d.additions, d.deletions)}`;
+      });
+      const summary = `${diffs.length} file${
+        diffs.length === 1 ? '' : 's'
+      } changed (+${totalAdd}/-${totalDel})\n${lines.join('\n')}`;
+      store.setCommandFeedback(summary, 30_000);
       break;
     }
     case '/help': {

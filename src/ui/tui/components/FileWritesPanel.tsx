@@ -132,17 +132,20 @@ const dedupeByPath = (entries: readonly FileWriteEntry[]): DedupedFileWrite[] =>
  * Relativize an absolute path against the install dir for display. Falls
  * back to the basename if the path lives outside the project (rare, but
  * possible — skill installs sometimes touch tmp dirs).
+ *
+ * Uses `path.sep` rather than a hardcoded `/` so the boundary check works
+ * on Windows (where ledger paths use `\`).
  */
 const displayPath = (raw: string, installDir?: string): string => {
   if (
     installDir &&
     raw.startsWith(installDir) &&
-    (raw.length === installDir.length || raw[installDir.length] === '/')
+    (raw.length === installDir.length || raw[installDir.length] === path.sep)
   ) {
     const rel = path.relative(installDir, raw);
     return rel === '' ? path.basename(raw) : rel;
   }
-  return raw.startsWith('/') ? path.basename(raw) : raw;
+  return path.isAbsolute(raw) ? path.basename(raw) : raw;
 };
 
 export const FileWritesPanel = ({
@@ -277,7 +280,12 @@ const FileWriteRow = ({
   const diffSummary = useMemo(() => {
     if (status !== 'applied') return null;
     try {
-      return summarizeLedgerPath(getFileChangeLedger(), entry.path);
+      // `includePatch: false` — the row only renders +N/-M counts, never
+      // the unified patch body, so paying the second `createPatch` pass
+      // would be pure waste.
+      return summarizeLedgerPath(getFileChangeLedger(), entry.path, {
+        includePatch: false,
+      });
     } catch {
       return null;
     }
