@@ -1554,13 +1554,14 @@ describe('WizardStore', () => {
     });
   });
 
-  describe('syncTodos (activeForm only)', () => {
-    // syncTodos no longer drives status — it only refreshes the
-    // `activeForm` flavor text shown beside each canonical step. Status
-    // is owned by `applyJourneyTransition`. The list is always rendered
-    // as the canonical 4 rows, regardless of TodoWrite content.
+  describe('syncTodos', () => {
+    // syncTodos refreshes the `activeForm` flavor text beside each
+    // canonical step AND forwards the agent's authoritative status
+    // (`in_progress` / `completed`) to `applyJourneyTransition`, which
+    // owns the monotonic guard. The list is always rendered as the
+    // canonical 4 rows, regardless of TodoWrite content.
 
-    it('renders exactly the four canonical steps even with no derived status', () => {
+    it('renders exactly the four canonical steps', () => {
       const store = createStore();
       store.syncTodos([
         { content: 'Install Amplitude', status: 'in_progress' },
@@ -1575,15 +1576,48 @@ describe('WizardStore', () => {
       ]);
     });
 
-    it('does not change step status — that is owned by applyJourneyTransition', () => {
+    it('forwards status=in_progress from TodoWrite to applyJourneyTransition', () => {
+      const store = createStore();
+      store.syncTodos([
+        {
+          content: 'Detect your project setup',
+          status: 'in_progress',
+          activeForm: 'Detecting…',
+        },
+      ]);
+
+      // The agent's explicit signal flips the canonical step.
+      expect(store.tasks[0].status).toBe(TaskStatus.InProgress);
+    });
+
+    it('forwards status=completed from TodoWrite to applyJourneyTransition', () => {
       const store = createStore();
       store.syncTodos([{ content: 'Install Amplitude', status: 'completed' }]);
 
-      // Even with status='completed' in the TodoWrite, the step stays
-      // pending until a deterministic tool-call signal flips it.
+      expect(store.tasks[1].status).toBe(TaskStatus.Completed);
+    });
+
+    it('ignores TodoWrite statuses other than in_progress / completed', () => {
+      const store = createStore();
+      store.syncTodos([{ content: 'Install Amplitude', status: 'pending' }]);
+      store.syncTodos([{ content: 'Install Amplitude', status: 'cancelled' }]);
+
       expect(store.tasks.every((t) => t.status === TaskStatus.Pending)).toBe(
         true,
       );
+    });
+
+    it('monotonic guard prevents completed → in_progress regression from TodoWrite', () => {
+      const store = createStore();
+      store.syncTodos([{ content: 'Install Amplitude', status: 'completed' }]);
+      expect(store.tasks[1].status).toBe(TaskStatus.Completed);
+
+      // A subsequent TodoWrite restating the step as in_progress must
+      // not demote it — applyJourneyTransition's guard owns this.
+      store.syncTodos([
+        { content: 'Install Amplitude', status: 'in_progress' },
+      ]);
+      expect(store.tasks[1].status).toBe(TaskStatus.Completed);
     });
 
     it('updates the matched step activeForm so the user sees current narration', () => {
@@ -1843,11 +1877,11 @@ describe('WizardStore', () => {
       );
     });
 
-    it('syncTodos with no derived journey state leaves every step pending', () => {
+    it('syncTodos with empty / unrecognised status leaves every step pending', () => {
       const store = createStore();
       store.syncTodos([{ content: 'Install Amplitude', status: '' }]);
-      // syncTodos cannot set status on its own — without a journey
-      // transition every step stays pending.
+      // syncTodos forwards in_progress / completed only; an empty
+      // status string is ignored, so every step stays pending.
       expect(store.tasks.every((t) => t.status === TaskStatus.Pending)).toBe(
         true,
       );
