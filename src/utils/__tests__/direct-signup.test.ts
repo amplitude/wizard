@@ -146,7 +146,16 @@ describe('performDirectSignup', () => {
 
     expect(result.kind).toBe('needs_information');
     if (result.kind === 'needs_information') {
-      expect(result.requiredFields).toEqual(['full_name']);
+      // The parser's spoof block injects 'terms_acceptance' into
+      // requiredFields when BE doesn't include it (Phase A behavior).
+      // After the BE flag flips ON across env tiers, BE will return both
+      // and the spoof's `else` branch becomes a no-op.
+      expect(result.requiredFields).toEqual(['full_name', 'terms_acceptance']);
+      expect(result.legalDocumentSource).toBe('local');
+      expect(result.legalDocumentBundle).toEqual({
+        terms_of_service: 'https://amplitude.com/terms',
+        privacy_policy: 'https://amplitude.com/privacy',
+      });
     }
   });
 
@@ -186,7 +195,8 @@ describe('performDirectSignup', () => {
     if (result.kind === 'needs_information') {
       observedRequiredFields = result.requiredFields;
     }
-    expect(observedRequiredFields).toEqual(['full_name']);
+    // Spoof injects 'terms_acceptance' when BE didn't return it.
+    expect(observedRequiredFields).toEqual(['full_name', 'terms_acceptance']);
   });
 
   // ── needs_information `required` shape gate (schema-layer) ───────────
@@ -238,8 +248,8 @@ describe('performDirectSignup', () => {
   );
 
   it('accepts the canonical `["full_name"]` shape (schema gate passes)', async () => {
-    // Companion to the table above: pin the one shape that DOES pass
-    // through the schema, so the gate's positive path is also covered.
+    // Companion to the table above: pin a shape that DOES pass through
+    // the schema, so the gate's positive path is also covered.
     server.use(
       http.post(PROVISIONING_URL, () =>
         HttpResponse.json({
@@ -262,6 +272,203 @@ describe('performDirectSignup', () => {
 
     expect(result.kind).toBe('needs_information');
   });
+
+  // ── needs_information `terms_acceptance` parsing (Phase A spoof) ──────
+  //
+  // Three behaviors pinned here:
+  //   - BE flag OFF (no terms_acceptance in `required`): spoof block
+  //     synthesizes local URLs and injects 'terms_acceptance' into
+  //     requiredFields. Source = 'local'.
+  //   - BE flag ON, valid documents: parser extracts URLs via the
+  //     transform-based schema. Source = 'server'.
+  //   - BE flag ON but documents are missing/malformed: invariant
+  //     violation — return unsupported_required_shape so the wizard falls
+  //     back to OAuth.
+  //
+  // The `legalDocumentBundle ↔ 'terms_acceptance' in requiredFields`
+  // invariant is part of the parser's contract; downstream (screen, body
+  // construction) relies on it.
+
+  it('flag-OFF (no terms_acceptance in required) spoofs local URLs and injects the kind', async () => {
+    server.use(
+      http.post(PROVISIONING_URL, () =>
+        HttpResponse.json({
+          type: 'needs_information',
+          needs_information: {
+            schema: {
+              type: 'object',
+              properties: { full_name: { type: 'string' } },
+              required: ['full_name'],
+            },
+          },
+        }),
+      ),
+    );
+
+    const result = await performDirectSignup({
+      email: 'ada@example.com',
+      zone: 'us',
+    });
+
+    expect(result.kind).toBe('needs_information');
+    if (result.kind === 'needs_information') {
+      expect(result.requiredFields).toEqual(['full_name', 'terms_acceptance']);
+      expect(result.legalDocumentSource).toBe('local');
+      expect(result.legalDocumentBundle).toEqual({
+        terms_of_service: 'https://amplitude.com/terms',
+        privacy_policy: 'https://amplitude.com/privacy',
+      });
+    }
+  });
+
+  it('flag-ON with valid terms_acceptance documents: passes BE URLs through', async () => {
+    server.use(
+      http.post(PROVISIONING_URL, () =>
+        HttpResponse.json({
+          type: 'needs_information',
+          needs_information: {
+            schema: {
+              type: 'object',
+              properties: {
+                terms_acceptance: {
+                  type: 'object',
+                  documents: [
+                    {
+                      kind: 'terms_of_service',
+                      url: 'https://example.test/terms-v2',
+                    },
+                    {
+                      kind: 'privacy_policy',
+                      url: 'https://example.test/privacy-v2',
+                    },
+                  ],
+                },
+                full_name: { type: 'string' },
+              },
+              required: ['terms_acceptance', 'full_name'],
+            },
+          },
+        }),
+      ),
+    );
+
+    const result = await performDirectSignup({
+      email: 'ada@example.com',
+      zone: 'us',
+    });
+
+    expect(result.kind).toBe('needs_information');
+    if (result.kind === 'needs_information') {
+      expect(result.requiredFields).toEqual(['terms_acceptance', 'full_name']);
+      expect(result.legalDocumentSource).toBe('server');
+      expect(result.legalDocumentBundle).toEqual({
+        terms_of_service: 'https://example.test/terms-v2',
+        privacy_policy: 'https://example.test/privacy-v2',
+      });
+    }
+  });
+
+  it('flag-ON with terms_acceptance alone (no full_name required): still parses', async () => {
+    server.use(
+      http.post(PROVISIONING_URL, () =>
+        HttpResponse.json({
+          type: 'needs_information',
+          needs_information: {
+            schema: {
+              type: 'object',
+              properties: {
+                terms_acceptance: {
+                  type: 'object',
+                  documents: [
+                    {
+                      kind: 'terms_of_service',
+                      url: 'https://amplitude.com/terms',
+                    },
+                    {
+                      kind: 'privacy_policy',
+                      url: 'https://amplitude.com/privacy',
+                    },
+                  ],
+                },
+              },
+              required: ['terms_acceptance'],
+            },
+          },
+        }),
+      ),
+    );
+
+    const result = await performDirectSignup({
+      email: 'ada@example.com',
+      zone: 'us',
+    });
+
+    expect(result.kind).toBe('needs_information');
+    if (result.kind === 'needs_information') {
+      expect(result.requiredFields).toEqual(['terms_acceptance']);
+      expect(result.legalDocumentSource).toBe('server');
+    }
+  });
+
+  it.each([
+    [
+      'wrong array length (length 1)',
+      [{ kind: 'terms_of_service', url: 'https://x.test/t' }],
+    ],
+    [
+      'unknown kind',
+      [
+        { kind: 'terms_of_service', url: 'https://x.test/t' },
+        { kind: 'dpa', url: 'https://x.test/d' },
+      ],
+    ],
+    [
+      'missing one of the two known kinds',
+      [
+        { kind: 'terms_of_service', url: 'https://x.test/t' },
+        { kind: 'terms_of_service', url: 'https://x.test/t2' },
+      ],
+    ],
+    [
+      'malformed URL',
+      [
+        { kind: 'terms_of_service', url: 'not-a-url' },
+        { kind: 'privacy_policy', url: 'https://x.test/p' },
+      ],
+    ],
+    ['documents field missing entirely', undefined],
+  ])(
+    'flag-ON with %s in documents → unsupported_required_shape',
+    async (_label, documents) => {
+      server.use(
+        http.post(PROVISIONING_URL, () =>
+          HttpResponse.json({
+            type: 'needs_information',
+            needs_information: {
+              schema: {
+                type: 'object',
+                properties: {
+                  terms_acceptance:
+                    documents === undefined ? {} : { documents },
+                },
+                required: ['terms_acceptance'],
+              },
+            },
+          }),
+        ),
+      );
+
+      const result = await performDirectSignup({
+        email: 'ada@example.com',
+        zone: 'us',
+      });
+
+      expect(result.kind).toBe('error');
+      if (result.kind === 'error') {
+        expect(result.code).toBe('unsupported_required_shape');
+      }
+    },
+  );
 
   it('omits full_name from the request body when fullName is not supplied', async () => {
     let observedBody: Record<string, unknown> | null = null;

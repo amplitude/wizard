@@ -5,6 +5,8 @@ import {
   AMPLITUDE_ZONE_SETTINGS,
   OUTBOUND_URLS,
   OAUTH_PORT,
+  PRIVACY_POLICY_URL,
+  TERMS_OF_SERVICE_URL,
   type AmplitudeZone,
 } from '../lib/constants.js';
 import { createLogger } from '../lib/observability/logger.js';
@@ -13,6 +15,25 @@ const log = createLogger('direct-signup');
 
 const REQUEST_TIMEOUT_MS = 10_000;
 const MAX_EXPIRES_IN_SECONDS = 86_400 * 365;
+
+/**
+ * The fields the wizard knows how to satisfy when listed in
+ * `needs_information.required`. Drives the schema's refine AND consumers
+ * that exhaustively switch on a kind (e.g. `flows.ts` `requiredSatisfied`).
+ * Adding a new kind here is the single source-of-truth change that
+ * propagates through the parser, the flow predicate, and any other
+ * consumer via `tsc` errors at unhandled call sites.
+ */
+export const KNOWN_REQUIRED_KEYS = ['full_name', 'terms_acceptance'] as const;
+export type RequiredKey = (typeof KNOWN_REQUIRED_KEYS)[number];
+
+/**
+ * Legal document kinds the wizard knows how to render. Same source-of-truth
+ * pattern as KNOWN_REQUIRED_KEYS — the schema's enum and the screen's
+ * iteration both derive from this const.
+ */
+export const KNOWN_DOC_KINDS = ['terms_of_service', 'privacy_policy'] as const;
+export type DocKind = (typeof KNOWN_DOC_KINDS)[number];
 
 // Discriminated union response schemas from the provisioning endpoint.
 // `dashboard_url` — optional magic-link URL (amplitude/javascript PR #108967).
@@ -64,39 +85,58 @@ const RedirectSchema = z.object({
 // test (`accepts properties values with or without optional metadata`) that
 // pins both shapes; keep it green if you change this.
 //
-// **Supported `required` shape:** the wizard's TUI ceremony has exactly one
-// collection screen (`SignupFullNameScreen`), so the only `required` value
-// it can act on is exactly `['full_name']`. The `.refine()` enforces this at
-// the parse layer — anything else (additional fields, missing fields, empty
-// array, substituted field) fails the parse and we route through the
-// type-aware handler below to `kind: 'error'` with `code:
-// 'unsupported_required_shape'`. That code maps to a distinct
-// `needs_information_unsupported` telemetry status in the wrapper so the
-// drift is visible in the funnel before users notice. To extend support,
-// update both this refine and `SUPPORTED_REQUIRED` together.
-const SUPPORTED_REQUIRED: ReadonlyArray<string> = ['full_name'];
+// **Supported `required` shape:** any non-empty subset of
+// `KNOWN_REQUIRED_KEYS`. Anything else (unknown kinds, empty array) fails
+// the parse and we route through the type-aware handler below to
+// `kind: 'error'` with `code: 'unsupported_required_shape'`. That code maps
+// to a distinct `needs_information_unsupported` telemetry status in the
+// wrapper so the drift is visible in the funnel before users notice.
 const NeedsInformationSchema = z.object({
   type: z.literal('needs_information'),
   needs_information: z.object({
     schema: z.object({
       type: z.literal('object'),
       properties: z.record(z.string(), z.unknown()),
-      required: z
-        .array(z.string())
-        .refine(
-          (arr) =>
-            arr.length === SUPPORTED_REQUIRED.length &&
-            SUPPORTED_REQUIRED.every((field) => arr.includes(field)),
-          { message: 'unsupported_required_shape' },
-        ),
+      required: z.array(z.enum(KNOWN_REQUIRED_KEYS)).nonempty(),
     }),
   }),
 });
+
+// Validates AND emits the keyed shape for `terms_acceptance.documents` in
+// one pass via `.transform()`. Output is `{ terms_of_service, privacy_policy }`
+// directly — no `.find()` ceremony at the call site.
+const DocumentEntrySchema = z.object({
+  kind: z.enum(KNOWN_DOC_KINDS),
+  url: z.string().url(),
+});
+
+const TermsAcceptanceDocsSchema = z
+  .array(DocumentEntrySchema)
+  .length(2)
+  .transform((docs, ctx) => {
+    const map: Partial<Record<DocKind, string>> = {};
+    for (const d of docs) map[d.kind] = d.url;
+    if (!map.terms_of_service || !map.privacy_policy) {
+      // ctx = zod RefinementCtx; addIssue + z.NEVER short-circuits the
+      // transform and surfaces the failure at the parent safeParse.
+      ctx.addIssue({ code: 'custom', message: 'unsupported_required_shape' });
+      return z.NEVER;
+    }
+    return {
+      terms_of_service: map.terms_of_service,
+      privacy_policy: map.privacy_policy,
+    };
+  });
 
 const ErrorSchema = z.object({
   type: z.literal('error'),
   error: z.object({ code: z.string(), message: z.string() }),
 });
+
+// Narrow `response.data` (typed as `any` by axios) to "an object with a
+// `type` field" without an `as` cast — zod handles the unknown → typed
+// value safely. Used by the unsupported-shape fall-through.
+const ResponseTypeSchema = z.object({ type: z.string() }).passthrough();
 
 const TokenSchema = z.object({
   access_token: z.string(),
@@ -168,7 +208,29 @@ export type DirectSignupResult =
       dashboardUrl: string | null;
     }
   | { kind: 'requires_redirect' }
-  | { kind: 'needs_information'; requiredFields: string[] }
+  | {
+      kind: 'needs_information';
+      requiredFields: RequiredKey[];
+      /**
+       * URLs of the legal documents the user must accept. Populated under
+       * the spoof in Phase A whenever `'terms_acceptance' in requiredFields`.
+       * Nullable on type to accommodate Phase D (BE drops the requirement)
+       * — at that point the screen-show predicate evaluates false and ToS
+       * is naturally skipped.
+       */
+      legalDocumentBundle: {
+        terms_of_service: string;
+        privacy_policy: string;
+      } | null;
+      /**
+       * Where `legalDocumentBundle`'s URLs originated — `'server'` when BE
+       * provided them in `needs_information.terms_acceptance.documents`,
+       * `'local'` when the parser's spoof block synthesized them from
+       * local constants. Used as the value of the `'legal document source'`
+       * telemetry tag.
+       */
+      legalDocumentSource: 'server' | 'local';
+    }
   | { kind: 'error'; message: string; code?: string };
 
 /**
@@ -237,28 +299,87 @@ export async function performDirectSignup(
 
   const parsedNeeds = NeedsInformationSchema.safeParse(response.data);
   if (parsedNeeds.success) {
+    const requiredFromBE = parsedNeeds.data.needs_information.schema.required;
+    const requiredHasTerms = requiredFromBE.includes('terms_acceptance');
+
+    // Pull `documents` out of `properties.terms_acceptance` defensively —
+    // the wire contract keeps property values opaque (z.unknown), so we
+    // walk the shape with `in`-narrowing rather than tightening the schema.
+    const propsRaw = parsedNeeds.data.needs_information.schema.properties;
+    const termsPropertyRaw = propsRaw['terms_acceptance'];
+    const documentsRaw =
+      typeof termsPropertyRaw === 'object' &&
+      termsPropertyRaw !== null &&
+      'documents' in termsPropertyRaw
+        ? termsPropertyRaw.documents
+        : undefined;
+    const termsParse = TermsAcceptanceDocsSchema.safeParse(documentsRaw);
+
+    // Invariant violation: BE listed terms_acceptance as required but
+    // documents are missing or malformed. Treat as unsupported.
+    if (requiredHasTerms && !termsParse.success) {
+      log.warn(
+        '[direct-signup] needs_information with required terms_acceptance but invalid documents',
+      );
+      return {
+        kind: 'error',
+        code: 'unsupported_required_shape',
+        message:
+          'Server returned terms_acceptance in required without valid documents — falling back to browser auth.',
+      };
+    }
+
+    let legalDocumentBundle: {
+      terms_of_service: string;
+      privacy_policy: string;
+    } | null;
+    let legalDocumentSource: 'server' | 'local';
+    let normalizedRequired: RequiredKey[] = [...requiredFromBE];
+
+    if (requiredHasTerms && termsParse.success) {
+      // Case (b) — BE provided. termsParse.data is the typed keyed record
+      // from TermsAcceptanceDocsSchema's .transform().
+      legalDocumentBundle = termsParse.data;
+      legalDocumentSource = 'server';
+    } else {
+      // === SPOOF BLOCK — DELETE WHEN REMOVING LOCAL FALLBACK ===
+      // Case (a) — BE flag OFF. Synthesize local URLs and inject
+      // 'terms_acceptance' into requiredFields so downstream sees
+      // case (a) and case (b) as the same shape. The screen, the body
+      // construction, the flow predicates — none of them branch on BE
+      // flag state. When the BE flag is ON across env tiers and adoption
+      // telemetry confirms it's safe, this entire `else` branch is what
+      // the cleanup PR deletes — no downstream changes required.
+      legalDocumentBundle = {
+        terms_of_service: TERMS_OF_SERVICE_URL,
+        privacy_policy: PRIVACY_POLICY_URL,
+      };
+      legalDocumentSource = 'local';
+      normalizedRequired = [...requiredFromBE, 'terms_acceptance'];
+      // === END SPOOF BLOCK ===
+    }
+
     return {
       kind: 'needs_information',
-      requiredFields: parsedNeeds.data.needs_information.schema.required,
+      requiredFields: normalizedRequired,
+      legalDocumentBundle,
+      legalDocumentSource,
     };
   }
-  // The schema's `.refine()` rejected the `required` shape (e.g. the
-  // server added a new field the wizard doesn't have a screen for, or
-  // returned an empty `required` array). Detect this here — by peeking
-  // at the response's `type` field — so we can return a distinct error
-  // code instead of falling through to the generic "Unexpected response"
-  // path. The wrapper maps `code: 'unsupported_required_shape'` to
-  // `needs_information_unsupported` telemetry so the wire-contract drift
-  // is visible in the funnel.
-  const responseType =
-    typeof response.data === 'object' &&
-    response.data !== null &&
-    'type' in response.data
-      ? (response.data as { type: unknown }).type
-      : undefined;
+  // The schema rejected the `required` shape (unknown kind, empty array, or
+  // some other contract drift). Detect this here — by peeking at the
+  // response's `type` field — so we can return a distinct error code instead
+  // of falling through to the generic "Unexpected response" path. The
+  // wrapper maps `code: 'unsupported_required_shape'` to
+  // `needs_information_unsupported` telemetry so the wire-contract drift is
+  // visible in the funnel.
+  const typedResponse = ResponseTypeSchema.safeParse(response.data);
+  const responseType = typedResponse.success
+    ? typedResponse.data.type
+    : undefined;
   if (responseType === 'needs_information') {
     log.warn('[direct-signup] needs_information with unsupported shape', {
-      supported: SUPPORTED_REQUIRED,
+      knownKeys: KNOWN_REQUIRED_KEYS,
     });
     return {
       kind: 'error',
