@@ -62,49 +62,47 @@ export async function detectRegionFromToken(
   );
 }
 
+/** Single global LLM proxy URL — shared by every region and every user. */
+export const WIZARD_LLM_PROXY_URL_DEFAULT =
+  'https://wizard.amplitude.com/web-api/wizard';
+
 /**
  * Get the LLM proxy URL for the Claude Agent SDK.
  *
- * Routes through Amplitude's LLM gateway, which validates OAuth tokens
- * and proxies to the Claude model. The Claude Agent SDK uses this as
- * `ANTHROPIC_BASE_URL` and appends `/v1/messages`.
+ * Routes through Amplitude's wizard LLM gateway (Next.js + Vertex), which
+ * accepts the wizard's existing OAuth bearer in `Authorization: Bearer ...`
+ * (or `x-api-key`) and proxies to Claude on Vertex on the user's behalf.
+ * The Claude Agent SDK uses this as `ANTHROPIC_BASE_URL` and appends
+ * `/v1/messages`; the AI SDK appends `/messages` (we add `/v1` in
+ * `ensureV1Suffix`). Both resolve to `…/web-api/wizard/v1/messages` against
+ * the proxy's Next.js `basePath`.
  *
- * Always defaults to the prod gateway — running a local LLM gateway is rare
- * and must be opt-in.
+ * Returns the same URL for every region — the proxy itself is region-agnostic
+ * (the underlying Vertex region is selected server-side). Earlier wizard
+ * releases routed via `core.amplitude.com/wizard` and `core.eu.amplitude.com/wizard`;
+ * those endpoints are no longer the LLM transport target. The Amplitude
+ * data API surface (`/v1/projects`, `/v1/planned-events`) still uses
+ * `core.amplitude.com/wizard` — see `getWizardProxyBase` in `lib/api.ts`.
+ *
+ * The `host` argument is now ignored for the default path. It is preserved
+ * so existing callers (which compute it from the user's region) continue to
+ * compile without change.
  *
  * Resolution precedence (first match wins):
- *   1. `WIZARD_LLM_PROXY_URL` — full URL override (LiteLLM, local proxy, etc.).
- *   2. `WIZARD_ZONE` — region selector (`us` | `eu`). Used by CI so the
- *      eval / bench harness can hit a specific gateway without threading a
- *      stored zone config through. Invalid values are ignored (fall through).
- *   3. `host` argument — derived from the user's stored config zone.
- *   4. US default.
+ *   1. `WIZARD_LLM_PROXY_URL` — full URL override (LiteLLM, local proxy,
+ *      staging, dev). Required for any non-prod target.
+ *   2. Default: `https://wizard.amplitude.com/web-api/wizard`.
+ *
+ * `WIZARD_ZONE` is intentionally NOT consulted here anymore — the LLM proxy
+ * is global. Eval / bench harnesses that need a specific backend must use
+ * `WIZARD_LLM_PROXY_URL` (the existing dev / staging escape hatch).
  */
-export const getLlmGatewayUrlFromHost = (host: string) => {
-  const proxyOverride = process.env.WIZARD_LLM_PROXY_URL;
+export const getLlmGatewayUrlFromHost = (_host: string) => {
+  const proxyOverride = process.env.WIZARD_LLM_PROXY_URL?.trim();
   if (proxyOverride) {
     return proxyOverride;
   }
-
-  // CI / harness path: explicit zone override that bypasses host derivation
-  // entirely. Lets eval and benchmark workflows hit `core.amplitude.com/wizard`
-  // or `core.eu.amplitude.com/wizard` without depending on a stored OAuth
-  // session's zone. Trim before truthiness so empty / whitespace-only values
-  // fall through to the host-derived default rather than producing a
-  // mismatched URL.
-  const zoneOverride = process.env.WIZARD_ZONE?.trim().toLowerCase();
-  if (zoneOverride === 'eu') {
-    return 'https://core.eu.amplitude.com/wizard';
-  }
-  if (zoneOverride === 'us') {
-    return 'https://core.amplitude.com/wizard';
-  }
-
-  if (host.includes('eu.amplitude.com')) {
-    return 'https://core.eu.amplitude.com/wizard';
-  }
-
-  return 'https://core.amplitude.com/wizard';
+  return WIZARD_LLM_PROXY_URL_DEFAULT;
 };
 
 /**

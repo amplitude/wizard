@@ -9,7 +9,6 @@ import {
   type AmplitudeZone,
 } from './constants.js';
 import { callAmplitudeMcp } from './mcp-with-fallback.js';
-import { getHostFromRegion, getLlmGatewayUrlFromHost } from '../utils/urls.js';
 
 // ── Shared axios client ──────────────────────────────────────────────
 //
@@ -360,17 +359,38 @@ export function validateProjectName(
 
 /**
  * Derive the wizard proxy base URL (e.g. `https://core.amplitude.com/wizard`)
- * from a zone by starting from the API host and stripping any trailing
- * `/v1/messages` suffix the gateway appends for the Claude SDK.
+ * for the Amplitude data API surface — used by `/v1/projects` (project
+ * creation) and `/v1/planned-events` (taxonomy ingestion).
+ *
+ * This is a SEPARATE surface from the LLM proxy at `wizard.amplitude.com`:
+ *
+ *   - LLM transport (Claude Agent SDK + AI SDK) → `wizard.amplitude.com/web-api/wizard`
+ *     resolved via `getLlmGatewayUrlFromHost` in `utils/urls.ts`.
+ *   - Amplitude data API (project creation, planned events) → this function,
+ *     `core.amplitude.com/wizard` (US) or `core.eu.amplitude.com/wizard` (EU).
+ *
+ * Don't conflate them — the data API is region-pinned and validates OAuth
+ * tokens against Hydra introspection; the LLM proxy is global.
+ *
+ * Resolution precedence (first match wins):
+ *   1. `WIZARD_PROXY_BASE_URL` — full URL override for tests / dev that need
+ *      to point both write paths at a local proxy. Uses a distinct env var
+ *      from `WIZARD_LLM_PROXY_URL` so the two surfaces can be redirected
+ *      independently.
+ *   2. Region-derived: EU → `core.eu.amplitude.com/wizard`,
+ *      US → `core.amplitude.com/wizard`.
  *
  * Exported so callers + tests can assert the exact endpoint.
  */
 export function getWizardProxyBase(zone: AmplitudeZone): string {
-  const gateway = getLlmGatewayUrlFromHost(getHostFromRegion(zone));
-  // getLlmGatewayUrlFromHost returns the base without `/v1/messages`, but if a
-  // WIZARD_LLM_PROXY_URL override includes it we need to strip it so the base
-  // stays consistent.
-  return gateway.replace(/\/v1\/messages\/?$/, '').replace(/\/$/, '');
+  const override = process.env.WIZARD_PROXY_BASE_URL?.trim();
+  if (override) {
+    return override.replace(/\/v1\/messages\/?$/, '').replace(/\/$/, '');
+  }
+  if (zone === 'eu') {
+    return 'https://core.eu.amplitude.com/wizard';
+  }
+  return 'https://core.amplitude.com/wizard';
 }
 
 /**

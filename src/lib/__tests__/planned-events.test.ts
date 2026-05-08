@@ -33,7 +33,7 @@ vi.mock('@anthropic-ai/claude-agent-sdk', () => ({
 
 const SESSION_ID = 'test-session-id';
 
-/** Matches getWizardProxyBase('us') when WIZARD_LLM_PROXY_URL is set. */
+/** Matches getWizardProxyBase('us') when WIZARD_PROXY_BASE_URL is set. */
 const PROXY_BASE = 'http://localhost:4999/wizard';
 
 function makeFetchResponse(
@@ -66,7 +66,7 @@ function primeSession(): void {
 
 describe('commitPlannedEvents', () => {
   beforeEach(() => {
-    process.env.WIZARD_LLM_PROXY_URL = PROXY_BASE;
+    process.env.WIZARD_PROXY_BASE_URL = PROXY_BASE;
     mockAxiosPost.mockReset();
     mockFetch.mockReset();
     mockQuery.mockReset();
@@ -83,7 +83,7 @@ describe('commitPlannedEvents', () => {
 
   afterEach(() => {
     vi.clearAllMocks();
-    delete process.env.WIZARD_LLM_PROXY_URL;
+    delete process.env.WIZARD_PROXY_BASE_URL;
   });
 
   it('returns zero counts and does not call HTTP or MCP when events are empty', async () => {

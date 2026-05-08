@@ -85,28 +85,68 @@ describe('validateProjectName', () => {
 });
 
 describe('getWizardProxyBase', () => {
-  it('returns the US base for the us zone', () => {
-    const base = getWizardProxyBase('us');
-    // In test/dev mode this may return a localhost override; the important
-    // invariants are: no trailing slash and no /v1/messages suffix.
-    expect(base.endsWith('/')).toBe(false);
-    expect(base.endsWith('/v1/messages')).toBe(false);
+  // getWizardProxyBase is the Amplitude DATA API base — separate surface
+  // from the LLM proxy. It still needs to be region-pinned to
+  // core.amplitude.com / core.eu.amplitude.com because it serves
+  // /v1/projects (project creation) and /v1/planned-events (taxonomy).
+  // The LLM transport moved to wizard.amplitude.com; see
+  // getLlmGatewayUrlFromHost in src/utils/urls.ts.
+
+  it('returns the US data API base for the us zone', () => {
+    const prev = process.env.WIZARD_PROXY_BASE_URL;
+    delete process.env.WIZARD_PROXY_BASE_URL;
+    try {
+      expect(getWizardProxyBase('us')).toBe(
+        'https://core.amplitude.com/wizard',
+      );
+    } finally {
+      if (prev !== undefined) process.env.WIZARD_PROXY_BASE_URL = prev;
+    }
   });
 
-  it('returns the EU base for the eu zone', () => {
-    const base = getWizardProxyBase('eu');
-    expect(base.endsWith('/')).toBe(false);
-    expect(base.endsWith('/v1/messages')).toBe(false);
+  it('returns the EU data API base for the eu zone', () => {
+    const prev = process.env.WIZARD_PROXY_BASE_URL;
+    delete process.env.WIZARD_PROXY_BASE_URL;
+    try {
+      expect(getWizardProxyBase('eu')).toBe(
+        'https://core.eu.amplitude.com/wizard',
+      );
+    } finally {
+      if (prev !== undefined) process.env.WIZARD_PROXY_BASE_URL = prev;
+    }
   });
 
-  it('respects WIZARD_LLM_PROXY_URL override', () => {
-    const prev = process.env.WIZARD_LLM_PROXY_URL;
-    process.env.WIZARD_LLM_PROXY_URL = 'http://localhost:4999/wizard';
+  it('respects WIZARD_PROXY_BASE_URL override', () => {
+    const prev = process.env.WIZARD_PROXY_BASE_URL;
+    process.env.WIZARD_PROXY_BASE_URL = 'http://localhost:4999/wizard';
     try {
       expect(getWizardProxyBase('us')).toBe('http://localhost:4999/wizard');
+      expect(getWizardProxyBase('eu')).toBe('http://localhost:4999/wizard');
     } finally {
-      if (prev === undefined) delete process.env.WIZARD_LLM_PROXY_URL;
-      else process.env.WIZARD_LLM_PROXY_URL = prev;
+      if (prev === undefined) delete process.env.WIZARD_PROXY_BASE_URL;
+      else process.env.WIZARD_PROXY_BASE_URL = prev;
+    }
+  });
+
+  it('does NOT consult WIZARD_LLM_PROXY_URL — that env var is for the LLM proxy only', () => {
+    // Regression: previously getWizardProxyBase derived from
+    // getLlmGatewayUrlFromHost, which meant overriding WIZARD_LLM_PROXY_URL
+    // also changed the project-creation endpoint. After decoupling the LLM
+    // proxy onto wizard.amplitude.com, that coupling broke the data API
+    // and is no longer wanted.
+    const prevLlm = process.env.WIZARD_LLM_PROXY_URL;
+    const prevProxy = process.env.WIZARD_PROXY_BASE_URL;
+    process.env.WIZARD_LLM_PROXY_URL = 'http://localhost:8010';
+    delete process.env.WIZARD_PROXY_BASE_URL;
+    try {
+      expect(getWizardProxyBase('us')).toBe(
+        'https://core.amplitude.com/wizard',
+      );
+    } finally {
+      if (prevLlm === undefined) delete process.env.WIZARD_LLM_PROXY_URL;
+      else process.env.WIZARD_LLM_PROXY_URL = prevLlm;
+      if (prevProxy !== undefined)
+        process.env.WIZARD_PROXY_BASE_URL = prevProxy;
     }
   });
 });
