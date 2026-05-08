@@ -409,6 +409,15 @@ export function runReplay(options: ReplayOptions): RunnerResult {
   const parsed = parseStream(ndjson);
   const fsSnapshot: FsSnapshot = captureFsSnapshot(pristineDir, goldenWorking);
 
+  // Optional `golden/run-second.ndjson` pins a recorded second-run NDJSON
+  // stream for the L1 idempotent-rerun scorer (criterion 16). Absence is
+  // fine — the scorer skip-passes with weight 0 when the field is unset.
+  const secondRunPath = join(goldenDir, 'run-second.ndjson');
+  let secondRunLog: typeof parsed.events | undefined;
+  if (existsSync(secondRunPath)) {
+    secondRunLog = parseStream(readFileSync(secondRunPath, 'utf8')).events;
+  }
+
   return {
     artifact: {
       runId: newRunId(),
@@ -421,6 +430,7 @@ export function runReplay(options: ReplayOptions): RunnerResult {
       fsSnapshot,
       stderr,
       buildResult,
+      secondRunLog,
       source: 'golden',
     },
     // Replay reads file content from the pre-recorded golden working

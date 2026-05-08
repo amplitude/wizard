@@ -33,6 +33,8 @@ import { scorer as l1EnvVarPrefix } from '../scorers/layer1-structural/env-var-p
 import { scorer as l1SetupCompleteShape } from '../scorers/layer1-structural/setup-complete-shape.js';
 import { scorer as l1ExitCodeMatches } from '../scorers/layer1-structural/exit-code-matches-outcome.js';
 import { scorer as l1ConfirmedEventsTracked } from '../scorers/layer1-structural/confirmed-events-tracked.js';
+import { scorer as l1IdempotentRerun } from '../scorers/layer1-structural/idempotent-rerun.js';
+import { scorer as l1SelfVerificationPasses } from '../scorers/layer1-structural/self-verification-passes.js';
 
 import { scorer as l2ServerClientBoundary } from '../scorers/layer2-static/server-client-boundary.js';
 import { scorer as l2InitOptionsCommented } from '../scorers/layer2-static/init-options-commented.js';
@@ -62,6 +64,8 @@ export const SCORERS: Scorer[] = [
   l1SetupCompleteShape,
   l1ExitCodeMatches,
   l1ConfirmedEventsTracked,
+  l1IdempotentRerun,
+  l1SelfVerificationPasses,
   // Layer 2 — static SDK rules (AST-aware).
   l2ServerClientBoundary,
   l2ServerSdkUsage,
