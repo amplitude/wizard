@@ -87,6 +87,42 @@ describe('BrailleSpinner', () => {
     intervalSpy.mockRestore();
   });
 
+  it('does not subscribe to the provider when `frame` prop is provided', async () => {
+    // Spinners with an explicit frame prop should not register with the
+    // provider — otherwise they keep the shared timer alive (and re-render
+    // every 200ms) while ignoring the shared frame value entirely.
+    // Bugbot finding on PR #646.
+    const intervalSpy = vi.spyOn(global, 'setInterval');
+    const { unmount } = render(
+      <SpinnerFrameProvider>
+        <BrailleSpinner frame={2} />
+        <BrailleSpinner frame={5} />
+      </SpinnerFrameProvider>,
+    );
+    await vi.advanceTimersByTimeAsync(0);
+    // No subscribers registered → provider must not have started its timer.
+    expect(intervalSpy).not.toHaveBeenCalled();
+    unmount();
+    intervalSpy.mockRestore();
+  });
+
+  it('keeps the provider paused when only frameProp spinners are mounted', async () => {
+    // Pause-when-idle should engage when no spinner subscribes, even if
+    // frameProp spinners are visually rendering.
+    const intervalSpy = vi.spyOn(global, 'setInterval');
+    const { lastFrame, unmount } = render(
+      <SpinnerFrameProvider>
+        <BrailleSpinner frame={4} />
+      </SpinnerFrameProvider>,
+    );
+    await vi.advanceTimersByTimeAsync(SPINNER_INTERVAL * 4);
+    expect(intervalSpy).not.toHaveBeenCalled();
+    // The frame prop is still rendered.
+    expect(stripAnsi(lastFrame() ?? '').trim()).toBe(SPINNER_FRAMES[4]);
+    unmount();
+    intervalSpy.mockRestore();
+  });
+
   it('pauses the timer when the subscriber count drops to zero', async () => {
     const ToggleSpinner = ({ visible }: { visible: boolean }) => (
       <SpinnerFrameProvider>

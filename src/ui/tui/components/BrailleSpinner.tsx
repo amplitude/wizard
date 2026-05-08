@@ -32,7 +32,13 @@ export const BrailleSpinner = ({
   // Shared frame from the App-root provider, when one is mounted. Returns
   // `null` outside the provider (e.g. snapshot tests rendering a screen
   // in isolation), in which case we fall back to the local interval.
-  const sharedFrame = useSpinnerFrame();
+  //
+  // When the caller already passes an explicit `frame` prop, skip the
+  // subscription entirely — we'd just ignore the shared value, but
+  // calling register() would keep the provider's timer alive (and
+  // re-render this spinner every 200ms) for nothing. `skip` keeps the
+  // hook call itself unconditional so rules-of-hooks still hold.
+  const sharedFrame = useSpinnerFrame({ skip: frameProp !== undefined });
   const useFallback = frameProp === undefined && sharedFrame === null;
 
   const [internalFrame, setInternalFrame] = useState(0);

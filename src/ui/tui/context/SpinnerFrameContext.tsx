@@ -97,10 +97,27 @@ export const SpinnerFrameProvider = ({
   );
 };
 
+interface UseSpinnerFrameOptions {
+  /**
+   * When true, the hook is called (rules-of-hooks compliance) but does not
+   * subscribe to the provider — no `register()` call, no re-renders from
+   * frame ticks. Used by spinners that already have an explicit `frame`
+   * prop and would otherwise keep the provider's timer alive while
+   * ignoring its value entirely.
+   */
+  skip?: boolean;
+}
+
 /**
  * Subscribe to the shared spinner frame. Returns `null` when no provider
  * is mounted (e.g. unit tests rendering a screen in isolation) — callers
  * should fall back to a self-contained timer in that case.
+ *
+ * Pass `{ skip: true }` to call the hook without subscribing — useful for
+ * components that conditionally consume the shared frame (e.g. only when
+ * a `frame` prop is absent). Hooks must be called unconditionally, but
+ * registration is gated behind `skip` so the provider's pause-when-idle
+ * optimization stays effective.
  *
  * register / unregister run exactly once per mount: we capture them in a
  * ref so the effect's dependency array can stay empty. If we depended on
@@ -108,7 +125,10 @@ export const SpinnerFrameProvider = ({
  * provider's `frame` updates) would unregister + re-register, restarting
  * the interval each tick and producing a timer that never fires.
  */
-export function useSpinnerFrame(): number | null {
+export function useSpinnerFrame(
+  options: UseSpinnerFrameOptions = {},
+): number | null {
+  const { skip = false } = options;
   const ctx = useContext(SpinnerFrameContext);
   const ctxRef = useRef(ctx);
   ctxRef.current = ctx;
@@ -117,7 +137,16 @@ export function useSpinnerFrame(): number | null {
   // the effect can read the current value without depending on it, which
   // avoids the unregister/register thrash that would otherwise reset the
   // provider's interval on every tick.
+  //
+  // `skip` is captured at mount via a ref for the same reason — toggling
+  // skip mid-lifetime would otherwise force an unmount/remount of the
+  // subscription. In practice callers either always pass a frame prop or
+  // never do, so capturing once is the desired behavior.
+  const skipRef = useRef(skip);
+  skipRef.current = skip;
+
   useEffect(() => {
+    if (skipRef.current) return;
     const c = ctxRef.current;
     if (!c) return;
     c.register();
@@ -126,5 +155,6 @@ export function useSpinnerFrame(): number | null {
     };
   }, []);
 
+  if (skip) return null;
   return ctx ? ctx.frame : null;
 }
