@@ -95,9 +95,6 @@ export const DiscoveryFeed = ({
   // spinner interval — it drives our re-render cadence.
   void tick;
 
-  if (cols < MIN_COLS_FOR_DISCOVERY_FEED) return null;
-  if (facts.length === 0) return null;
-
   const visibleCount = resolveVisibleCount(facts, now);
   // Slice to the most recent N rows. The store doesn't cap discovery
   // facts (they're cheap to keep around for diagnostics), so the panel
@@ -110,6 +107,8 @@ export const DiscoveryFeed = ({
       : upTo;
   }, [facts, visibleCount]);
 
+  if (cols < MIN_COLS_FOR_DISCOVERY_FEED) return null;
+  if (facts.length === 0) return null;
   if (slice.length === 0) return null;
 
   return (
