@@ -175,12 +175,14 @@ export function initLogger(
   // logs. The two paths are tracked independently — `log.txt` and
   // `log.ndjson` — so we explicitly iterate both rather than deriving one
   // from the other with a string concatenation.
+  let rotated = false;
   for (const path of [activePath, activeStructuredPath]) {
     try {
       const stats = statSync(path);
       if (stats.size > LOG_MAX_BYTES) {
         try {
           renameSync(path, `${path}.1`);
+          rotated = true;
         } catch {
           // Rename failed — truncate will happen naturally
         }
@@ -188,6 +190,14 @@ export function initLogger(
     } catch {
       // File doesn't exist yet — fine
     }
+  }
+  // If we rotated, any cached fds from a previous `initLogger` call (or
+  // from pre-init writes through the bootstrap path) still point at the
+  // now-renamed `.1` file. Close them so the next `writeToFile` reopens
+  // against the fresh target path. Bugbot caught this — without it,
+  // post-rotation log lines silently land in the rotated backup.
+  if (rotated) {
+    closeCachedFds();
   }
 
   // Write run header
