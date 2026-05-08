@@ -26,6 +26,7 @@ import { dirname, join, resolve } from 'node:path';
 
 import { runLive, runReplay } from '../runner/invoke-wizard.js';
 import { assertContract, parseStream } from '../runner/parse-stream.js';
+import { runRuntimeProbe } from '../runner/runtime.js';
 import { parseScenario } from '../runner/scenario-schema.js';
 import { score } from '../runner/score.js';
 import type { Scenario } from '../runner/types.js';
@@ -42,14 +43,21 @@ interface CliArgs {
    * one-off Ring 3 packaging runs don't have to mutate env.
    */
   wizardBin?: string;
+  /**
+   * Run the Layer 4 runtime probe after scoring. Opt-in because
+   * playwright is a heavy install + boots the dev server (1-3 min per
+   * scenario). Nightly + pre-release rings flip this on.
+   */
+  runtime: boolean;
 }
 
 function parseArgs(argv: string[]): CliArgs {
-  const args: CliArgs = { scenarioId: '', live: false };
+  const args: CliArgs = { scenarioId: '', live: false, runtime: false };
   const rest: string[] = [];
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
     if (a === '--live') args.live = true;
+    else if (a === '--runtime') args.runtime = true;
     else if (a === '--reports-dir') args.reportsDir = argv[++i];
     else if (a === '--wizard-bin') args.wizardBin = argv[++i];
     else if (a.startsWith('--')) {
@@ -58,7 +66,7 @@ function parseArgs(argv: string[]): CliArgs {
   }
   if (rest.length !== 1) {
     throw new Error(
-      'usage: pnpm evals:run <scenario-id> [--live] [--reports-dir <path>] [--wizard-bin <cmd>]',
+      'usage: pnpm evals:run <scenario-id> [--live] [--runtime] [--reports-dir <path>] [--wizard-bin <cmd>]',
     );
   }
   args.scenarioId = rest[0];
@@ -139,6 +147,16 @@ async function main() {
   const ndjson = artifact.runLog.map((e) => JSON.stringify(e)).join('\n');
   const parsed = parseStream(ndjson);
   const contract = assertContract(parsed, artifact.exitCode);
+
+  // Optionally run the Layer 4 runtime probe BEFORE scoring so the
+  // result rides on the artifact. Probe boots a dev server inside
+  // workingDir, which means it must run before cleanup. Skipped when
+  // `--runtime` is absent or the scenario doesn't declare a
+  // `runtimeProbe` config — the L4 scorer skip-passes with weight 0
+  // either way.
+  if (args.runtime && scenario.runtimeProbe) {
+    artifact.runtimeResult = await runRuntimeProbe({ scenario, workingDir });
+  }
 
   // Score against the workingDir the runner returned, then tear it
   // down. The try/finally guarantees cleanup runs even if a scorer

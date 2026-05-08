@@ -62,6 +62,29 @@ export const ScenarioSchema = z
      *     should land on.
      */
     useDetection: z.boolean().default(true),
+    /**
+     * Optional Layer 4 (runtime probe) configuration. When present and
+     * the runner is invoked with `--runtime`, the probe boots the
+     * framework's dev server, loads `route` in a headless browser, and
+     * captures console errors plus outbound Amplitude requests.
+     *
+     * Browser-only — Node / mobile scenarios should leave this unset and
+     * rely on Layer 3 + Layer 4-Node smoke harnesses (future work).
+     * The runtime probe requires `playwright` to be installed; the
+     * runner reports a clear "playwright not installed" error if not.
+     */
+    runtimeProbe: z
+      .object({
+        /** `pnpm dev` argv vector that boots the framework's dev server. */
+        devCommand: z.array(z.string().min(1)).min(1),
+        /** Path the probe navigates to (e.g. `/` or `/example`). */
+        route: z.string().min(1),
+        /** Port the dev server listens on after boot. */
+        port: z.number().int().positive(),
+        /** Override the default 60s boot timeout (ms). */
+        bootTimeoutMs: z.number().int().positive().optional(),
+      })
+      .optional(),
     notes: z.string().optional(),
   })
   // Cross-field invariant: override + reason travel together. A

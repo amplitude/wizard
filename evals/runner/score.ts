@@ -45,6 +45,8 @@ import { scorer as l2PropertyKeyNaming } from '../scorers/layer2-static/property
 
 import { scorer as l3BuildPasses } from '../scorers/layer3-build/build-passes.js';
 
+import { scorer as l4RuntimeProbe } from '../scorers/layer4-runtime/runtime-probe.js';
+
 /**
  * The full scorer stack. Order matters — Layer 0 runs first; if any
  * Layer 0 scorer hard-fails, downstream layers are skipped.
@@ -75,6 +77,8 @@ export const SCORERS: Scorer[] = [
   l2PropertyKeyNaming,
   // Layer 3 — build / typecheck.
   l3BuildPasses,
+  // Layer 4 — runtime probe (opt-in via scenario.runtimeProbe).
+  l4RuntimeProbe,
 ];
 
 export interface ScoreOptions {

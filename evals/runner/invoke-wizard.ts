@@ -29,7 +29,13 @@ import { join } from 'node:path';
 import { redactString } from '../../src/lib/observability/redact.js';
 import { captureFsSnapshot } from './fs-snapshot.js';
 import { parseStream } from './parse-stream.js';
-import type { Artifact, BuildResult, FsSnapshot, Scenario } from './types.js';
+import type {
+  Artifact,
+  BuildResult,
+  FsSnapshot,
+  RuntimeResult,
+  Scenario,
+} from './types.js';
 
 /**
  * Generate a short, sortable run ID. Prefer crypto.randomUUID over a
@@ -418,6 +424,17 @@ export function runReplay(options: ReplayOptions): RunnerResult {
     secondRunLog = parseStream(readFileSync(secondRunPath, 'utf8')).events;
   }
 
+  // Optional `golden/runtime-result.json` pins a recorded
+  // {@link RuntimeResult} for the L4 runtime-probe scorer. Absence is
+  // fine — the scorer skip-passes with weight 0 (no signal, no penalty).
+  const runtimePath = join(goldenDir, 'runtime-result.json');
+  let runtimeResult: RuntimeResult | undefined;
+  if (existsSync(runtimePath)) {
+    runtimeResult = JSON.parse(
+      readFileSync(runtimePath, 'utf8'),
+    ) as RuntimeResult;
+  }
+
   return {
     artifact: {
       runId: newRunId(),
@@ -430,6 +447,7 @@ export function runReplay(options: ReplayOptions): RunnerResult {
       fsSnapshot,
       stderr,
       buildResult,
+      runtimeResult,
       secondRunLog,
       source: 'golden',
     },

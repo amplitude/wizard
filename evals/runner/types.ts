@@ -56,6 +56,39 @@ export interface BuildResult {
 }
 
 /**
+ * Result of probing the post-wizard working tree at runtime. Layer 4
+ * grades against this — boots the framework's dev server, loads a known
+ * route in a headless browser, and reports whether the agent's
+ * integration actually executes without errors.
+ *
+ * `consoleErrors` carries the messages so triagers see what blew up;
+ * the full console log is not preserved (it's noisy and mostly
+ * developer-tooling banter that doesn't help). `amplitudeRequestCount`
+ * is incremented for every outbound request to the Amplitude ingestion
+ * endpoint family — `api2.amplitude.com`, `api.eu.amplitude.com`,
+ * `api.amplitude.com`, the v2/v3 prefixes. The probe intercepts these
+ * (it does NOT forward them — Layer 5 owns the ingestion verification
+ * piece, and the eval-only project is decision #2 in the spec).
+ *
+ * `pageStatusCode` is the top-level navigation HTTP response (200 for
+ * a successful boot, 5xx for a server error, 0 for navigation timeout).
+ */
+export interface RuntimeResult {
+  /** Boot URL the probe loaded (e.g. `http://localhost:5173/`). */
+  url: string;
+  pageStatusCode: number;
+  consoleErrors: string[];
+  amplitudeRequestCount: number;
+  /** First few outbound paths hit (capped to 5 entries for triage). */
+  amplitudeRequestPaths: string[];
+  /** True when the probe booted, navigated, and exited cleanly. */
+  ok: boolean;
+  /** One-line failure message when `ok=false`. */
+  detail?: string;
+  durationMs: number;
+}
+
+/**
  * The artifact a scenario produces. Scorers consume this; they never
  * re-spawn the wizard or touch the live filesystem.
  *
@@ -95,6 +128,14 @@ export interface Artifact {
    * scorer treats undefined as "no build attempted, no signal."
    */
   buildResult?: BuildResult;
+  /**
+   * Result of booting the integration in a headless browser (Layer 4).
+   * Live runs populate this when `--runtime` is passed and the
+   * scenario opts in via a `runtimeProbe` config. Goldens may pin a
+   * recorded outcome via `golden/runtime-result.json`. Absence is
+   * fine — the L4 scorer skip-passes with weight 0.
+   */
+  runtimeResult?: RuntimeResult;
   /**
    * Source of the artifact. `live` = freshly spawned wizard. `golden`
    * = pre-recorded NDJSON + a baseline snapshot loaded from disk.
