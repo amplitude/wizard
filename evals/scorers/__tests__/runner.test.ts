@@ -32,7 +32,7 @@ const scenario = parseScenario(scenarioJson);
 
 describe('eval runner — nextjs-app-router/vanilla golden replay', () => {
   it('produces a contract-clean artifact and a clean Layer 0 + Layer 1 score', () => {
-    const artifact = runReplay({ scenario, scenarioDir });
+    const { artifact, workingDir } = runReplay({ scenario, scenarioDir });
 
     // Round-trip the events through parseStream so we score the same
     // wire shape the runner sees from a real spawn.
@@ -47,7 +47,10 @@ describe('eval runner — nextjs-app-router/vanilla golden replay', () => {
     expect(contract.violations).toEqual([]);
     expect(contract.ok).toBe(true);
 
-    const workingDir = resolve(scenarioDir, 'golden', 'working');
+    // Replay returns the absolute path to golden/working; assert it
+    // matches the convention so a future drift in mintWorkingDir
+    // (e.g. accidental tmpdir routing for replays) fails loudly.
+    expect(workingDir).toBe(resolve(scenarioDir, 'golden', 'working'));
     const report = score({ artifact, scenario, workingDir });
 
     expect(report.hardFailed).toBe(false);

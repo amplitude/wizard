@@ -23,6 +23,7 @@
 
 import { spawn } from 'node:child_process';
 import { cpSync, existsSync, mkdirSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { redactString } from '../../src/lib/observability/redact.js';
@@ -56,6 +57,19 @@ export interface InvokeWizardOptions {
   apiKey?: string;
   /** Override the default 8-minute spawn timeout (ms). */
   timeoutMs?: number;
+  /**
+   * Override the wizard binary the runner spawns. Equivalent to
+   * setting `WIZARD_BIN` on the runner process; the option takes
+   * precedence so callers can drive multiple binaries from one
+   * process without mutating env.
+   *
+   * When set, the runner skips the default `pnpm exec tsx bin.ts`
+   * shape and spawns the override directly, e.g.
+   * `npx @amplitude/wizard@latest` or `/path/to/built-cli`. The
+   * `--agent --yes --install-dir <dir>` arg shape is appended by the
+   * runner regardless.
+   */
+  wizardBin?: string;
 }
 
 /**
@@ -108,16 +122,91 @@ export function resolveLiveAuthMode(
 }
 
 /**
+ * Build the spawn shape (`cmd` + base `args`) for the wizard child.
+ *
+ * Default path: `pnpm exec tsx bin.ts ...` against the developer
+ * checkout. Set `WIZARD_BIN` (or pass `--wizard-bin <cmd>` to
+ * `evals/bin/run-eval.ts`, which forwards to `wizardBin`) to spawn an
+ * arbitrary command instead — e.g. `npx @amplitude/wizard@latest` or a
+ * built tarball path. This is what unlocks Ring 3 packaging coverage:
+ * we run the same scenarios against the published artifact, not just
+ * the source tree.
+ *
+ * When `wizardBin` is set the runner does NOT prepend `pnpm exec
+ * tsx bin.ts`; the caller is expected to pass a single command (e.g.
+ * `"npx"` plus its arg list, or a path to a built CLI). The `--agent
+ * --yes --install-dir <dir>` shape is appended by the runner — those
+ * are framework invariants, not packaging concerns.
+ */
+export function resolveWizardSpawn(options: InvokeWizardOptions): {
+  cmd: string;
+  baseArgs: string[];
+} {
+  const override = options.wizardBin ?? process.env.WIZARD_BIN;
+  if (override && override.trim().length > 0) {
+    // Tokenize on whitespace — good enough for the supported shapes
+    // (`npx @amplitude/wizard@latest`, `node /path/to/cli.js`,
+    // `/path/to/built-cli`). Anything that needs shell quoting should
+    // be wrapped in a script and pointed at via WIZARD_BIN.
+    const parts = override.trim().split(/\s+/);
+    return { cmd: parts[0], baseArgs: parts.slice(1) };
+  }
+  return { cmd: 'pnpm', baseArgs: ['exec', 'tsx', 'bin.ts'] };
+}
+
+/**
+ * Mint a per-run working directory under `os.tmpdir()` keyed by the
+ * runId. Two parallel scenario runs would collide on the old
+ * `<scenarioDir>/working/` single-slot path — a tmpdir-scoped subdir
+ * keeps each run isolated and lets cleanup stay best-effort.
+ */
+function mintWorkingDir(runId: string): string {
+  return join(tmpdir(), 'amplitude-wizard-evals', runId);
+}
+
+/**
+ * Result of a runner invocation. Carries the artifact plus the
+ * absolute `workingDir` the run wrote into so callers (the orchestrator
+ * + scorers) can read file content from one source. Both `runLive` and
+ * `runReplay` return the same shape so `run-eval.ts` doesn't branch on
+ * source when wiring the workingDir into the scorer stack.
+ */
+export interface RunnerResult {
+  artifact: Artifact;
+  /** Absolute path to the directory scorers should read files from. */
+  workingDir: string;
+  /**
+   * Tear down any per-run resources the runner created. The caller
+   * (`run-eval.ts`) MUST invoke this AFTER scoring completes — the
+   * runner deliberately does not clean up `workingDir` before returning
+   * so scorers can read files from it via `EVALS_WORKING_DIR`.
+   *
+   * - `runLive`: removes the tmpdir-scoped working tree. Best-effort —
+   *   `mintWorkingDir` is keyed on a fresh runId per call, so a leak
+   *   only costs tmpdir space and the next run's own pre-clean is a
+   *   backstop.
+   * - `runReplay`: no-op. The golden working dir is a permanent
+   *   fixture; deleting it would corrupt the scenario.
+   *
+   * Idempotent: calling more than once is safe.
+   */
+  cleanup: () => void;
+}
+
+/**
  * Spawn the wizard against a fresh copy of `pristine/` and capture an
  * artifact. Tears down the working tree afterwards regardless of
  * success / failure so a crash mid-run doesn't pollute the next run.
  */
-export async function runLive(options: InvokeWizardOptions): Promise<Artifact> {
+export async function runLive(
+  options: InvokeWizardOptions,
+): Promise<RunnerResult> {
   const { scenario, scenarioDir, repoRoot } = options;
   const startedAt = new Date().toISOString();
 
   const pristineDir = join(scenarioDir, 'pristine');
-  const workingDir = join(scenarioDir, 'working');
+  const runId = newRunId();
+  const workingDir = mintWorkingDir(runId);
 
   if (!existsSync(pristineDir)) {
     throw new Error(
@@ -125,26 +214,24 @@ export async function runLive(options: InvokeWizardOptions): Promise<Artifact> {
     );
   }
 
-  // Always start from a clean working dir. The spec calls for
-  // teardown at run-end, but we also clean at run-start to be
-  // resilient to a previous crash.
+  // Always start from a clean working dir. The runId is fresh so a
+  // collision is theoretically impossible, but be defensive: a stale
+  // dir from a prior crash with the same runId (e.g. clock-rollback
+  // tests) would otherwise pollute this run.
   if (existsSync(workingDir)) rmSync(workingDir, { recursive: true });
   mkdirSync(workingDir, { recursive: true });
   cpSync(pristineDir, workingDir, { recursive: true });
 
   const auth = resolveLiveAuthMode(options);
 
-  const args = [
-    'exec',
-    'tsx',
-    'bin.ts',
-    '--agent',
-    '--yes',
-    '--install-dir',
-    workingDir,
-    '--integration',
-    scenario.integrationHint,
-  ];
+  const { cmd, baseArgs } = resolveWizardSpawn(options);
+  const args = [...baseArgs, '--agent', '--yes', '--install-dir', workingDir];
+  // useDetection defaults to `true` (pass `--integration`). Set
+  // `false` on a scenario to drop the hint and grade the wizard's
+  // detection pipeline against `integrationHint` as ground truth.
+  if (scenario.useDetection) {
+    args.push('--integration', scenario.integrationHint);
+  }
   if (auth.kind === 'api-key-bypass') {
     args.push('--api-key', auth.apiKey);
   }
@@ -165,7 +252,7 @@ export async function runLive(options: InvokeWizardOptions): Promise<Artifact> {
   }
 
   const { stdout, stderr, exitCode } = await spawnAndCapture(
-    'pnpm',
+    cmd,
     args,
     { cwd: repoRoot, env },
     options.timeoutMs ?? 8 * 60_000,
@@ -175,25 +262,32 @@ export async function runLive(options: InvokeWizardOptions): Promise<Artifact> {
   const parsed = parseStream(stdout);
   const fsSnapshot = captureFsSnapshot(pristineDir, workingDir);
 
-  // Best-effort teardown. If this fails the next run will still
-  // start by removing `working/`.
-  try {
-    rmSync(workingDir, { recursive: true });
-  } catch {
-    // ignore — diagnostics will surface a stale dir
-  }
-
+  // Cleanup is deferred to `RunnerResult.cleanup` — the orchestrator
+  // (`run-eval.ts`) calls it after scoring runs, so scorers can still
+  // read files from `workingDir` via `EVALS_WORKING_DIR`. Removing the
+  // tree before returning would hard-fail every Layer 0 scorer that
+  // reads `package.json` or scans the source tree.
   return {
-    runId: newRunId(),
-    scenario: scenario.name,
-    ring: scenario.ring,
-    startedAt,
-    finishedAt,
-    exitCode,
-    runLog: parsed.events,
-    fsSnapshot,
-    stderr,
-    source: 'live',
+    artifact: {
+      runId,
+      scenario: scenario.name,
+      ring: scenario.ring,
+      startedAt,
+      finishedAt,
+      exitCode,
+      runLog: parsed.events,
+      fsSnapshot,
+      stderr,
+      source: 'live',
+    },
+    workingDir,
+    cleanup: () => {
+      try {
+        rmSync(workingDir, { recursive: true, force: true });
+      } catch {
+        // ignore — diagnostics will surface a stale dir
+      }
+    },
   };
 }
 
@@ -270,7 +364,7 @@ export interface ReplayOptions {
  * rely on `runLive` and replay should be reserved for offline scorer
  * development.
  */
-export function runReplay(options: ReplayOptions): Artifact {
+export function runReplay(options: ReplayOptions): RunnerResult {
   const { scenario, scenarioDir } = options;
   const startedAt = new Date().toISOString();
 
@@ -305,15 +399,23 @@ export function runReplay(options: ReplayOptions): Artifact {
   const fsSnapshot: FsSnapshot = captureFsSnapshot(pristineDir, goldenWorking);
 
   return {
-    runId: newRunId(),
-    scenario: scenario.name,
-    ring: scenario.ring,
-    startedAt,
-    finishedAt: new Date().toISOString(),
-    exitCode,
-    runLog: parsed.events,
-    fsSnapshot,
-    stderr,
-    source: 'golden',
+    artifact: {
+      runId: newRunId(),
+      scenario: scenario.name,
+      ring: scenario.ring,
+      startedAt,
+      finishedAt: new Date().toISOString(),
+      exitCode,
+      runLog: parsed.events,
+      fsSnapshot,
+      stderr,
+      source: 'golden',
+    },
+    // Replay reads file content from the pre-recorded golden working
+    // dir — that's the snapshot scorers should grade against.
+    workingDir: goldenWorking,
+    // No-op: the golden working dir is a permanent fixture, not a
+    // per-run tmpdir. Deleting it would corrupt the scenario.
+    cleanup: () => {},
   };
 }
