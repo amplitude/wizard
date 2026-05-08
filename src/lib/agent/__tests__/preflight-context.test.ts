@@ -59,8 +59,8 @@ describe('buildPreflightContext', () => {
     }
   });
 
-  it('renders the canonical header so the commandment can reference it', () => {
-    const out = buildPreflightContext({
+  it('renders the canonical header so the commandment can reference it', async () => {
+    const { prompt: out } = await buildPreflightContext({
       installDir,
       integration: Integration.nextjs,
       detectedFrameworkLabel: 'Next.js 15.3',
@@ -81,8 +81,8 @@ describe('buildPreflightContext', () => {
     );
   });
 
-  it('renders all three sections', () => {
-    const out = buildPreflightContext({
+  it('renders all three sections', async () => {
+    const { prompt: out } = await buildPreflightContext({
       installDir,
       integration: Integration.nextjs,
       detectedFrameworkLabel: 'Next.js 15.3',
@@ -103,8 +103,8 @@ describe('buildPreflightContext', () => {
     expect(out).toContain('## Environment');
   });
 
-  it('reminds the agent that discovery tools remain available later', () => {
-    const out = buildPreflightContext({
+  it('reminds the agent that discovery tools remain available later', async () => {
+    const { prompt: out } = await buildPreflightContext({
       installDir,
       integration: Integration.generic,
       detectedFrameworkLabel: null,
@@ -125,8 +125,8 @@ describe('buildPreflightContext', () => {
     expect(out).toMatch(/remain available/);
   });
 
-  it('surfaces the primary package manager + install command', () => {
-    const out = buildPreflightContext({
+  it('surfaces the primary package manager + install command', async () => {
+    const { prompt: out } = await buildPreflightContext({
       installDir,
       integration: Integration.nextjs,
       detectedFrameworkLabel: 'Next.js',
@@ -145,8 +145,8 @@ describe('buildPreflightContext', () => {
     expect(out).toMatch(/package manager: pnpm \(install: pnpm add\)/);
   });
 
-  it('emits a `?` placeholder when package manager detection is unavailable', () => {
-    const out = buildPreflightContext({
+  it('emits a `?` placeholder when package manager detection is unavailable', async () => {
+    const { prompt: out } = await buildPreflightContext({
       installDir,
       integration: Integration.generic,
       detectedFrameworkLabel: null,
@@ -165,7 +165,7 @@ describe('buildPreflightContext', () => {
     expect(out).toMatch(/package manager: \?/);
   });
 
-  it('lists multiple lockfiles when more than one is present', () => {
+  it('lists multiple lockfiles when more than one is present', async () => {
     const info: PackageManagerInfo = {
       detected: [
         {
@@ -189,7 +189,7 @@ describe('buildPreflightContext', () => {
       },
       recommendation: 'Multiple package managers detected. Prefer Yarn V1.',
     };
-    const out = buildPreflightContext({
+    const { prompt: out } = await buildPreflightContext({
       installDir,
       integration: Integration.javascript_web,
       detectedFrameworkLabel: 'Vite + React',
@@ -209,8 +209,8 @@ describe('buildPreflightContext', () => {
     expect(out).toMatch(/other lockfiles present: npm/);
   });
 
-  it('reports auth + org + project when known', () => {
-    const out = buildPreflightContext({
+  it('reports auth + org + project when known', async () => {
+    const { prompt: out } = await buildPreflightContext({
       installDir,
       integration: Integration.nextjs,
       detectedFrameworkLabel: 'Next.js',
@@ -234,8 +234,8 @@ describe('buildPreflightContext', () => {
     expect(out).toMatch(/environment: Production/);
   });
 
-  it('emits placeholders when org/project picker has not run yet', () => {
-    const out = buildPreflightContext({
+  it('emits placeholders when org/project picker has not run yet', async () => {
+    const { prompt: out } = await buildPreflightContext({
       installDir,
       integration: null,
       detectedFrameworkLabel: null,
@@ -257,7 +257,7 @@ describe('buildPreflightContext', () => {
     expect(out).toMatch(/bound: no/);
   });
 
-  it('reports env file presence and Amplitude key names without values', () => {
+  it('reports env file presence and Amplitude key names without values', async () => {
     fs.writeFileSync(
       path.join(installDir, '.env.local'),
       'AMPLITUDE_API_KEY=secret-do-not-leak\nFOO=bar\n',
@@ -268,7 +268,7 @@ describe('buildPreflightContext', () => {
       'NEXT_PUBLIC_AMPLITUDE_API_KEY=\n',
       'utf8',
     );
-    const out = buildPreflightContext({
+    const { prompt: out } = await buildPreflightContext({
       installDir,
       integration: Integration.nextjs,
       detectedFrameworkLabel: 'Next.js',
@@ -297,8 +297,8 @@ describe('buildPreflightContext', () => {
     expect(out).not.toContain('FOO');
   });
 
-  it('emits "none" markers when there are no env files', () => {
-    const out = buildPreflightContext({
+  it('emits "none" markers when there are no env files', async () => {
+    const { prompt: out } = await buildPreflightContext({
       installDir,
       integration: Integration.go,
       detectedFrameworkLabel: 'Go',
@@ -318,8 +318,8 @@ describe('buildPreflightContext', () => {
     expect(out).toMatch(/existing AMPLITUDE_\* keys: none/);
   });
 
-  it('inlines framework-context disambiguators (e.g. monorepo, app router)', () => {
-    const out = buildPreflightContext({
+  it('inlines framework-context disambiguators (e.g. monorepo, app router)', async () => {
+    const { prompt: out } = await buildPreflightContext({
       installDir,
       integration: Integration.nextjs,
       detectedFrameworkLabel: 'Next.js 15.3',
@@ -346,7 +346,7 @@ describe('buildPreflightContext', () => {
     expect(out).toMatch(/workspace: apps\/web/);
   });
 
-  it('parameterizes cleanly across (framework, monorepo, auth, env) cases', () => {
+  it('parameterizes cleanly across (framework, monorepo, auth, env) cases', async () => {
     type Case = {
       integration: Integration | null;
       monorepo: boolean;
@@ -395,7 +395,7 @@ describe('buildPreflightContext', () => {
             'utf8',
           );
         }
-        const out = buildPreflightContext({
+        const { prompt: out } = await buildPreflightContext({
           installDir: dir,
           integration: c.integration,
           detectedFrameworkLabel: c.integration ? String(c.integration) : null,
@@ -470,10 +470,15 @@ describe('buildPreflightContext — JIT gating', () => {
     ...override,
   });
 
-  it('returns the JIT-mode block when file count exceeds the threshold', () => {
-    const out = buildPreflightContext(
+  it('returns the JIT-mode block when file count exceeds the threshold', async () => {
+    const { prompt: out } = await buildPreflightContext(
       baseInput({
-        projectSize: { fileCount: 5_000, eventCount: 0, timedOut: false },
+        projectSize: {
+          fileCount: 5_000,
+          eventCount: 0,
+          timedOut: false,
+          capHit: false,
+        },
       }),
     );
     expect(out).toMatch(
@@ -495,40 +500,62 @@ describe('buildPreflightContext — JIT gating', () => {
     expect(out).toContain('## Amplitude state');
   });
 
-  it('returns the JIT-mode block when event count exceeds the threshold', () => {
-    const out = buildPreflightContext(
+  it('returns the JIT-mode block when event count exceeds the threshold', async () => {
+    const { prompt: out } = await buildPreflightContext(
       baseInput({
-        projectSize: { fileCount: 50, eventCount: 200, timedOut: false },
+        projectSize: {
+          fileCount: 50,
+          eventCount: 200,
+          timedOut: false,
+          capHit: false,
+        },
       }),
     );
     expect(out).toMatch(/load on demand/);
     expect(out).toMatch(/200 confirmed events/);
   });
 
-  it('treats a timed-out scan as JIT mode', () => {
-    const out = buildPreflightContext(
+  it('treats a timed-out scan as JIT mode', async () => {
+    const { prompt: out } = await buildPreflightContext(
       baseInput({
-        projectSize: { fileCount: 0, eventCount: 0, timedOut: true },
+        projectSize: {
+          fileCount: 0,
+          eventCount: 0,
+          timedOut: true,
+          capHit: false,
+        },
       }),
     );
     expect(out).toMatch(/load on demand/);
     expect(out).toMatch(/0\+ files \(scan capped\)/);
   });
 
-  it('reports file count when maxFiles cap triggers', () => {
-    const out = buildPreflightContext(
+  it('reports file count when maxFiles cap triggers (capHit, not timedOut)', async () => {
+    // After B1: cap firing sets `capHit: true`, NOT `timedOut: true`. The
+    // gate trips because the partial fileCount exceeds the threshold.
+    const { prompt: out } = await buildPreflightContext(
       baseInput({
-        projectSize: { fileCount: 1001, eventCount: 0, timedOut: true },
+        projectSize: {
+          fileCount: 1001,
+          eventCount: 0,
+          timedOut: false,
+          capHit: true,
+        },
       }),
     );
     expect(out).toMatch(/load on demand/);
     expect(out).toMatch(/1001\+ files \(scan capped\)/);
   });
 
-  it('returns the full pre-flight block when file count is at or below the threshold', () => {
-    const out = buildPreflightContext(
+  it('returns the full pre-flight block when file count is at or below the threshold', async () => {
+    const { prompt: out } = await buildPreflightContext(
       baseInput({
-        projectSize: { fileCount: 200, eventCount: 50, timedOut: false },
+        projectSize: {
+          fileCount: 200,
+          eventCount: 50,
+          timedOut: false,
+          capHit: false,
+        },
       }),
     );
     expect(out).toMatch(
@@ -538,31 +565,41 @@ describe('buildPreflightContext — JIT gating', () => {
     expect(out).not.toMatch(/load on demand/);
   });
 
-  it('honors AMPLITUDE_WIZARD_PREFLIGHT_FILE_THRESHOLD override', () => {
+  it('honors AMPLITUDE_WIZARD_PREFLIGHT_FILE_THRESHOLD override', async () => {
     // 100 files would normally pass (default threshold 200). With an env
     // override of 50, it now flips into JIT mode.
-    const out = buildPreflightContext(
+    const { prompt: out } = await buildPreflightContext(
       baseInput({
-        projectSize: { fileCount: 100, eventCount: 0, timedOut: false },
+        projectSize: {
+          fileCount: 100,
+          eventCount: 0,
+          timedOut: false,
+          capHit: false,
+        },
         env: { AMPLITUDE_WIZARD_PREFLIGHT_FILE_THRESHOLD: '50' },
       }),
     );
     expect(out).toMatch(/load on demand/);
   });
 
-  it('honors AMPLITUDE_WIZARD_PREFLIGHT_EVENT_THRESHOLD override', () => {
+  it('honors AMPLITUDE_WIZARD_PREFLIGHT_EVENT_THRESHOLD override', async () => {
     // 10 events with default threshold 50 stays full. Lower override
     // to 5 and we flip.
-    const out = buildPreflightContext(
+    const { prompt: out } = await buildPreflightContext(
       baseInput({
-        projectSize: { fileCount: 10, eventCount: 10, timedOut: false },
+        projectSize: {
+          fileCount: 10,
+          eventCount: 10,
+          timedOut: false,
+          capHit: false,
+        },
         env: { AMPLITUDE_WIZARD_PREFLIGHT_EVENT_THRESHOLD: '5' },
       }),
     );
     expect(out).toMatch(/load on demand/);
   });
 
-  it('regression: ~50-file project (Excalidraw-size) gets the full pre-flight block', () => {
+  it('regression: ~50-file project (Excalidraw-size) gets the full pre-flight block', async () => {
     // Materialize ~50 source files in the install dir so detection runs
     // against a real fixture rather than a synthetic ProjectSizeReport.
     // The default threshold is 200, so this should land squarely in
@@ -574,7 +611,7 @@ describe('buildPreflightContext — JIT gating', () => {
         '// excalidraw-shaped fixture\n',
       );
     }
-    const out = buildPreflightContext(baseInput());
+    const { prompt: out } = await buildPreflightContext(baseInput());
     expect(out).toMatch(
       /^# Pre-flight context \(you have these answers; do NOT re-probe at start\)/,
     );

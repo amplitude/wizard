@@ -8,22 +8,33 @@
  * attention budget for medium-and-up codebases — Anthropic's guidance is
  * to prefer just-in-time (JIT) context loading via `read_file` / `grep`
  * for projects above ~50 events or ~200 source files. This helper scans
- * the install directory under a hard 5s wall-clock cap and a 1k-file
+ * the install directory under a hard 5s wall-clock cap and a 500-file
  * count cap (whichever fires first) and reports the counts the gate uses.
  *
- * Pure-ish: `fs.readdirSync` recursively, plus a single read of
- * `events.json`. No network, no spawning.
+ * Async on purpose: `fs.promises.readdir` lets the event loop service the
+ * Ink renderer + the rest of cold-start while we walk the tree. Earlier
+ * iterations used `fs.readdirSync` + `withFileTypes`, but on a large
+ * monorepo that synchronously blocked the main thread for 1–4s, freezing
+ * the spinner and starving any concurrent network calls.
  *
- * Bias: when detection times out, returns `timedOut: true`. The caller
- * is expected to treat that as "large project" — large codebases
- * shouldn't be paying a probe tax to figure out they're large.
+ * Bias: when detection times out (hits the wall-clock cap), returns
+ * `timedOut: true`. The caller treats that as "large project" — we don't
+ * pay a probe tax to figure out a codebase is large. The file-count cap
+ * is reported separately via `capHit` so a user-supplied threshold higher
+ * than the cap can still be honored against the partial count.
  */
 
+import { promises as fsp } from 'node:fs';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 
+import { z } from 'zod';
+
 import { parseEventPlanContent } from '../event-plan-parser.js';
+import { createLogger } from '../observability/logger.js';
 import { getEventsFile } from '../../utils/storage-paths.js';
+
+const log = createLogger('preflight:project-size');
 
 /** Default file-count threshold above which we switch to JIT mode. */
 export const DEFAULT_FILE_THRESHOLD = 200;
@@ -37,11 +48,14 @@ export const DEFAULT_DETECTION_TIMEOUT_MS = 5_000;
 /**
  * Hard cap on files counted before bailing. Once we know the project
  * exceeds this, we already know it's "large" — continuing to walk only
- * burns startup time. Set well above `DEFAULT_FILE_THRESHOLD` (200) so
- * the JIT decision still has signal even when callers raise the
- * threshold via the env-var override.
+ * burns startup time. Set above `DEFAULT_FILE_THRESHOLD` (200) so the
+ * JIT decision still has signal at the default threshold. When callers
+ * raise the threshold via env-var, the effective cap is widened
+ * proportionally inside `detectProjectSize` so a user-set threshold of
+ * 2000 still gets a 2× scan budget instead of being silently capped at
+ * 500.
  */
-export const DEFAULT_MAX_FILES_SCANNED = 1_000;
+export const DEFAULT_MAX_FILES_SCANNED = 500;
 
 /** Env-var override names. Documented in `CLAUDE.md`. */
 export const FILE_THRESHOLD_ENV = 'AMPLITUDE_WIZARD_PREFLIGHT_FILE_THRESHOLD';
@@ -103,6 +117,14 @@ export interface ProjectSizeReport {
   eventCount: number;
   /** True when the directory scan hit the wall-clock cap. */
   timedOut: boolean;
+  /**
+   * True when the file-count cap (`maxFiles`) fired before the wall-clock
+   * cap. Distinct from `timedOut` so callers can honor a user-supplied
+   * threshold higher than the cap (we report the partial count, the gate
+   * compares against the threshold, and large-but-bounded projects still
+   * land on JIT correctly).
+   */
+  capHit: boolean;
 }
 
 export interface DetectProjectSizeOptions {
@@ -110,44 +132,63 @@ export interface DetectProjectSizeOptions {
   timeoutMs?: number;
   /**
    * Hard cap on file count. Once exceeded, the walk aborts early and
-   * `timedOut: true` is reported so callers route to JIT mode. Defaults
-   * to `DEFAULT_MAX_FILES_SCANNED`.
+   * `capHit: true` is reported. Callers can compare the (partial)
+   * `fileCount` against their threshold to decide JIT vs full mode.
+   * Defaults to `DEFAULT_MAX_FILES_SCANNED`, but `detectProjectSize`
+   * widens it proportionally when the env-var threshold is high.
    */
   maxFiles?: number;
 }
 
 /**
- * Walk `installDir` recursively counting files (excluding the directories
+ * Zod schema for `<installDir>/.amplitude/events.json`. We only need to
+ * validate the outer shape — the canonical parser
+ * (`parseEventPlanContent`) already accepts a wide range of field-casing
+ * variants. The schema rejects malformed JSON early so we don't burn
+ * cycles parsing a file that will fail downstream anyway. On schema
+ * mismatch we log a warning and return 0; the agent falls back to its
+ * normal `read_file` exploration.
+ */
+const EventsFileSchema = z.union([
+  z.array(z.unknown()),
+  z.object({ events: z.array(z.unknown()).optional() }).passthrough(),
+]);
+
+/**
+ * Walk `installDir` asynchronously counting files (excluding directories
  * in `SKIP_DIRECTORIES`). Stops as soon as `Date.now() - start` exceeds
- * `timeoutMs` OR `fileCount` exceeds `maxFiles`, and reports
- * `timedOut: true`. Always returns synchronously — `fs.readdirSync` with
- * `withFileTypes: true` is the cheapest API for a depth-first walk on
- * Node 20+.
+ * `timeoutMs` (sets `timedOut: true`) OR `fileCount` exceeds `maxFiles`
+ * (sets `capHit: true`). Distinct flags so callers can honor a user
+ * threshold above the cap — `capHit` does NOT auto-imply "large project".
+ *
+ * Async by design: `fs.promises.readdir` lets the event loop service the
+ * Ink renderer + the rest of cold-start while we walk. The earlier
+ * `fs.readdirSync` version blocked the main thread for 1–4s on a large
+ * monorepo, freezing the spinner and starving any concurrent network
+ * calls.
  *
  * Why two caps: `timeoutMs` protects against pathological filesystems
  * (slow network mounts, huge breadth); `maxFiles` protects against the
  * common case of a healthy-but-large monorepo where we'd otherwise spend
- * 1–4s synchronously enumerating files we already know we won't read.
- * The JIT mode decision only needs "is this above the threshold?", so
- * once we've exceeded the cap the answer is already locked in.
+ * multiple seconds enumerating files we already know we won't read.
  */
-function countSourceFiles(
+async function countSourceFiles(
   installDir: string,
   timeoutMs: number,
   maxFiles: number,
-): { fileCount: number; timedOut: boolean } {
+): Promise<{ fileCount: number; timedOut: boolean; capHit: boolean }> {
   const start = Date.now();
   let fileCount = 0;
   const stack: string[] = [installDir];
 
   while (stack.length > 0) {
     if (Date.now() - start > timeoutMs) {
-      return { fileCount, timedOut: true };
+      return { fileCount, timedOut: true, capHit: false };
     }
     const dir = stack.pop()!;
     let entries: fs.Dirent[];
     try {
-      entries = fs.readdirSync(dir, { withFileTypes: true });
+      entries = await fsp.readdir(dir, { withFileTypes: true });
     } catch {
       // Permission denied / vanished directory — skip silently. Detection
       // is best-effort; a partial count is still useful.
@@ -168,24 +209,47 @@ function countSourceFiles(
           // Bail mid-readdir — a wide flat directory can blow past the cap
           // without ever popping another stack entry. The outer loop's
           // cap check would then never fire.
-          return { fileCount, timedOut: true };
+          return { fileCount, timedOut: false, capHit: true };
         }
       }
       // Symlinks, sockets, etc. are intentionally not counted.
     }
   }
 
-  return { fileCount, timedOut: false };
+  return { fileCount, timedOut: false, capHit: false };
 }
 
 /** Read `<installDir>/.amplitude/events.json` and count parsed events. */
-function countConfirmedEvents(installDir: string): number {
+async function countConfirmedEvents(installDir: string): Promise<number> {
   const eventsPath = getEventsFile(installDir);
   let content: string;
   try {
-    if (!fs.existsSync(eventsPath)) return 0;
-    content = fs.readFileSync(eventsPath, 'utf8');
+    content = await fsp.readFile(eventsPath, 'utf8');
+  } catch (err: unknown) {
+    // ENOENT is expected when the user hasn't approved a plan yet.
+    const code = (err as NodeJS.ErrnoException | undefined)?.code;
+    if (code !== 'ENOENT') {
+      log.warn('events.json unreadable', { code, path: eventsPath });
+    }
+    return 0;
+  }
+  // Validate outer shape with zod before handing off to the canonical
+  // parser. A schema mismatch here means the file is so malformed even
+  // the lenient downstream parser will reject it; we log + return 0
+  // rather than feeding garbage into the gate.
+  let json: unknown;
+  try {
+    json = JSON.parse(content);
   } catch {
+    log.warn('events.json is not valid JSON', { path: eventsPath });
+    return 0;
+  }
+  const validation = EventsFileSchema.safeParse(json);
+  if (!validation.success) {
+    log.warn('events.json failed schema validation', {
+      path: eventsPath,
+      'error message': validation.error.issues[0]?.message ?? 'unknown',
+    });
     return 0;
   }
   const parsed = parseEventPlanContent(content);
@@ -195,21 +259,37 @@ function countConfirmedEvents(installDir: string): number {
 
 /**
  * Inspect the project on disk and report the signals the pre-flight gate
- * needs. Synchronous + best-effort; never throws.
+ * needs. Async + best-effort; never throws.
+ *
+ * The effective `maxFiles` is widened proportionally when the active
+ * file-count threshold (resolved from env vars at call time, or the
+ * caller-supplied option) exceeds the default cap. This prevents a user
+ * setting `AMPLITUDE_WIZARD_PREFLIGHT_FILE_THRESHOLD=2000` from being
+ * silently capped at 500 — the scan budget grows to `2 × threshold` so
+ * the gate decision is informed by enough of the tree to be meaningful.
  */
-export function detectProjectSize(
+export async function detectProjectSize(
   installDir: string,
   options: DetectProjectSizeOptions = {},
-): ProjectSizeReport {
+): Promise<ProjectSizeReport> {
   const timeoutMs = options.timeoutMs ?? DEFAULT_DETECTION_TIMEOUT_MS;
-  const maxFiles = options.maxFiles ?? DEFAULT_MAX_FILES_SCANNED;
-  const { fileCount, timedOut } = countSourceFiles(
-    installDir,
-    timeoutMs,
-    maxFiles,
-  );
-  const eventCount = countConfirmedEvents(installDir);
-  return { fileCount, eventCount, timedOut };
+  // Widen the default cap proportionally if the user set a high threshold
+  // via env-var. Without this, B1 fires: a 2000-file threshold gets
+  // silently capped at the default 500 and the gate trips on every
+  // project. An explicit `options.maxFiles` (test-only) is honored
+  // verbatim — only the default is widened.
+  let maxFiles: number;
+  if (options.maxFiles !== undefined) {
+    maxFiles = options.maxFiles;
+  } else {
+    const { fileThreshold } = resolveThresholds();
+    maxFiles = Math.max(DEFAULT_MAX_FILES_SCANNED, fileThreshold * 2);
+  }
+  const [{ fileCount, timedOut, capHit }, eventCount] = await Promise.all([
+    countSourceFiles(installDir, timeoutMs, maxFiles),
+    countConfirmedEvents(installDir),
+  ]);
+  return { fileCount, eventCount, timedOut, capHit };
 }
 
 /**
@@ -238,9 +318,15 @@ function parsePositiveInt(value: string | undefined): number | null {
 
 /**
  * Decide whether to use the just-in-time block based on the report and
- * the active thresholds. A `timedOut: true` report always lands on JIT
- * — large projects shouldn't be paying a probe tax to figure out they're
- * large.
+ * the active thresholds.
+ *
+ * - `timedOut: true` (wall-clock cap fired) always lands on JIT — large
+ *   codebases shouldn't pay a probe tax to figure out they're large.
+ * - `capHit: true` (file-count cap fired) does NOT auto-trip JIT — the
+ *   partial `fileCount` is compared against the threshold like any
+ *   other count, so a user-supplied threshold higher than the cap is
+ *   honored. The caller may still observe the partial count is below
+ *   their threshold and stay on full mode.
  */
 export function shouldUseJitMode(
   report: ProjectSizeReport,

@@ -333,7 +333,10 @@ function buildJitContextBlock(
 
 function describeProjectSize(size: ProjectSizeReport): string {
   const parts: string[] = [];
-  if (size.timedOut) {
+  // `timedOut` (wall-clock cap) and `capHit` (file-count cap) both yield
+  // a partial count — annotate accordingly so the LLM knows the number is
+  // a lower bound. `capHit` is the more common case in practice.
+  if (size.timedOut || size.capHit) {
     parts.push(`${size.fileCount}+ files (scan capped)`);
   } else {
     parts.push(`${size.fileCount} files`);
@@ -342,6 +345,23 @@ function describeProjectSize(size: ProjectSizeReport): string {
     parts.push(`${size.eventCount} confirmed events`);
   }
   return parts.join(' / ');
+}
+
+/**
+ * Result of `buildPreflightContext`. Returns the rendered Markdown plus
+ * the gate decision so callers (most notably `agent-runner.ts`) can log
+ * the authoritative mode without recomputing thresholds — that previously
+ * created a divergence risk between the gate and the diagnostic line.
+ */
+export interface PreflightContextResult {
+  /** Markdown block to prepend to the integration prompt. */
+  prompt: string;
+  /** True when the JIT mode block was rendered (large project). */
+  jitMode: boolean;
+  /** Project-size report used to make the gate decision. */
+  projectSize: ProjectSizeReport;
+  /** Resolved thresholds from env vars (or defaults). */
+  thresholds: { fileThreshold: number; eventThreshold: number };
 }
 
 /**
@@ -365,12 +385,20 @@ function describeProjectSize(size: ProjectSizeReport): string {
  * The mode decision uses `input.projectSize` if supplied; otherwise the
  * helper runs `detectProjectSize` itself with the default 5s cap.
  */
-export function buildPreflightContext(input: PreflightContextInput): string {
-  const size = input.projectSize ?? detectProjectSize(input.installDir);
+export async function buildPreflightContext(
+  input: PreflightContextInput,
+): Promise<PreflightContextResult> {
+  const size = input.projectSize ?? (await detectProjectSize(input.installDir));
   const thresholds = resolveThresholds(input.env ?? process.env);
+  const jitMode = shouldUseJitMode(size, thresholds);
 
-  if (shouldUseJitMode(size, thresholds)) {
-    return buildJitContextBlock(input, size);
+  if (jitMode) {
+    return {
+      prompt: buildJitContextBlock(input, size),
+      jitMode: true,
+      projectSize: size,
+      thresholds,
+    };
   }
 
   const sections = [
@@ -385,5 +413,10 @@ export function buildPreflightContext(input: PreflightContextInput): string {
     '`detect_package_manager`, `check_env_keys`, or other discovery tools ' +
     'on the very first turn just to re-derive them. Those tools remain ' +
     'available later if you need to verify a value the user just changed.';
-  return [header, ...sections, footer].join('\n\n') + '\n';
+  return {
+    prompt: [header, ...sections, footer].join('\n\n') + '\n',
+    jitMode: false,
+    projectSize: size,
+    thresholds,
+  };
 }
