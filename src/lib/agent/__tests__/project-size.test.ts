@@ -114,6 +114,38 @@ describe('detectProjectSize', () => {
     // require platform-specific chmod that's flaky in CI.
     expect(() => detectProjectSize(dir)).not.toThrow();
   });
+
+  it('counts files inside `env/` directories (not skipped)', () => {
+    // Regression: bare `env` was previously in the skip list, which
+    // undercounted T3-stack apps that put env-validation schemas under
+    // `src/env/`. We removed it; legitimate `env/` source dirs must be
+    // walked.
+    touch(path.join(dir, 'src/env/server.ts'));
+    touch(path.join(dir, 'src/env/client.ts'));
+    touch(path.join(dir, 'src/env/index.ts'));
+    const report = detectProjectSize(dir);
+    expect(report.fileCount).toBe(3);
+  });
+
+  it('still skips Python virtualenvs via `.venv`', () => {
+    // Confirms the env removal did not regress virtualenv handling.
+    touch(path.join(dir, 'src/a.py'));
+    touch(path.join(dir, '.venv/lib/site-packages/foo.py'));
+    const report = detectProjectSize(dir);
+    expect(report.fileCount).toBe(1);
+  });
+
+  it('aborts the walk early once the file-count cap is exceeded', () => {
+    // Defends against multi-second blocking on large monorepos.
+    for (let i = 0; i < 50; i += 1) {
+      touch(path.join(dir, `src/file-${i}.ts`));
+    }
+    const report = detectProjectSize(dir, { maxFiles: 10 });
+    expect(report.timedOut).toBe(true);
+    // We may overshoot the cap by a single readdir batch, so just assert
+    // we stopped well below the full 50-file count.
+    expect(report.fileCount).toBeLessThan(50);
+  });
 });
 
 describe('resolveThresholds', () => {

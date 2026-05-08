@@ -8,8 +8,8 @@
  * attention budget for medium-and-up codebases — Anthropic's guidance is
  * to prefer just-in-time (JIT) context loading via `read_file` / `grep`
  * for projects above ~50 events or ~200 source files. This helper scans
- * the install directory under a hard 5s wall-clock cap and reports the
- * counts the gate uses.
+ * the install directory under a hard 5s wall-clock cap and a 1k-file
+ * count cap (whichever fires first) and reports the counts the gate uses.
  *
  * Pure-ish: `fs.readdirSync` recursively, plus a single read of
  * `events.json`. No network, no spawning.
@@ -33,6 +33,15 @@ export const DEFAULT_EVENT_THRESHOLD = 50;
 
 /** Default wall-clock cap on the recursive directory scan. */
 export const DEFAULT_DETECTION_TIMEOUT_MS = 5_000;
+
+/**
+ * Hard cap on files counted before bailing. Once we know the project
+ * exceeds this, we already know it's "large" — continuing to walk only
+ * burns startup time. Set well above `DEFAULT_FILE_THRESHOLD` (200) so
+ * the JIT decision still has signal even when callers raise the
+ * threshold via the env-var override.
+ */
+export const DEFAULT_MAX_FILES_SCANNED = 1_000;
 
 /** Env-var override names. Documented in `CLAUDE.md`. */
 export const FILE_THRESHOLD_ENV = 'AMPLITUDE_WIZARD_PREFLIGHT_FILE_THRESHOLD';
@@ -72,7 +81,11 @@ const SKIP_DIRECTORIES: ReadonlySet<string> = new Set([
   'obj',
   '.venv',
   'venv',
-  'env',
+  // NOTE: bare `env` is intentionally NOT in this set. Many legitimate
+  // source trees (e.g. T3-stack Next.js apps) keep TypeScript env-validation
+  // schemas under `src/env/` or `app/env/`; skipping them at any depth would
+  // undercount real source files and falsely shrink medium projects below
+  // the JIT threshold. Python virtualenvs are still skipped via `.venv`.
   '__pycache__',
   '.pytest_cache',
   '.mypy_cache',
@@ -95,18 +108,33 @@ export interface ProjectSizeReport {
 export interface DetectProjectSizeOptions {
   /** Hard wall-clock cap. Defaults to `DEFAULT_DETECTION_TIMEOUT_MS`. */
   timeoutMs?: number;
+  /**
+   * Hard cap on file count. Once exceeded, the walk aborts early and
+   * `timedOut: true` is reported so callers route to JIT mode. Defaults
+   * to `DEFAULT_MAX_FILES_SCANNED`.
+   */
+  maxFiles?: number;
 }
 
 /**
  * Walk `installDir` recursively counting files (excluding the directories
  * in `SKIP_DIRECTORIES`). Stops as soon as `Date.now() - start` exceeds
- * `timeoutMs` and reports `timedOut: true`. Always returns synchronously
- * — `fs.readdirSync` with `withFileTypes: true` is the cheapest API for
- * a depth-first walk on Node 20+.
+ * `timeoutMs` OR `fileCount` exceeds `maxFiles`, and reports
+ * `timedOut: true`. Always returns synchronously — `fs.readdirSync` with
+ * `withFileTypes: true` is the cheapest API for a depth-first walk on
+ * Node 20+.
+ *
+ * Why two caps: `timeoutMs` protects against pathological filesystems
+ * (slow network mounts, huge breadth); `maxFiles` protects against the
+ * common case of a healthy-but-large monorepo where we'd otherwise spend
+ * 1–4s synchronously enumerating files we already know we won't read.
+ * The JIT mode decision only needs "is this above the threshold?", so
+ * once we've exceeded the cap the answer is already locked in.
  */
 function countSourceFiles(
   installDir: string,
   timeoutMs: number,
+  maxFiles: number,
 ): { fileCount: number; timedOut: boolean } {
   const start = Date.now();
   let fileCount = 0;
@@ -132,12 +160,16 @@ function countSourceFiles(
         // bespoke `.something`) — they're either tool/IDE caches we don't
         // enumerate or generated artifacts. `SKIP_DIRECTORIES` already
         // handled the common named cases above; this is the catch-all.
-        // (Not an allowlist — there is no mechanism to opt a `.foo` dir
-        // back in via `SKIP_DIRECTORIES`.)
         if (entry.name.startsWith('.')) continue;
         stack.push(path.join(dir, entry.name));
       } else if (entry.isFile()) {
         fileCount += 1;
+        if (fileCount > maxFiles) {
+          // Bail mid-readdir — a wide flat directory can blow past the cap
+          // without ever popping another stack entry. The outer loop's
+          // cap check would then never fire.
+          return { fileCount, timedOut: true };
+        }
       }
       // Symlinks, sockets, etc. are intentionally not counted.
     }
@@ -170,7 +202,12 @@ export function detectProjectSize(
   options: DetectProjectSizeOptions = {},
 ): ProjectSizeReport {
   const timeoutMs = options.timeoutMs ?? DEFAULT_DETECTION_TIMEOUT_MS;
-  const { fileCount, timedOut } = countSourceFiles(installDir, timeoutMs);
+  const maxFiles = options.maxFiles ?? DEFAULT_MAX_FILES_SCANNED;
+  const { fileCount, timedOut } = countSourceFiles(
+    installDir,
+    timeoutMs,
+    maxFiles,
+  );
   const eventCount = countConfirmedEvents(installDir);
   return { fileCount, eventCount, timedOut };
 }
