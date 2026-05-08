@@ -119,7 +119,15 @@ export const getLlmGatewayUrlFromHost = (host: string) => {
  *   1. `AMPLITUDE_WIZARD_MESSAGES_BASE_URL` — full URL override. Escape hatch
  *      for internal users who need to pin to a different host (incident
  *      response, eval harness, local proxy).
- *   2. Zone-aware production default:
+ *   2. `WIZARD_LLM_PROXY_URL` — full URL override. Mirrors precedence in
+ *      `getLlmGatewayUrlFromHost` so users with this env var set (LiteLLM,
+ *      corporate proxy, etc.) don't silently bypass their proxy on the
+ *      messages path.
+ *   3. `WIZARD_ZONE` — explicit region selector (`us` | `eu`) for CI / harness
+ *      paths. Bypasses host derivation so eval workflows can hit a specific
+ *      zone without depending on a stored OAuth session's host. Invalid
+ *      values fall through to host derivation.
+ *   4. Zone-aware production default:
  *      - US → `https://amplitude.com/web-api/wizard`
  *      - EU → `https://eu.amplitude.com/web-api/wizard`
  *
@@ -131,6 +139,19 @@ export const getMessagesBaseUrl = (host: string): string => {
   const override = process.env.AMPLITUDE_WIZARD_MESSAGES_BASE_URL?.trim();
   if (override) {
     return override;
+  }
+
+  const proxyOverride = process.env.WIZARD_LLM_PROXY_URL?.trim();
+  if (proxyOverride) {
+    return proxyOverride;
+  }
+
+  const zoneOverride = process.env.WIZARD_ZONE?.trim().toLowerCase();
+  if (zoneOverride === 'eu') {
+    return 'https://eu.amplitude.com/web-api/wizard';
+  }
+  if (zoneOverride === 'us') {
+    return 'https://amplitude.com/web-api/wizard';
   }
 
   if (host.includes('eu.amplitude.com')) {
