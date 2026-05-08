@@ -108,6 +108,39 @@ export const getLlmGatewayUrlFromHost = (host: string) => {
 };
 
 /**
+ * Resolve the base URL the Claude Agent SDK should use for `POST /v1/messages`.
+ *
+ * The wizard's messages traffic is served by the standalone `wizard-api`
+ * service, which is operationally separate from the wizard-proxy on
+ * `core.amplitude.com/wizard` (skills, project create, MCP — those still
+ * go through `getLlmGatewayUrlFromHost`).
+ *
+ * Resolution precedence (first match wins):
+ *   1. `AMPLITUDE_WIZARD_MESSAGES_BASE_URL` — full URL override. Escape hatch
+ *      for internal users who need to pin to a different host (incident
+ *      response, eval harness, local proxy).
+ *   2. Zone-aware production default:
+ *      - US → `https://amplitude.com/web-api/wizard`
+ *      - EU → `https://eu.amplitude.com/web-api/wizard`
+ *
+ * EU vs US is decided by inspecting `host` (the user's resolved Amplitude
+ * data host). Routing EU traffic through US infrastructure is a compliance
+ * issue, not just a UX issue — same reasoning as `getMcpHostFromRegion`.
+ */
+export const getMessagesBaseUrl = (host: string): string => {
+  const override = process.env.AMPLITUDE_WIZARD_MESSAGES_BASE_URL?.trim();
+  if (override) {
+    return override;
+  }
+
+  if (host.includes('eu.amplitude.com')) {
+    return 'https://eu.amplitude.com/web-api/wizard';
+  }
+
+  return 'https://amplitude.com/web-api/wizard';
+};
+
+/**
  * Resolve the Amplitude MCP server base host for a given region.
  *
  * Returns the bare origin (no path); callers append `/mcp`, `/sse`, etc.

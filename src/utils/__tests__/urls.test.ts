@@ -5,6 +5,7 @@ import {
   getLlmGatewayUrlFromHost,
   getMcpHostFromRegion,
   getMcpUrlFromZone,
+  getMessagesBaseUrl,
 } from '../urls.js';
 
 // ── getCloudUrlFromRegion ─────────────────────────────────────────────────────
@@ -191,6 +192,66 @@ describe('getLlmGatewayUrlFromHost', () => {
     // Full URL override wins over zone selector.
     expect(getLlmGatewayUrlFromHost('https://api2.amplitude.com')).toBe(
       'http://gateway-test:8010',
+    );
+  });
+});
+
+// ── getMessagesBaseUrl ────────────────────────────────────────────────────────
+
+describe('getMessagesBaseUrl', () => {
+  const ENV_URL = 'AMPLITUDE_WIZARD_MESSAGES_BASE_URL';
+  const originalUrl = process.env[ENV_URL];
+
+  afterEach(() => {
+    if (originalUrl === undefined) delete process.env[ENV_URL];
+    else process.env[ENV_URL] = originalUrl;
+  });
+
+  it('returns the US wizard-api URL for US hosts', () => {
+    delete process.env[ENV_URL];
+    expect(getMessagesBaseUrl('https://api2.amplitude.com')).toBe(
+      'https://amplitude.com/web-api/wizard',
+    );
+  });
+
+  it('returns the EU wizard-api URL for EU hosts', () => {
+    delete process.env[ENV_URL];
+    expect(getMessagesBaseUrl('https://api.eu.amplitude.com')).toBe(
+      'https://eu.amplitude.com/web-api/wizard',
+    );
+  });
+
+  it('returns the EU wizard-api URL for the eu.amplitude.com host', () => {
+    delete process.env[ENV_URL];
+    expect(getMessagesBaseUrl('https://eu.amplitude.com')).toBe(
+      'https://eu.amplitude.com/web-api/wizard',
+    );
+  });
+
+  it('AMPLITUDE_WIZARD_MESSAGES_BASE_URL overrides both regions', () => {
+    process.env[ENV_URL] = 'https://my-proxy.example.com';
+    expect(getMessagesBaseUrl('https://api2.amplitude.com')).toBe(
+      'https://my-proxy.example.com',
+    );
+    expect(getMessagesBaseUrl('https://api.eu.amplitude.com')).toBe(
+      'https://my-proxy.example.com',
+    );
+  });
+
+  it('whitespace-only override falls through to the production default', () => {
+    process.env[ENV_URL] = '   ';
+    expect(getMessagesBaseUrl('https://api2.amplitude.com')).toBe(
+      'https://amplitude.com/web-api/wizard',
+    );
+  });
+
+  it('never returns localhost by default (must be opt-in via override)', () => {
+    delete process.env[ENV_URL];
+    expect(getMessagesBaseUrl('https://api2.amplitude.com')).not.toContain(
+      'localhost',
+    );
+    expect(getMessagesBaseUrl('https://api.eu.amplitude.com')).not.toContain(
+      'localhost',
     );
   });
 });

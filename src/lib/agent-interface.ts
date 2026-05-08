@@ -39,8 +39,8 @@ import { registerCleanup, getWizardAbortSignal } from '../utils/wizard-abort';
 import { createCustomHeaders } from '../utils/custom-headers';
 import {
   getHostFromRegion,
-  getLlmGatewayUrlFromHost,
   getMcpUrlFromZone,
+  getMessagesBaseUrl,
 } from '../utils/urls';
 import { getStoredToken, getStoredUser } from '../utils/ampli-settings';
 import {
@@ -1220,8 +1220,12 @@ export async function initializeAgent(
       delete process.env.ANTHROPIC_AUTH_TOKEN;
       logToFile('No Amplitude API key — using local claude CLI');
     } else {
-      // Configure LLM gateway environment variables (inherited by SDK subprocess)
-      const gatewayUrl = getLlmGatewayUrlFromHost(config.amplitudeApiHost);
+      // Configure LLM gateway environment variables (inherited by SDK subprocess).
+      // Messages traffic is served by the standalone wizard-api service —
+      // separate from the wizard-proxy on core.amplitude.com (skills, project
+      // create, MCP), which still uses getLlmGatewayUrlFromHost.
+      // AMPLITUDE_WIZARD_MESSAGES_BASE_URL is the escape hatch.
+      const gatewayUrl = getMessagesBaseUrl(config.amplitudeApiHost);
 
       // Fail fast if the gateway isn't responding rather than hanging indefinitely
       const alive = await checkGatewayLiveness(gatewayUrl);
