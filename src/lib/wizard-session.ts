@@ -886,6 +886,19 @@ export interface WizardSession {
   signupAbandoned: boolean;
 
   /**
+   * True while an agentic-signup POST is awaiting response. Ephemeral —
+   * written exclusively by `WizardStore.runSignupAttempt`'s try/finally
+   * and `_resetCeremonyKeys`. Used as a back-nav wall: Esc must not let
+   * the user reset ceremony state mid-POST, since the response could
+   * still land (success → tokens captured; abandon → ceremony settles)
+   * on a session that's been wiped.
+   *
+   * Distinct from `signupTokensObtained` (persistent across runs) and
+   * `signupAuth` (settled outcome of the POST).
+   */
+  signupInFlight: boolean;
+
+  /**
    * Create-project flow state.
    *
    * `pending` = the user has chosen "Create new project…" from the Auth
@@ -1225,6 +1238,7 @@ export function buildSession(args: {
     signupRequiredFields: null,
     signupAuth: null,
     signupAbandoned: false,
+    signupInFlight: false,
 
     createProject: {
       pending: false,

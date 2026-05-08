@@ -31,7 +31,6 @@ import { useWizardStore } from '../hooks/useWizardStore.js';
 import { useAsyncEffect } from '../hooks/useAsyncEffect.js';
 import { Colors, Icons } from '../styles.js';
 import { BrailleSpinner } from '../components/BrailleSpinner.js';
-import { performSignupOrAuth } from '../../../utils/signup-or-auth.js';
 import { resolveZone } from '../../../lib/zone-resolution.js';
 import { DEFAULT_AMPLITUDE_ZONE } from '../../../lib/constants.js';
 import { createLogger } from '../../../lib/observability/logger.js';
@@ -64,12 +63,20 @@ export const SigningUpScreen = ({ store }: SigningUpScreenProps) => {
       const zone = resolveZone(session, DEFAULT_AMPLITUDE_ZONE, {
         readDisk: false,
       });
-      // Thread `signal` through so axios cancels the in-flight POSTs on
-      // unmount AND the wrapper skips its `replaceStoredUser` write if
-      // the user backed out before the success arm settled. Without
-      // this, an abandoned ceremony can still leak tokens to disk and
-      // make the next launch think the user is signed in.
-      const result = await performSignupOrAuth({
+      // `store.runSignupAttempt` is the sole TUI surface for the
+      // agentic-signup POST: it wraps `performSignupOrAuth` in a
+      // try/finally that toggles `signupInFlight` for the duration
+      // of the call (clears even on signal-driven aborts). The
+      // signup-ceremony FlowEntries gate `isWall` on that flag so
+      // Esc cannot reset ceremony state mid-POST; otherwise the
+      // response could land on a session that's been wiped.
+      //
+      // Threading `signal` through aborts the in-flight POSTs on
+      // unmount AND skips the wrapper's `replaceStoredUser` write if
+      // the user backed out before the success arm settled —
+      // otherwise an abandoned ceremony can still leak tokens to
+      // disk and make the next launch think the user is signed in.
+      const result = await store.runSignupAttempt({
         email,
         fullName,
         zone,

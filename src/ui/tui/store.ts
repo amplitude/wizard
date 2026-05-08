@@ -45,6 +45,11 @@ import {
 import { analytics, sessionPropertiesCompact } from '../../utils/analytics.js';
 import { clearApiKey } from '../../utils/api-key-store.js';
 import {
+  performSignupOrAuth,
+  type SignupOrAuthInput,
+  type PerformSignupOrAuthResult,
+} from '../../utils/signup-or-auth.js';
+import {
   CANONICAL_STEPS,
   matchCanonicalStep,
 } from '../../lib/canonical-tasks.js';
@@ -709,6 +714,11 @@ export class WizardStore {
     // the forward-direction write is folded into `setSignupAuth`, not
     // a separate setter — see that method for the atomicity rationale.)
     this.$session.setKey('signupTokensObtained', false);
+    // Match the singleton-writer invariant: this and `runSignupAttempt`
+    // are the only direct writers of `signupInFlight`. Resetting it
+    // here guards against a stale `true` riding through a ceremony
+    // wipe (e.g. region change while a POST was abandoned in-flight).
+    this.$session.setKey('signupInFlight', false);
   }
 
   setSignupEmail(email: string | null): void {
@@ -782,6 +792,37 @@ export class WizardStore {
   setSignupAbandoned(abandoned: boolean): void {
     this.$session.setKey('signupAbandoned', abandoned);
     this.emitChange();
+  }
+
+  /**
+   * Sole TUI entry point for the agentic-signup POST. Wraps
+   * `performSignupOrAuth` in a try/finally that toggles
+   * `signupInFlight` so the back-nav wall (`signupCommittedWall` in
+   * `flows.ts`) blocks Esc while the request is pending.
+   *
+   * Why this is the only TUI surface for the call:
+   * - `signupInFlight` is mutated nowhere else (singleton-writer
+   *   invariant, pinned by `signup-in-flight.invariants.test.ts`).
+   * - A bare `performSignupOrAuth(...)` call from the TUI would skip
+   *   the wall and re-introduce the BA-114 race (response landing on
+   *   a session that's been wiped by Esc mid-POST).
+   * - Pinned by `signup-or-auth-tui-encapsulation.test.ts`: the only
+   *   import of `performSignupOrAuth` inside `src/ui/tui/` is this
+   *   file. Non-TUI modes (CI / agent / classic) intentionally call
+   *   `performSignupOrAuth` directly via `runDirectSignupIfRequested`
+   *   — they have no Esc handler so no wall to maintain.
+   */
+  async runSignupAttempt(
+    input: SignupOrAuthInput,
+  ): Promise<PerformSignupOrAuthResult> {
+    this.$session.setKey('signupInFlight', true);
+    this.emitChange();
+    try {
+      return await performSignupOrAuth(input);
+    } finally {
+      this.$session.setKey('signupInFlight', false);
+      this.emitChange();
+    }
   }
 
   setAuthOnboardingPath(path: WizardSession['authOnboardingPath']): void {

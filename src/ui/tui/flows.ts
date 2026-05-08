@@ -74,6 +74,51 @@ export interface FlowEntry {
    * successful revert.
    */
   revert?: (store: WizardStore) => boolean | void;
+  /**
+   * State-driven hard wall. When true on a completed entry, back-nav
+   * past this entry is blocked outright (`canGoBack` / `goBack` return
+   * `false`). Checked BEFORE `revert` so a wall takes precedence over
+   * a defined revert callback.
+   *
+   * Use for committed states the user cannot honestly undo — e.g. a
+   * server account created during signup. Distinct from "no `revert`
+   * defined" (a flow-definition-time wall): `isWall` is a runtime
+   * decision based on session state, so the same entry can revert
+   * normally in one state and be a hard wall in another.
+   *
+   * Today the only `isWall` user is the signup-ceremony entries, gated
+   * on `signupCommittedWall` (BA-114). The browser-OAuth callback case
+   * is tracked separately as BA-122.
+   */
+  isWall?: (session: WizardSession) => boolean;
+}
+
+/**
+ * State-driven wall for the signup-ceremony entries.
+ *
+ * Once the user has committed to direct signup — either the POST is
+ * mid-flight or it landed successfully — back-nav out of the ceremony
+ * is a no-op trapdoor: the server-side account exists (success) or
+ * could land any moment (in-flight) on a session that's been wiped.
+ *
+ * `signupAuth !== null` covers the "direct-signup success" case. The
+ * `requires_redirect` arm (browser-OAuth fallback) is intentionally NOT
+ * covered here — tracked separately as BA-122.
+ *
+ * `signupInFlight` covers the in-flight POST window, written
+ * exclusively by `WizardStore.runSignupAttempt`'s try/finally.
+ *
+ * Scope: this wall applies to **back-nav only** (Esc / `goBack`). Slash
+ * commands that funnel through `_resetCeremonyKeys` (e.g. `/region` →
+ * `setRegionForced`, `switchToLogin`) are out of scope by design — they
+ * represent explicit user intent ("I picked the wrong region; restart
+ * from there") that should not be silently blocked while a brief POST
+ * is in flight. If a slash command fires mid-POST, the ceremony state
+ * is wiped atomically alongside `signupInFlight` and the response is
+ * dropped on the floor — same outcome as user `/exit` mid-POST.
+ */
+function signupCommittedWall(s: WizardSession): boolean {
+  return s.signupAuth !== null || s.signupInFlight;
 }
 
 /**
@@ -131,6 +176,7 @@ export const FLOWS: Record<Flow, FlowEntry[]> = {
         if (!isCreateAccountOnboarding(store.session)) return false;
         store.setSignupEmail(null);
       },
+      isWall: signupCommittedWall,
     },
     // 2b. Signing up — POSTs the agentic provisioning request and writes
     //     the response into session state. Show predicate gates on email
@@ -176,6 +222,7 @@ export const FLOWS: Record<Flow, FlowEntry[]> = {
       // resets the ceremony so the next forward pass fires a fresh
       // probe.
       revert: () => false,
+      isWall: signupCommittedWall,
     },
     // 2c. Terms of Service — only renders AFTER the server confirmed
     //     agentic signup is happening (signupRequiredFields was set).
@@ -211,6 +258,7 @@ export const FLOWS: Record<Flow, FlowEntry[]> = {
         if (store.session.signupAbandoned) return false;
         store.resetToS();
       },
+      isWall: signupCommittedWall,
     },
     // 2d. Signup full name — renders only when the server included
     //     'full_name' in `required` AND the session doesn't already have
@@ -249,6 +297,7 @@ export const FLOWS: Record<Flow, FlowEntry[]> = {
         if (store.session.signupAbandoned) return false;
         store.setSignupFullName(null);
       },
+      isWall: signupCommittedWall,
     },
     // 3. Authenticate (SUSI for new users, silent login check for returning users).
     //    Skipped on error so auth-failure runs route directly to Outro.

@@ -135,7 +135,8 @@ export class WizardRouter {
    * Returns true if it finds a previously-completed entry with a `revert`
    * defined. Returns false the moment it hits a completed entry without a
    * revert — those act as a wall (e.g. Run, which would be destructive
-   * to undo).
+   * to undo). State-driven walls (`isWall` returning true) are also
+   * treated as a hard stop and take precedence over `revert`.
    *
    * Overlays disable back-nav so users dismiss the overlay first.
    */
@@ -148,6 +149,9 @@ export class WizardRouter {
       // its isComplete predicate is true; show=false alone doesn't disqualify
       // (a step can be hidden because it already concluded).
       if (!entry.isComplete || !entry.isComplete(session)) continue;
+      // State-driven wall takes precedence over `revert` so an entry can
+      // revert normally in one state and be a hard wall in another.
+      if (entry.isWall && entry.isWall(session)) return false;
       // Completed entry: either it can be reverted, or it's a wall.
       return Boolean(entry.revert);
     }
@@ -160,7 +164,9 @@ export class WizardRouter {
    * on the next render. Returns true if a revert fired.
    *
    * Reverts that return `false` are treated as no-ops (nothing meaningful
-   * to undo at that step) and the walk continues further back.
+   * to undo at that step) and the walk continues further back. A
+   * completed entry with `isWall === true` halts the walk regardless of
+   * `revert` semantics.
    */
   goBack(session: WizardSession, store: WizardStore): boolean {
     if (this.overlays.length > 0) return false;
@@ -168,6 +174,7 @@ export class WizardRouter {
     for (let i = activeIdx - 1; i >= 0; i--) {
       const entry = this.flow[i];
       if (!entry.isComplete || !entry.isComplete(session)) continue;
+      if (entry.isWall && entry.isWall(session)) return false; // hard wall
       if (!entry.revert) return false; // wall — no back past this entry
       const reverted = entry.revert(store);
       if (reverted === false) continue; // no-op revert, keep walking
