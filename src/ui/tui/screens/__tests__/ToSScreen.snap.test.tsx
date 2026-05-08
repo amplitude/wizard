@@ -21,14 +21,19 @@ describe('ToSScreen snapshots', () => {
   it('renders the heading, both legal links, and the accept/decline picker', () => {
     // Pin the session at the "ToS is the active screen" point in the
     // create-account flow: intro concluded, zone resolved, email capture
-    // done. This is the only state in which canGoBack() returns true on
-    // ToS, which is what triggers `useEscapeBack` to register the
-    // [Esc] Back hint we assert on below.
+    // done, and `legalDocumentBundle` populated by the parser. This is
+    // the only state in which canGoBack() returns true on ToS, which is
+    // what triggers `useEscapeBack` to register the [Esc] Back hint we
+    // assert on below.
     const store = makeStoreForSnapshot({
       authOnboardingPath: AuthOnboardingPath.CreateAccount,
       introConcluded: true,
       region: 'us',
       emailCaptureComplete: true,
+      legalDocumentBundle: {
+        terms_of_service: 'https://amplitude.com/terms',
+        privacy_policy: 'https://amplitude.com/privacy',
+      },
     });
     const { frame, hints } = renderSnapshot(<ToSScreen store={store} />, store);
 
@@ -36,7 +41,9 @@ describe('ToSScreen snapshots', () => {
     expect(frame).toContain("By continuing, you agree to Amplitude's terms");
     // Both URL labels render — order matters because the screen presents
     // them as a numbered checklist; flipping them would be a regression.
-    expect(frame.indexOf('Terms:')).toBeLessThan(frame.indexOf('Privacy:'));
+    expect(frame.indexOf('Terms of Service:')).toBeLessThan(
+      frame.indexOf('Privacy Policy:'),
+    );
 
     expect(frame).toContain('I accept the Terms of Service and Privacy Policy');
     expect(frame).toContain('I do not accept');
@@ -47,5 +54,29 @@ describe('ToSScreen snapshots', () => {
     expect(hints.map((h) => h.key)).toEqual(['↑↓', 'Enter', 'Esc']);
 
     expect(frame).toMatchSnapshot();
+  });
+
+  it('renders the BE-supplied URLs verbatim when the parser passes them through', () => {
+    // Pin the URL-source contract: when the parser returns
+    // legalDocumentBundle from BE-supplied documents (Phase B/C), the
+    // screen must render those URLs — never the local constants. The
+    // sentinel URLs below would NEVER appear if the screen were still
+    // sourcing from `lib/constants.ts` directly.
+    const store = makeStoreForSnapshot({
+      authOnboardingPath: AuthOnboardingPath.CreateAccount,
+      introConcluded: true,
+      region: 'us',
+      emailCaptureComplete: true,
+      legalDocumentBundle: {
+        terms_of_service: 'https://example.test/terms-v2',
+        privacy_policy: 'https://example.test/privacy-v2',
+      },
+    });
+    const { frame } = renderSnapshot(<ToSScreen store={store} />, store);
+
+    expect(frame).toContain('https://example.test/terms-v2');
+    expect(frame).toContain('https://example.test/privacy-v2');
+    expect(frame).not.toContain('amplitude.com/terms');
+    expect(frame).not.toContain('amplitude.com/privacy');
   });
 });
