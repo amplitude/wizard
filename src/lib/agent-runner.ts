@@ -101,7 +101,11 @@ export const POST_AGENT_STEP_COMMIT_EVENTS = 'commit-events';
  *     detector to finish.
  *   - The detector leg is best-effort: a slow / failing scan must not
  *     block the agent from starting. We absorb its error into `null` so
- *     the fail-fast contract above only applies to the agent.
+ *     the fail-fast contract above only applies to the agent. This
+ *     covers BOTH async rejections AND synchronous throws — the call-site
+ *     wrapper passed in is not `async`, so a detector that throws before
+ *     returning a Promise would otherwise propagate before `initAgent()`
+ *     was ever invoked.
  *
  * Pure for unit testing — exported so we can verify the parallelization
  * exists by mocking each leg with a timing marker and asserting overlap.
@@ -111,12 +115,19 @@ export async function runColdStartParallel<TPm, TAgent>(
   initAgent: () => Promise<TAgent>,
   onDetectorError?: (err: unknown) => void,
 ): Promise<{ packageManagerInfo: TPm | null; agent: TAgent }> {
-  const detectorPromise: Promise<TPm | null> = detectPackageManager().catch(
-    (err) => {
+  // Wrap the detector in `Promise.resolve().then(...)` so a *synchronous*
+  // throw becomes a rejected promise the `.catch()` below can absorb.
+  // The call-site wrapper (`() => config.detection.detectPackageManager(...)`)
+  // is not `async`, and several concrete detectors are plain functions that
+  // return `Promise.resolve(...)` — without this guard, a sync throw would
+  // propagate before `initAgent()` was ever invoked, violating the
+  // best-effort contract documented above.
+  const detectorPromise: Promise<TPm | null> = Promise.resolve()
+    .then(detectPackageManager)
+    .catch((err) => {
       onDetectorError?.(err);
       return null;
-    },
-  );
+    });
   const [packageManagerInfo, agent] = await Promise.all([
     detectorPromise,
     initAgent(),

@@ -730,6 +730,44 @@ describe('runColdStartParallel (cold-start perf)', () => {
     expect(onDetectorError).toHaveBeenCalledWith(detectorErr);
   });
 
+  it('absorbs synchronous throws from the detector wrapper (not just async rejections)', async () => {
+    // Bugbot regression guard: the call-site wrapper
+    // (`() => config.detection.detectPackageManager(...)`) is NOT async.
+    // Several concrete detectors are plain functions that return
+    // `Promise.resolve(...)` — a sync throw inside one of them would
+    // bubble out of the wrapper before any `.catch()` could see it,
+    // killing agent init even though the detector is documented as
+    // best-effort. Lock the contract that BOTH paths are absorbed.
+    const detectorErr = new Error('sync boom');
+    const onDetectorError = vi.fn();
+    let agentRan = false;
+
+    // Cast: the function-shape signature says `Promise<TPm>` but a sync
+    // throw is exactly the runtime case we need to cover.
+    const syncThrowingDetector = (() => {
+      throw detectorErr;
+    }) as unknown as () => Promise<{
+      detected: string[];
+      primary: string | null;
+      recommendation: string;
+    }>;
+
+    const result = await runColdStartParallel(
+      syncThrowingDetector,
+      async () => {
+        agentRan = true;
+        return { workingDirectory: '/tmp/x' };
+      },
+      onDetectorError,
+    );
+
+    // Sync-throwing detector must not block agent init.
+    expect(agentRan).toBe(true);
+    expect(result.packageManagerInfo).toBeNull();
+    expect(result.agent).toEqual({ workingDirectory: '/tmp/x' });
+    expect(onDetectorError).toHaveBeenCalledWith(detectorErr);
+  });
+
   it('propagates getAgent errors immediately (fail-fast on the agent leg)', async () => {
     // The agent leg is NOT best-effort — if MCP bootstrap or the
     // gateway probe fails the run cannot continue, and the caller
