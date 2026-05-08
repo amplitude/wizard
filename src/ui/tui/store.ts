@@ -54,6 +54,7 @@ import {
   matchCanonicalStep,
 } from '../../lib/canonical-tasks.js';
 import type { JourneyStepId, JourneyStatus } from '../../lib/journey-state.js';
+import { triggerRerender } from './rerender-bridge.js';
 // Inlined to avoid tsx ESM resolution bug with dynamic import().
 const FLAG_LLM_ANALYTICS = 'wizard-llm-analytics';
 
@@ -1991,6 +1992,12 @@ export class WizardStore {
     if (!this._reverting) {
       this._detectTransition();
     }
+    // Force Ink to invalidate its frame cache and write the latest tree
+    // to the terminal. Without this, state changes that produce visually
+    // different trees were silently being skipped by Ink's log-update
+    // diff cache until a manual terminal resize forced a clearTerminal+
+    // repaint. No-op when no TUI is mounted (agent / CI mode / tests).
+    triggerRerender();
   }
 
   // ── Overlay navigation ──────────────────────────────────────────

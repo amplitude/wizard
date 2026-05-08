@@ -4,7 +4,7 @@
  * Uses Amplitude brand colors for terminal theming.
  */
 
-import { render } from 'ink';
+import { render, type Instance } from 'ink';
 import { createElement } from 'react';
 import { WizardStore, Flow } from './store.js';
 import type { WizardSession } from '../../lib/wizard-session.js';
@@ -12,6 +12,7 @@ import { InkUI } from './ink-ui.js';
 import { setUI } from '../index.js';
 import { App } from './App.js';
 import { Brand } from './styles.js';
+import { setRerender } from './rerender-bridge.js';
 
 // ANSI escape sequences
 const RESET_ATTRS = '\x1b[0m';
@@ -109,10 +110,19 @@ export function startTUI(
   // transitions only render after a manual resize. The wizard already
   // routes all diagnostics to the structured log file via createLogger /
   // logToFile, so we don't need Ink's console patch.
-  const { unmount: inkUnmount } = render(createElement(App, { store }), {
+  const instance: Instance = render(createElement(App, { store }), {
     exitOnCtrlC: false,
     patchConsole: false,
   });
+  const { unmount: inkUnmount } = instance;
+
+  // Bridge non-React store mutations to Ink's instance.rerender(), which
+  // re-evaluates the React tree from scratch AND invalidates Ink's
+  // internal frame cache. Without this, log-update silently skips writes
+  // when its diff cache thinks the new frame matches the previous one,
+  // so post-Run screen transitions only render after a manual terminal
+  // resize. See rerender-bridge.ts and store.ts emitChange().
+  setRerender(() => instance.rerender(createElement(App, { store })));
 
   // Reset terminal colors on exit. process.on('exit') doesn't fire on
   // signal-driven exits (SIGINT / SIGTERM / SIGHUP) — without these
@@ -159,6 +169,9 @@ export function startTUI(
 
   return {
     unmount: () => {
+      // Detach the rerender bridge before tearing down Ink so any
+      // in-flight emitChange() can't try to rerender into a dead instance.
+      setRerender(null);
       inkUnmount();
       cleanup();
     },
