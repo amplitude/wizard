@@ -2229,21 +2229,36 @@ export class WizardStore {
     const next: Partial<Record<JourneyStepId, string>> = {
       ...this.$journeyActiveForms.get(),
     };
+    // Accumulate journey-status changes locally (with the monotonic guard
+    // inlined from applyJourneyTransition) so we can commit BOTH the
+    // active-form atom and the derived-journey atom in a single batch
+    // before triggering one render+emit. Calling applyJourneyTransition
+    // inside the loop would fire renderJourneyTasks() + emitChange() per
+    // iteration against a stale $journeyActiveForms (which is only
+    // updated after the loop), exposing intermediate inconsistent
+    // frames to subscribers.
+    const journeyPrev = this.$derivedJourney.get();
+    type JourneySnapshot = typeof journeyPrev;
+    let journeyDraft: JourneySnapshot | null = null;
     for (const todo of todos) {
       const idx = matchCanonicalStep(todo.content);
       if (idx < 0) continue;
       if (todo.activeForm && todo.activeForm.trim()) {
         next[CANONICAL_STEPS[idx].id] = todo.activeForm;
       }
-      // Honour status from TodoWrite. The monotonic guard inside
-      // applyJourneyTransition prevents regressions (e.g. a
-      // completed step stays completed even if a later TodoWrite
-      // restates it as in_progress).
-      if (todo.status === 'in_progress' || todo.status === 'completed') {
-        this.applyJourneyTransition(CANONICAL_STEPS[idx].id, todo.status);
+      if (todo.status !== 'in_progress' && todo.status !== 'completed') {
+        continue;
       }
+      const stepId = CANONICAL_STEPS[idx].id;
+      const snapshot: JourneySnapshot = journeyDraft ?? journeyPrev;
+      const current = snapshot[stepId];
+      // Monotonic guard — once completed, can't regress to in_progress.
+      if (current === 'completed' && todo.status !== 'completed') continue;
+      if (current === todo.status) continue;
+      journeyDraft = { ...snapshot, [stepId]: todo.status };
     }
     this.$journeyActiveForms.set(next);
+    if (journeyDraft) this.$derivedJourney.set(journeyDraft);
     this.renderJourneyTasks();
     this.emitChange();
   }
