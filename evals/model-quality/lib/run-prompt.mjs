@@ -45,6 +45,7 @@ import { resolveModelAlias, gatewayModelString } from './scorers.mjs';
  *   inputTokens: number | null,
  *   outputTokens: number | null,
  *   error: string | null,
+ *   usageError: string | null,
  * }>}
  */
 export async function runPrompt(args) {
@@ -73,6 +74,7 @@ export async function runPrompt(args) {
   let inputTokens = null;
   let outputTokens = null;
   let error = null;
+  let usageError = null;
 
   try {
     const result = deps.streamText(requestArgs);
@@ -99,8 +101,15 @@ export async function runPrompt(args) {
             outputTokens = usage.completionTokens;
         }
       } catch (usageErr) {
-        // Non-fatal — record the issue but keep the row.
-        error = `usage read failed: ${stringifyError(usageErr)}`;
+        // Non-fatal: the text stream completed, but the usage side
+        // channel rejected (provider quirk, transient token-counting
+        // failure, etc.). The row's `text` is still valid model output
+        // and MUST be scored — we lose only the input/output token
+        // counts. Record the issue on a separate `usageError` field so
+        // downstream scoring (`score-quality.mjs`) can keep the row
+        // instead of skipping it the way it must skip rows where the
+        // stream itself failed (`error` set, `text === ''`).
+        usageError = `usage read failed: ${stringifyError(usageErr)}`;
       }
     }
   } catch (err) {
@@ -119,6 +128,7 @@ export async function runPrompt(args) {
     inputTokens,
     outputTokens,
     error,
+    usageError,
   };
 }
 

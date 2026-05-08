@@ -167,22 +167,40 @@ async function main() {
 
   // Score structural for every row.
   //
-  // Skip rows that errored at the runner stage (`row.error` set,
+  // Skip rows where the stream itself failed (`row.error` set AND
   // `row.text === ''`): scoring an empty response against any fixture
   // with `minLength > 0` would always fail, polluting
   // `haikuStructuralFail` and forcing a `revert-to-sonnet`
   // recommendation off a single transient API/network blip. Errored
   // rows are tagged `structural: { skipped: true }`; `summariseResults`
-  // ignores them (`structural?.pass === true` is false either way, but
-  // the explicit shape makes the intent clear at the callsite). Mirror
-  // of the same `!haiku.error && !sonnet.error` filter used by the
-  // judge step.
+  // ignores them. Mirror of the same `!haiku.error && !sonnet.error`
+  // filter used by the judge step.
+  //
+  // Distinct from `row.usageError` (legacy `row.error` from older
+  // results files where the stream succeeded but token counting
+  // rejected): those rows have valid `row.text` and MUST be scored.
+  // Treat the usage failure as a warning so the operator sees it
+  // without losing the data point. We back-compat older results files
+  // (where a usage failure was written into `row.error` while `text`
+  // was non-empty) by inferring the same warning shape from a
+  // non-empty `text` plus a truthy `error`.
+  const usageWarnings = [];
   const scored = rows.map((row) => {
-    if (row.error) {
+    const text = row.text ?? '';
+    const streamFailed = Boolean(row.error) && text.length === 0;
+    if (streamFailed) {
       return {
         ...row,
         structural: { skipped: true, reason: 'runner error' },
       };
+    }
+    if (row.usageError || (row.error && text.length > 0)) {
+      usageWarnings.push({
+        promptId: row.promptId,
+        attempt: row.attempt,
+        modelRole: row.modelRole,
+        message: row.usageError ?? row.error,
+      });
     }
     const checks = checksByPromptId.get(row.promptId);
     if (!checks) {
@@ -191,9 +209,20 @@ async function main() {
         structural: { pass: false, failures: ['unknown promptId'] },
       };
     }
-    const structural = scoreStructural(row.text, checks);
+    const structural = scoreStructural(text, checks);
     return { ...row, structural };
   });
+  if (usageWarnings.length > 0) {
+    console.error(
+      `WARN: ${usageWarnings.length} row(s) had non-fatal usage-read errors; ` +
+        `text scored, token counts may be missing.`,
+    );
+    for (const w of usageWarnings) {
+      console.error(
+        `  ${w.modelRole} ${w.promptId} attempt=${w.attempt}: ${w.message}`,
+      );
+    }
+  }
 
   // Group rows by (promptId, attempt) so we can pair Haiku-vs-Sonnet
   // for the judge and pit equivalent attempts against each other.
@@ -237,14 +266,15 @@ async function main() {
       continue;
     }
 
+    // Judge gate: skip the LLM judge only when the stream itself
+    // failed for either side (no text to judge). A non-fatal
+    // `usageError` (token counting rejected, text valid) does NOT
+    // disqualify a row — the judge cares about the response text, not
+    // the token count.
+    const haikuStreamOk = haiku.text && haiku.text.length > 0;
+    const sonnetStreamOk = sonnet.text && sonnet.text.length > 0;
     let verdict = null;
-    if (
-      !args.noJudge &&
-      !haiku.error &&
-      !sonnet.error &&
-      haiku.text &&
-      sonnet.text
-    ) {
+    if (!args.noJudge && haikuStreamOk && sonnetStreamOk) {
       try {
         verdict = await judge({
           userMessage: userMessageByPromptId.get(haiku.promptId),
@@ -302,12 +332,35 @@ async function main() {
       inputTokens: r.inputTokens,
       outputTokens: r.outputTokens,
       error: r.error,
+      usageError: r.usageError ?? null,
     })),
   };
 
-  let outPath = args.outPath ?? resultsPath.replace(/\.jsonl$/, '.report.json');
-  if (outPath === resultsPath) {
-    outPath = resultsPath + '.report.json';
+  // Refuse to overwrite the input results file with the report. Two
+  // failure modes converge here: (1) `--out` explicitly points at the
+  // input, and (2) the default `resultsPath.replace(/\.jsonl$/, …)` is a
+  // no-op when the operator passed a non-`.jsonl` results file (e.g.
+  // `--results data.ndjson`), leaving `outPath === resultsPath`. For the
+  // explicit `--out` collision we hard-fail with a clear error so the
+  // operator can fix the flag; for the implicit default we fall back to
+  // appending `.report.json` since the operator did not request the
+  // collision and a successful run is preferable to a hard failure.
+  let outPath;
+  if (args.outPath) {
+    outPath = pathResolve(args.outPath);
+    if (outPath === resultsPath) {
+      console.error(
+        `--out path matches --results path (${resultsPath}). ` +
+          `Choose a different output path so the report does not overwrite ` +
+          `the raw results.`,
+      );
+      process.exit(2);
+    }
+  } else {
+    outPath = resultsPath.replace(/\.jsonl$/, '.report.json');
+    if (outPath === resultsPath) {
+      outPath = `${resultsPath}.report.json`;
+    }
   }
   writeFileSync(outPath, JSON.stringify(report, null, 2) + '\n', 'utf8');
 
@@ -319,7 +372,12 @@ function aggregateLatency(rows) {
   const buckets = { haiku: [], sonnet: [] };
   const ttft = { haiku: [], sonnet: [] };
   for (const r of rows) {
-    if (r.error) continue;
+    // Mirror the structural-scoring skip: only stream failures (text
+    // empty) drop a row from latency. A non-fatal usage-read error
+    // (text valid, token count missing) does not corrupt latency
+    // numbers, so keep it.
+    const text = r.text ?? '';
+    if (r.error && text.length === 0) continue;
     if (r.modelRole === 'haiku' || r.modelRole === 'sonnet') {
       if (Number.isFinite(r.totalMs)) buckets[r.modelRole].push(r.totalMs);
       if (Number.isFinite(r.ttftMs)) ttft[r.modelRole].push(r.ttftMs);

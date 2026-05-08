@@ -153,6 +153,38 @@ describe('runPrompt', () => {
 
     expect(row.error).toMatch(/streamText boom/);
     expect(row.text).toBe('');
+    expect(row.usageError).toBeNull();
+  });
+
+  it('records usage-read failures as usageError without setting error', async () => {
+    // Stream text succeeds; the `usage` promise rejects (provider quirk
+    // / transient token-counting failure). The text is valid model
+    // output and MUST be kept — the only loss is token counts. The
+    // runner records the failure on `row.usageError` (warning channel)
+    // and leaves `row.error` null, so downstream scoring keeps the
+    // sample.
+    const provider = (modelStr: string) => ({ __isModel: true, modelStr });
+    const createAnthropic = () => provider;
+    const streamText = () => ({
+      textStream: (async function* () {
+        yield 'hello ';
+        yield 'world';
+      })(),
+      usage: Promise.reject(new Error('upstream usage 500')),
+    });
+
+    const row = await runPrompt({
+      modelRole: 'haiku',
+      userMessage: 'hi',
+      auth: { authToken: 't', baseURL: 'http://x' },
+      deps: { streamText, createAnthropic },
+    });
+
+    expect(row.text).toBe('hello world');
+    expect(row.error).toBeNull();
+    expect(row.usageError).toMatch(/upstream usage 500/);
+    expect(row.inputTokens).toBeNull();
+    expect(row.outputTokens).toBeNull();
   });
 
   it('authToRunnerShape: oauth → baseURL + authToken', () => {

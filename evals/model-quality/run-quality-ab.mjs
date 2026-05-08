@@ -169,7 +169,11 @@ async function main() {
             ...row,
           }),
         );
-        const status = row.error ? `ERR ${row.error.slice(0, 60)}` : 'ok';
+        let status;
+        if (row.error) status = `ERR ${row.error.slice(0, 60)}`;
+        else if (row.usageError)
+          status = `ok (warn: ${row.usageError.slice(0, 50)})`;
+        else status = 'ok';
         console.error(
           `  ${prompt.id} :: ${modelRole} #${attempt} :: ${status} ` +
             `(ttft=${fmtMs(row.ttftMs)} total=${fmtMs(row.totalMs)})`,

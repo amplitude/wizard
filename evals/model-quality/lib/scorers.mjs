@@ -314,9 +314,17 @@ export function median(nums) {
  * here so the harness can run regardless of whether that PR has
  * landed on main yet. Override with WIZARD_HAIKU_MODEL / WIZARD_CLAUDE_MODEL
  * env vars to test alternative aliases.
+ *
+ * Haiku is intentionally the **dated** snapshot — production's
+ * `HAIKU_MODEL_DIRECT` (the alias `selectModel('oneshot')` returns) is
+ * pinned to the same dated suffix for reproducibility across releases.
+ * This PR's purpose is to A/B *that exact one-shot alias*, so the harness
+ * must match it byte-for-byte. The undated `'claude-haiku-4-5'` alias is
+ * production's `'fast'` tier (inner agent loop), not the one-shot tier
+ * this harness covers.
  */
 export const MODEL_ALIASES = {
-  haiku: 'claude-haiku-4-5',
+  haiku: 'claude-haiku-4-5-20251001',
   sonnet: 'claude-sonnet-4-6',
 };
 
