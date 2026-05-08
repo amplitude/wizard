@@ -334,7 +334,7 @@ function buildJitContextBlock(
 function describeProjectSize(size: ProjectSizeReport): string {
   const parts: string[] = [];
   if (size.timedOut) {
-    parts.push('file scan exceeded 5s budget');
+    parts.push(`${size.fileCount}+ files (scan capped)`);
   } else {
     parts.push(`${size.fileCount} files`);
   }

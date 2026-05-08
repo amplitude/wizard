@@ -512,7 +512,17 @@ describe('buildPreflightContext — JIT gating', () => {
       }),
     );
     expect(out).toMatch(/load on demand/);
-    expect(out).toMatch(/file scan exceeded 5s budget/);
+    expect(out).toMatch(/0\+ files \(scan capped\)/);
+  });
+
+  it('reports file count when maxFiles cap triggers', () => {
+    const out = buildPreflightContext(
+      baseInput({
+        projectSize: { fileCount: 1001, eventCount: 0, timedOut: true },
+      }),
+    );
+    expect(out).toMatch(/load on demand/);
+    expect(out).toMatch(/1001\+ files \(scan capped\)/);
   });
 
   it('returns the full pre-flight block when file count is at or below the threshold', () => {
