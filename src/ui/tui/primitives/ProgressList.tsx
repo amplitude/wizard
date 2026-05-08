@@ -45,6 +45,14 @@ export const ProgressList = ({ items, title }: ProgressListProps) => {
             : item.status === 'in_progress'
             ? Colors.primary
             : Colors.muted;
+        // Label-resolution rule (don't break this):
+        //   in_progress + activeForm  →  show ONLY the activeForm
+        //   anything else              →  show ONLY the canonical label
+        // The two strings must NEVER appear concatenated. The activeForm is
+        // the "doing" form of the canonical step ("Wiring up event tracking"
+        // vs. "Wire up event tracking") — they describe the same step in
+        // different tenses, so concatenating them produces gibberish like
+        // `Wiring up event trackingto track` (caught on a ~30-col terminal).
         const label =
           item.status === 'in_progress' && item.activeForm
             ? item.activeForm
@@ -54,9 +62,14 @@ export const ProgressList = ({ items, title }: ProgressListProps) => {
           // Icon and label live in separate boxes so wrapped label lines
           // hang-indent under the first label character instead of resetting
           // to column 0 (which broke the visual hierarchy on long labels).
+          //
+          // The icon column is given a fixed width (2 cells: glyph + space)
+          // so Yoga doesn't collapse the trailing space at narrow widths —
+          // that collapse was the trigger for visible smushing between the
+          // icon and the label start when the row got tight.
           <Box key={i} flexDirection="row">
-            <Box flexShrink={0}>
-              <Text color={color}>{icon} </Text>
+            <Box flexShrink={0} width={2}>
+              <Text color={color}>{icon}</Text>
             </Box>
             <Box flexGrow={1} flexShrink={1}>
               <Text
