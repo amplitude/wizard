@@ -18,6 +18,11 @@
  * Estimated-duration phrasing only appears when `estimatedDurationSec` is
  * provided by the caller so we never pull a number out of thin air; the
  * rate-limit-retry case sets it dynamically from `nextRetryAtMs`.
+ *
+ * Cold-start over-time hint: when a `cold-start` activity blows past its
+ * estimated duration we swap the suffix from "typically ~Ns" to "this can
+ * take up to 60s on first run" so a slow first-run still reads as expected
+ * behavior instead of a hung process.
  */
 
 import { Box, Text } from 'ink';
@@ -53,9 +58,22 @@ export const ActivityLine = ({ store, now = Date.now }: ActivityLineProps) => {
     0,
     Math.floor((now() - activity.startedAt) / 1000),
   );
-  const eta = activity.estimatedDurationSec
-    ? `, typically ~${activity.estimatedDurationSec}s`
-    : '';
+  // Cold-start specific: once we've exceeded the estimate, swap the
+  // suffix to a "this can take up to 60s on first run" message so a
+  // slow first-run reads as known-duration patience instead of unknown
+  // silence. Other activity kinds (compaction, retry, ingestion poll,
+  // MCP) keep the static "typically ~Ns" copy because their callers
+  // already update `message` mid-flight (e.g. retry shows the
+  // attempt-counter live).
+  const isColdStartOverTime =
+    activity.kind === 'cold-start' &&
+    activity.estimatedDurationSec !== undefined &&
+    elapsedSec > activity.estimatedDurationSec;
+  const eta = isColdStartOverTime
+    ? ', this can take up to 60s on first run'
+    : activity.estimatedDurationSec
+      ? `, typically ~${activity.estimatedDurationSec}s`
+      : '';
   // Reference `tick` so React doesn't dead-code-eliminate the interval.
   void tick;
 
