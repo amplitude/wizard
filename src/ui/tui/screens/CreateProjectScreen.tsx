@@ -201,11 +201,47 @@ export const CreateProjectScreen = ({ store }: CreateProjectScreenProps) => {
       store.setApiKeyNotice(null);
 
       // Fire-and-forget org refresh so the new project appears if the user
-      // navigates back to the picker. Best-effort — never blocks the flow.
+      // navigates back to the picker, and so we can persist OrgId +
+      // ProjectId to ampli.json.
+      //
+      // The create API only returns appId + name — the stable UUID project
+      // ID only appears in the org-list response. We find the new project by
+      // name and then:
+      //   1. Update the in-memory selectedProjectId via restoreSessionIds().
+      //   2. Write OrgId + ProjectId + Zone to ampli.json directly rather
+      //      than via setOrgAndProject(), which would re-derive appId and
+      //      projectApiKey from the org-list data. The org-list schema marks
+      //      environments[].app.apiKey as nullable/optional, so it may come
+      //      back null for a freshly-created project; using setOrgAndProject()
+      //      would clobber the correct projectApiKey + appId that were already
+      //      set from the create response above.
       void fetchAmplitudeUser(idToken, zone)
-        .then((info) => store.setPendingOrgs(info.orgs))
+        .then((info) => {
+          store.setPendingOrgs(info.orgs);
+          const freshOrg = info.orgs.find((o) => o.id === orgId);
+          const freshProject = freshOrg?.projects.find(
+            (p) => p.name === result.name,
+          );
+          if (!freshOrg || !freshProject) return;
+          // Surface the project UUID in session state so downstream callers
+          // (e.g. DataIngestionCheck) can use it without a second org fetch.
+          store.restoreSessionIds({ projectId: freshProject.id });
+          // Persist to ampli.json — write only the project-binding fields so
+          // we never touch the credentials the create response already set.
+          void import('../../../lib/ampli-config.js').then(
+            ({ writeAmpliConfig }) => {
+              writeAmpliConfig(session.installDir, {
+                OrgId: freshOrg.id,
+                ProjectId: freshProject.id,
+                ProjectName: freshProject.name || undefined,
+                Zone: zone,
+              });
+            },
+          );
+        })
         .catch(() => {
-          // Swallow — we've already landed on success.
+          // Swallow — we've already landed on success; ampli.json will be
+          // written on the next successful org refresh or wizard run.
         });
 
       // Clear the create-project state last, after credentials are set, so

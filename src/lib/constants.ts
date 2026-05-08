@@ -229,8 +229,12 @@ export const OUTBOUND_URLS = {
   // ── Tips ──────────────────────────────────────────────────────────────────
 
   /** Stripe data-source deep-link — shown as a tip in the RunScreen. */
-  stripeDataSource:
-    'https://app.amplitude.com/project/data-warehouse/new-source?kind=Stripe',
+  stripeDataSource: (zone: AmplitudeZone, orgId?: string | null): string => {
+    const base = OUTBOUND_URLS.app[zone];
+    return orgId
+      ? `${base}/${orgId}/data-warehouse/new-source?kind=Stripe`
+      : `${base}/data-warehouse/new-source?kind=Stripe`;
+  },
 
   // ── Status ────────────────────────────────────────────────────────────────
 
