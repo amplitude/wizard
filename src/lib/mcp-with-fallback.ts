@@ -120,6 +120,21 @@ const MCP_FETCH_TIMEOUT_MS = 30_000;
 const MCP_NOTIFY_TIMEOUT_MS = 5_000;
 
 /**
+ * Backoff schedule (ms) between in-process retries of `openMcpSessionInner`
+ * on non-deterministic failures (network blip, gateway hiccup, missing
+ * `mcp-session-id`). Total worst-case extra latency: 200 + 600 = 800ms,
+ * compared to the ~12s cost of spinning up the agent fallback subprocess.
+ *
+ * Retries only fire for `deterministic: false` outcomes — auth rejections
+ * (401/403) and other deterministic failures bail out immediately because
+ * the next attempt would hit the same wall.
+ *
+ * Honors `abortSignal` between attempts so Ctrl+C / SIGINT interrupts the
+ * retry loop instead of waiting for the full backoff window.
+ */
+const MCP_DIRECT_RETRY_DELAYS_MS = [200, 600] as const;
+
+/**
  * `fetch` wrapped with a per-call timeout, covering both the request
  * round-trip AND body consumption. Combines the caller's external
  * `AbortSignal` (if any) with an internal `AbortController` so either
@@ -238,12 +253,38 @@ export function invalidateMcpSessionsForToken(accessToken: string): void {
 }
 
 /**
+ * Sleep for `ms` while honoring `signal`. Resolves early (without
+ * throwing) if the signal is already aborted or aborts during the wait,
+ * so the caller can re-check abort state on its own terms.
+ */
+function delayWithAbort(ms: number, signal?: AbortSignal): Promise<void> {
+  if (signal?.aborted) return Promise.resolve();
+  return new Promise((resolve) => {
+    const timer = setTimeout(() => {
+      signal?.removeEventListener('abort', onAbort);
+      resolve();
+    }, ms);
+    const onAbort = (): void => {
+      clearTimeout(timer);
+      resolve();
+    };
+    signal?.addEventListener('abort', onAbort, { once: true });
+  });
+}
+
+/**
  * Open an MCP session and return a `callTool` helper bound to that session.
  * Returns a tagged result so callers can distinguish transient failures
  * (worth falling back to the agent path) from deterministic ones (auth
  * errors — agent fallback uses the same token and would just hit the
  * same wall). Reuses a cached session for the same `accessToken|mcpUrl`
  * pair when it's still fresh.
+ *
+ * Transient failures (`deterministic: false`) are retried in-process per
+ * {@link MCP_DIRECT_RETRY_DELAYS_MS} before falling through to the caller.
+ * The 800ms worst-case retry budget is far cheaper than the ~12s agent
+ * fallback subprocess spin-up, and most network blips / missing
+ * `mcp-session-id` headers resolve on the first retry.
  */
 async function openMcpSession(
   accessToken: string,
@@ -260,9 +301,44 @@ async function openMcpSession(
     'mcp.session',
     { 'mcp.url': mcpUrl },
     async () => {
-      const fresh = await openMcpSessionInner(accessToken, mcpUrl, signal);
-      if (fresh.ok) cacheMcpSession(accessToken, mcpUrl, fresh.callTool);
-      return fresh;
+      let last: SessionOpenResult = await openMcpSessionInner(
+        accessToken,
+        mcpUrl,
+        signal,
+      );
+      if (last.ok) {
+        cacheMcpSession(accessToken, mcpUrl, last.callTool);
+        return last;
+      }
+      // Deterministic failures (auth errors) won't change on retry —
+      // bail out immediately so the caller can fail fast.
+      if (last.deterministic) return last;
+
+      for (let i = 0; i < MCP_DIRECT_RETRY_DELAYS_MS.length; i++) {
+        if (signal?.aborted) return last;
+        const delayMs = MCP_DIRECT_RETRY_DELAYS_MS[i];
+        logToFile(
+          `[MCP] transient session failure (${
+            last.reason
+          }) — retrying in ${delayMs}ms (attempt ${i + 2}/${
+            MCP_DIRECT_RETRY_DELAYS_MS.length + 1
+          })`,
+        );
+        addBreadcrumb('mcp', 'Retrying direct MCP session', {
+          reason: last.reason,
+          attempt: i + 2,
+          delay_ms: delayMs,
+        });
+        await delayWithAbort(delayMs, signal);
+        if (signal?.aborted) return last;
+        last = await openMcpSessionInner(accessToken, mcpUrl, signal);
+        if (last.ok) {
+          cacheMcpSession(accessToken, mcpUrl, last.callTool);
+          return last;
+        }
+        if (last.deterministic) return last;
+      }
+      return last;
     },
   );
 }
