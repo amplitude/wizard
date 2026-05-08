@@ -456,7 +456,7 @@ describe('WizardRouter', () => {
     it('shape 1: after needs_information, lands on ToS first', () => {
       const session = signupBase({
         signupEmail: 'ada@example.com',
-        signupRequiredFields: ['full_name'],
+        signupRequiredFields: ['full_name', 'terms_acceptance'],
       });
       expect(new WizardRouter().resolve(session)).toBe(Screen.ToS);
     });
@@ -464,7 +464,7 @@ describe('WizardRouter', () => {
     it('shape 1: after ToS, lands on SignupFullName', () => {
       const session = signupBase({
         signupEmail: 'ada@example.com',
-        signupRequiredFields: ['full_name'],
+        signupRequiredFields: ['full_name', 'terms_acceptance'],
         tosAccepted: true,
       });
       expect(new WizardRouter().resolve(session)).toBe(Screen.SignupFullName);
@@ -473,7 +473,7 @@ describe('WizardRouter', () => {
     it('shape 1: after name submit, lands on SigningUp for the second POST', () => {
       const session = signupBase({
         signupEmail: 'ada@example.com',
-        signupRequiredFields: ['full_name'],
+        signupRequiredFields: ['full_name', 'terms_acceptance'],
         tosAccepted: true,
         signupFullName: 'Ada Lovelace',
       });
@@ -483,7 +483,7 @@ describe('WizardRouter', () => {
     it('shape 1: after success, advances past SigningUp toward Auth', () => {
       const session = signupBase({
         signupEmail: 'ada@example.com',
-        signupRequiredFields: ['full_name'],
+        signupRequiredFields: ['full_name', 'terms_acceptance'],
         tosAccepted: true,
         signupFullName: 'Ada Lovelace',
         signupAuth: {
@@ -515,7 +515,7 @@ describe('WizardRouter', () => {
       const session = signupBase({
         signupEmail: 'ada@example.com',
         signupFullName: 'Ada Lovelace',
-        signupRequiredFields: ['full_name'],
+        signupRequiredFields: ['full_name', 'terms_acceptance'],
       });
       expect(new WizardRouter().resolve(session)).toBe(Screen.ToS);
     });
@@ -524,7 +524,7 @@ describe('WizardRouter', () => {
       const session = signupBase({
         signupEmail: 'ada@example.com',
         signupFullName: 'Ada Lovelace',
-        signupRequiredFields: ['full_name'],
+        signupRequiredFields: ['full_name', 'terms_acceptance'],
         tosAccepted: true,
       });
       expect(new WizardRouter().resolve(session)).toBe(Screen.SigningUp);
@@ -588,7 +588,7 @@ describe('WizardRouter', () => {
       const router = new WizardRouter();
       const session = signupBase({
         signupEmail: 'ada@example.com',
-        signupRequiredFields: ['full_name'],
+        signupRequiredFields: ['full_name', 'terms_acceptance'],
         tosAccepted: true,
         signupFullName: 'Ada Lovelace',
         signupAbandoned: true,
@@ -614,7 +614,7 @@ describe('WizardRouter', () => {
       const router = new WizardRouter();
       const session = signupBase({
         signupEmail: 'ada@example.com',
-        signupRequiredFields: ['full_name'],
+        signupRequiredFields: ['full_name', 'terms_acceptance'],
         tosAccepted: true,
         signupFullName: 'Ada Lovelace',
         signupAuth: {
