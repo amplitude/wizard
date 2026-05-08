@@ -917,13 +917,7 @@ export interface WizardSession {
     /** True when the CreateProjectScreen should be shown. */
     pending: boolean;
     /** Which picker triggered it — used for analytics + cancel routing. */
-    source:
-      | 'project'
-      | 'environment'
-      | 'slash'
-      | 'cli-flag'
-      | 'account-confirm'
-      | null;
+    source: 'project' | 'environment' | 'slash' | 'cli-flag' | null;
     /** Pre-filled name (e.g. from --project-name CLI flag). */
     suggestedName: string | null;
   };

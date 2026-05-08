@@ -40,8 +40,6 @@ export interface AmpliConfig {
   OrgId?: string;
   /** UUID of the Amplitude project (formerly "workspace") */
   ProjectId?: string;
-  /** Human-readable display name for ProjectId. Diagnostic only — ProjectId is the join key. */
-  ProjectName?: string;
   /** @deprecated use ProjectId — kept for read-time back-compat migration */
   WorkspaceId?: string;
   /** UUID of the data source (tracking plan source) */
@@ -103,7 +101,6 @@ const AmpliConfigSchema = z
   .object({
     OrgId: z.string().optional(),
     ProjectId: z.string().optional(),
-    ProjectName: z.string().optional(),
     // Kept readable for back-compat with ampli.json files written before the
     // workspace → project rename. parseAmpliConfig migrates it to ProjectId
     // at the read boundary; everything downstream only sees ProjectId.
