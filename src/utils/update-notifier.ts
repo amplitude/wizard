@@ -16,6 +16,7 @@
 
 import { promises as fs } from 'node:fs';
 import { dirname } from 'node:path';
+import chalk from 'chalk';
 import semver from 'semver';
 import { atomicWriteJSON } from './atomic-write.js';
 import { ensureDir, getUpdateCheckFile } from './storage-paths.js';
@@ -170,12 +171,71 @@ export async function checkForUpdate(
 let pendingNotice: string | null = null;
 let exitHookInstalled = false;
 
-function formatNotice(
+/**
+ * Render a padded line inside a box: `│  content·····│` where `·` is padding.
+ * `contentLen` is the visible (non-ANSI) character count of `content`.
+ */
+function boxLine(
+  content: string,
+  contentLen: number,
+  innerWidth: number,
+): string {
+  const pad = innerWidth - contentLen;
+  return (
+    chalk.yellow('│') +
+    '  ' +
+    content +
+    ' '.repeat(Math.max(pad, 0)) +
+    chalk.yellow('│')
+  );
+}
+
+/** Visible width of the inner content area (excluding the 2-char left pad). */
+const BOX_INNER = 58;
+
+/** Exported for tests. */
+export function formatNotice(
   pkgName: string,
   current: string,
   latest: string,
 ): string {
-  return `\nA new version of ${pkgName} is available: ${current} → ${latest}\n  Run \`npm i -g ${pkgName}\` or use \`npx ${pkgName}@latest\` to update.\n`;
+  const w = BOX_INNER;
+  const top = chalk.yellow('┌' + '─'.repeat(w + 2) + '┐');
+  const bot = chalk.yellow('└' + '─'.repeat(w + 2) + '┘');
+  const empty = boxLine('', 0, w);
+
+  const titleText = `New version of ${pkgName} available! ${current} → ${latest}`;
+  const titleStyled =
+    `New version of ${chalk.bold(pkgName)} available! ` +
+    `${chalk.dim(current)} → ${chalk.green(latest)}`;
+  const titleLine = boxLine(titleStyled, titleText.length, w);
+
+  const npxLabel = 'Update with npx (always latest):';
+  const npxCmd = `npx ${pkgName}@latest`;
+  const npxLabelLine = boxLine(npxLabel, npxLabel.length, w);
+  const npxCmdLine = boxLine('  ' + chalk.cyan(npxCmd), npxCmd.length + 2, w);
+
+  const npmLabel = 'Update with npm:';
+  const npmCmd = `npm install -g ${pkgName}`;
+  const npmLabelLine = boxLine(npmLabel, npmLabel.length, w);
+  const npmCmdLine = boxLine('  ' + chalk.cyan(npmCmd), npmCmd.length + 2, w);
+
+  return [
+    '',
+    '  ' + chalk.yellow('⚠') + '  ' + chalk.yellow.bold('Update available'),
+    '  ' + top,
+    '  ' + empty,
+    '  ' + titleLine,
+    '  ' + empty,
+    '  ' + npxLabelLine,
+    '  ' + npxCmdLine,
+    '  ' + empty,
+    '  ' + npmLabelLine,
+    '  ' + npmCmdLine,
+    '  ' + empty,
+    '  ' + bot,
+    '',
+  ].join('\n');
 }
 
 function installExitHook(): void {
