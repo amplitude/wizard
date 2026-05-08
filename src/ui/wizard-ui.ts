@@ -296,6 +296,18 @@ export interface WizardUI {
   /** Emitted by agent mode when MCP polling detects events flowing into the project. */
   setEventIngestionDetected(eventNames: string[]): void;
 
+  /**
+   * Mark `dataIngestionConfirmed` on the session via the store so React
+   * subscribers (the DataIngestionCheckScreen → next-screen transition)
+   * see the change. Called from the agent-mode poll loop in
+   * `pollForDataIngestion`. Direct `session.dataIngestionConfirmed = true`
+   * mutates the field but never bumps `$version`, so the TUI router
+   * stays on the verification screen until something else triggers a
+   * re-render (notably a terminal resize). InkUI delegates to
+   * `store.setDataIngestionConfirmed()`; LoggingUI / AgentUI no-op.
+   */
+  markDataIngestionConfirmed(): void;
+
   // ── Agent-created dashboard ────────────────────────────────────
   /**
    * Called when the agent writes .amplitude-dashboard.json with the URL of

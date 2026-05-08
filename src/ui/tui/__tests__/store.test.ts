@@ -404,13 +404,11 @@ describe('WizardStore', () => {
     });
 
     it('setOutroData notifies subscribers even when data shape is unchanged', () => {
-      // Regression: the agent-runner AUTH_ERROR path used to direct-mutate
-      // `session.outroData`, then call `cancel()` which skipped its own
-      // setOutroData branch when outroData was already truthy. The
-      // OutroScreen never received a re-emit and the user could miss the
-      // auth-failure confirmation before being routed back to login.
-      // ink-ui's cancel() now re-calls setOutroData; this guards the
-      // contract that calling setOutroData fires a change notification.
+      // Contract: every call to setOutroData fires a change notification
+      // (and the 'outro reached' analytics event). Callers that need to
+      // re-notify subscribers without re-firing analytics should use
+      // emitChange() directly — see InkUI.outro()/cancel() defensive
+      // re-emit branches.
       const store = createStore();
       const listener = vi.fn();
       const data = { kind: OutroKind.Error, message: 'Authentication failed' };
