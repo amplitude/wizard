@@ -214,18 +214,19 @@ describe('applyScopedSettings', () => {
   // ── autoCompactWindow override ─────────────────────────────────────
   // The reliability audit (May 2026) traced lost user-feedback context
   // to compactions firing at ~169K tokens — too late for the summarizer
-  // to keep load-bearing turns. The wizard now writes a 120K
-  // `autoCompactWindow` into the local settings layer to lower the
-  // trigger threshold. These tests pin the behaviour around env-driven
-  // override + user-respect.
+  // to keep load-bearing turns. With Sonnet 4.6's 1M context window now
+  // GA at standard pricing, the wizard writes a 750K `autoCompactWindow`
+  // into the local settings layer so compaction effectively never fires
+  // on a normal-sized run (no compaction → no summary loss). These tests
+  // pin the behaviour around env-driven override + user-respect.
 
-  it('writes a default autoCompactWindow=120000 when env is unset and user has no value', () => {
+  it('writes a default autoCompactWindow=750000 when env is unset and user has no value', () => {
     process.env.ANTHROPIC_BASE_URL = 'https://gateway.example.com';
     delete process.env.AMPLITUDE_WIZARD_COMPACTION_WINDOW;
 
     const handle = applyScopedSettings(workdir);
     const written = JSON.parse(fs.readFileSync(handle!.filePath, 'utf-8'));
-    expect(written.autoCompactWindow).toBe(120_000);
+    expect(written.autoCompactWindow).toBe(750_000);
   });
 
   it('honours AMPLITUDE_WIZARD_COMPACTION_WINDOW when it parses to a positive number', () => {
@@ -259,7 +260,7 @@ describe('applyScopedSettings', () => {
 
     const handle = applyScopedSettings(workdir);
     const written = JSON.parse(fs.readFileSync(handle!.filePath, 'utf-8'));
-    expect(written.autoCompactWindow).toBe(120_000);
+    expect(written.autoCompactWindow).toBe(750_000);
 
     delete process.env.AMPLITUDE_WIZARD_COMPACTION_WINDOW;
   });

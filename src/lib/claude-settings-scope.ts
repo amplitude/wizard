@@ -76,25 +76,34 @@ type ScopedEnvKey = (typeof SCOPED_ENV_KEYS)[number];
 
 /**
  * Auto-compact window (in tokens) the wizard requests for the inner SDK
- * conversation. The SDK's default lets context fill almost to the 200K
- * limit before triggering compaction — the May 2026 reliability audit
- * caught a case where compaction fired at `pre_tokens: 168,943` and the
- * resulting summary lost a load-bearing user-feedback turn ("More funny
- * names"). Lowering the threshold makes compaction fire earlier with a
- * smaller, less-aggressive summary at the cost of more frequent cycles.
+ * conversation. Sized for Sonnet 4.6's 1M context window, which is GA at
+ * the standard $3/$15 pricing tier (no `context-1m-2025-08-07` beta header
+ * required — Anthropic retired that beta for 4.5 on 2026-04-30, and 4.6
+ * gets 1M natively). Raising this to 750K means compaction effectively
+ * never fires on a normal-sized run: the SDK applies a safety cushion
+ * under the configured ceiling, so the practical first-compaction
+ * watermark moves from ~87K (under the prior 120K) to ~700K (under 750K),
+ * which is past the working size of every wizard run we've measured.
  *
- * 120000 is conservative — comfortably below the average inner-agent
- * working size, well above the typical first-turn context size, and
- * leaves headroom so a single oversize tool result doesn't trip
- * compaction immediately. Override via `AMPLITUDE_WIZARD_COMPACTION_WINDOW`
- * (set to `0` or `disable` to opt out and use the SDK default).
+ * Why this matters: the prior 120K was set after the May 2026 reliability
+ * audit caught compaction at `pre_tokens: 168,943` losing a load-bearing
+ * user-feedback turn ("More funny names"). Lowering the threshold
+ * traded summary fidelity for frequency — but on Excalidraw-class runs
+ * that meant ~14 compactions × ~80s each = ~160s of stalled wall-clock
+ * per run (~30% of agent runtime). With Sonnet 4.6's 1M window we can
+ * stop compacting altogether on the runs we care about, which is
+ * strictly better than tuning the summary trigger: no compaction means
+ * no summary loss at all.
+ *
+ * Override via `AMPLITUDE_WIZARD_COMPACTION_WINDOW` (set to `0` or
+ * `disable` to opt out and use the SDK default).
  *
  * Note: only effective when the user's `.claude/settings.json` doesn't
  * also set `autoCompactWindow` at the project layer (settings-local
  * wins over project, project wins over user — same precedence as the
  * env block above).
  */
-const DEFAULT_AUTO_COMPACT_WINDOW = 120_000;
+const DEFAULT_AUTO_COMPACT_WINDOW = 750_000;
 
 /**
  * Resolve the wizard's auto-compact-window override. Returns `null`

@@ -2660,25 +2660,22 @@ export async function runAgent(
             // `thinking_delta` blocks streaming right before the 400.
             // See the long-form rationale in the comment block below.
             thinking: { type: 'disabled' },
-            // 1M-context beta — DEFAULT OFF on the gateway path.
+            // 1M-context beta header — no longer sent on either path.
             //
-            // Vertex AI's Anthropic publisher endpoint does not enable
-            // arbitrary `anthropic-beta` previews that the direct Anthropic
-            // API supports. `context-1m-2025-08-07` is one of those Vertex
-            // does not honor: Vertex returns 400 INVALID_ARGUMENT, the
-            // wizard proxy (Thunder) wraps that as the generic
-            // `"Invalid request sent to model provider"` (see Thunder's
-            // `wizard-proxy/router.ts:917-974`), and users running
-            // `--agent` inside Claude Code / Cursor / Cline cannot recover.
-            // Earlier copy here claimed "safe to leave on — falls back to
-            // 200K" — that is true on direct-Anthropic, false on Vertex.
-            //
-            // Set `AMPLITUDE_WIZARD_GATEWAY_BETAS=1` to opt back in for
-            // local diagnostic runs against the direct-API path.
-            ...(process.env.AMPLITUDE_WIZARD_GATEWAY_BETAS === '1' ||
-            agentConfig.useDirectApiKey
-              ? { betas: ['context-1m-2025-08-07'] }
-              : {}),
+            // Sonnet 4.6 supports the 1M context window at standard
+            // $3/$15 pricing GA: the `context-1m-2025-08-07` beta header
+            // is not required, and Anthropic retired the same beta for
+            // Sonnet 4.5 on 2026-04-30. The header was previously gated
+            // behind `AMPLITUDE_WIZARD_GATEWAY_BETAS=1` because Vertex AI
+            // returned 400 INVALID_ARGUMENT for it (the wizard proxy
+            // wrapped that as the generic "Invalid request sent to model
+            // provider" failure inside `--agent`). With 4.6 GA the gate
+            // is now stale on both paths — direct-Anthropic doesn't need
+            // it, gateway/Vertex doesn't accept it — so we drop the
+            // option entirely. The wizard's standard tier still selects
+            // `claude-sonnet-4-6` via `selectModel('standard', …)` (see
+            // `agent/model-config.ts`); the SDK's fallback is Sonnet 4.5,
+            // which falls back to its native 200K window if invoked.
             cwd: agentConfig.workingDirectory,
             permissionMode: 'acceptEdits',
             mcpServers: agentConfig.mcpServers,
