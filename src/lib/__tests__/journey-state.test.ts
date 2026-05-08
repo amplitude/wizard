@@ -315,8 +315,8 @@ describe('classifyToolEventTransitions (cascade)', () => {
     expect(
       classifyToolEventTransitions({
         phase: 'pre',
-        toolName: 'Read',
-        toolInput: { file_path: '/p/package.json' },
+        toolName: 'mcp__wizard-tools__detect_package_manager',
+        toolInput: {},
       }),
     ).toEqual([{ stepId: 'detect', status: 'in_progress' }]);
   });
