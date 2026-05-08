@@ -232,6 +232,50 @@ describe('selfHealStaleProjectState', () => {
     ).toBe(true);
   });
 
+  it('preserves credential when binding file exists on disk (activation poll false-negative regression)', () => {
+    // Audit regression: an activation-status poll returning
+    // `hasAnyEvents=false` must NEVER cause self-heal to nuke a valid
+    // stored credential. The only authoritative signal is disk presence
+    // of `project-binding.json`. This test pins the invariant: when the
+    // binding file is genuinely on disk, the stored API key is preserved
+    // even if the caller invokes self-heal during/after a polling check.
+    writeProjectBinding(installDir);
+    persistApiKey('valid-key', installDir);
+    fs.mkdirSync(path.join(installDir, '.amplitude'), { recursive: true });
+    fs.writeFileSync(
+      path.join(installDir, '.amplitude', 'events.json'),
+      '[{"event":"resume me"}]',
+    );
+
+    const result = selfHealStaleProjectState(installDir);
+
+    expect(result.healed).toBe(false);
+    expect(result.reason).toContain('caches are consistent');
+    // CRITICAL: credential is preserved — disk presence of the binding
+    // file dominates any other signal.
+    expect(readApiKey(installDir)).toBe('valid-key');
+    // Per-project artifacts also survive.
+    expect(
+      fs.existsSync(path.join(installDir, '.amplitude', 'events.json')),
+    ).toBe(true);
+    expect(fs.existsSync(getProjectBindingFile(installDir))).toBe(true);
+  });
+
+  it('clears credential ONLY when binding file is genuinely absent on disk', () => {
+    // Companion to the test above: when the binding file is genuinely
+    // gone (real `git reset`), the cred-clear path executes. This pins
+    // the symmetric half of the disk-presence-dominates invariant so a
+    // future refactor can't quietly turn the gate into a no-op.
+    persistApiKey('orphan-key', installDir);
+    expect(fs.existsSync(getProjectBindingFile(installDir))).toBe(false);
+
+    const result = selfHealStaleProjectState(installDir);
+
+    expect(result.healed).toBe(true);
+    expect(result.reason).toContain('orphan credential');
+    expect(readApiKey(installDir)).toBeNull();
+  });
+
   it('does not touch ~/.ampli.json (user-level OAuth tokens)', () => {
     // The function never reads or writes ~/.ampli.json — it's user-level
     // state, not per-project. This test asserts the contract by checking
