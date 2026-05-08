@@ -34,6 +34,7 @@ import { RetryStatusChip } from '../components/RetryBanner.js';
 import { FileWritesPanel } from '../components/FileWritesPanel.js';
 import { FinalizingPanel } from '../components/FinalizingPanel.js';
 import { PostAgentStepStatus } from '../session-constants.js';
+import { TaskStatus } from '../../wizard-ui.js';
 import { useStdoutDimensions } from '../hooks/useStdoutDimensions.js';
 import { useResolvedZone } from '../hooks/useResolvedZone.js';
 import { DiscoveredFeature } from '../../../lib/wizard-session.js';
@@ -115,6 +116,60 @@ function extractCurrentFile(
 
 interface RunScreenProps {
   store: WizardStore;
+}
+
+/**
+ * Resolve the bottom-pill / footer-pill status text shown by the agent's
+ * Progress tab.
+ *
+ * Priority (highest wins):
+ *   1. Active post-agent step's `activeForm` — single source of truth
+ *      during the FinalizingPanel phase (charts / dashboard / commit).
+ *   2. Active **canonical** journey task's `activeForm` — pinned to the
+ *      deterministic 4-step state derived by `journey-state.ts`. Once
+ *      e.g. Plan flips to ✓ and Wire is in_progress, the pill shows
+ *      "Wiring up event tracking" instead of whatever the agent's last
+ *      free-form text delta happened to say.
+ *   3. The most recent free-form `pushStatus` line — fallback for the
+ *      cold-start gap (before the first journey transition lands) and
+ *      between canonical steps.
+ *
+ * Why prefer the task `activeForm` over the trailing `pushStatus`:
+ *
+ *   `pushStatus` is append-only and accumulates raw streaming text
+ *   deltas (`enqueueStreamDelta` in `agent-interface.ts`) — the model's
+ *   voice during long tool calls. The latest entry can therefore be
+ *   stale narration from a previous phase: the user reported seeing
+ *   "Now let me plan the events" *while the Plan task was already
+ *   marked ✓ and Wire was in_progress*. That contradicts the
+ *   user-visible task list (#646 / state-narration mismatch).
+ *
+ *   The canonical journey state is deterministic — flipped by tool-call
+ *   classification, not by free-form text — so anchoring the pill to
+ *   it eliminates the contradiction. The pre-existing post-agent path
+ *   (#1) already follows the same pattern; this extends it to the
+ *   in-loop journey steps.
+ */
+export function resolveRunScreenStatus(
+  store: WizardStore,
+): string | undefined {
+  const activePostAgentStep = store.session.postAgentSteps.find(
+    (s) => s.status === PostAgentStepStatus.InProgress,
+  );
+  if (activePostAgentStep?.activeForm) return activePostAgentStep.activeForm;
+
+  // Prefer the canonical in-progress task's activeForm over the trailing
+  // free-form `pushStatus` line. The journey classifier owns task state;
+  // the pill should mirror it, not lag it.
+  const inProgressTask = store.tasks.find(
+    (t) => t.status === TaskStatus.InProgress,
+  );
+  if (inProgressTask?.activeForm) return inProgressTask.activeForm;
+
+  if (store.statusMessages.length > 0) {
+    return store.statusMessages[store.statusMessages.length - 1];
+  }
+  return undefined;
 }
 
 /** Compact inline display of planned event names. */
@@ -434,27 +489,18 @@ export const RunScreen = ({ store }: RunScreenProps) => {
   useWizardStore(store);
   useScreenHints(RUN_HINTS);
 
-  // Footer status: when a post-agent step is in_progress, drive the
-  // footer line from the step's `activeForm` so the visible task and
-  // the spinner footer always agree (single source of truth). Without
-  // this, the agent's last pushStatus("Creating charts and dashboard…")
-  // sits frozen beneath the FinalizingPanel and the message can lag
-  // the actual step state. Falls back to the agent's last status when
-  // no post-agent step is active (during the run, before seeding, or
-  // after all steps finish).
-  const activePostAgentStep = store.session.postAgentSteps.find(
-    (s) => s.status === PostAgentStepStatus.InProgress,
-  );
-  const rawLastStatus =
-    activePostAgentStep?.activeForm ??
-    (store.statusMessages.length > 0
-      ? store.statusMessages[store.statusMessages.length - 1]
-      : undefined);
-  // The bottom TabContainer status pill is the single source of truth for
-  // live activity now. Cap raw streamed content (rare protocol fragments
-  // from `runAgentLocally`) before it reaches the pill — Yoga's
+  // Footer status — resolved through `resolveRunScreenStatus` which
+  // anchors the pill to canonical state (post-agent step, then
+  // in-progress journey task) before falling back to the trailing
+  // free-form `pushStatus` line. See the helper's docstring for why
+  // the trailing `pushStatus` cannot win on its own (state/narration
+  // mismatch — agent says "let me plan the events" after Plan ✓).
+  //
+  // Cap raw streamed content (rare protocol fragments from
+  // `runAgentLocally`) before it reaches the pill — Yoga's
   // `overflow="hidden"` handles wide terminals, but a JS cap is the
   // belt-and-braces guard against unbounded strings.
+  const rawLastStatus = resolveRunScreenStatus(store);
   const lastStatus = rawLastStatus
     ? truncateStatus(rawLastStatus)
     : undefined;
