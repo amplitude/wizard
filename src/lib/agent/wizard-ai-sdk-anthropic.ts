@@ -26,9 +26,9 @@ export type CreateWizardAiSdkAnthropicOptions = {
  *
  * The Vercel AI SDK's `@ai-sdk/anthropic` provider posts to
  * `${baseURL}/messages`, while the Claude Agent SDK appends `/v1/messages`.
- * The wizard sets `ANTHROPIC_BASE_URL=https://core.amplitude.com/wizard`
+ * The wizard sets `ANTHROPIC_BASE_URL=https://wizard.amplitude.com/web-api/wizard`
  * (no `/v1`) for the Agent SDK path; passing the same bare URL to
- * `createAnthropic` produces 404s on `…/wizard/messages`.
+ * `createAnthropic` produces 404s on `…/web-api/wizard/messages`.
  *
  * Idempotent — if the URL already ends in `/v1` (or any `/vN`), leave it
  * alone. Trims trailing slashes so we don't end up with `…//v1`.
