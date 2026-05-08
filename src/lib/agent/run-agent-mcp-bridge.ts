@@ -269,25 +269,18 @@ export async function bridgeWizardToolsMcp(
     toolNames,
     close: async () => {
       // Close the client first — that flushes any in-flight requests
-      // back to the server so it can shut down cleanly. If the server
-      // exposes its own close, call it; otherwise the InMemoryTransport
-      // pair gets garbage collected once both ends are released.
+      // back to the server so it can shut down cleanly. The
+      // InMemoryTransport pair gets garbage collected once both ends
+      // are released. The bridge does NOT own `mcpServer` (created by
+      // the caller via createWizardToolsServer) so we leave its
+      // lifecycle to its owner; closing it here would disconnect it
+      // from its transport and break any retry/reconnect logic the
+      // dispatch layer may add later.
       try {
         await client.close();
       } catch (err) {
         logToFile(
           `[run-agent-mcp-bridge] client.close threw (non-fatal): ${
-            err instanceof Error ? err.message : String(err)
-          }`,
-        );
-      }
-      try {
-        if (typeof mcpServer.close === 'function') {
-          await mcpServer.close();
-        }
-      } catch (err) {
-        logToFile(
-          `[run-agent-mcp-bridge] server.close threw (non-fatal): ${
             err instanceof Error ? err.message : String(err)
           }`,
         );
