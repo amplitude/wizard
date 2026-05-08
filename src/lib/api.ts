@@ -1,4 +1,5 @@
 import axios, { AxiosError } from 'axios';
+import https from 'node:https';
 import { z } from 'zod';
 import { analytics } from '../utils/analytics.js';
 import { logToFile } from '../utils/debug.js';
@@ -9,6 +10,26 @@ import {
 } from './constants.js';
 import { callAmplitudeMcp } from './mcp-with-fallback.js';
 import { getHostFromRegion, getLlmGatewayUrlFromHost } from '../utils/urls.js';
+
+// ── Shared axios client ──────────────────────────────────────────────
+//
+// All Amplitude HTTP calls in this module share one axios instance so that:
+//   1. TCP/TLS connections are reused via keep-alive (cheaper round-trips
+//      when the wizard makes several Data API / App API calls back-to-back).
+//   2. Every request has a sane default timeout — without this, a hung
+//      Data API would freeze the wizard forever (`fetchAmplitudeUser`,
+//      `fetchBranches`, `fetchProjectEventTypes`, `fetchSources`,
+//      `fetchOwnedDashboards`, `fetchProjectActivationStatus` previously
+//      had no timeout). 15s is generous for GraphQL reads but bounded.
+//   3. Per-call `timeout` overrides still work — axios merges request config
+//      on top of instance defaults, so callers like `createAmplitudeApp`
+//      (20s) and `fetchSlackInstallUrl` (10s) keep their explicit values.
+//
+// Scope is intentionally limited to this file — other HTTP callers
+// (e.g. `src/lib/planned-events.ts`, `src/utils/direct-signup.ts`) keep
+// their existing axios usage and are out of scope for this change.
+const httpsAgent = new https.Agent({ keepAlive: true });
+const apiClient = axios.create({ timeout: 15_000, httpsAgent });
 
 // ── App API URL helper ────────────────────────────────────────────────
 
@@ -169,7 +190,7 @@ export async function fetchAmplitudeUser(
 ): Promise<AmplitudeUserInfo> {
   const { dataApiUrl } = AMPLITUDE_ZONE_SETTINGS[zone];
   try {
-    const response = await axios.post(
+    const response = await apiClient.post(
       dataApiUrl,
       { query: ORGS_QUERY },
       {
@@ -385,7 +406,7 @@ export async function createAmplitudeApp(
   }
 
   try {
-    const response = await axios.post(
+    const response = await apiClient.post(
       url,
       {
         orgId: input.orgId,
@@ -535,7 +556,7 @@ export async function fetchBranches(
 ): Promise<AmplitudeBranch[]> {
   const { dataApiUrl } = AMPLITUDE_ZONE_SETTINGS[zone];
   try {
-    const response = await axios.post(
+    const response = await apiClient.post(
       dataApiUrl,
       { query: BRANCHES_QUERY, variables: { orgId, projectId } },
       {
@@ -612,7 +633,7 @@ export async function fetchProjectEventTypes(
     if (!defaultBranch) return [];
 
     // Step 2: fetch events for that version
-    const response = await axios.post(
+    const response = await apiClient.post(
       dataApiUrl,
       {
         query: PROJECT_EVENTS_QUERY,
@@ -680,7 +701,7 @@ export async function fetchOwnedDashboards(
 ): Promise<{ hasCharts: boolean; hasDashboards: boolean }> {
   const url = appApiUrl(zone, orgId, 'OwnedDashboards');
   try {
-    const response = await axios.post(
+    const response = await apiClient.post(
       url,
       { query: OWNED_DASHBOARDS_QUERY },
       {
@@ -793,7 +814,7 @@ export async function fetchSources(
 ): Promise<AmplitudeSource[]> {
   const { dataApiUrl } = AMPLITUDE_ZONE_SETTINGS[zone];
   try {
-    const response = await axios.post(
+    const response = await apiClient.post(
       dataApiUrl,
       {
         query: SOURCES_QUERY,
@@ -1048,7 +1069,7 @@ export async function fetchProjectActivationStatus(opts: {
     'hasAnyDefaultEventTrackingSourceAndEvents',
   );
   try {
-    const response = await axios.post(
+    const response = await apiClient.post(
       url,
       { query: ACTIVATION_STATUS_QUERY, variables: { appId: String(appId) } },
       {
@@ -1105,7 +1126,7 @@ export async function fetchSlackInstallUrl(
 ): Promise<string | null> {
   const url = appApiUrl(zone, orgId, 'SlackInstallUrl');
   try {
-    const response = await axios.post(
+    const response = await apiClient.post(
       url,
       {
         query: SLACK_INSTALL_URL_QUERY,
@@ -1168,7 +1189,7 @@ export async function fetchSlackConnectionStatus(
 ): Promise<boolean | null> {
   const url = appApiUrl(zone, orgId, 'SlackConnectionStatus');
   try {
-    const response = await axios.post(
+    const response = await apiClient.post(
       url,
       { query: SLACK_CONNECTION_STATUS_QUERY },
       {

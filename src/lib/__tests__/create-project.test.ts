@@ -7,7 +7,6 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import axios from 'axios';
 import {
   createAmplitudeApp,
   validateProjectName,
@@ -16,12 +15,20 @@ import {
   PROJECT_NAME_MAX_LENGTH,
 } from '../api';
 
+// `src/lib/api.ts` now uses a shared `axios.create()` instance so we can
+// attach a keep-alive agent and a default timeout. The test mock has to
+// route both `axios.post` and the shared instance's `.post` to the same
+// `vi.fn()` so existing assertions on call args still pass. We use
+// `vi.hoisted()` so `mockPost` is available inside the hoisted `vi.mock`
+// factory.
+const { mockPost } = vi.hoisted(() => ({ mockPost: vi.fn() }));
 vi.mock('axios', async () => {
   const actual = await vi.importActual<typeof import('axios')>('axios');
   return {
     default: {
       ...actual.default,
-      post: vi.fn(),
+      post: mockPost,
+      create: () => ({ post: mockPost, get: vi.fn() }),
       isAxiosError: actual.default.isAxiosError,
     },
   };
@@ -35,7 +42,10 @@ vi.mock('../../utils/analytics', () => ({
   },
 }));
 
-const mockedAxios = axios as unknown as {
+// Backwards-compatible alias for the existing assertions below — the actual
+// shared mock is `mockPost` (declared above so it can be wired into
+// `axios.create()` at hoist time).
+const mockedAxios = { post: mockPost } as unknown as {
   post: ReturnType<typeof vi.fn>;
 };
 
