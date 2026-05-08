@@ -1,7 +1,7 @@
 {
   "name": "react-vite/vanilla",
   "ring": 1,
-  "integrationHint": "react-vite",
+  "integrationHint": "javascript_web",
   "buildCommand": ["pnpm", "build"],
   "expectedEnvPrefix": "VITE_",
   "expectedInitFile": "src/main.tsx",
