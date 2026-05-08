@@ -299,6 +299,28 @@ export enum AgentErrorType {
   GATEWAY_INVALID_REQUEST = 'WIZARD_GATEWAY_INVALID_REQUEST',
 }
 
+/**
+ * Sub-classification for {@link AgentErrorType.AUTH_ERROR}. Two failure modes
+ * share the AUTH_ERROR signal but require very different user-facing copy:
+ *
+ *  - `'amplitude'`    — the `amplitude-wizard` MCP server reported
+ *                       `needs-auth`, i.e. the user's Amplitude OAuth session
+ *                       is missing or expired. This is the new-user / first-
+ *                       login failure mode (account just created, not yet
+ *                       provisioned, or OAuth scope refused).
+ *  - `'llm-gateway'`  — the Anthropic / wizard LLM gateway returned an
+ *                       `authentication_error` mid-run. This typically hits
+ *                       _existing_ users on long-running tasks: the bearer
+ *                       expired or was revoked while the agent was working.
+ *                       Retrying immediately is sufficient — no signup needed.
+ *
+ * Defaulting to `'amplitude'` would re-introduce the original bug (showing
+ * the new-user signup pitch to a returning user mid-run); callers must be
+ * explicit. Surface as a discriminator on the agent run result so
+ * agent-runner can pick the right copy.
+ */
+export type AuthErrorSubkind = 'amplitude' | 'llm-gateway';
+
 const DEFAULT_MAX_TURNS = 200;
 /**
  * Upper sanity bound on AMPLITUDE_WIZARD_MAX_TURNS. A real run almost never
@@ -1833,6 +1855,12 @@ export async function runAgent(
 ): Promise<{
   error?: AgentErrorType;
   message?: string;
+  /**
+   * Set only when `error === AgentErrorType.AUTH_ERROR` so agent-runner can
+   * disambiguate the new-user-signup path from the existing-user expired-
+   * bearer path. See {@link AuthErrorSubkind} for the rationale.
+   */
+  authSubkind?: AuthErrorSubkind;
   plannedEvents?: Array<{ name: string; description: string }>;
 }> {
   const {
@@ -1900,6 +1928,17 @@ export async function runAgent(
   //   stuck waiting through ~3 minutes of futile retries.
   let authErrorDetected = false;
   let authRetryCount = 0;
+  // Distinguishes the two AUTH_ERROR sources so agent-runner can pick copy:
+  //   - 'amplitude'   — amplitude-wizard MCP `needs-auth` (new-user / OAuth)
+  //   - 'llm-gateway' — Anthropic/wizard-proxy `authentication_error`
+  //                     (existing user's bearer expired mid-run)
+  // First-write-wins so the LLM-gateway path doesn't get clobbered by a
+  // later MCP-init `needs-auth` if both fire — the 401 is the immediate
+  // cause and the more accurate diagnosis.
+  let authErrorSubkind: AuthErrorSubkind | undefined;
+  const recordAuthSubkind = (k: AuthErrorSubkind): void => {
+    if (authErrorSubkind === undefined) authErrorSubkind = k;
+  };
   // Set by either short-circuit (post-stream or catch branch) when the
   // upstream gateway / Vertex returns the verbatim
   // `"Invalid request sent to model provider"` wrapper. The post-loop
@@ -1925,9 +1964,20 @@ export async function runAgent(
   const exitWithError = (
     error: AgentErrorType,
     message?: string,
-  ): { error: AgentErrorType; message?: string } => {
+  ): {
+    error: AgentErrorType;
+    message?: string;
+    authSubkind?: AuthErrorSubkind;
+  } => {
     recordTerminal({ kind: 'error', error, message });
-    return message !== undefined ? { error, message } : { error };
+    // Only attach `authSubkind` to AUTH_ERROR exits — every other error
+    // type leaves it undefined so callers can rely on its presence as a
+    // safe narrowing signal.
+    const subkind =
+      error === AgentErrorType.AUTH_ERROR ? authErrorSubkind : undefined;
+    const base: { error: AgentErrorType; message?: string } =
+      message !== undefined ? { error, message } : { error };
+    return subkind ? { ...base, authSubkind: subkind } : base;
   };
 
   // Workaround for SDK bug: stdin closes before canUseTool responses can be sent.
@@ -3292,6 +3342,10 @@ export async function runAgent(
             isAuthErrorMessage(JSON.stringify(message))
           ) {
             authErrorDetected = true;
+            // Anthropic / wizard-proxy LLM gateway 401 — bearer expired or
+            // revoked mid-run. Returning users hit this; new-user signup
+            // copy would be misleading. See AuthErrorSubkind.
+            recordAuthSubkind('llm-gateway');
             logToFile('Auth error detected in result message');
           }
 
@@ -3376,6 +3430,11 @@ export async function runAgent(
             );
             if (authRetryCount >= AUTH_RETRY_LIMIT) {
               authErrorDetected = true;
+              // 401 retry storm always originates from the LLM gateway —
+              // the SDK only retries upstream auth failures, not Amplitude
+              // MCP. Mark accordingly so the runner shows the
+              // "session token expired, just re-run" copy.
+              recordAuthSubkind('llm-gateway');
               logToFile(
                 'Auth retries exceeded threshold — aborting agent query',
               );
@@ -3400,6 +3459,10 @@ export async function runAgent(
                 server.status === 'needs-auth'
               ) {
                 authErrorDetected = true;
+                // Amplitude OAuth — new-user / first-login failure mode.
+                // Keep the existing "account just created / signup manually"
+                // copy in agent-runner.
+                recordAuthSubkind('amplitude');
                 logToFile(
                   'Auth error detected: amplitude-wizard MCP needs-auth',
                 );

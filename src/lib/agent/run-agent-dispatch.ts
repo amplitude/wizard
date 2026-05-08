@@ -19,7 +19,11 @@
  */
 import type { SpinnerHandle } from '../../ui/wizard-ui.js';
 import type { WizardOptions } from '../../utils/types.js';
-import type { AgentErrorType, AgentRunConfig } from '../agent-interface.js';
+import type {
+  AgentErrorType,
+  AgentRunConfig,
+  AuthErrorSubkind,
+} from '../agent-interface.js';
 import type { SDKMessage } from '../middleware/types.js';
 import type { AdditionalFeature } from '../wizard-session.js';
 import { logToFile } from '../../utils/debug.js';
@@ -50,6 +54,13 @@ export type RunAgentDispatchMiddleware = {
 export interface RunAgentDispatchResult {
   error?: AgentErrorType;
   message?: string;
+  /**
+   * Set only when `error === AgentErrorType.AUTH_ERROR`. Lets the runner
+   * pick between new-user-signup copy (`'amplitude'`) and
+   * existing-user-bearer-expired copy (`'llm-gateway'`). See
+   * {@link AuthErrorSubkind} in `agent-interface.ts` for full rationale.
+   */
+  authSubkind?: AuthErrorSubkind;
   plannedEvents?: Array<{ name: string; description: string }>;
 }
 
