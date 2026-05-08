@@ -2007,6 +2007,10 @@ export class WizardStore {
     this.router.pushOverlay(overlay);
     this.$version.set(this.$version.get() + 1);
     this._detectTransition();
+    // Same Ink log-update diff-skip class as emitChange — overlay
+    // transitions produce visible frame changes that get silently
+    // dropped until a manual terminal resize. See rerender-bridge.ts.
+    triggerRerender();
   }
 
   popOverlay(): void {
@@ -2014,6 +2018,7 @@ export class WizardStore {
     this.router.popOverlay();
     this.$version.set(this.$version.get() + 1);
     this._detectTransition();
+    triggerRerender();
   }
 
   // ── Screen transition analytics ─────────────────────────────────
