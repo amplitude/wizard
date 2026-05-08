@@ -33,12 +33,17 @@ export const ProgressList = ({ items, title }: ProgressListProps) => {
       )}
       {items.length === 0 && <LoadingBox message="Analyzing project..." />}
       {items.map((item, i) => {
+        // Glyph language matches JourneyStepper: ✓ for completed, ›
+        // (chevron) for in-progress, and a blank gutter for pending so
+        // the eye scans straight down the active and finished items
+        // instead of being snagged by a stray bullet column on every
+        // not-yet-started row.
         const icon =
           item.status === 'completed'
-            ? Icons.squareFilled
+            ? Icons.checkmark
             : item.status === 'in_progress'
-            ? Icons.triangleRight
-            : Icons.squareOpen;
+            ? Icons.chevronRight
+            : ' ';
         const color =
           item.status === 'completed'
             ? Colors.success
@@ -61,6 +66,7 @@ export const ProgressList = ({ items, title }: ProgressListProps) => {
             <Box flexGrow={1} flexShrink={1}>
               <Text
                 color={item.status === 'pending' ? Colors.muted : undefined}
+                dimColor={item.status === 'pending'}
               >
                 {label}
               </Text>
