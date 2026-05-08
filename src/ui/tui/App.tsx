@@ -17,6 +17,7 @@ import type { WizardStore } from './store.js';
 import { createScreens, createServices } from './screen-registry.js';
 import { CommandModeContext } from './context/CommandModeContext.js';
 import { ContentAreaContext } from './context/ContentAreaContext.js';
+import { SpinnerFrameProvider } from './context/SpinnerFrameContext.js';
 import { ConsoleView } from './components/ConsoleView.js';
 import { EventPlanFullScreen } from './screens/EventPlanFullScreen.js';
 import { CtrlCHandler } from './components/CtrlCHandler.js';
@@ -83,86 +84,88 @@ export const App = ({ store }: AppProps) => {
 
   return (
     <CommandModeContext.Provider value={store.commandMode}>
-      {/* Always-on Ctrl+C interceptor. Uses Ink's useInput so it gets
+      <SpinnerFrameProvider>
+        {/* Always-on Ctrl+C interceptor. Uses Ink's useInput so it gets
           the key event in raw mode. Drives graceful-exit flow directly
           (banner → save checkpoint → flush analytics → exit). */}
-      <CtrlCHandler store={store} />
-      <Box
-        flexDirection="column"
-        height={rows}
-        width={columns}
-        alignItems="center"
-        justifyContent="flex-start"
-      >
-        {showEventPlan &&
-        pendingPrompt &&
-        pendingPrompt.kind === 'event-plan' ? (
-          <EventPlanFullScreen
-            key="event-plan"
-            store={store}
-            events={pendingPrompt.events}
-            width={columns}
-            height={rows}
-          />
-        ) : (
-          <Box
-            key="normal-layout"
-            flexDirection="column"
-            width={columns}
-            alignItems="center"
-          >
-            <Box flexDirection="column" width={width}>
-              {/* Journey stepper */}
-              <JourneyStepper store={store} width={width} />
+        <CtrlCHandler store={store} />
+        <Box
+          flexDirection="column"
+          height={rows}
+          width={columns}
+          alignItems="center"
+          justifyContent="flex-start"
+        >
+          {showEventPlan &&
+          pendingPrompt &&
+          pendingPrompt.kind === 'event-plan' ? (
+            <EventPlanFullScreen
+              key="event-plan"
+              store={store}
+              events={pendingPrompt.events}
+              width={columns}
+              height={rows}
+            />
+          ) : (
+            <Box
+              key="normal-layout"
+              flexDirection="column"
+              width={columns}
+              alignItems="center"
+            >
+              <Box flexDirection="column" width={width}>
+                {/* Journey stepper */}
+                <JourneyStepper store={store} width={width} />
 
-              {/* Live activity sub-line (compaction, retries, polls, MCP, cold-start).
+                {/* Live activity sub-line (compaction, retries, polls, MCP, cold-start).
                   Renders nothing when the wizard is idle. */}
-              <ActivityLine store={store} />
+                <ActivityLine store={store} />
 
-              {/* Header bar */}
-              <HeaderBar
-                width={width}
-                orgName={store.session.selectedOrgName}
-                projectName={store.session.selectedProjectName}
-                envName={store.session.selectedEnvName}
-              />
+                {/* Header bar */}
+                <HeaderBar
+                  width={width}
+                  orgName={store.session.selectedOrgName}
+                  projectName={store.session.selectedProjectName}
+                  envName={store.session.selectedEnvName}
+                />
 
-              {/* Top separator */}
-              <Box paddingX={1}>
-                <Text color={Colors.border}>{separator}</Text>
+                {/* Top separator */}
+                <Box paddingX={1}>
+                  <Text color={Colors.border}>{separator}</Text>
+                </Box>
               </Box>
-            </Box>
 
-            {/* Content + console input */}
-            <ConsoleView store={store} width={width} height={consoleHeight}>
-              <Box
-                flexDirection="column"
-                flexGrow={1}
-                paddingX={Layout.paddingX}
-                overflow="hidden"
-              >
-                <ContentAreaContext.Provider
-                  value={{ height: contentHeight, width: contentAreaWidth }}
+              {/* Content + console input */}
+              <ConsoleView store={store} width={width} height={consoleHeight}>
+                <Box
+                  flexDirection="column"
+                  flexGrow={1}
+                  paddingX={Layout.paddingX}
+                  overflow="hidden"
                 >
-                  <DissolveTransition
-                    transitionKey={store.currentScreen}
-                    width={contentAreaWidth}
-                    height={contentHeight}
-                    direction={direction}
+                  <ContentAreaContext.Provider
+                    value={{ height: contentHeight, width: contentAreaWidth }}
                   >
-                    <ScreenErrorBoundary
-                      store={store}
-                      retryToken={store.screenErrorRetry}
+                    <DissolveTransition
+                      transitionKey={store.currentScreen}
+                      width={contentAreaWidth}
+                      height={contentHeight}
+                      direction={direction}
                     >
-                      {activeScreen}
-                    </ScreenErrorBoundary>
-                  </DissolveTransition>
-                </ContentAreaContext.Provider>
-              </Box>
-            </ConsoleView>
-          </Box>
-        )}
-      </Box>
+                      <ScreenErrorBoundary
+                        store={store}
+                        retryToken={store.screenErrorRetry}
+                      >
+                        {activeScreen}
+                      </ScreenErrorBoundary>
+                    </DissolveTransition>
+                  </ContentAreaContext.Provider>
+                </Box>
+              </ConsoleView>
+            </Box>
+          )}
+        </Box>
+      </SpinnerFrameProvider>
     </CommandModeContext.Provider>
   );
 };
