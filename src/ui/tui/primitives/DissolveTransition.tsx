@@ -53,15 +53,6 @@ interface DissolveTransitionProps {
   height: number;
   children: ReactNode;
   direction?: WipeDirection;
-  /**
-   * Tick interval in milliseconds. Each tick rebuilds a `width × height`
-   * character grid and runs it through Yoga, so the per-tick render cost
-   * is non-trivial (e.g. 4800 chars on a 120×40 terminal). 33ms ≈ 30Hz,
-   * which is well above the perceptible-flicker threshold for a TUI and
-   * roughly a third of the render-budget pressure of the old 12ms (~83Hz)
-   * default. Don't drop this below ~25ms (40Hz) without also profiling on
-   * the slowest supported terminal.
-   */
   duration?: number;
 }
 
@@ -84,7 +75,7 @@ export const DissolveTransition = ({
   height,
   children,
   direction = 'left',
-  duration = 33,
+  duration = 12,
 }: DissolveTransitionProps) => {
   // Decide once per render whether to animate at all. When the env
   // doesn't support a smooth sweep, skip every state-machine path and
@@ -140,12 +131,8 @@ export const DissolveTransition = ({
     return () => clearInterval(timer);
   }, [phase, duration]);
 
-  // Easer steps scale with width so total wall time per phase stays ~constant
-  // across terminal sizes. Tuned for the new 33ms (30Hz) tick rate: at 33ms
-  // we want ~3× fewer ticks per phase than the old 12ms (~83Hz) default that
-  // used `width / 3`, so this is `width / 10` with a 4-tick floor — preserves
-  // the original ~500ms per-phase feel on a 120-column terminal.
-  const easerSteps = Math.max(Math.ceil(width / 10), 4);
+  // Easer steps = width / 3: ~3 columns activate per tick for a fast sweep.
+  const easerSteps = Math.max(Math.ceil(width / 3), 10);
 
   // A phase ends when the easer has completed AND all columns have finished their shade cycle.
   const maxTicks = easerSteps + SHADE_CYCLE_TICKS;
