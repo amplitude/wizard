@@ -1,3 +1,4 @@
+import { createLogger } from '../observability/logger';
 import {
   ServiceHealthStatus,
   type BaseHealthResult,
@@ -12,7 +13,27 @@ import {
 // summary.json – same rollup + component list; component status is one of:
 //   operational | degraded_performance | partial_outage | major_outage | under_maintenance
 //   https://support.atlassian.com/statuspage/docs/show-service-status-with-components
+//
+// Performance notes:
+//
+// 1. Aggregate `checkAllExternalServices()` only needs to hit `summary.json`
+//    for the three Statuspage hosts — it returns BOTH the page-level
+//    indicator and the component list in a single response. The combined
+//    helpers below (`checkAmplitudeStatusAndComponents`, etc.) make one
+//    request and derive both results, cutting three round-trips out of the
+//    cold-start aggregate check.
+//
+//    The standalone `check*OverallHealth` / `check*ComponentHealth` exports
+//    are retained for ad-hoc callers (e.g. `OutageScreen` polls overall
+//    only, no point pulling component data every 30s).
+//
+// 2. We pass `keepalive: true` to every `fetch` so the underlying TLS
+//    socket can be reused across the parallel checks against the same
+//    statuspage host (undici is not a direct dependency yet, so we rely on
+//    Node's built-in fetch keep-alive flag rather than a shared `Agent`).
 // ---------------------------------------------------------------------------
+
+const log = createLogger('health-checks/statuspage');
 
 interface StatuspageStatusResponse {
   status?: { indicator?: string; description?: string };
@@ -22,6 +43,16 @@ interface StatuspageSummaryResponse extends StatuspageStatusResponse {
   components?: { id: string; name: string; status: string }[];
 }
 
+/**
+ * Map a Statuspage page-level indicator to our internal status enum.
+ *
+ * Unknown / unexpected values are intentionally treated as Healthy with a
+ * logged warning. Statuspage occasionally adds new indicator values, and
+ * silently flipping every wizard run to "Degraded" on schema drift would
+ * turn a benign upstream change into a hard blocker. Prefer false-negative
+ * (we miss a new degraded state for a release) over false-positive (we
+ * block every user until we ship a patch).
+ */
 function mapIndicator(v: string | null | undefined): ServiceHealthStatus {
   switch (v) {
     case 'none':
@@ -32,10 +63,22 @@ function mapIndicator(v: string | null | undefined): ServiceHealthStatus {
     case 'critical':
       return ServiceHealthStatus.Down;
     default:
-      return ServiceHealthStatus.Degraded;
+      if (v != null && v !== '') {
+        log.warn('unknown statuspage indicator — defaulting to healthy', {
+          indicator: v,
+        });
+      }
+      return ServiceHealthStatus.Healthy;
   }
 }
 
+/**
+ * Map a Statuspage component status to our internal status enum.
+ *
+ * Same fail-safe rationale as `mapIndicator`: unknown values default to
+ * Healthy + warning so schema drift on the upstream API can't silently
+ * block wizard runs.
+ */
 function mapComponentRaw(v: string | null | undefined): ServiceHealthStatus {
   switch (v) {
     case 'operational':
@@ -47,11 +90,23 @@ function mapComponentRaw(v: string | null | undefined): ServiceHealthStatus {
     case 'major_outage':
       return ServiceHealthStatus.Down;
     default:
-      return ServiceHealthStatus.Degraded;
+      if (v != null && v !== '') {
+        log.warn(
+          'unknown statuspage component status — defaulting to healthy',
+          {
+            component_status: v,
+          },
+        );
+      }
+      return ServiceHealthStatus.Healthy;
   }
 }
 
 function errResult(error: string): BaseHealthResult {
+  return { status: ServiceHealthStatus.Degraded, error };
+}
+
+function componentErrResult(error: string): ComponentHealthResult {
   return { status: ServiceHealthStatus.Degraded, error };
 }
 
@@ -62,7 +117,10 @@ async function fetchStatuspageIndicator(
   try {
     const controller = new AbortController();
     const tid = setTimeout(() => controller.abort(), timeoutMs);
-    const res = await fetch(url, { signal: controller.signal });
+    const res = await fetch(url, {
+      signal: controller.signal,
+      keepalive: true,
+    });
     clearTimeout(tid);
 
     if (!res.ok) return errResult(`HTTP ${res.status}`);
@@ -84,17 +142,41 @@ async function fetchStatuspageSummary(
   url: string,
   timeoutMs = 5000,
 ): Promise<ComponentHealthResult> {
+  const combined = await fetchStatuspageOverallAndComponents(url, timeoutMs);
+  return combined.components;
+}
+
+/**
+ * Single-fetch helper that returns BOTH the page-level indicator result and
+ * the component-level result from one `summary.json` response. This is the
+ * primitive the aggregate readiness check uses.
+ */
+export async function fetchStatuspageOverallAndComponents(
+  url: string,
+  timeoutMs = 5000,
+): Promise<{ overall: BaseHealthResult; components: ComponentHealthResult }> {
   try {
     const controller = new AbortController();
     const tid = setTimeout(() => controller.abort(), timeoutMs);
-    const res = await fetch(url, { signal: controller.signal });
+    const res = await fetch(url, {
+      signal: controller.signal,
+      keepalive: true,
+    });
     clearTimeout(tid);
 
-    if (!res.ok) return errResult(`HTTP ${res.status}`);
+    if (!res.ok) {
+      const msg = `HTTP ${res.status}`;
+      return { overall: errResult(msg), components: componentErrResult(msg) };
+    }
 
     const data = (await res.json()) as StatuspageSummaryResponse;
     const indicator = data.status?.indicator ?? null;
-    const overall = mapIndicator(indicator);
+    const overallStatus = mapIndicator(indicator);
+
+    const overall: BaseHealthResult = {
+      status: overallStatus,
+      rawIndicator: indicator ?? undefined,
+    };
 
     const affected = (data.components ?? [])
       .map((c) => ({
@@ -104,17 +186,38 @@ async function fetchStatuspageSummary(
       }))
       .filter((c) => c.status !== ServiceHealthStatus.Healthy);
 
-    return {
-      status: affected.length > 0 ? ServiceHealthStatus.Degraded : overall,
+    const components: ComponentHealthResult = {
+      status:
+        affected.length > 0 ? ServiceHealthStatus.Degraded : overallStatus,
       rawIndicator: indicator ?? undefined,
       degradedOrDownComponents: affected.length > 0 ? affected : undefined,
     };
+
+    return { overall, components };
   } catch (e) {
-    if (e instanceof Error && e.name === 'AbortError')
-      return errResult('Request timed out');
-    return errResult(e instanceof Error ? e.message : 'Unknown error');
+    const msg =
+      e instanceof Error && e.name === 'AbortError'
+        ? 'Request timed out'
+        : e instanceof Error
+        ? e.message
+        : 'Unknown error';
+    return { overall: errResult(msg), components: componentErrResult(msg) };
   }
 }
+
+// ---------------------------------------------------------------------------
+// Statuspage URLs (single source of truth)
+// ---------------------------------------------------------------------------
+
+const URLS = {
+  amplitudeStatus: 'https://status.amplitude.com/api/v2/status.json',
+  amplitudeSummary: 'https://status.amplitude.com/api/v2/summary.json',
+  githubStatus: 'https://www.githubstatus.com/api/v2/status.json',
+  npmStatus: 'https://status.npmjs.org/api/v2/status.json',
+  npmSummary: 'https://status.npmjs.org/api/v2/summary.json',
+  cloudflareStatus: 'https://www.cloudflarestatus.com/api/v2/status.json',
+  cloudflareSummary: 'https://www.cloudflarestatus.com/api/v2/summary.json',
+} as const;
 
 // ---------------------------------------------------------------------------
 // Individual statuspage-backed checks
@@ -128,28 +231,49 @@ export const checkAnthropicHealth = (): Promise<BaseHealthResult> =>
   });
 
 export const checkAmplitudeOverallHealth = (): Promise<BaseHealthResult> =>
-  fetchStatuspageIndicator('https://status.amplitude.com/api/v2/status.json');
+  fetchStatuspageIndicator(URLS.amplitudeStatus);
 
 export const checkAmplitudeComponentHealth =
   (): Promise<ComponentHealthResult> =>
-    fetchStatuspageSummary('https://status.amplitude.com/api/v2/summary.json');
+    fetchStatuspageSummary(URLS.amplitudeSummary);
 
 export const checkGithubHealth = (): Promise<BaseHealthResult> =>
-  fetchStatuspageIndicator('https://www.githubstatus.com/api/v2/status.json');
+  fetchStatuspageIndicator(URLS.githubStatus);
 
 export const checkNpmOverallHealth = (): Promise<BaseHealthResult> =>
-  fetchStatuspageIndicator('https://status.npmjs.org/api/v2/status.json');
+  fetchStatuspageIndicator(URLS.npmStatus);
 
 export const checkNpmComponentHealth = (): Promise<ComponentHealthResult> =>
-  fetchStatuspageSummary('https://status.npmjs.org/api/v2/summary.json');
+  fetchStatuspageSummary(URLS.npmSummary);
 
 export const checkCloudflareOverallHealth = (): Promise<BaseHealthResult> =>
-  fetchStatuspageIndicator(
-    'https://www.cloudflarestatus.com/api/v2/status.json',
-  );
+  fetchStatuspageIndicator(URLS.cloudflareStatus);
 
 export const checkCloudflareComponentHealth =
   (): Promise<ComponentHealthResult> =>
-    fetchStatuspageSummary(
-      'https://www.cloudflarestatus.com/api/v2/summary.json',
-    );
+    fetchStatuspageSummary(URLS.cloudflareSummary);
+
+// ---------------------------------------------------------------------------
+// Combined (single-fetch) statuspage checks
+//
+// Each of these issues ONE GET to `summary.json` and derives both the
+// page-level indicator result and the component-level result from it. Use
+// these in aggregate flows; use the individual `check*Overall` /
+// `check*Component` functions only when one half of the data is genuinely
+// not needed (e.g. `OutageScreen` polling).
+// ---------------------------------------------------------------------------
+
+export const checkAmplitudeStatusAndComponents = (): Promise<{
+  overall: BaseHealthResult;
+  components: ComponentHealthResult;
+}> => fetchStatuspageOverallAndComponents(URLS.amplitudeSummary);
+
+export const checkNpmStatusAndComponents = (): Promise<{
+  overall: BaseHealthResult;
+  components: ComponentHealthResult;
+}> => fetchStatuspageOverallAndComponents(URLS.npmSummary);
+
+export const checkCloudflareStatusAndComponents = (): Promise<{
+  overall: BaseHealthResult;
+  components: ComponentHealthResult;
+}> => fetchStatuspageOverallAndComponents(URLS.cloudflareSummary);
