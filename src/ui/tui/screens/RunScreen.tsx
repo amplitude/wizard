@@ -378,15 +378,21 @@ const ProgressTab = ({ store }: { store: WizardStore }) => {
               )}
             </Box>
 
-            {/* Show the latest agent status on its own row while nothing is
-                finished yet. Stays below the counter (not inline) — long
-                status strings used to push the counter siblings to wrap onto
-                the next line. Truncated in JS as a belt-and-braces guard
+            {/* Show the latest agent status on its own row, always — not
+                only during cold start. Users were repeatedly complaining
+                that they couldn't tell what the wizard was working on
+                because the status pill lives at the bottom of the screen
+                (below the tab bar) while the progress header sits at the
+                top: "now" was two rows of attention away from "n done · m
+                to go". Inline-and-always means the answer to "what's it
+                doing right now?" is always one row below the counter.
+
+                Stays below the counter (not inline-with) — long status
+                strings used to push the counter siblings to wrap onto the
+                next line. Truncated in JS as a belt-and-braces guard
                 against unbounded streamed content (e.g. raw stream-event
-                JSON from `runAgentLocally`). Once the first task lands, the
-                regular status pill below the tabs takes over and we don't
-                need to duplicate it in the header. */}
-            {completedDisplay === 0 && lastStatus && (
+                JSON from `runAgentLocally`). */}
+            {lastStatus && (
               <Text color={Colors.muted} wrap="truncate-end">
                 {Icons.dot} {truncateStatus(lastStatus)}
               </Text>
