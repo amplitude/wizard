@@ -33,6 +33,7 @@ import { AnimatedAmplitudeLogo } from '../components/AmplitudeLogo.js';
 import { RetryStatusChip } from '../components/RetryBanner.js';
 import { FileWritesPanel } from '../components/FileWritesPanel.js';
 import { FinalizingPanel } from '../components/FinalizingPanel.js';
+import { ActiveTaskSubsteps } from '../components/ActiveTaskSubsteps.js';
 import { PostAgentStepStatus } from '../session-constants.js';
 import { TaskStatus } from '../../wizard-ui.js';
 import { useStdoutDimensions } from '../hooks/useStdoutDimensions.js';
@@ -426,8 +427,23 @@ const ProgressTab = ({ store }: { store: WizardStore }) => {
           </Box>
         </Box>
 
-        {/* Tasks — the hero */}
-        <ProgressList items={progressItems} title="Tasks" />
+        {/* Tasks — the hero. The `renderActiveSubsteps` slot injects 2-3
+            lines of live tool-call narration ("Reading package.json",
+            "Running pnpm add …") under whichever task is currently
+            in_progress. Sources: PreToolUse hooks in
+            `inner-lifecycle.ts` push verb-formed labels into
+            `store.toolActivities` via `recordToolActivity`. Hidden on
+            terminals < MIN_WIDTH_FOR_SUBSTEPS cols to save space. */}
+        <ProgressList
+          items={progressItems}
+          title="Tasks"
+          renderActiveSubsteps={() => (
+            <ActiveTaskSubsteps
+              activities={store.toolActivities}
+              width={cols}
+            />
+          )}
+        />
 
         {/* Live per-file activity from the inner agent's write hooks.
             Hidden until the first PreToolUse fires so it doesn't reserve
