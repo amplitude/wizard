@@ -367,8 +367,12 @@ describe('callAmplitudeMcp', () => {
   });
 
   describe('MCP session failure', () => {
-    it('goes straight to agent fallback when initialize fails', async () => {
-      mockFetch.mockRejectedValueOnce(new Error('network error'));
+    it('falls back to agent fallback when initialize keeps failing', async () => {
+      // All fetch attempts (initial + 2 retries) fail; openMcpSession returns
+      // a non-ok result so the direct path is skipped and the agent fallback
+      // runs. The retry behavior itself is exercised in the "direct-path
+      // retries" describe block above.
+      mockFetch.mockRejectedValue(new Error('network error'));
 
       mockQuery.mockReturnValue(
         (async function* () {
@@ -489,6 +493,109 @@ describe('callAmplitudeMcp', () => {
       });
 
       // Agent fallback IS invoked — 5xx is transient.
+      expect(mockQuery).toHaveBeenCalledOnce();
+      expect(result).toEqual({ recovered: true });
+    });
+  });
+
+  describe('direct-path retries before agent fallback', () => {
+    // Transient direct-call failures (init network blip, missing
+    // mcp-session-id header, gateway hiccup) should be retried in-process
+    // with a small backoff before paying the ~12s cost of the agent
+    // fallback subprocess. Deterministic failures (401/403) still bail
+    // out immediately — same token, same wall.
+
+    it('retries openMcpSession on a transient init error and succeeds without agent fallback', async () => {
+      // Attempt 1: initialize fetch rejects (network blip).
+      mockFetch.mockRejectedValueOnce(new Error('ECONNRESET'));
+      // Attempt 2: full successful handshake + tool call.
+      setupSuccessfulMcpSession();
+      mockFetch.mockResolvedValueOnce(makeFetchResponse(sseResult({ v: 7 })));
+
+      const result = await callAmplitudeMcp({
+        accessToken: 'tok',
+        direct: async (callTool) => {
+          const text = await callTool(1, 't', {});
+          return text ? (JSON.parse(text) as { v: number }) : null;
+        },
+        agentPrompt: 'should not run',
+        parseAgent: () => null,
+      });
+
+      expect(result).toEqual({ v: 7 });
+      // 1 failed init + 2 successful (init, notif) + 1 tool call = 4
+      expect(mockFetch.mock.calls.length).toBe(4);
+      // Agent fallback subprocess never spun up — saved ~12s.
+      expect(mockQuery).not.toHaveBeenCalled();
+    });
+
+    it('retries on a missing mcp-session-id header and succeeds on retry', async () => {
+      // Attempt 1: initialize returns 200 but no session id header.
+      mockFetch.mockResolvedValueOnce(makeFetchResponse('', {}));
+      // Attempt 2: full successful handshake + tool call.
+      setupSuccessfulMcpSession();
+      mockFetch.mockResolvedValueOnce(makeFetchResponse(sseResult({ v: 9 })));
+
+      const result = await callAmplitudeMcp({
+        accessToken: 'tok',
+        direct: async (callTool) => {
+          const text = await callTool(1, 't', {});
+          return text ? (JSON.parse(text) as { v: number }) : null;
+        },
+        agentPrompt: 'should not run',
+        parseAgent: () => null,
+      });
+
+      expect(result).toEqual({ v: 9 });
+      expect(mockQuery).not.toHaveBeenCalled();
+    });
+
+    it('does NOT retry on deterministic auth failures', async () => {
+      // 401 is deterministic — same token would just 401 again.
+      mockFetch.mockResolvedValueOnce(makeFetchResponse('', {}, 401));
+
+      const result = await callAmplitudeMcp({
+        accessToken: 'expired-tok',
+        direct: async () => 'unreachable',
+        agentPrompt: 'unused',
+        parseAgent: () => null,
+      });
+
+      expect(result).toBeNull();
+      // Exactly one fetch — no retry, no agent fallback.
+      expect(mockFetch.mock.calls.length).toBe(1);
+      expect(mockQuery).not.toHaveBeenCalled();
+    });
+
+    it('falls back to the agent after exhausting all retries', async () => {
+      // All 3 attempts (initial + 2 retries) reject with a network error.
+      mockFetch.mockRejectedValueOnce(new Error('ECONNRESET'));
+      mockFetch.mockRejectedValueOnce(new Error('ECONNRESET'));
+      mockFetch.mockRejectedValueOnce(new Error('ECONNRESET'));
+
+      mockQuery.mockReturnValue(
+        (async function* () {
+          yield {
+            type: 'assistant',
+            message: {
+              content: [{ type: 'text', text: '{"recovered":true}' }],
+            },
+          };
+        })(),
+      );
+
+      const result = await callAmplitudeMcp({
+        accessToken: 'tok',
+        direct: async () => 'unreachable',
+        agentPrompt: 'recover',
+        parseAgent: (text) => {
+          const m = text.match(/\{.*\}/s);
+          return m ? (JSON.parse(m[0]) as { recovered: boolean }) : null;
+        },
+      });
+
+      // 3 init attempts (all failed), then agent fallback ran.
+      expect(mockFetch.mock.calls.length).toBe(3);
       expect(mockQuery).toHaveBeenCalledOnce();
       expect(result).toEqual({ recovered: true });
     });
