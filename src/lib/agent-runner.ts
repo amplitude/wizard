@@ -504,7 +504,7 @@ export async function runAgentWizard(
   // ensureWizardArtifactsIgnored writes to `.gitignore`, so it MUST run
   // after the ledger has captured the original gitignore — otherwise
   // rollback would "restore" the wizard's own gitignore additions.
-  const { initFileChangeLedger, getFileChangeLedger } = await import(
+  const { initFileChangeLedger, executeRollbackWithStatus } = await import(
     './file-change-ledger.js'
   );
   initFileChangeLedger(session.installDir);
@@ -597,43 +597,31 @@ export async function runAgentWizard(
   // whenever the cleanup runs.
   const runRollbackIfNotSuccessful = (): void => {
     if (success) return;
-    const ledger = getFileChangeLedger();
-    if (!ledger) return;
-    try {
-      const result = ledger.rollback();
-      const reverted = result.filesReverted;
-      const removed = result.filesRemoved;
-      if (reverted === 0 && removed === 0) {
-        logToFile('[ledger] rollback: nothing to revert');
-        return;
-      }
-      const message = `Wizard cancelled. Your repo has been restored to its pre-wizard state. (${reverted} file${
-        reverted === 1 ? '' : 's'
-      } reverted, ${removed} file${removed === 1 ? '' : 's'} removed.)`;
-      logToFile(`[ledger] ${message}`);
-      // Best-effort surface to the user. `getUI()` may not be reachable
-      // (very early failure paths); swallow either way.
+    // Carve-out for failure classes where the agent's writes are
+    // demonstrably consistent and an automatic revert is more
+    // destructive than the user wants. AUTH_ERROR is the canonical
+    // example: the bearer token expired on the very last call but the
+    // event plan was approved, the `track()` calls landed, and
+    // validation passed. Reverting those 10 files because of a token
+    // refresh bug is exactly the user-hostile behaviour the original
+    // post-mortem flagged.
+    //
+    // The OutroScreen renders a `[K] Keep / [R] Revert` choice when
+    // `preserveFiles` is set, so the user can still revert manually if
+    // they want — this gate only suppresses the AUTOMATIC revert.
+    if (session.outroData?.preserveFiles) {
+      logToFile(
+        '[ledger] rollback: skipped (outroData.preserveFiles set; user owns the revert decision via OutroScreen)',
+      );
+      return;
+    }
+    executeRollbackWithStatus((message) => {
       try {
         getUI().pushStatus(message);
       } catch {
         /* surfaced to log already */
       }
-      if (result.failures.length > 0) {
-        logToFile(
-          `[ledger] rollback: ${result.failures.length} failure${
-            result.failures.length === 1 ? '' : 's'
-          }: ${result.failures
-            .map((f) => `${f.path} (${f.reason})`)
-            .join(', ')}`,
-        );
-      }
-    } catch (err) {
-      logToFile(
-        `[ledger] rollback threw: ${
-          err instanceof Error ? err.message : String(err)
-        }`,
-      );
-    }
+    }, logToFile);
   };
   registerPriorityCleanup(runRollbackIfNotSuccessful);
 
@@ -1259,6 +1247,13 @@ async function runAgentWizardBody(
       message: authMessage,
       promptLogin: true,
       canRestart: true,
+      // The bearer token expired on the very last gateway call. The
+      // event plan was approved, `track()` calls landed, validation
+      // passed — automatically reverting that work would penalise the
+      // user for what is fundamentally an internal token refresh bug.
+      // The OutroScreen surfaces a `[K] Keep / [R] Revert` prompt so
+      // the user owns the decision instead of the cleanup hook.
+      preserveFiles: true,
     });
     // Also push a status so the failure is visibly announced even if the
     // OutroScreen hasn't taken focus yet (e.g. mid-Run-screen render).

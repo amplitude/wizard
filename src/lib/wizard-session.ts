@@ -356,6 +356,23 @@ export interface OutroData {
   continueUrl?: string;
   promptLogin?: boolean;
   canRestart?: boolean;
+  /**
+   * Suppress automatic rollback of the file-change ledger and surface a
+   * `[K] Keep changes / [R] Revert changes` choice on the Error outro.
+   *
+   * Set on AUTH_ERROR (and any other "post-instrumentation" failure where
+   * the agent's writes are demonstrably consistent — the bearer token
+   * expired on the very last call but the event plan was approved, the
+   * `track()` calls landed, and validation passed). Without this flag
+   * the wizard's cleanup hook reverts every file touched during the run,
+   * penalising the user for what is fundamentally an internal token
+   * refresh bug.
+   *
+   * Default rollback behaviour is unchanged for every other failure
+   * class (agent crashed mid-write with partial garbage, hooks denied a
+   * Bash command, etc.) — those still auto-revert.
+   */
+  preserveFiles?: boolean;
 }
 
 /**
