@@ -47,7 +47,10 @@ import { getLogFile } from '../../../utils/storage-paths.js';
 import { getSessionStartMs } from '../../../lib/observability/index.js';
 
 const RUN_HINTS: readonly KeyHint[] = Object.freeze([
-  { key: '←→', label: 'Tabs' },
+  // Tabs is the most droppable here — the tab bar at the bottom of
+  // RunScreen also surfaces ←→ navigation. Keep Ctrl+C visible at all
+  // widths so a panicking user always has a way out.
+  { key: '←→', label: 'Tabs', optional: true },
   { key: 'Ctrl+C', label: 'Cancel' },
 ]);
 
@@ -383,6 +386,7 @@ const ProgressTab = ({ store }: { store: WizardStore }) => {
           entries={store.fileWrites}
           installDir={store.session.installDir}
           spinnerFrame={spinnerFrame}
+          width={cols}
         />
 
         {/* Coaching: surfaces calmly after 90s of no task-count progress.
@@ -400,7 +404,7 @@ const ProgressTab = ({ store }: { store: WizardStore }) => {
               {Icons.dash}
               {coachingTier >= 2
                 ? " This is unusually slow. Press ← / → to switch to the Logs tab and see what's stuck — or Ctrl+C to cancel."
-                : ' Still working — press ← / → to switch to the Logs tab and see what\'s happening, or Ctrl+C to cancel.'}
+                : " Still working — press ← / → to switch to the Logs tab and see what's happening, or Ctrl+C to cancel."}
             </Text>
           </Box>
         )}

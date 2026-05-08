@@ -40,7 +40,52 @@ interface FileWritesPanelProps {
   now?: number;
   /** Cap on rows rendered — older rows are dropped from the head. */
   maxVisible?: number;
+  /**
+   * Visible terminal width. Used to head-truncate long file paths so every
+   * row stays on a single line. When omitted, the panel falls back to a
+   * sensible default — the cap exists so a forgotten width prop still
+   * renders consistently rather than reverting to the old wrap behavior.
+   */
+  width?: number;
 }
+
+/**
+ * Head-truncate a path so the *meaningful* tail (filename + parents)
+ * survives. Long Next.js segment paths like
+ * `src/app/(category-sidebar)/products/[category]/[subcategory]/[product]/page.tsx`
+ * become `…/[product]/page.tsx` instead of being right-truncated into
+ * `src/app/(category-sidebar)/products/[ca…` (which loses the filename).
+ *
+ * Walks segments from the right and stops when adding the next segment
+ * would exceed `maxWidth - 1` (reserved for the leading ellipsis). If
+ * even the basename overflows, falls back to middle-truncation of the
+ * basename so we never wrap.
+ */
+export const truncatePathHead = (raw: string, maxWidth: number): string => {
+  if (raw.length <= maxWidth || maxWidth <= 1) return raw;
+  const segments = raw.split('/');
+  const basename = segments[segments.length - 1] ?? raw;
+  // Basename alone overflows — middle-truncate it. Keeping the file
+  // extension visible is the priority.
+  if (basename.length + 1 >= maxWidth) {
+    if (maxWidth <= 3) return '…';
+    const keep = maxWidth - 1; // reserve 1 col for the ellipsis
+    const head = Math.ceil(keep / 2);
+    const tail = keep - head;
+    return `…${basename.slice(0, head)}…${basename.slice(-tail)}`.slice(
+      0,
+      maxWidth,
+    );
+  }
+  let acc = basename;
+  for (let i = segments.length - 2; i >= 0; i--) {
+    const next = `${segments[i]}/${acc}`;
+    // +1 for the leading ellipsis. Stop one segment short.
+    if (next.length + 1 > maxWidth) break;
+    acc = next;
+  }
+  return `…/${acc}`;
+};
 
 const OP_LABELS: Record<FileWriteEntry['operation'], string> = {
   create: 'CREATE',
@@ -86,6 +131,7 @@ export const FileWritesPanel = ({
   spinnerFrame,
   now = Date.now(),
   maxVisible = 8,
+  width,
 }: FileWritesPanelProps) => {
   // Slice to the most recent rows. The store also caps at MAX_FILE_WRITES,
   // but RunScreen has limited vertical real estate — long-running runs
@@ -127,6 +173,7 @@ export const FileWritesPanel = ({
           installDir={installDir}
           spinnerFrame={spinnerFrame}
           now={now}
+          width={width}
         />
       ))}
     </Box>
@@ -138,18 +185,43 @@ interface FileWriteRowProps {
   installDir?: string;
   spinnerFrame?: number;
   now: number;
+  /** Visible width budget for the row (terminal cols). */
+  width?: number;
 }
+
+/**
+ * Fixed glyph budget per row, in terminal columns:
+ *   1 leading space + 1 status icon + 1 space + 6 op label
+ *   + 1 space + path + 3 (' · ') + detail.
+ *
+ * We only need to budget the *non-path*, *non-detail* cells here — those
+ * are the cells with predictable widths.
+ */
+const ROW_FIXED_COLS =
+  1 /* indent */ +
+  1 /* icon */ +
+  1 +
+  6 /* op label */ +
+  1 /* gap */ +
+  3; /* ' · ' */
+/** Floor on usable columns when the terminal is unreasonably narrow. */
+const MIN_ROW_WIDTH = 24;
+/** Minimum path budget — below this the row would be unreadable. */
+const MIN_PATH_WIDTH = 8;
+/** Default width when no measurement is available (matches Layout.maxWidth). */
+const DEFAULT_ROW_WIDTH = 120;
 
 const FileWriteRow = ({
   entry,
   installDir,
   spinnerFrame,
   now,
+  width,
 }: FileWriteRowProps) => {
   const { operation, status } = entry;
   const opLabel = padRight(OP_LABELS[operation], 6);
   const opColor = OP_COLORS[operation];
-  const display = displayPath(entry.path, installDir);
+  const rawDisplay = displayPath(entry.path, installDir);
 
   let icon: ReactElement;
   if (status === 'applied') {
@@ -174,13 +246,28 @@ const FileWriteRow = ({
       typeof entry.bytes === 'number'
         ? `${entry.bytes.toLocaleString()} bytes`
         : 'edited';
-    detail = dur ? `${sizeHint}  ${dur}` : sizeHint;
+    detail = dur ? `${sizeHint} ${dur}` : sizeHint;
   } else if (status === 'failed') {
     detail = 'failed';
   } else {
     const elapsed = now - entry.startedAt;
-    detail = elapsed >= 1000 ? `generating… ${formatDuration(elapsed)}` : 'generating…';
+    detail =
+      elapsed >= 1000
+        ? `generating… ${formatDuration(elapsed)}`
+        : 'generating…';
   }
+
+  // Compute the path budget so the row always fits on one line. Without
+  // this, a long path makes Yoga's flex container reflow into a 2-line
+  // layout where the trailing "· edited Xms" jumps to the next row,
+  // misaligned far to the right. Short paths kept their compact 1-line
+  // layout — that visual inconsistency is the bug we're fixing here.
+  const totalWidth = Math.max(MIN_ROW_WIDTH, width ?? DEFAULT_ROW_WIDTH);
+  const pathBudget = Math.max(
+    MIN_PATH_WIDTH,
+    totalWidth - ROW_FIXED_COLS - detail.length,
+  );
+  const display = truncatePathHead(rawDisplay, pathBudget);
 
   return (
     <Box>
@@ -191,9 +278,7 @@ const FileWriteRow = ({
         {opLabel}
       </Text>
       <Text> </Text>
-      <Text color={Colors.body} wrap="truncate-end">
-        {display}
-      </Text>
+      <Text color={Colors.body}>{display}</Text>
       <Text color={Colors.subtle}> {Icons.dot} </Text>
       <Text color={Colors.muted}>{detail}</Text>
     </Box>

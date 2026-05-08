@@ -76,6 +76,85 @@ describe('KeyHintBar', () => {
     expect(out).toContain('Commands');
   });
 
+  it('switches to compact mode below the COMPACT_THRESHOLD', () => {
+    // At 30 cols (well below 60), full "[Tab] Ask a question" used to
+    // word-wrap into "[T-Ctrl] Ca-/] Com-Tab] Ask a / abs +C ncel mands
+    // questi / on" — single tokens torn across rows. Verify the compact
+    // forms render and no default hint label appears in long form.
+    const out = frameOf(<KeyHintBar width={30} />);
+    expect(out).toContain('cmds');
+    expect(out).not.toContain('Commands');
+    expect(out).not.toContain('Ask a question');
+  });
+
+  it('uses compact key forms in compact mode', () => {
+    const out = frameOf(
+      <KeyHintBar
+        width={30}
+        hints={[{ key: 'Ctrl+C', label: 'Cancel' }]}
+        showDefaults={false}
+      />,
+    );
+    expect(out).toContain('^C');
+    expect(out).toContain('cancel');
+    // Bracketed full form should NOT appear at narrow widths.
+    expect(out).not.toContain('[Ctrl+C]');
+  });
+
+  it('keeps single-token hints intact (no word-wrap of "Cancel")', () => {
+    // The bug from the screenshot: at 30 cols Ink's word-wrap split
+    // "Cancel" into "Ca / ncel" and "Commands" into "Com- / mands".
+    // After the fix, every visible hint must appear on a single line.
+    const out = frameOf(
+      <KeyHintBar width={30} hints={[{ key: 'Ctrl+C', label: 'Cancel' }]} />,
+    );
+    const lines = out.split('\n').filter((l) => l.trim().length > 0);
+    // Bar renders as exactly one line.
+    expect(lines.length).toBe(1);
+    expect(lines[0]).toContain('cancel');
+    expect(lines[0]).toContain('cmds');
+  });
+
+  it('drops optional hints first under MIN_THRESHOLD', () => {
+    const out = frameOf(
+      <KeyHintBar
+        width={25}
+        hints={[
+          { key: 'Ctrl+C', label: 'Cancel' },
+          { key: 'X', label: 'Extra', optional: true },
+        ]}
+      />,
+    );
+    expect(out).toContain('cancel');
+    expect(out).not.toContain('extra');
+  });
+
+  it('renders the full bracketed form at wide widths (≥ COMPACT_THRESHOLD)', () => {
+    const out = frameOf(<KeyHintBar width={120} />);
+    expect(out).toContain('[/]');
+    expect(out).toContain('[Tab]');
+    expect(out).toContain('Commands');
+    expect(out).toContain('Ask a question');
+  });
+
+  it.each([25, 40, 60, 100, 160])(
+    'never word-wraps single-token labels at width=%i',
+    (width) => {
+      const out = frameOf(
+        <KeyHintBar
+          width={width}
+          hints={[
+            { key: 'Ctrl+C', label: 'Cancel' },
+            { key: '←→', label: 'Tabs', optional: true },
+          ]}
+        />,
+      );
+      const lines = out.split('\n').filter((l) => l.trim().length > 0);
+      // Bar must always render as a single visible row.
+      expect(lines.length).toBe(1);
+    },
+  );
+
   it('does not warn about duplicate React keys when a screen registers a hint that collides with the defaults', () => {
     // Regression: a screen registering its own `/ Commands` hint used to
     // collide with the always-on default, producing a noisy "Encountered

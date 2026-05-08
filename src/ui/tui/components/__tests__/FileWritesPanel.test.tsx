@@ -16,7 +16,7 @@
 import React from 'react';
 import { describe, it, expect } from 'vitest';
 import { render } from 'ink-testing-library';
-import { FileWritesPanel } from '../FileWritesPanel.js';
+import { FileWritesPanel, truncatePathHead } from '../FileWritesPanel.js';
 import type { FileWriteEntry } from '../../store.js';
 
 // eslint-disable-next-line no-control-regex
@@ -158,6 +158,49 @@ describe('FileWritesPanel', () => {
     expect(out).not.toContain('/');
   });
 
+  it('keeps long-path rows on a single line by head-truncating the path', () => {
+    // The exact path the user reported in the screenshot — long Next.js
+    // segment route. Without head-truncation, Yoga reflowed this into a
+    // 2-line layout while short rows (e.g. "src/app/order/page.tsx")
+    // stayed compact, producing visually inconsistent rendering.
+    const entry = makeEntry({
+      path: '/proj/src/app/(category-sidebar)/products/[category]/[subcategory]/[product]/page.tsx',
+      bytes: undefined,
+      completedAt: t0 + 4,
+    });
+    const { lastFrame } = render(
+      <FileWritesPanel entries={[entry]} installDir="/proj" width={100} />,
+    );
+    const frame = stripAnsi(lastFrame() ?? '');
+    // Row count: header line + 1 row = 2 visible content lines (plus a
+    // possible trailing newline from Ink's framebuffer).
+    const lines = frame.split('\n').filter((l) => l.length > 0);
+    expect(lines.length).toBeLessThanOrEqual(2);
+    // Filename + tail must survive — that's the meaningful part.
+    expect(frame).toContain('page.tsx');
+    expect(frame).toContain('[product]');
+    // Detail must remain on the same row as the path.
+    expect(frame).toContain('edited');
+    // Head ellipsis is the signature of the new truncation strategy.
+    expect(frame).toContain('…/');
+  });
+
+  it('renders narrow (40-col) terminals without word-wrapping a row', () => {
+    const entry = makeEntry({
+      path: '/proj/src/app/products/category/subcategory/page.tsx',
+      bytes: undefined,
+      completedAt: t0 + 4,
+    });
+    const { lastFrame } = render(
+      <FileWritesPanel entries={[entry]} installDir="/proj" width={40} />,
+    );
+    const frame = stripAnsi(lastFrame() ?? '');
+    const lines = frame.split('\n').filter((l) => l.length > 0);
+    // Header + 1 row only — no wrap.
+    expect(lines.length).toBeLessThanOrEqual(2);
+    expect(frame).toContain('page.tsx');
+  });
+
   it('caps visible rows to maxVisible and shows the most recent ones', () => {
     const entries: FileWriteEntry[] = Array.from({ length: 12 }, (_, i) =>
       makeEntry({
@@ -167,11 +210,7 @@ describe('FileWritesPanel', () => {
       }),
     );
     const { lastFrame } = render(
-      <FileWritesPanel
-        entries={entries}
-        installDir="/proj"
-        maxVisible={3}
-      />,
+      <FileWritesPanel entries={entries} installDir="/proj" maxVisible={3} />,
     );
     const out = stripAnsi(lastFrame() ?? '');
     // Last three rows = file-9 / file-10 / file-11.
@@ -180,5 +219,26 @@ describe('FileWritesPanel', () => {
     expect(out).toContain('file-9.ts');
     // Earlier rows should not render.
     expect(out).not.toContain('file-0.ts');
+  });
+});
+
+describe('truncatePathHead', () => {
+  it('returns the path unchanged when it fits', () => {
+    expect(truncatePathHead('src/app/page.tsx', 40)).toBe('src/app/page.tsx');
+  });
+
+  it('keeps the basename and parents from the right', () => {
+    const long =
+      'src/app/(category-sidebar)/products/[category]/[subcategory]/[product]/page.tsx';
+    const out = truncatePathHead(long, 40);
+    expect(out.startsWith('…/')).toBe(true);
+    expect(out.endsWith('page.tsx')).toBe(true);
+    expect(out.length).toBeLessThanOrEqual(40);
+  });
+
+  it('middle-truncates when even the basename overflows', () => {
+    const out = truncatePathHead('superlongfilename.ts', 12);
+    expect(out.length).toBeLessThanOrEqual(12);
+    expect(out).toContain('…');
   });
 });
