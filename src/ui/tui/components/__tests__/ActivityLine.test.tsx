@@ -86,6 +86,59 @@ describe('ActivityLine', () => {
     expect(out).toContain('typically ~90s');
   });
 
+  it('swaps cold-start suffix to "still loading" copy after estimate is exceeded', () => {
+    // S3 — once a cold-start activity blows past its estimate, the suffix
+    // flips from the static "typically ~Ns" to a dynamic "this can take up
+    // to Ns on first run" hint. The upper bound rounds up to the next
+    // 30-second boundary (floor 60s) so it never contradicts the elapsed
+    // counter.
+    const startedAt = 6_000_000;
+    const store = makeStoreWithActivity({
+      kind: 'cold-start',
+      message: 'Starting the agent...',
+      startedAt,
+      estimatedDurationSec: 45,
+    });
+    const out = frameOf(store, () => startedAt + 60_000);
+    expect(out).toContain('Starting the agent');
+    expect(out).toContain('60s elapsed');
+    expect(out).toContain('this can take up to 60s on first run');
+    // Static "typically ~Ns" copy should NOT appear once we're over.
+    expect(out).not.toContain('typically');
+  });
+
+  it('raises the upper-bound dynamically when elapsed exceeds 60s', () => {
+    const startedAt = 6_000_000;
+    const store = makeStoreWithActivity({
+      kind: 'cold-start',
+      message: 'Starting the agent...',
+      startedAt,
+      estimatedDurationSec: 45,
+    });
+    // At 70s the upper bound should round up to 90s (next 30s boundary).
+    const out = frameOf(store, () => startedAt + 70_000);
+    expect(out).toContain('70s elapsed');
+    expect(out).toContain('this can take up to 90s on first run');
+  });
+
+  it('keeps the "typically ~Ns" suffix on non-cold-start kinds even when over estimate', () => {
+    // The over-time swap is scoped to cold-start because compaction /
+    // ingestion-poll / mcp callers already update `message` mid-flight
+    // (e.g. retry shows attempt counters live). Verify other kinds
+    // retain the static suffix.
+    const startedAt = 7_000_000;
+    const store = makeStoreWithActivity({
+      kind: 'compaction',
+      message: 'Compacting context.',
+      startedAt,
+      estimatedDurationSec: 60,
+    });
+    const out = frameOf(store, () => startedAt + 120_000);
+    expect(out).toContain('Compacting context');
+    expect(out).toContain('typically ~60s');
+    expect(out).not.toMatch(/this can take up to \d+s on first run/);
+  });
+
   it('renders ingestion-poll waits', () => {
     const startedAt = 4_000_000;
     const store = makeStoreWithActivity({
