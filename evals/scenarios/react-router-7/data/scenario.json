@@ -1,7 +1,7 @@
 {
   "name": "react-router-7/data",
   "ring": 1,
-  "integrationHint": "react-router-7-data",
+  "integrationHint": "react-router",
   "buildCommand": ["pnpm", "build"],
   "expectedEnvPrefix": "VITE_",
   "expectedInitFile": "src/main.tsx",
