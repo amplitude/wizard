@@ -23,11 +23,19 @@ interface BrailleSpinnerProps {
   /** External frame index. When provided the spinner skips its own interval
    *  and renders this frame directly — lets callers share a single timer. */
   frame?: number;
+  /**
+   * When true, render three consecutive frames (offset by +1 and +2) so
+   * the spinner occupies three terminal cells instead of one. Useful for
+   * prominent positions like the RunScreen header where a single character
+   * is too easy to miss.
+   */
+  wide?: boolean;
 }
 
 export const BrailleSpinner = ({
   color = Colors.active,
   frame: frameProp,
+  wide = false,
 }: BrailleSpinnerProps) => {
   // Shared frame from the App-root provider, when one is mounted. Returns
   // `null` outside the provider (e.g. snapshot tests rendering a screen
@@ -59,6 +67,15 @@ export const BrailleSpinner = ({
     frame = sharedFrame;
   } else {
     frame = internalFrame;
+  }
+
+  if (wide) {
+    const n = SPINNER_FRAMES.length;
+    const chars =
+      SPINNER_FRAMES[frame] +
+      SPINNER_FRAMES[(frame + 1) % n] +
+      SPINNER_FRAMES[(frame + 2) % n];
+    return <Text color={color}>{chars}</Text>;
   }
 
   return <Text color={color}>{SPINNER_FRAMES[frame]}</Text>;

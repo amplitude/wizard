@@ -2796,4 +2796,50 @@ describe('WizardStore', () => {
       expect(store.session.currentActivity?.startedAt).toBe(2);
     });
   });
+
+  // ── Returning-user account confirm → create-project → cancel ───────
+  // Regression: pressing N at the account-confirm screen used to clear
+  // the project, then Esc-from-CreateProject left AuthScreen with no
+  // project selected, no requiresAccountConfirmation, and no
+  // pendingOrgs (returning users never populate it). The OAuth waiting
+  // screen would render with an empty login URL — a deadlock.
+  describe('account-confirm → create-project cancel restores confirm', () => {
+    it('cancel from account-confirm source re-enables requiresAccountConfirmation', () => {
+      const store = createStore();
+      store.session.credentials = {
+        accessToken: 'tok',
+        idToken: 'id',
+        projectApiKey: 'k',
+        host: 'amplitude.com',
+        appId: 0,
+      } as never;
+      store.session.selectedOrgId = 'org-1';
+      store.session.selectedOrgName = 'Acme';
+      store.session.selectedProjectId = 'proj-1';
+      store.session.selectedProjectName = 'Original';
+      store.session.requiresAccountConfirmation = true;
+
+      store.dismissAccountConfirmForNewProject();
+      store.startCreateProject('account-confirm');
+      expect(store.session.requiresAccountConfirmation).toBe(false);
+      expect(store.session.createProject.pending).toBe(true);
+      // Project state is intact so cancel can fall back cleanly.
+      expect(store.session.selectedProjectId).toBe('proj-1');
+      expect(store.session.selectedProjectName).toBe('Original');
+
+      store.cancelCreateProject();
+      expect(store.session.createProject.pending).toBe(false);
+      expect(store.session.requiresAccountConfirmation).toBe(true);
+      expect(store.session.selectedProjectId).toBe('proj-1');
+      expect(store.session.selectedProjectName).toBe('Original');
+    });
+
+    it('cancel from a non-account-confirm source does not re-enable confirmation', () => {
+      const store = createStore();
+      store.session.requiresAccountConfirmation = false;
+      store.startCreateProject('project');
+      store.cancelCreateProject();
+      expect(store.session.requiresAccountConfirmation).toBe(false);
+    });
+  });
 });
