@@ -105,7 +105,10 @@ export const FileWritesPanel = ({
   const inProgressCount = entries.filter((e) => e.status === 'planned').length;
 
   return (
-    <Box flexDirection="column" marginTop={1}>
+    // Bold section header is the visual separator — no blank row above.
+    // Stacking marginTop={1} on every section in RunScreen produced 5–6
+    // dead rows of vertical whitespace and made the dashboard hard to scan.
+    <Box flexDirection="column">
       <Box>
         <Text color={Colors.heading} bold>
           Files
