@@ -63,6 +63,72 @@ export interface SkillMenuFileContent {
 // ---------------------------------------------------------------------------
 
 /**
+ * Memoized cache for {@link getSkillsRootDir}. The skill tree is immutable
+ * during a wizard session — `pnpm skills:refresh` runs out-of-band, before
+ * the wizard process starts — so we resolve the root directory once on
+ * first access and reuse it for every subsequent lookup. Prior behaviour
+ * walked the parent chain and parsed `package.json` on every call, which
+ * the `load_skill` MCP tool amplified to one walk per skill request.
+ *
+ * Cleared via {@link clearBundledSkillsCache} (test-only).
+ */
+let cachedSkillsRootDir: string | null = null;
+
+/**
+ * Memoized in-memory index of every bundled skill, built lazily on first
+ * access. Maps `skillId -> { category, path, body, displayName }`.
+ *
+ * Why an index: previously `loadBundledSkillMenu`, `bundledSkillExists`,
+ * `readBundledSkillBody`, and `readBundledSkillReference` each re-walked
+ * the entire `skills/<category>/<id>/` tree (and the menu loader read
+ * every SKILL.md from disk to extract a single frontmatter line). The
+ * `load_skill` MCP tool calls these per agent invocation, so each skill
+ * request paid the full walk cost. Building the index once collapses
+ * those repeated walks into a single map lookup.
+ *
+ * The map is keyed by skill id alone. The `installBundledSkill` legacy
+ * iteration order (first matching category wins) is preserved because
+ * the index records whichever category we encountered first while
+ * walking — same semantics as the original `for (const category of
+ * readdirSync(skillsRoot))` loop.
+ *
+ * Cleared via {@link clearBundledSkillsCache} (test-only).
+ */
+interface SkillIndexEntry {
+  /** Category folder name (e.g. `integration`, `taxonomy`). */
+  category: string;
+  /** Absolute path to the skill's directory (`<skillsRoot>/<category>/<id>`). */
+  skillDir: string;
+  /** Absolute path to the skill's `SKILL.md`. */
+  skillMdPath: string;
+  /** Cached `SKILL.md` body (read once into the index). */
+  body: string;
+  /** Display name extracted from frontmatter `description: >-` block, with id-based fallback. */
+  displayName: string;
+}
+
+interface BundledSkillsIndex {
+  /** Category folder names that exist on disk, in `readdirSync` order. */
+  categories: string[];
+  /** skillId -> entry for every bundled skill that has a `SKILL.md`. */
+  skills: Map<string, SkillIndexEntry>;
+}
+
+let cachedSkillsIndex: BundledSkillsIndex | null = null;
+
+/**
+ * Reset the memoized skills root directory and skill index. **Test-only** —
+ * the wizard never invalidates the cache during normal operation because the
+ * skill tree is immutable for the lifetime of the process. Tests that mock
+ * `fs` or change `process.cwd` between cases must call this in `beforeEach`
+ * so the index they observe matches the mocked filesystem.
+ */
+export function clearBundledSkillsCache(): void {
+  cachedSkillsRootDir = null;
+  cachedSkillsIndex = null;
+}
+
+/**
  * Resolve the bundled skills root directory.
  * Skills are shipped at `<wizardPackageRoot>/skills/<category>/` — sibling
  * to the package's `package.json`.
@@ -73,8 +139,13 @@ export interface SkillMenuFileContent {
  * extracting this helper from `src/lib/wizard-tools.ts` to
  * `src/lib/wizard-tools/bundled-skills.ts` (one directory deeper). Any
  * future move under `src/` would silently fall through.
+ *
+ * The result is memoized in {@link cachedSkillsRootDir} after the first
+ * call so the parent walk + `package.json` parse runs at most once per
+ * process.
  */
 function getSkillsRootDir(): string {
+  if (cachedSkillsRootDir !== null) return cachedSkillsRootDir;
   // Defensive upper bound: a sane repo is far shallower than this. Used as
   // a guard against pathological filesystems (e.g. a runaway symlink loop)
   // rather than a real depth budget.
@@ -88,7 +159,8 @@ function getSkillsRootDir(): string {
           name?: string;
         };
         if (pkg.name === '@amplitude/wizard') {
-          return path.join(dir, 'skills');
+          cachedSkillsRootDir = path.join(dir, 'skills');
+          return cachedSkillsRootDir;
         }
       } catch {
         // Unreadable / malformed package.json — keep walking.
@@ -101,49 +173,136 @@ function getSkillsRootDir(): string {
   // Fallback: relative to cwd. Preserves prior behavior when running from
   // a layout that doesn't contain the wizard's package.json (e.g. some
   // bundler outputs or tests).
-  return path.join(process.cwd(), 'skills');
+  cachedSkillsRootDir = path.join(process.cwd(), 'skills');
+  return cachedSkillsRootDir;
+}
+
+/**
+ * Extract the display name from a SKILL.md frontmatter `description: >-`
+ * block, falling back to a humanized form of the skill id.
+ *
+ * The frontmatter pattern is fixed by context-hub's generator and lives
+ * within the first ~200 bytes of every SKILL.md, so we don't need the
+ * full file body to compute it.
+ */
+function extractDisplayName(
+  skillMdContent: string,
+  skillId: string,
+  category: string,
+): string {
+  const descMatch = skillMdContent.match(/^description:\s*>-?\s*\n\s+(.+)/m);
+  if (descMatch) return descMatch[1].trim();
+  return skillId.replace(new RegExp(`^${category}-`), '').replace(/-/g, ' ');
+}
+
+/**
+ * Build (or return the memoized) bundled-skills index. Walks
+ * `<skillsRoot>/<category>/<id>/SKILL.md` exactly once per process.
+ *
+ * Errors during the walk are logged and the partial index is cached —
+ * matching the prior callsites' "best effort, log and move on" behaviour.
+ * A subsequent call won't retry the walk, which is what we want: skill
+ * trees don't materialize mid-session, so a transient I/O failure here
+ * almost certainly means the bundle is genuinely missing.
+ */
+function getBundledSkillsIndex(): BundledSkillsIndex {
+  if (cachedSkillsIndex !== null) return cachedSkillsIndex;
+
+  const skillsRoot = getSkillsRootDir();
+  logToFile(`getBundledSkillsIndex: scanning ${skillsRoot}`);
+  const skills = new Map<string, SkillIndexEntry>();
+  const categories: string[] = [];
+
+  try {
+    for (const category of fs.readdirSync(skillsRoot)) {
+      const categoryPath = path.join(skillsRoot, category);
+      let categoryStat;
+      try {
+        categoryStat = fs.statSync(categoryPath);
+      } catch {
+        continue;
+      }
+      if (!categoryStat.isDirectory()) continue;
+      categories.push(category);
+
+      let names: string[];
+      try {
+        names = fs.readdirSync(categoryPath);
+      } catch {
+        continue;
+      }
+
+      for (const name of names) {
+        const skillDir = path.join(categoryPath, name);
+        const skillMdPath = path.join(skillDir, 'SKILL.md');
+        let skillStat;
+        try {
+          skillStat = fs.statSync(skillDir);
+        } catch {
+          continue;
+        }
+        if (!skillStat.isDirectory()) continue;
+        if (!fs.existsSync(skillMdPath)) continue;
+
+        // First-write-wins: preserve the legacy behaviour where iteration
+        // order in `installBundledSkill` etc. picks the first category to
+        // contain the id. In practice ids are unique across categories,
+        // so the guard is purely defensive.
+        if (skills.has(name)) continue;
+
+        let body: string;
+        try {
+          body = fs.readFileSync(skillMdPath, 'utf8');
+        } catch {
+          continue;
+        }
+        const displayName = extractDisplayName(body, name, category);
+        skills.set(name, {
+          category,
+          skillDir,
+          skillMdPath,
+          body,
+          displayName,
+        });
+      }
+    }
+  } catch (err) {
+    logToFile(
+      `getBundledSkillsIndex: error scanning: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
+  }
+
+  cachedSkillsIndex = { categories, skills };
+  logToFile(
+    `getBundledSkillsIndex: indexed ${skills.size} skills across ${categories.length} categories`,
+  );
+  return cachedSkillsIndex;
 }
 
 /**
  * Build skill menu from bundled skill directories.
  * Scans skills/<category>/ subdirectories for folders containing SKILL.md.
  * Each subdirectory of skills/ becomes a category (e.g. integration, instrumentation).
+ *
+ * Backed by the memoized {@link getBundledSkillsIndex}, so repeated calls
+ * (e.g. one per agent invocation) are O(n) over the indexed map rather
+ * than re-walking the filesystem.
  */
 export function loadBundledSkillMenu(): SkillMenu {
-  const skillsRoot = getSkillsRootDir();
-  logToFile(`loadBundledSkillMenu: scanning ${skillsRoot}`);
+  const index = getBundledSkillsIndex();
   const categories: Record<string, SkillEntry[]> = {};
 
-  try {
-    for (const category of fs.readdirSync(skillsRoot)) {
-      const categoryPath = path.join(skillsRoot, category);
-      if (!fs.statSync(categoryPath).isDirectory()) continue;
-
-      const entries: SkillEntry[] = [];
-      for (const name of fs.readdirSync(categoryPath)) {
-        const skillPath = path.join(categoryPath, name);
-        const skillMd = path.join(skillPath, 'SKILL.md');
-        if (fs.statSync(skillPath).isDirectory() && fs.existsSync(skillMd)) {
-          // Extract display name from SKILL.md frontmatter
-          const content = fs.readFileSync(skillMd, 'utf8');
-          const descMatch = content.match(/^description:\s*>-?\s*\n\s+(.+)/m);
-          const fallbackName = name
-            .replace(new RegExp(`^${category}-`), '')
-            .replace(/-/g, ' ');
-          const displayName = descMatch ? descMatch[1].trim() : fallbackName;
-          entries.push({ id: name, name: displayName, downloadUrl: '' });
-        }
-      }
-      if (entries.length > 0) {
-        categories[category] = entries;
-      }
+  for (const category of index.categories) {
+    const entries: SkillEntry[] = [];
+    for (const [id, entry] of index.skills) {
+      if (entry.category !== category) continue;
+      entries.push({ id, name: entry.displayName, downloadUrl: '' });
     }
-  } catch (err) {
-    logToFile(
-      `loadBundledSkillMenu: error scanning: ${
-        err instanceof Error ? err.message : String(err)
-      }`,
-    );
+    if (entries.length > 0) {
+      categories[category] = entries;
+    }
   }
 
   const total = Object.values(categories).reduce(
@@ -151,9 +310,9 @@ export function loadBundledSkillMenu(): SkillMenu {
     0,
   );
   logToFile(
-    `loadBundledSkillMenu: found ${total} skills across ${
+    `loadBundledSkillMenu: returning ${total} skills across ${
       Object.keys(categories).length
-    } categories`,
+    } categories (from index)`,
   );
   return { categories };
 }
@@ -206,73 +365,58 @@ export function isSafeSkillId(skillId: string): boolean {
 export const SKILL_REFERENCE_REL_PATH = /^references\/[\w.-]+\.md$/;
 
 /**
- * Check whether a bundled skill exists on disk by searching across all
- * category subdirectories under skills/. Used to decide whether to pre-stage
- * a skill before the agent runs vs leave integration entry to the agent
- * prompt's on-disk discovery path (`Glob` under `.claude/skills/` — the
- * wizard-tools skill menu tools stay disabled).
+ * Check whether a bundled skill exists on disk. Used to decide whether to
+ * pre-stage a skill before the agent runs vs leave integration entry to
+ * the agent prompt's on-disk discovery path (`Glob` under `.claude/skills/`
+ * — the wizard-tools skill menu tools stay disabled).
+ *
+ * Backed by the in-memory index — a single map lookup, not a filesystem
+ * scan. The category-name safety check survives via the index build path
+ * (categories with traversal-unsafe names are still walked because
+ * `readdirSync` returned them, but the map only contains skill ids, not
+ * category traversal vectors).
  */
 export function bundledSkillExists(skillId: string): boolean {
-  // Reject any skillId that's not a strict basename — defense in depth before
-  // the path.join below (skillId comes from internal callers but we treat it
-  // as untrusted at the boundary).
+  // Reject any skillId that's not a strict basename — defense in depth.
+  // The index is keyed by names that came off disk, so a malformed id
+  // can never produce a hit, but we keep the explicit check so callers
+  // get the same fast-fail semantics as before.
   if (!isSafeSkillId(skillId)) return false;
-  const skillsRoot = getSkillsRootDir();
-  try {
-    for (const category of fs.readdirSync(skillsRoot)) {
-      // Same defense for category names read off disk.
-      if (!isSafeSkillId(category)) continue;
-      // skillId and category are both validated against SKILL_ID_ALLOWLIST
-      // above, so neither can contain `..` or path separators.
-      // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
-      const candidate = path.join(skillsRoot, category, skillId);
-      if (
-        fs.existsSync(candidate) &&
-        fs.statSync(candidate).isDirectory() &&
-        // candidate is derived solely from the validated inputs above.
-        // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
-        fs.existsSync(path.join(candidate, 'SKILL.md'))
-      ) {
-        return true;
-      }
-    }
-  } catch {
-    return false;
-  }
-  return false;
+  const index = getBundledSkillsIndex();
+  const entry = index.skills.get(skillId);
+  if (!entry) return false;
+  // Defense in depth: ensure the category recorded in the index is also
+  // a safe basename, matching the original `isSafeSkillId(category)`
+  // gate inside the per-category loop.
+  if (!isSafeSkillId(entry.category)) return false;
+  return true;
 }
 
 /**
  * Read bundled `SKILL.md` body for tiered-context experiments (never writes
  * to `.claude/skills/`). Returns null when absent or malformed inputs.
+ *
+ * Served from the in-memory index — the SKILL.md body is read off disk
+ * exactly once (during index construction) regardless of how many times
+ * `load_skill` requests it.
  */
 export function readBundledSkillBody(skillId: string): string | null {
   if (!isSafeSkillId(skillId)) return null;
-  const skillsRoot = getSkillsRootDir();
-  try {
-    for (const category of fs.readdirSync(skillsRoot)) {
-      if (!isSafeSkillId(category)) continue;
-      // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
-      const candidate = path.join(skillsRoot, category, skillId);
-      // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
-      const skillMd = path.join(candidate, 'SKILL.md');
-      if (
-        fs.existsSync(candidate) &&
-        fs.statSync(candidate).isDirectory() &&
-        fs.existsSync(skillMd)
-      ) {
-        return fs.readFileSync(skillMd, 'utf8');
-      }
-    }
-  } catch {
-    return null;
-  }
-  return null;
+  const index = getBundledSkillsIndex();
+  const entry = index.skills.get(skillId);
+  if (!entry) return null;
+  if (!isSafeSkillId(entry.category)) return null;
+  return entry.body;
 }
 
 /**
  * Read a bundled skill reference markdown file by relative path.
  * Path is restricted to `references/*.md` to avoid broad file reads.
+ *
+ * Reference files are not pre-loaded into the index (there are many per
+ * skill and most are never requested). The skill *location* is, though —
+ * so we resolve the directory in O(1) and only hit the disk for the
+ * specific reference body when a caller asks for it.
  */
 export function readBundledSkillReference(
   skillId: string,
@@ -280,26 +424,20 @@ export function readBundledSkillReference(
 ): string | null {
   if (!isSafeSkillId(skillId)) return null;
   if (!SKILL_REFERENCE_REL_PATH.test(refPath)) return null;
-  const skillsRoot = getSkillsRootDir();
+  const index = getBundledSkillsIndex();
+  const entry = index.skills.get(skillId);
+  if (!entry) return null;
+  if (!isSafeSkillId(entry.category)) return null;
+  // entry.skillDir is built from validated category + skillId during the
+  // index walk. refPath is constrained by SKILL_REFERENCE_REL_PATH above.
+  // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
+  const reference = path.join(entry.skillDir, refPath);
   try {
-    for (const category of fs.readdirSync(skillsRoot)) {
-      if (!isSafeSkillId(category)) continue;
-      // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
-      const candidate = path.join(skillsRoot, category, skillId);
-      // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
-      const reference = path.join(candidate, refPath);
-      if (
-        fs.existsSync(candidate) &&
-        fs.statSync(candidate).isDirectory() &&
-        fs.existsSync(reference)
-      ) {
-        return fs.readFileSync(reference, 'utf8');
-      }
-    }
+    if (!fs.existsSync(reference)) return null;
+    return fs.readFileSync(reference, 'utf8');
   } catch {
     return null;
   }
-  return null;
 }
 
 /**
@@ -449,31 +587,29 @@ export function preStageSkills(
 
 /**
  * Install a bundled skill by copying it to the project's .claude/skills/ dir.
- * Searches across all category subdirectories under skills/.
+ * Looks up the skill's source location via the in-memory index — no
+ * filesystem walk per call.
  */
 export function installBundledSkill(
   skillId: string,
   installDir: string,
 ): { success: boolean; error?: string } {
-  const skillsRoot = getSkillsRootDir();
   const dest = path.join(installDir, '.claude', 'skills', skillId);
+  const index = getBundledSkillsIndex();
+  const entry = index.skills.get(skillId);
+  if (!entry) {
+    return { success: false, error: `Bundled skill "${skillId}" not found` };
+  }
 
   try {
-    for (const category of fs.readdirSync(skillsRoot)) {
-      const src = path.join(skillsRoot, category, skillId);
-      if (fs.existsSync(src) && fs.statSync(src).isDirectory()) {
-        fs.cpSync(src, dest, { recursive: true });
-        logToFile(
-          `installBundledSkill: copied ${skillId} from ${src} to ${dest}`,
-        );
-        return { success: true };
-      }
-    }
+    fs.cpSync(entry.skillDir, dest, { recursive: true });
+    logToFile(
+      `installBundledSkill: copied ${skillId} from ${entry.skillDir} to ${dest}`,
+    );
+    return { success: true };
   } catch (err) {
     const msg = err instanceof Error ? err.message : String(err);
     logToFile(`installBundledSkill: error: ${msg}`);
     return { success: false, error: msg };
   }
-
-  return { success: false, error: `Bundled skill "${skillId}" not found` };
 }
