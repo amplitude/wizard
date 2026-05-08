@@ -34,6 +34,13 @@ import { scorer as l1SetupCompleteShape } from '../scorers/layer1-structural/set
 import { scorer as l1ExitCodeMatches } from '../scorers/layer1-structural/exit-code-matches-outcome.js';
 import { scorer as l1ConfirmedEventsTracked } from '../scorers/layer1-structural/confirmed-events-tracked.js';
 
+import { scorer as l2ServerClientBoundary } from '../scorers/layer2-static/server-client-boundary.js';
+import { scorer as l2InitOptionsCommented } from '../scorers/layer2-static/init-options-commented.js';
+import { scorer as l2VersionRange } from '../scorers/layer2-static/version-range.js';
+import { scorer as l2NoVendorAdditions } from '../scorers/layer2-static/no-vendor-additions.js';
+import { scorer as l2ServerSdkUsage } from '../scorers/layer2-static/server-sdk-usage.js';
+import { scorer as l2PropertyKeyNaming } from '../scorers/layer2-static/property-key-naming.js';
+
 /**
  * The full scorer stack. Order matters — Layer 0 runs first; if any
  * Layer 0 scorer hard-fails, downstream layers are skipped.
@@ -53,6 +60,13 @@ export const SCORERS: Scorer[] = [
   l1SetupCompleteShape,
   l1ExitCodeMatches,
   l1ConfirmedEventsTracked,
+  // Layer 2 — static SDK rules (AST-aware).
+  l2ServerClientBoundary,
+  l2ServerSdkUsage,
+  l2VersionRange,
+  l2NoVendorAdditions,
+  l2InitOptionsCommented,
+  l2PropertyKeyNaming,
 ];
 
 export interface ScoreOptions {
@@ -96,8 +110,11 @@ export function score(options: ScoreOptions): Report {
       if (result.hardFail) hardFailed = true;
     }
     // Downstream layers — only run when no Layer 0 hard fail.
+    // Loops over every layer > 0 so Layer 2+ scorers participate
+    // automatically as they're added to SCORERS.
+    const downstream = SCORERS.filter((s) => s.layer > 0);
     if (!hardFailed) {
-      for (const scorer of SCORERS.filter((s) => s.layer === 1)) {
+      for (const scorer of downstream) {
         const result = scorer.evaluate(artifact, scenario);
         scores.push({
           scorerId: scorer.id,
@@ -107,7 +124,7 @@ export function score(options: ScoreOptions): Report {
         });
       }
     } else {
-      for (const scorer of SCORERS.filter((s) => s.layer === 1)) {
+      for (const scorer of downstream) {
         scores.push({
           scorerId: scorer.id,
           layer: scorer.layer,
