@@ -1166,12 +1166,15 @@ describe('runAgent', () => {
       expect(result.error).toBe(AgentErrorType.GATEWAY_INVALID_REQUEST);
     });
 
-    it('does not opt into the 1M-context beta on the gateway path by default', async () => {
+    it('does not opt into the 1M-context beta on the gateway path', async () => {
       // Vertex AI's Anthropic publisher endpoint does not honor the
       // `context-1m-2025-08-07` beta. Sending the `betas` SDK option
-      // here is the proximate cause of the `--agent` 400 inside Claude
+      // here was the proximate cause of the `--agent` 400 inside Claude
       // Code / Cursor / Cline. This test pins the wire shape so a future
-      // change cannot silently re-introduce the regression.
+      // change cannot silently re-introduce the regression. (As of
+      // Sonnet 4.6 GA + 4.5 beta retirement, the wizard stops sending
+      // the header on every path — this test is the gateway half of
+      // that invariant.)
       vi.useFakeTimers();
 
       let capturedOptions: Record<string, unknown> | undefined;
@@ -1201,16 +1204,16 @@ describe('runAgent', () => {
       await runPromise;
 
       expect(capturedOptions).toBeDefined();
-      // `useDirectApiKey` is undefined in defaultAgentConfig → gateway
-      // path. The `betas` option must not be present on this path
-      // unless explicitly opted in via AMPLITUDE_WIZARD_GATEWAY_BETAS=1.
+      // Gateway path: `betas` must not be present on the wire.
       expect(capturedOptions).not.toHaveProperty('betas');
     });
 
-    it('opts into the 1M-context beta on the direct-API path', async () => {
-      // The beta is still safe on direct Anthropic — only Vertex
-      // rejects it. Preserve the long-context win for users who supply
-      // their own ANTHROPIC_API_KEY.
+    it('does not send the 1M-context beta on the direct-API path either', async () => {
+      // Sonnet 4.6 supports the 1M window at standard pricing GA, with
+      // no beta header required, and Anthropic retired the same beta
+      // for Sonnet 4.5 on 2026-04-30. The wizard now omits `betas` on
+      // every path — pinning the wire shape so we don't accidentally
+      // re-introduce the now-stale opt-in.
       vi.useFakeTimers();
 
       let capturedOptions: Record<string, unknown> | undefined;
@@ -1242,7 +1245,7 @@ describe('runAgent', () => {
       await runPromise;
 
       expect(capturedOptions).toBeDefined();
-      expect(capturedOptions?.betas).toEqual(['context-1m-2025-08-07']);
+      expect(capturedOptions).not.toHaveProperty('betas');
     });
 
     it('does not retry on non-stall errors', async () => {
