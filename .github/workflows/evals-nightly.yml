@@ -1,0 +1,122 @@
+name: Evals (nightly Ring 2)
+
+# Nightly Ring 2 evals — full Layer 0–6 coverage with the LLM judge at
+# 100% of scenarios (no sampling — unlimited Anthropic budget per the
+# spec). Two seeds per scenario for variance tracking; a scenario whose
+# seeds disagree by more than 10 points gets flagged as non-deterministic
+# in the report.
+#
+# Scope: every Ring 1 scenario today plus any Ring 2 scenarios as they
+# land. Layer 4 (runtime probe) is gated on a per-scenario `runtimeProbe`
+# config; scenarios without one skip-pass with weight 0.
+#
+# Auth model:
+#   * ANTHROPIC_API_KEY — populated from org secrets, used by the L6
+#     judge. Required for the workflow's value; absent → judge
+#     skip-passes with a clear detail.
+#   * WIZARD_OAUTH_TOKEN — gateway-routed live runs. Wizard-side wiring
+#     is a follow-up; this workflow currently runs golden replays only,
+#     so the secret is not required yet.
+
+on:
+  schedule:
+    # 07:00 UTC daily — picks up changes merged through the previous day
+    # without competing with morning PR traffic.
+    - cron: '0 7 * * *'
+  workflow_dispatch:
+    inputs:
+      seeds:
+        description: 'Number of seeds per scenario (variance tracking)'
+        required: false
+        default: '2'
+
+permissions:
+  contents: read
+
+concurrency:
+  # One nightly run at a time on any given ref. A manual dispatch
+  # cancels the cron run if both fire on the same day.
+  group: evals-nightly-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  evals-nightly:
+    name: Ring 2 — ${{ matrix.scenario }} (seed ${{ matrix.seed }})
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    strategy:
+      fail-fast: false
+      matrix:
+        # Add Ring 2 scenarios alongside the Ring 1 graduates as they
+        # land. Each scenario × seed pair runs in parallel; the matrix
+        # is sized for the GitHub Actions concurrency cap (~20 jobs).
+        scenario:
+          - nextjs-app-router/vanilla
+          - nextjs-app-router/pre-existing-vendor
+          - react-router-7/framework
+          - react-router-7/data
+          - react-vite/vanilla
+          - expo/vanilla
+          - generic/probe
+        seed: [1, 2]
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5.0.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      # Playwright is only needed when scenarios opt into the runtime
+      # probe. Install on the nightly path; PR-gate runs skip this step.
+      - name: Install playwright + chromium
+        run: pnpm add -D playwright && pnpm exec playwright install --with-deps chromium
+
+      - name: Run eval — ${{ matrix.scenario }} (seed ${{ matrix.seed }})
+        env:
+          # Sonnet judge gets the org-managed key. Absent in fork PRs;
+          # the workflow still runs (judge skip-passes with weight 0).
+          ANTHROPIC_API_KEY: ${{ secrets.EVALS_ANTHROPIC_API_KEY }}
+          EVAL_SEED: ${{ matrix.seed }}
+        run: pnpm evals:run ${{ matrix.scenario }} --runtime --judge
+
+      - name: Upload report
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: eval-report-${{ matrix.scenario }}-seed${{ matrix.seed }}
+          path: evals/reports/**/report.json
+          retention-days: 30
+          if-no-files-found: ignore
+
+  variance-summary:
+    name: Variance summary
+    needs: evals-nightly
+    runs-on: ubuntu-latest
+    if: always()
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
+      - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5.0.0
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: 22
+          cache: pnpm
+      - run: pnpm install --frozen-lockfile
+
+      - name: Download all reports
+        uses: actions/download-artifact@d3f86a106a0bac45b974a628896c90dbdf5c8093 # v4
+        with:
+          path: nightly-reports
+
+      - name: Build variance summary
+        run: pnpm exec tsx evals/bin/variance-summary.ts nightly-reports
+
+      - name: Upload variance summary
+        if: always()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: variance-summary
+          path: variance-summary.json
+          retention-days: 30

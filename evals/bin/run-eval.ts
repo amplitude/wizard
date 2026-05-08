@@ -56,6 +56,13 @@ interface CliArgs {
    * to nightly Ring 2 by default. Requires `ANTHROPIC_API_KEY`.
    */
   judge: boolean;
+  /**
+   * Variance-tracking seed. Doesn't affect golden replay output (the
+   * inputs are deterministic), but is recorded on the artifact so
+   * `variance-summary.ts` can stitch same-scenario different-seed
+   * reports together. Falls back to `EVAL_SEED` env var, then 1.
+   */
+  seed?: number;
 }
 
 function parseArgs(argv: string[]): CliArgs {
@@ -71,6 +78,7 @@ function parseArgs(argv: string[]): CliArgs {
     if (a === '--live') args.live = true;
     else if (a === '--runtime') args.runtime = true;
     else if (a === '--judge') args.judge = true;
+    else if (a === '--seed') args.seed = Number.parseInt(argv[++i], 10);
     else if (a === '--reports-dir') args.reportsDir = argv[++i];
     else if (a === '--wizard-bin') args.wizardBin = argv[++i];
     else if (a.startsWith('--')) {
@@ -153,6 +161,14 @@ async function main() {
     : runReplay({ scenario, scenarioDir });
   const { artifact, workingDir, cleanup } = result;
 
+  // Stamp the variance-tracking seed onto the artifact so
+  // `variance-summary.ts` can stitch same-scenario reports together.
+  // Default to 1 when neither flag nor env var was supplied.
+  const seedFromEnv = process.env.EVAL_SEED
+    ? Number.parseInt(process.env.EVAL_SEED, 10)
+    : undefined;
+  artifact.seed = args.seed ?? (Number.isFinite(seedFromEnv) ? seedFromEnv : 1);
+
   // Re-parse the run log + assert contract on the assembled artifact.
   // (parseStream + assertContract is also called inside the runner, but
   // for live runs we want a single canonical block of contract violations
@@ -203,6 +219,7 @@ async function main() {
           runId: artifact.runId,
           scenario: artifact.scenario,
           source: artifact.source,
+          seed: artifact.seed,
           exitCode: artifact.exitCode,
           startedAt: artifact.startedAt,
           finishedAt: artifact.finishedAt,
