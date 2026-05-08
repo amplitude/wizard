@@ -489,7 +489,7 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
                 : []),
               ...workspacePicks.map((pick) => ({
                 label: pick.isWildcard
-                  ? `${pick.label}  ${narrow ? '' : '— pick a workspace'}`
+                  ? `${pick.label}${narrow ? '' : '  — pick a workspace'}`
                   : pick.label,
                 value: `workspace:${pick.absolutePath}::${pick.isWildcard ? 'wild' : 'lit'}`,
               })),
