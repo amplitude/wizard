@@ -123,8 +123,9 @@ const InlineEventPlan = ({ store }: { store: WizardStore }) => {
   const events = store.eventPlan.filter((e) => e.name);
   if (events.length === 0) return null;
 
+  // Tight stacking — the bold "Events:" prefix is the visual separator.
   return (
-    <Box marginTop={1} flexDirection="column">
+    <Box flexDirection="column">
       <Text color={Colors.secondary}>
         <Text bold color={Colors.accent}>
           {Icons.diamond} Events:
@@ -154,11 +155,7 @@ const ConditionalTips = ({ store }: { store: WizardStore }) => {
 
   if (tips.length === 0) return null;
 
-  return (
-    <Box flexDirection="column" marginTop={1}>
-      {tips}
-    </Box>
-  );
+  return <Box flexDirection="column">{tips}</Box>;
 };
 
 /** The main Progress tab content. */
@@ -430,7 +427,7 @@ const ProgressTab = ({ store }: { store: WizardStore }) => {
             wired to opening the slash-command input in ConsoleView. The
             old copy said "(Tab)" and led users to the wrong key. */}
         {coachingTier >= 1 && (
-          <Box marginTop={1}>
+          <Box>
             <Text color={Colors.muted}>
               <Text color={Colors.accent}>{Icons.diamond} tip</Text>
               {Icons.dash}

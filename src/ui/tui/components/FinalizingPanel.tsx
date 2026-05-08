@@ -65,11 +65,13 @@ export const FinalizingPanel = ({ steps }: FinalizingPanelProps) => {
       : 2;
 
   return (
-    <Box flexDirection="column" marginTop={1}>
+    // Bold heading is the visual separator — no marginTop blank row above.
+    // Stacking marginTop={1} on every section in RunScreen produced 5–6
+    // dead rows of vertical whitespace and made the dashboard hard to scan.
+    <Box flexDirection="column">
       <Text bold color={Colors.heading}>
         Finalizing in Amplitude
       </Text>
-      <Box height={1} />
       {steps.map((step) => {
         const icon =
           step.status === PostAgentStepStatus.Completed
