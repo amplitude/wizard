@@ -25,7 +25,7 @@ import { DEMO_MODE } from './constants.js';
 const UNIVERSAL_COMMANDMENTS: string[] = [
   'Never hallucinate an Amplitude API key, host, or any other secret. Always use the real values configured for this project (e.g. via environment variables).',
 
-  'API keys (server private vs browser public), allowed env conventions, forbidden build-config bridging, and when to inline a public key — full detail in the pre-staged skill `.claude/skills/wizard-prompt-supplement/references/api-keys-and-env.md` (load via Read after opening `wizard-prompt-supplement/SKILL.md`). Invariant: never invent secrets; use wizard-tools `check_env_keys` / `set_env_values` for `.env*`; never modify webpack/vite/next/babel config to pipe env into client code.',
+  'API keys, env conventions, and when to inline a public key vs use a framework env var — read `.claude/skills/wizard-prompt-supplement/references/api-keys-and-env.md`. Invariants: never invent secrets; use wizard-tools `check_env_keys` / `set_env_values` for `.env*`; never modify webpack/vite/next/babel config to pipe env into client code.',
 
   'The first user message contains a `# Pre-flight context (...)` block — the wizard already discovered the cwd, framework, lockfile-based package manager, TypeScript flag, Amplitude org/project/region, project-binding state, and which AMPLITUDE_* env keys exist in which `.env*` files. Treat that block as authoritative on the FIRST turn. Do NOT call `detect_package_manager`, `check_env_keys`, or fan out Glob/Read probes for `package.json` / lockfiles / `.env*` just to re-derive those answers. The discovery tools remain registered — call them only when you genuinely need to verify a specific value the user changed mid-run, when the pre-flight block marks a field with `?`, or before `set_env_values` if you must confirm a key is still missing.',
 
@@ -82,9 +82,9 @@ Do NOT add a fifth — internal steps (env var writes, Content Security Policy e
 
   'Before proposing the event plan (i.e. before `confirm_event_plan`), you MUST load the **discover-analytics-patterns** skill from `.claude/skills/` via `mcp__wizard-tools__load_skill` to identify existing analytics wrapper calls, helper functions, hooks, or instrumentation patterns already in the codebase. If the codebase already has tracking calls (even via a custom wrapper like `trackEvent()`, `useAnalytics()`, or an `ampli.*` typed call), REUSE those patterns when you instrument — do not reimplement the events on top of the raw SDK. Reference the discovered pattern in the setup report so the user can see which wrapper was honored.',
 
-  `After installing the SDK and adding init code, but BEFORE writing any track() calls, you MUST call confirm_event_plan. Naming rules, plan sizing, funnel/async/symmetry/identify, autocapture overlap, and .amplitude/events.json ownership — read \`.claude/skills/wizard-prompt-supplement/references/confirm-event-plan-contract.md\` before the call. Invariants: confirm_event_plan owns the initial write of \`.amplitude/events.json\` only (canonical under \`.amplitude/\`; do not create or overwrite legacy root \`.amplitude-events.json\` / \`.amplitude-dashboard.json\`); canonical shape [{name, description}]; do not pre-write a conflicting shape; if skipped, do not instrument.`,
+  'After installing the SDK and adding init code, but BEFORE writing any track() calls, you MUST call confirm_event_plan. Naming, plan sizing, funnel/async/symmetry/identify, autocapture overlap, and `.amplitude/events.json` ownership — read `.claude/skills/wizard-prompt-supplement/references/confirm-event-plan-contract.md` before the call. Invariants: confirm_event_plan owns the initial write of `.amplitude/events.json` (canonical shape `[{name, description}]`); do not pre-write a conflicting shape, do not create the legacy root `.amplitude-events.json` / `.amplitude-dashboard.json`; if skipped, do not instrument.',
 
-  'Post-instrumentation `.amplitude/events.json` (under `.amplitude/`) array shape — read `.claude/skills/wizard-prompt-supplement/references/post-instrumentation-events-and-dashboard.md`. Note: this run does NOT create charts or dashboards. The reference file may still describe `record_dashboard` for back-compat, but you MUST NOT call it (or `create_chart` / `create_dashboard` / `query_dataset` / any Amplitude MCP chart/dashboard tool) — those are owned by the deferred `amplitude-wizard dashboard` command, which runs after event ingestion has caught up.',
+  'Post-instrumentation `.amplitude/events.json` array shape — read `.claude/skills/wizard-prompt-supplement/references/post-instrumentation-events-and-dashboard.md`. This run does NOT create charts or dashboards: do NOT call `record_dashboard` / `create_chart` / `create_dashboard` / `query_dataset` / any Amplitude MCP chart/dashboard tool — those are deferred to the `amplitude-wizard dashboard` command, which runs after ingestion catches up.',
 
   'Setup report format and `<wizard-report>` tags — read `.claude/skills/wizard-prompt-supplement/references/setup-report-requirements.md`. You MUST write `amplitude-setup-report.md` at the project root before the run ends.',
 
@@ -100,18 +100,7 @@ The wizard runs explicit cleanup hooks AFTER your run (see \`cleanupIntegrationS
 
   'When running Grep to discover analytics patterns or instrumentation surfaces, always pass `head_limit: 20` and exclude `node_modules/**`, `dist/**`, `build/**`, `**/*.test.*`, `**/*.spec.*` via the `glob` parameter. If the unfiltered result is large, use `output_mode: "count"` first to size the search, then narrow the pattern or path before requesting filenames. Wide unfiltered Grep results trigger context compaction and slow the run.',
 
-  `Lint / format / build at end-of-run MUST be scoped to files you edited — never project-wide.
-
-  RIGHT (fast, scoped):
-    npx prettier --write <file1> <file2>
-    npx eslint --fix <file1> <file2>
-    npx tsc --noEmit -p tsconfig.json   # only if no other TS check; skip for large monorepos
-
-  WRONG (project-wide, hangs): \`npm run build\` / \`npm run lint\` / \`npm run typecheck\` / \`npm run format\` / \`pnpm lint\` / \`yarn lint\` / \`npx prettier --write .\` — all run against the entire repo.
-
-  Rationale and time-budget detail: \`.claude/skills/wizard-prompt-supplement/references/lint-scoping.md\`. Pass explicit paths. If a custom lint command only accepts no-args, skip it and note in the setup report.
-
-  Time budget: lint+format+typecheck combined under 60s. If a single command exceeds 90s or you're on a third attempt, STOP — note in setup report and proceed.`,
+  'Lint / format / build at end-of-run MUST be scoped to files you edited — pass explicit paths to `npx prettier --write <files>` / `npx eslint --fix <files>` / `npx tsc --noEmit`. Project-wide commands (`npm run build` / `npm run lint` / `pnpm lint` / `yarn lint` / `npx prettier --write .`) are forbidden — they hang on large repos. Rationale, time budget (combined <60s), and the third-attempt stop rule: read `.claude/skills/wizard-prompt-supplement/references/lint-scoping.md`.',
 ];
 
 /**
