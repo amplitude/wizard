@@ -195,12 +195,21 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
       // to via the dismissal handler below — pressing K explicitly is a
       // shortcut for that same outcome plus an analytics event so we
       // can see how often users override the default.
+      //
+      // Track explicit resolution so the implicit-keep branch below
+      // doesn't double-fire `'preserve files resolution'` after the K
+      // shortcut falls through — `setPreserveResolution('kept')` doesn't
+      // update `showPreservePrompt` until the next render, so checking
+      // the prompt flag alone is not enough within this same handler
+      // invocation.
+      let preservePromptResolvedThisTick = false;
       if (showPreservePrompt && (input === 'k' || input === 'K')) {
         analytics.wizardCapture('preserve files resolution', {
           resolution: 'kept',
           source: 'keystroke',
         });
         setPreserveResolution('kept');
+        preservePromptResolvedThisTick = true;
         // Fall through to the dismissal block below — keeping files is
         // the no-op default, so we don't need to do anything else
         // before exiting.
@@ -261,7 +270,7 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
       // explicitly picking K/R, record the implicit-keep so we can
       // distinguish "user actively chose to keep" from "user dismissed
       // and we defaulted to keep" in analytics.
-      if (showPreservePrompt) {
+      if (showPreservePrompt && !preservePromptResolvedThisTick) {
         analytics.wizardCapture('preserve files resolution', {
           resolution: 'kept',
           source: 'default',
