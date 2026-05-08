@@ -1305,12 +1305,7 @@ export class WizardStore {
    * @param suggestedName optional pre-filled name (e.g. from /create-project <name> or --project-name)
    */
   startCreateProject(
-    source:
-      | 'project'
-      | 'environment'
-      | 'slash'
-      | 'cli-flag'
-      | 'account-confirm',
+    source: 'project' | 'environment' | 'slash' | 'cli-flag',
     suggestedName?: string | null,
   ): void {
     this.$session.setKey('createProject', {
@@ -1324,20 +1319,11 @@ export class WizardStore {
 
   /** Exit the create-project flow without creating a project. */
   cancelCreateProject(): void {
-    const source = this.session.createProject.source;
     this.$session.setKey('createProject', {
       pending: false,
       source: null,
       suggestedName: null,
     });
-    // Cancelling from the account-confirm path means the user changed
-    // their mind about creating a new project — bring them back to the
-    // confirm screen with the original selection still intact (the
-    // dismiss path leaves project-level fields untouched precisely so
-    // this restore is a no-op on session state, just a flag flip).
-    if (source === 'account-confirm') {
-      this.$session.setKey('requiresAccountConfirmation', true);
-    }
     analytics.wizardCapture('Create Project Cancelled', {});
     this.emitChange();
   }
@@ -1427,7 +1413,6 @@ export class WizardStore {
         writeAmpliConfig(installDir, {
           OrgId: org.id,
           ProjectId: project.id,
-          ProjectName: project.name || undefined,
           Zone: zone,
         });
       });
@@ -1787,30 +1772,6 @@ export class WizardStore {
       'from screen': 'auth',
       'org id': this.session.selectedOrgId,
       'project id': this.session.selectedProjectId,
-    });
-    this.emitChange();
-  }
-
-  /**
-   * Enter the inline create-project flow from the account-confirmation screen.
-   *
-   * Unlike `rejectStoredAccount()` (which clears credentials + org so the
-   * full SUSI picker re-runs), this keeps credentials and the resolved org so
-   * CreateProjectScreen can authenticate and knows which org to create in.
-   *
-   * Project-level fields (id/name/appId/envName/projectHasData) are left
-   * intact: the create-project success path overwrites them via
-   * `restoreSessionIds` + `setCredentials` + `setProjectHasData(false)`,
-   * and the cancel path needs them so `cancelCreateProject` can restore the
-   * account-confirm screen with the original selection still visible.
-   * Returning users never have `pendingOrgs` populated (it's only set by
-   * the OAuth-or-mismatch paths), so falling back to a project-less Auth
-   * screen would render an OAuth-waiting state with no login URL.
-   */
-  dismissAccountConfirmForNewProject(): void {
-    this.$session.setKey('requiresAccountConfirmation', false);
-    analytics.wizardCapture('account project cleared for new project', {
-      'from screen': 'auth',
     });
     this.emitChange();
   }

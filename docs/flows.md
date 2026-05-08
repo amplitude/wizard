@@ -256,15 +256,7 @@ flowchart TD
     OAUTH_WAIT["Show OAuth spinner + login URL<br/>(bin.ts opens browser, AuthScreen waits)"]
     OAUTH_WAIT --> OAUTH_DONE["OAuth completes — region auto-detected from token"]
 
-    OAUTH_DONE --> RETURNING{Returning user?<br/>(credentials resolved silently from disk)}
-    RETURNING -->|no — fresh login| ORG_COUNT
-    RETURNING -->|yes| ACCOUNT_CONFIRM["Account confirmation<br/>Enter = continue · C = change project · N = new project · Esc = cancel"]
-
-    ACCOUNT_CONFIRM -->|Enter — confirmed| DONE
-    ACCOUNT_CONFIRM -->|C — change project| ORG_COUNT
-    ACCOUNT_CONFIRM -->|N — new project| CREATE_PROJECT["CreateProjectScreen<br/>(creates a fresh Amplitude project)"] --> DONE
-
-    ORG_COUNT{How many orgs?}
+    OAUTH_DONE --> ORG_COUNT{How many orgs?}
     ORG_COUNT -->|1| PROJECT_COUNT
     ORG_COUNT -->|many| ORG_PICKER["Picker: select org"] --> PROJECT_COUNT
 

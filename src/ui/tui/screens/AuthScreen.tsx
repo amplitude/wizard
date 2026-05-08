@@ -593,17 +593,8 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
         store.confirmAccount();
         return;
       }
-      if (ch === 'c') {
+      if (ch === 'c' || ch === 'n') {
         store.rejectStoredAccount();
-        return;
-      }
-      if (ch === 'n') {
-        // Keep credentials + org + project intact; only flip off the
-        // confirmation gate so CreateProjectScreen can render. The
-        // create success path overwrites project fields; cancel restores
-        // the confirm screen so the original project stays visible.
-        store.dismissAccountConfirmForNewProject();
-        store.startCreateProject('account-confirm');
         return;
       }
       if (key.escape) {
@@ -692,13 +683,6 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
               C
             </Text>
             <Text color={Colors.muted}>] Change project</Text>
-          </Box>
-          <Box>
-            <Text color={Colors.muted}>[</Text>
-            <Text bold color={Colors.body}>
-              N
-            </Text>
-            <Text color={Colors.muted}>] New project</Text>
           </Box>
           <Box>
             <Text color={Colors.muted}>[</Text>
