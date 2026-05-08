@@ -1,5 +1,3 @@
-import { type MockedFunction } from 'vitest';
-
 const { mockCreateInstance, MockIdentify } = vi.hoisted(() => {
   const mockCreateInstance = vi.fn(() => ({
     init: vi.fn(() => ({ promise: Promise.resolve() })),
@@ -20,10 +18,6 @@ const { mockCreateInstance, MockIdentify } = vi.hoisted(() => {
 vi.mock('@amplitude/analytics-node', () => ({
   createInstance: mockCreateInstance,
   Identify: MockIdentify,
-}));
-
-vi.mock('uuid', () => ({
-  v4: vi.fn(() => 'test-uuid'),
 }));
 
 vi.mock('../../lib/observability', () => ({
@@ -54,18 +48,13 @@ vi.mock('../install-id', () => ({
   getOrCreateInstallId: vi.fn(() => 'test-uuid'),
 }));
 
-import { v4 as uuidv4 } from 'uuid';
-
 import { Analytics, resolveTelemetryApiKey } from '../analytics.js';
-
-const mockUuidv4 = uuidv4 as MockedFunction<typeof uuidv4>;
 
 describe('Analytics', () => {
   let analytics: Analytics;
 
   beforeEach(() => {
     vi.clearAllMocks();
-    mockUuidv4.mockReturnValue('test-uuid' as any);
     analytics = new Analytics();
   });
 

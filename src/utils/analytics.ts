@@ -1,6 +1,6 @@
+import { randomUUID } from 'node:crypto';
 import { createInstance, Identify } from '@amplitude/analytics-node';
 import type { WizardSession } from '../lib/wizard-session';
-import { v4 as uuidv4 } from 'uuid';
 import { debug } from './debug';
 import { IS_DEV } from '../lib/constants';
 import { getSessionId, getRunId, setSentryUser } from '../lib/observability';
@@ -96,7 +96,7 @@ export class Analytics {
     this.sessionProperties = { $app_name: this.appName };
     // Persistent install ID stitches pre-auth runs across invocations;
     // fall back to a per-process UUID if disk access fails.
-    this.anonymousId = getOrCreateInstallId() ?? uuidv4();
+    this.anonymousId = getOrCreateInstallId() ?? randomUUID();
     this.distinctId = undefined;
     this.client = createInstance();
   }

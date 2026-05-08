@@ -12,7 +12,7 @@
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { v4 as uuidv4 } from 'uuid';
+import { randomUUID } from 'node:crypto';
 import { z } from 'zod';
 import { atomicWriteJSON } from './atomic-write.js';
 import { debug } from './debug.js';
@@ -56,7 +56,7 @@ export function getOrCreateInstallId(
   }
 
   const record: InstallRecord = {
-    installId: uuidv4(),
+    installId: randomUUID(),
     createdAt: new Date().toISOString(),
   };
 

@@ -5,7 +5,7 @@
  * - runId: new UUID per agent attempt (reset on stall-retry)
  */
 
-import { v4 as uuidv4 } from 'uuid';
+import { randomUUID } from 'node:crypto';
 
 let _sessionId: string | null = null;
 let _runId: string | null = null;
@@ -14,7 +14,7 @@ let _sessionStartMs: number | null = null;
 /** Initialize with the analytics session ID. Call once at startup. */
 export function initCorrelation(sessionId: string): void {
   _sessionId = sessionId;
-  _runId = uuidv4().slice(0, 8); // Short for log readability
+  _runId = randomUUID().slice(0, 8); // Short for log readability
   _sessionStartMs = Date.now();
 }
 
@@ -40,6 +40,6 @@ export function getSessionStartMs(): number | null {
 
 /** Create a new run ID (call on agent retry / stall recovery). */
 export function rotateRunId(): string {
-  _runId = uuidv4().slice(0, 8);
+  _runId = randomUUID().slice(0, 8);
   return _runId;
 }
