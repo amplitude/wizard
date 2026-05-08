@@ -229,6 +229,57 @@ describe('commitPlannedEvents', () => {
     expect(mockFetch).not.toHaveBeenCalled();
   });
 
+  it('treats the full 2xx range as success, including 201 and 299', async () => {
+    // The HTTP success classifier is `>= 200 && < 300`. An off-by-one
+    // (`< 299`) would silently misroute 299s as errors, and a flip to
+    // `<= 300` would treat a 300-redirect as event creation. Pin the
+    // boundary explicitly: a happy 201 and a happy 299 both succeed.
+    for (const status of [201, 299]) {
+      mockAxiosPost.mockResolvedValueOnce({
+        status,
+        data: {
+          createdCount: 1,
+          eventTypes: ['Boundary'],
+          appId: '12345',
+        },
+      });
+      const result = await commitPlannedEvents({
+        accessToken: 'tok',
+        appId: '12345',
+        events: [{ name: 'Boundary', description: '' }],
+        zone: 'us',
+      });
+      expect(result.created, `status ${status} should succeed`).toBe(1);
+      expect(result.error).toBeUndefined();
+    }
+  });
+
+  it('treats 300 (and beyond) as a failure — routes to the error branch with REDIRECT', async () => {
+    // Counter-pin: 300 is NOT success. A `<= 300` mutation would flip
+    // this and silently mark redirects as event creation. Also: an
+    // earlier draft of this test slipped through `<= 300` because the
+    // response body's mismatched shape caused a generic "Invalid
+    // response" error from the success branch — same pass/fail surface
+    // as the real error branch. We pin the exact error code so that
+    // semantic difference is visible.
+    mockAxiosPost.mockResolvedValueOnce({
+      status: 300,
+      data: { error: { code: 'REDIRECT', message: 'redirected' } },
+    });
+    const result = await commitPlannedEvents({
+      accessToken: 'tok',
+      appId: '12345',
+      events: [{ name: 'X', description: '' }],
+      zone: 'us',
+    });
+    expect(result.created).toBe(0);
+    // Error code REDIRECT comes from the failure-branch parser (which
+    // reads `data.error.code`). The success branch can't produce this
+    // string — if `<= 300` slips in, the message becomes "Invalid
+    // response from planned-events endpoint" instead.
+    expect(result.error).toContain('REDIRECT');
+  });
+
   it('maps CONFLICT from planned-events HTTP response', async () => {
     mockAxiosPost.mockResolvedValueOnce({
       status: 409,

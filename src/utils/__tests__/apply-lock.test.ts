@@ -5,7 +5,7 @@
  * lockfile path resolves under the test's scratch space.
  */
 
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
@@ -257,6 +257,52 @@ describe('apply-lock', () => {
         planId: 'p',
       };
       expect(isStale(holder)).toBe(true);
+    });
+
+    it("returns false on EPERM (process exists, we just can't signal it)", () => {
+      // EPERM means another user owns the pid — same machine, but our
+      // process can't send signal 0. Treating that as "stale, steal the
+      // lock" would let two wizards stomp each other when running under
+      // different users. Lock-stealing must require ESRCH-confirmed
+      // process death.
+      const holder: ApplyLockHolder = {
+        pid: 99_999_998,
+        startedAt: new Date().toISOString(),
+        planId: 'p',
+      };
+      const spy = vi.spyOn(process, 'kill').mockImplementation((): true => {
+        const err = new Error('EPERM') as NodeJS.ErrnoException;
+        err.code = 'EPERM';
+        throw err;
+      });
+      try {
+        expect(isStale(holder)).toBe(false);
+      } finally {
+        spy.mockRestore();
+      }
+    });
+
+    it('returns false on unexpected errno codes (conservative — never steal)', () => {
+      // Any errno that isn't ESRCH/EPERM falls into the catch-all "be
+      // conservative" branch. If a future Node version surfaces a new
+      // error code we don't know about, default to NOT stealing the
+      // lock. Inverting this would let bizarre OS conditions trigger
+      // double-applies.
+      const holder: ApplyLockHolder = {
+        pid: 99_999_997,
+        startedAt: new Date().toISOString(),
+        planId: 'p',
+      };
+      const spy = vi.spyOn(process, 'kill').mockImplementation((): true => {
+        const err = new Error('weird') as NodeJS.ErrnoException;
+        err.code = 'EWEIRD';
+        throw err;
+      });
+      try {
+        expect(isStale(holder)).toBe(false);
+      } finally {
+        spy.mockRestore();
+      }
     });
   });
 });
