@@ -48,6 +48,7 @@ import {
 import { readDraftEventPlanMeta } from '../../../lib/wizard-tools.js';
 import { retryFromCheckpoint } from '../../../lib/retry-from-checkpoint.js';
 import { isInteractiveOutro } from '../utils/outro-mode.js';
+import { executeRollbackWithStatus } from '../../../lib/file-change-ledger.js';
 
 const REPORT_FILE = 'amplitude-setup-report.md';
 
@@ -109,6 +110,22 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
   const [bugReportPathState, setBugReportPathState] = useState<string | null>(
     null,
   );
+  // Tracks the user's resolution of the `[K] Keep / [R] Revert` prompt
+  // shown on `preserveFiles` error outros (currently AUTH_ERROR only).
+  // null     → still showing the prompt; default = keep on dismissal.
+  // 'kept'   → user pressed K; files stay on disk.
+  // 'reverted' → user pressed R; the ledger has already been rolled back.
+  // Once set, the prompt copy collapses to a confirmation line so a
+  // subsequent any-key dismissal doesn't re-fire the action.
+  const [preserveResolution, setPreserveResolution] = useState<
+    'kept' | 'reverted' | null
+  >(null);
+  // Captured count from the rollback so the confirmation copy can show
+  // exactly how many files were reverted. Set only on the R path.
+  const [revertCount, setRevertCount] = useState<{
+    filesReverted: number;
+    filesRemoved: number;
+  } | null>(null);
   // Disk-state about the setup report — captured ONCE on mount so we
   // don't sync-stat the filesystem on every re-render (the picker
   // re-renders on each keypress, and Ink's reconciler can re-render on
@@ -136,6 +153,14 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
     isError && store.session.outroData?.promptLogin === true;
   const canRetry = (isError || isCancel) && !isAuthFailure;
   const showRetryHint = canRetry && isInteractiveOutro();
+  // `preserveFiles` is set by agent-runner.ts on failure classes where
+  // the agent's writes are demonstrably consistent (currently AUTH_ERROR
+  // only). Skips the automatic ledger rollback and lets the user choose
+  // `[K] Keep` (default) / `[R] Revert` here.
+  const preserveFiles =
+    isError && store.session.outroData?.preserveFiles === true;
+  const showPreservePrompt =
+    preserveFiles && preserveResolution === null && isInteractiveOutro();
 
   // Any-key-to-exit for non-success states; success uses the picker.
   // Exceptions on error: 'l'/'L' opens the log in the OS-default handler,
@@ -164,6 +189,58 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
         setBugReportPathState(written);
         return;
       }
+      // Preserve-files prompt — `[K] Keep` / `[R] Revert`. Only active
+      // while the prompt is unresolved. K is the safe default and is
+      // also what every non-K-non-R keypress (Enter, Space, etc.) maps
+      // to via the dismissal handler below — pressing K explicitly is a
+      // shortcut for that same outcome plus an analytics event so we
+      // can see how often users override the default.
+      if (showPreservePrompt && (input === 'k' || input === 'K')) {
+        analytics.wizardCapture('preserve files resolution', {
+          resolution: 'kept',
+          source: 'keystroke',
+        });
+        setPreserveResolution('kept');
+        // Fall through to the dismissal block below — keeping files is
+        // the no-op default, so we don't need to do anything else
+        // before exiting.
+      }
+      if (showPreservePrompt && (input === 'r' || input === 'R')) {
+        // Run the same revert path the cleanup hook would have taken
+        // automatically — just gated on the user's explicit choice.
+        // `executeRollbackWithStatus` is idempotent, so even if the
+        // cleanup fired despite `preserveFiles` (e.g. a future ordering
+        // bug), this is a no-op rather than a double revert.
+        let outcome: { filesReverted: number; filesRemoved: number } | null =
+          null;
+        try {
+          const result = executeRollbackWithStatus((msg: string) =>
+            store.pushStatus(msg),
+          );
+          if (result.executed) {
+            outcome = {
+              filesReverted: result.filesReverted,
+              filesRemoved: result.filesRemoved,
+            };
+          }
+        } catch {
+          /* ledger errors are surfaced to the log by
+             executeRollbackWithStatus — keep the screen alive. */
+        }
+        analytics.wizardCapture('preserve files resolution', {
+          resolution: 'reverted',
+          source: 'keystroke',
+          'files reverted': outcome?.filesReverted ?? 0,
+          'files removed': outcome?.filesRemoved ?? 0,
+        });
+        setRevertCount(outcome);
+        setPreserveResolution('reverted');
+        // Stay on screen so the user can read the confirmation copy.
+        // Any subsequent keystroke flows through the dismissal handler
+        // below; `preserveResolution !== null` keeps the K/R branch
+        // inert on re-entry so we don't double-revert.
+        return;
+      }
       // Press R to retry from checkpoint. Available on Error AND Cancel
       // outros (the cancel path benefits too — user hit Esc, regretted it,
       // wants back in). Disabled for auth failures: those will fail again
@@ -179,6 +256,17 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
         setRetryInProgress(true);
         void retryFromCheckpoint(store);
         return;
+      }
+      // If the prompt was visible and the user dismissed without
+      // explicitly picking K/R, record the implicit-keep so we can
+      // distinguish "user actively chose to keep" from "user dismissed
+      // and we defaulted to keep" in analytics.
+      if (showPreservePrompt) {
+        analytics.wizardCapture('preserve files resolution', {
+          resolution: 'kept',
+          source: 'default',
+        });
+        setPreserveResolution('kept');
       }
       // Signal dismissal first. When we got here via wizardAbort, that
       // caller is awaiting this signal — once it resolves, abort runs
@@ -308,8 +396,8 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
   const dashboardOpenUrl = signupMagicLinkUrl
     ? signupMagicLinkUrl
     : dashboardCanonicalUrl
-      ? toWizardDashboardOpenUrl(dashboardCanonicalUrl)
-      : null;
+    ? toWizardDashboardOpenUrl(dashboardCanonicalUrl)
+    : null;
 
   if (!outroData) {
     return (
@@ -442,8 +530,8 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
               {draftMeta && (
                 <Box flexDirection="column" marginBottom={1}>
                   <Text color={Colors.warning}>
-                    {Icons.bullet} Feedback was given but the plan was
-                    never finalized — re-run the wizard to continue iterating.
+                    {Icons.bullet} Feedback was given but the plan was never
+                    finalized — re-run the wizard to continue iterating.
                   </Text>
                   {draftMeta.lastFeedback && (
                     <Text color={Colors.muted}>
@@ -576,6 +664,65 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
               </Text>
             )}
           </Box>
+
+          {/* Preserve-files prompt — only when the failure class is one
+              where the agent's writes are demonstrably consistent (e.g.
+              AUTH_ERROR, where the bearer expired AFTER the event plan
+              was approved and `track()` calls landed). Without this
+              prompt the cleanup hook would silently revert every file
+              touched during the run, penalising the user for a token
+              refresh bug. The default is Keep — the safer of the two
+              outcomes. */}
+          {showPreservePrompt && (
+            <Box marginTop={1} flexDirection="column">
+              <Text color={Colors.warning} bold>
+                Your changes are still on disk
+              </Text>
+              <Text color={Colors.body}>
+                The instrumentation completed successfully — only the final
+                handshake failed. Choose what to do with the files the wizard
+                wrote:
+              </Text>
+              <Box marginTop={1} flexDirection="column">
+                <Text color={Colors.secondary}>
+                  Press{' '}
+                  <Text bold color={Colors.accent}>
+                    K
+                  </Text>{' '}
+                  to keep changes <Text color={Colors.muted}>(default)</Text>
+                </Text>
+                <Text color={Colors.secondary}>
+                  Press{' '}
+                  <Text bold color={Colors.accent}>
+                    R
+                  </Text>{' '}
+                  to revert every file the wizard touched
+                </Text>
+              </Box>
+            </Box>
+          )}
+          {preserveResolution === 'reverted' && (
+            <Box marginTop={1}>
+              <Text color={Colors.warning}>
+                {Icons.dash} Reverted the wizard's writes
+                {revertCount
+                  ? ` (${revertCount.filesReverted} file${
+                      revertCount.filesReverted === 1 ? '' : 's'
+                    } reverted, ${revertCount.filesRemoved} file${
+                      revertCount.filesRemoved === 1 ? '' : 's'
+                    } removed)`
+                  : ''}
+                . Press any key to exit.
+              </Text>
+            </Box>
+          )}
+          {preserveResolution === 'kept' && (
+            <Box marginTop={1}>
+              <Text color={Colors.success}>
+                {Icons.checkmark} Kept the wizard's changes on disk.
+              </Text>
+            </Box>
+          )}
         </Box>
       )}
 

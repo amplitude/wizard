@@ -23,6 +23,7 @@ import { join } from 'node:path';
 
 import {
   FileChangeLedger,
+  executeRollbackWithStatus,
   initFileChangeLedger,
   getFileChangeLedger,
   resetFileChangeLedger,
@@ -222,6 +223,111 @@ describe('FileChangeLedger', () => {
       expect(getFileChangeLedger()).toBe(ledger);
       resetFileChangeLedger();
       expect(getFileChangeLedger()).toBeNull();
+    });
+  });
+
+  // executeRollbackWithStatus is the user-facing wrapper the OutroScreen
+  // calls when the user picks `[R] Revert` on a `preserveFiles` outro
+  // (currently AUTH_ERROR). It also powers the cleanup-hook path in
+  // agent-runner.ts. The tests below pin both branches.
+  describe('executeRollbackWithStatus', () => {
+    it('returns executed=false with no surfaced status when no ledger has been initialised', () => {
+      const status: string[] = [];
+      const log: string[] = [];
+      const out = executeRollbackWithStatus(
+        (m) => status.push(m),
+        (m) => log.push(String(m)),
+      );
+      expect(out.executed).toBe(false);
+      expect(out.filesReverted).toBe(0);
+      expect(out.filesRemoved).toBe(0);
+      expect(status).toEqual([]);
+    });
+
+    it('returns executed=false when the ledger has no entries', () => {
+      initFileChangeLedger(installDir, () => undefined);
+      const status: string[] = [];
+      const out = executeRollbackWithStatus(
+        (m) => status.push(m),
+        () => undefined,
+      );
+      expect(out.executed).toBe(false);
+      expect(status).toEqual([]);
+    });
+
+    it('reverts modify entries, removes created files, and surfaces the summary', () => {
+      const log: string[] = [];
+      const ledger = initFileChangeLedger(installDir, (m) =>
+        log.push(String(m)),
+      );
+
+      const modified = join(installDir, 'README.md');
+      writeFileSync(modified, '# original\n');
+      ledger.recordPreWrite(modified);
+      writeFileSync(modified, '# agent rewrote me\n');
+      ledger.recordPostWrite(modified, '# agent rewrote me\n');
+
+      const created = join(installDir, 'src', 'instrument.ts');
+      mkdirSync(join(installDir, 'src'), { recursive: true });
+      ledger.recordPreWrite(created);
+      writeFileSync(created, 'export const x = 1;\n');
+      ledger.recordPostWrite(created, 'export const x = 1;\n');
+
+      const status: string[] = [];
+      const out = executeRollbackWithStatus(
+        (m) => status.push(m),
+        (m) => log.push(String(m)),
+      );
+      expect(out.executed).toBe(true);
+      expect(out.filesReverted).toBe(1);
+      expect(out.filesRemoved).toBe(1);
+      expect(status).toHaveLength(1);
+      expect(status[0]).toMatch(/Wizard cancelled/);
+      expect(status[0]).toMatch(/1 file reverted/);
+      expect(status[0]).toMatch(/1 file removed/);
+      expect(readFileSync(modified, 'utf8')).toBe('# original\n');
+      expect(existsSync(created)).toBe(false);
+    });
+
+    it('is idempotent — second invocation reports executed=false', () => {
+      const ledger = initFileChangeLedger(installDir, () => undefined);
+      const target = join(installDir, 'foo.ts');
+      writeFileSync(target, 'pre');
+      ledger.recordPreWrite(target);
+      writeFileSync(target, 'post');
+      ledger.recordPostWrite(target, 'post');
+
+      const first = executeRollbackWithStatus(
+        () => undefined,
+        () => undefined,
+      );
+      expect(first.executed).toBe(true);
+
+      const second = executeRollbackWithStatus(
+        () => undefined,
+        () => undefined,
+      );
+      expect(second.executed).toBe(false);
+    });
+
+    it('does not throw when the status callback throws', () => {
+      const ledger = initFileChangeLedger(installDir, () => undefined);
+      const target = join(installDir, 'foo.ts');
+      writeFileSync(target, 'pre');
+      ledger.recordPreWrite(target);
+      writeFileSync(target, 'post');
+      ledger.recordPostWrite(target, 'post');
+
+      expect(() =>
+        executeRollbackWithStatus(
+          () => {
+            throw new Error('UI not reachable');
+          },
+          () => undefined,
+        ),
+      ).not.toThrow();
+      // Despite the status callback throwing, the file is still reverted.
+      expect(readFileSync(target, 'utf8')).toBe('pre');
     });
   });
 });

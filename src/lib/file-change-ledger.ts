@@ -563,3 +563,98 @@ export function getFileChangeLedger(): FileChangeLedger | null {
 export function resetFileChangeLedger(): void {
   _ledger = null;
 }
+
+/**
+ * Outcome of {@link executeRollbackWithStatus}, useful for analytics /
+ * tests. Mirrors the underlying {@link RollbackResult} but adds an
+ * `executed` flag so callers can distinguish "no ledger present" or
+ * "nothing to revert" from a real revert pass.
+ */
+export interface ExecuteRollbackOutcome {
+  /** True when {@link FileChangeLedger.rollback} actually ran. */
+  executed: boolean;
+  /** Number of `modify` / `delete` entries reverted. `0` when not executed. */
+  filesReverted: number;
+  /** Number of `create` entries removed. `0` when not executed. */
+  filesRemoved: number;
+  /** User-facing summary message; `null` when there was nothing to surface. */
+  message: string | null;
+}
+
+/**
+ * Run the singleton ledger's rollback and surface the user-facing status
+ * line through {@link onStatus}. Extracted from `agent-runner.ts` so the
+ * OutroScreen's `[R] Revert changes` prompt (PR adding `preserveFiles`
+ * to OutroData) can trigger the same revert path without duplicating
+ * the formatting / logging plumbing.
+ *
+ *  - Returns `executed: false` when there is no ledger or nothing to
+ *    revert; the call site can show a short "no changes to revert"
+ *    confirmation instead of the standard message.
+ *  - Honors the ledger's idempotency: a second call after rollback has
+ *    already run is a no-op and returns `executed: false`.
+ *  - Catches and logs filesystem errors so a partial revert never blocks
+ *    the calling screen.
+ */
+export function executeRollbackWithStatus(
+  onStatus: (message: string) => void,
+  log: (message: string, ...rest: unknown[]) => void = logToFile,
+): ExecuteRollbackOutcome {
+  const ledger = getFileChangeLedger();
+  if (!ledger) {
+    return {
+      executed: false,
+      filesReverted: 0,
+      filesRemoved: 0,
+      message: null,
+    };
+  }
+  try {
+    const result = ledger.rollback();
+    const reverted = result.filesReverted;
+    const removed = result.filesRemoved;
+    if (reverted === 0 && removed === 0) {
+      log('[ledger] rollback: nothing to revert');
+      return {
+        executed: false,
+        filesReverted: 0,
+        filesRemoved: 0,
+        message: null,
+      };
+    }
+    const message = `Wizard cancelled. Your repo has been restored to its pre-wizard state. (${reverted} file${
+      reverted === 1 ? '' : 's'
+    } reverted, ${removed} file${removed === 1 ? '' : 's'} removed.)`;
+    log(`[ledger] ${message}`);
+    try {
+      onStatus(message);
+    } catch {
+      /* surfaced to log already */
+    }
+    if (result.failures.length > 0) {
+      log(
+        `[ledger] rollback: ${result.failures.length} failure${
+          result.failures.length === 1 ? '' : 's'
+        }: ${result.failures.map((f) => `${f.path} (${f.reason})`).join(', ')}`,
+      );
+    }
+    return {
+      executed: true,
+      filesReverted: reverted,
+      filesRemoved: removed,
+      message,
+    };
+  } catch (err) {
+    log(
+      `[ledger] rollback threw: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
+    return {
+      executed: false,
+      filesReverted: 0,
+      filesRemoved: 0,
+      message: null,
+    };
+  }
+}
