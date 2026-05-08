@@ -662,6 +662,13 @@ If a scenario fails for a reason this table doesn't predict, that's a finding �
 - **Judge model and cadence (decision #3).** Unlimited Anthropic budget removes the spend constraint. Sonnet stays the default judge; Opus enters via the pre-release bake-off only if it earns the slot. Judge runs at 100% of nightly scenarios, not 10%.
 - **CI gating shape.** Default PR is Layers 0-3 on Ring 1. Opt-in full PR via `evals:full` label or `[evals]` trigger phrase. Nightly is full Ring 2 with Layers 0-6 and judge at 100%. Pre-release is Ring 3 with ingestion.
 
+### Implemented as of 2026-05-08
+
+- Layers 0–4 + 6 wired and tested (122 scorer tests). Layer 5 is the only deferred piece, blocked on decision #2 (eval-only Amplitude project).
+- Ring 1 scenarios fully shipped: `nextjs-app-router/vanilla`, `nextjs-app-router/pre-existing-vendor`, `react-router-7/framework`, `react-router-7/data`, `react-vite/vanilla`, `expo/vanilla`, `generic/probe`. Each carries a lockfile-pinned pristine fixture and a hand-authored golden.
+- PR gate runs `.github/workflows/evals-pr-scenarios.yml` (Layers 0–3, Ring 1 matrix). Nightly Ring 2 runs `.github/workflows/evals-nightly.yml` (Layers 0–6, two seeds per scenario, Playwright installed for Layer 4, Sonnet judge for Layer 6, plus a separate variance-summary job that flags any scenario whose seed-to-seed score spread exceeds 10).
+- Layer 0 `correct-sdk-package` now hard-fails on stale-legacy-SDK coexistence (failure mode #10 from the table) — a `pre-existing-vendor` run that leaves both `@amplitude/unified` and `@amplitude/analytics-browser` in `package.json` is graded as broken.
+
 ### Still open
 
 - **Decision #2 — eval-only Amplitude project.** Layer 5 ingestion verification needs a project that we can blast with synthetic events without polluting prod analytics. Ops conversation pending; needs an org owner and a project key managed outside the user-facing OAuth flow.
