@@ -200,8 +200,8 @@ export function formatNotice(
   latest: string,
 ): string {
   const w = BOX_INNER;
-  const top = chalk.yellow('┌' + '─'.repeat(w) + '┐');
-  const bot = chalk.yellow('└' + '─'.repeat(w) + '┘');
+  const top = chalk.yellow('┌' + '─'.repeat(w + 2) + '┐');
+  const bot = chalk.yellow('└' + '─'.repeat(w + 2) + '┘');
   const empty = boxLine('', 0, w);
 
   const titleText = `New version of ${pkgName} available! ${current} → ${latest}`;
