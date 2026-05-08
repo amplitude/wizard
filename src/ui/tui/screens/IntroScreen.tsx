@@ -11,6 +11,7 @@
  * Calls store.concludeIntro() to advance past this screen.
  */
 
+import { sep } from 'node:path';
 import { Box, Text } from 'ink';
 import { useState, useEffect, useMemo } from 'react';
 import type { WizardStore } from '../store.js';
@@ -434,12 +435,16 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
           Unsigned: sign-in vs create-account (`--auth-onboarding` in CI).
           One menu so we do not stack two PickerMenus (shared useInput). */}
       {showContinue && !changingDirectory && !wildcardParent && (
-        <Box marginTop={compact ? 0 : 1} flexDirection="column" alignItems="center">
+        <Box
+          marginTop={compact ? 0 : 1}
+          flexDirection="column"
+          alignItems="center"
+        >
           {!compact && session.userEmail && (
             <Box marginBottom={1}>
               <Text color={Colors.muted}>
-                Next: install the SDK and propose an event plan you'll
-                review before any code is written.
+                Next: install the SDK and propose an event plan you'll review
+                before any code is written.
               </Text>
             </Box>
           )}
@@ -551,7 +556,10 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
                 return;
               }
 
-              if (typeof choice === 'string' && choice.startsWith('workspace:')) {
+              if (
+                typeof choice === 'string' &&
+                choice.startsWith('workspace:')
+              ) {
                 // value shape: `workspace:<abs>::wild` | `workspace:<abs>::lit`
                 const rest = choice.slice('workspace:'.length);
                 const sep = rest.lastIndexOf('::');
@@ -640,9 +648,13 @@ const WildcardChildPicker = ({
 
   // Display labels are relative to the original installDir so users
   // see e.g. `packages/excalidraw-app` instead of an absolute path.
-  const relativePrefix = installDir.endsWith('/') ? installDir : installDir + '/';
+  const relativePrefix = installDir.endsWith(sep)
+    ? installDir
+    : installDir + sep;
   const options = children.map((abs) => ({
-    label: abs.startsWith(relativePrefix) ? abs.slice(relativePrefix.length) : abs,
+    label: abs.startsWith(relativePrefix)
+      ? abs.slice(relativePrefix.length)
+      : abs,
     value: abs,
   }));
 
@@ -702,8 +714,8 @@ const WelcomeBackPanel = ({
       ? `${projectName} · ${region.toUpperCase()}`
       : projectName
     : region
-    ? region.toUpperCase()
-    : null;
+      ? region.toUpperCase()
+      : null;
 
   // Events line: only show when we know something concrete. "0 events
   // instrumented" by itself is misleading — it usually means the events
@@ -791,9 +803,7 @@ const TargetSummary = ({
             {frameworkLabel}
             {frameworkSuffix}
           </Text>
-          {frameworkBeta && (
-            <Text color={Colors.muted}> · beta</Text>
-          )}
+          {frameworkBeta && <Text color={Colors.muted}> · beta</Text>}
         </Box>
       )}
 

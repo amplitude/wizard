@@ -214,14 +214,6 @@ function hasNestedManifest(installDir: string): boolean {
 }
 
 /**
- * Run all sync workspace checks against `installDir`.
- *
- * Never throws. On a missing or unreadable directory returns
- * `{ hasManifest: false, isMonorepo: false, workspaceGlobs: [] }` — the
- * caller should treat that the same way as "no manifest found" and
- * surface the warning.
- */
-/**
  * Concrete workspace pick surfaced inline on the welcome screen when the
  * user lands on a monorepo root. Each entry is either a literal subdir
  * (`isWildcard: false`) — selecting it changes installDir to that path
@@ -333,6 +325,14 @@ export function listWildcardChildren(parentDir: string): string[] {
   return children.sort();
 }
 
+/**
+ * Run all sync workspace checks against `installDir`.
+ *
+ * Never throws. On a missing or unreadable directory returns
+ * `{ hasManifest: false, isMonorepo: false, workspaceGlobs: [] }` — the
+ * caller should treat that the same way as "no manifest found" and
+ * surface the warning.
+ */
 export function analyzeWorkspace(installDir: string): WorkspaceAnalysis {
   const absolutePath = installDir;
   const displayPath = shortenHomePath(absolutePath);
