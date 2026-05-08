@@ -103,6 +103,41 @@ async function settle(ms = 50): Promise<void> {
   for (let i = 0; i < 4; i++) await waitForFrame();
 }
 
+/**
+ * Poll `lastFrame()` until the predicate matches the rendered frame
+ * (ANSI-stripped) or `timeoutMs` elapses. Throws with the most recent
+ * frame on timeout so failures explain what *was* rendered.
+ *
+ * Why this exists: a single fixed `settle(150)` is racy under load on
+ * Node 22+. The poll path is `await refreshToken()` (which does THREE
+ * dynamic `import()`s) → `await fetchHasAnyEventsMcp(...)` → React
+ * commit → ref-syncing `useEffect` → second commit. ESM resolution
+ * inside dynamic import is I/O-bound and not microtask-flushable;
+ * under parallel test load it can comfortably exceed 150ms, so the
+ * assertion runs against the pre-poll frame ("Listening for events…")
+ * instead of the post-observation frame. This helper retries the
+ * assertion on each `setImmediate` tick, which is deterministic across
+ * Node versions.
+ */
+async function waitForFrameMatching(
+  lastFrame: () => string | undefined,
+  predicate: (frame: string) => boolean,
+  description: string,
+  timeoutMs = 2000,
+): Promise<string> {
+  const start = Date.now();
+  let current = stripAnsi(lastFrame() ?? '');
+  while (Date.now() - start < timeoutMs) {
+    if (predicate(current)) return current;
+    await waitForFrame();
+    current = stripAnsi(lastFrame() ?? '');
+  }
+  throw new Error(
+    `Timed out after ${timeoutMs}ms waiting for: ${description}\n` +
+      `Last frame:\n${current}`,
+  );
+}
+
 describe('DataIngestionCheckScreen — tracking plan + skip guard', () => {
   let installDir: string;
 
@@ -194,11 +229,17 @@ describe('DataIngestionCheckScreen — tracking plan + skip guard', () => {
       <DataIngestionCheckScreen store={store} />,
     );
 
-    await settle(150);
-
-    const frame = stripAnsi(lastFrame() ?? '');
-    // Header reflects the partial observation count.
-    expect(frame).toMatch(/1 of 3 observed/);
+    // Poll until the post-observation header lands. A fixed `settle(150)`
+    // raced the dynamic-import chain inside `refreshToken()` on Node 22+
+    // (CI failure pattern: assertion ran against the pre-poll
+    // "Listening for events…" frame). `waitForFrameMatching` retries on
+    // each `setImmediate` tick, so we're deterministic regardless of how
+    // long the imports take.
+    const frame = await waitForFrameMatching(
+      lastFrame,
+      (f) => /1 of 3 observed/.test(f),
+      'tracking plan header to show "1 of 3 observed"',
+    );
     // All three planned events are still listed.
     expect(frame).toContain('Page Viewed');
     expect(frame).toContain('Button Clicked');
