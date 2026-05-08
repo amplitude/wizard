@@ -154,6 +154,48 @@ describe('getWizardProxyBase', () => {
   });
 });
 
+// Regression: agent-runner's `skillsBaseUrl` must derive from the data API
+// host (`getWizardProxyBase`), NOT the LLM proxy at wizard.amplitude.com.
+// Bugbot caught a coupling where the skills URL inherited the LLM proxy
+// after the wizard.amplitude.com migration and started 404'ing because
+// the proxy only serves `/v1/messages`. Pin both regions so any future
+// re-coupling fails this test.
+describe('skillsBaseUrl host pinning', () => {
+  it('uses core.amplitude.com/wizard for the us zone (not the LLM proxy)', () => {
+    const prevProxy = process.env.WIZARD_PROXY_BASE_URL;
+    const prevSkills = process.env.SKILLS_URL;
+    delete process.env.WIZARD_PROXY_BASE_URL;
+    delete process.env.SKILLS_URL;
+    try {
+      const skillsBaseUrl =
+        process.env.SKILLS_URL || getWizardProxyBase('us') + '/skills';
+      expect(skillsBaseUrl).toBe('https://core.amplitude.com/wizard/skills');
+      expect(skillsBaseUrl).not.toContain('wizard.amplitude.com');
+    } finally {
+      if (prevProxy !== undefined)
+        process.env.WIZARD_PROXY_BASE_URL = prevProxy;
+      if (prevSkills !== undefined) process.env.SKILLS_URL = prevSkills;
+    }
+  });
+
+  it('uses core.eu.amplitude.com/wizard for the eu zone (not the LLM proxy)', () => {
+    const prevProxy = process.env.WIZARD_PROXY_BASE_URL;
+    const prevSkills = process.env.SKILLS_URL;
+    delete process.env.WIZARD_PROXY_BASE_URL;
+    delete process.env.SKILLS_URL;
+    try {
+      const skillsBaseUrl =
+        process.env.SKILLS_URL || getWizardProxyBase('eu') + '/skills';
+      expect(skillsBaseUrl).toBe('https://core.eu.amplitude.com/wizard/skills');
+      expect(skillsBaseUrl).not.toContain('wizard.amplitude.com');
+    } finally {
+      if (prevProxy !== undefined)
+        process.env.WIZARD_PROXY_BASE_URL = prevProxy;
+      if (prevSkills !== undefined) process.env.SKILLS_URL = prevSkills;
+    }
+  });
+});
+
 describe('createAmplitudeApp', () => {
   beforeEach(() => {
     mockedAxios.post.mockReset();
