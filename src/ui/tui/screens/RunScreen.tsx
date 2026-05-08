@@ -29,7 +29,6 @@ import {
 } from '../primitives/index.js';
 import type { ProgressItem } from '../primitives/index.js';
 import { Colors, Icons, SPINNER_FRAMES, SPINNER_INTERVAL } from '../styles.js';
-import { OrbitSpinner } from '../components/OrbitSpinner.js';
 import { AnimatedAmplitudeLogo } from '../components/AmplitudeLogo.js';
 import { RetryStatusChip } from '../components/RetryBanner.js';
 import { FileWritesPanel } from '../components/FileWritesPanel.js';
@@ -61,13 +60,13 @@ function formatElapsed(seconds: number): string {
 }
 
 /**
- * Cap a status string for inline display. Belt-and-braces against unbounded
- * streamed content (e.g. raw stream-event JSON forwarded by runAgentLocally
- * before its filter stripped them). Yoga's `truncate-end` is the primary
- * defense once the row is flex-shrinkable, but a JS cap keeps the header
- * sane regardless of layout context.
+ * Cap a status string before handing it to TabContainer. Belt-and-braces
+ * against unbounded streamed content (e.g. raw stream-event JSON forwarded
+ * by runAgentLocally before its filter stripped them). Yoga's
+ * `overflow="hidden"` in the bottom status bar handles wide terminals, but
+ * a JS cap keeps the bar sane regardless of layout context.
  */
-const STATUS_MAX_LEN = 80;
+const STATUS_MAX_LEN = 160;
 function truncateStatus(s: string): string {
   if (s.length <= STATUS_MAX_LEN) return s;
   return s.slice(0, STATUS_MAX_LEN - 1) + '…';
@@ -320,85 +319,53 @@ const ProgressTab = ({ store }: { store: WizardStore }) => {
   // Cold-start UX: until the agent finishes its first task the counter sits
   // at "0 done · N to go" with the timer climbing — every screenshot the
   // wizard's collected of users Ctrl+C-ing during Setup has been in this
-  // exact gap. The agent IS working (its [STATUS] shows up at the bottom),
-  // but the user's eye lands on the spinner header and the header looks
-  // dead. Surface the latest status next to the counter, and after 30s of
-  // zero completed tasks add an explanatory hint so a slow first response
-  // doesn't read as a hung wizard.
-  const lastStatus =
-    store.statusMessages.length > 0
-      ? store.statusMessages[store.statusMessages.length - 1]
-      : undefined;
+  // exact gap. The agent IS working (its [STATUS] shows up in the bottom
+  // status pill), but if the user doesn't know cold-starts are normal a
+  // quiet header reads as a hung wizard. After 30s of zero completed tasks
+  // surface a tiny inline hint next to the elapsed timer — not a 4-line
+  // coaching block. The bottom TabContainer status pill remains the single
+  // source of truth for "what is the wizard doing right now"; this header
+  // is just "how far along" + "is this normally this slow".
   const showColdStartHint =
     completedDisplay === 0 && total > 0 && elapsed >= 30;
+  // Reference `tick` so React doesn't dead-code-eliminate the SPINNER
+  // interval that drives the AnimatedAmplitudeLogo + FileWritesPanel.
+  void tick;
 
   return (
     <Box flexDirection="row" flexGrow={1}>
       {/* Left: tasks and status (takes all remaining width) */}
       <Box flexDirection="column" flexGrow={1} flexShrink={1} paddingX={1}>
-        {/* Header: OrbitSpinner on the left, all status text stacked to
-            the right. alignItems="flex-start" keeps the orbit pinned to
-            the top row while the text column grows downward. */}
-        <Box marginBottom={1} flexDirection="row" gap={2} alignItems="flex-start">
-          <OrbitSpinner tick={tick} color={Colors.accent} />
-
-          {/* Right column: progress + elapsed + file + sub-status lines */}
-          <Box flexDirection="column" flexGrow={1} flexShrink={1}>
-            <Box justifyContent="space-between">
-              <Box gap={1}>
-                <Text color={Colors.body} bold>
-                  {total > 0
-                    ? // Avoid "X / Y" — Y can grow as the agent adds new tasks
-                      // mid-run, which makes the progress bar look like it's
-                      // going backwards (6 tasks → 9 tasks). Show absolute
-                      // counts instead so the user sees forward motion.
-                      // `completedDisplay` is a high-water mark, so the "done"
-                      // count never regresses if new tasks appear after the
-                      // user already saw earlier ones finish.
-                      pending + inProgress > 0
-                      ? `${completedDisplay} done · ${inProgress + pending} to go`
-                      : `${completedDisplay} tasks complete`
-                    : 'Agent running'}
-                </Text>
-                <Text color={Colors.muted}>
-                  {Icons.dot} {formatElapsed(elapsed)}
-                </Text>
-                <RetryStatusChip
-                  retryState={store.session.retryState}
-                  now={Date.now()}
-                />
-              </Box>
-              {currentFile && (
-                <Text color={Colors.muted} wrap="truncate-end">
-                  {currentFile}
-                </Text>
-              )}
-            </Box>
-
-            {/* Show the latest agent status on its own row, always — not
-                only during cold start. Users were repeatedly complaining
-                that they couldn't tell what the wizard was working on
-                because the status pill lives at the bottom of the screen
-                (below the tab bar) while the progress header sits at the
-                top: "now" was two rows of attention away from "n done · m
-                to go". Inline-and-always means the answer to "what's it
-                doing right now?" is always one row below the counter.
-
-                Stays below the counter (not inline-with) — long status
-                strings used to push the counter siblings to wrap onto the
-                next line. Truncated in JS as a belt-and-braces guard
-                against unbounded streamed content (e.g. raw stream-event
-                JSON from `runAgentLocally`). */}
-            {lastStatus && (
-              <Text color={Colors.muted} wrap="truncate-end">
-                {Icons.dot} {truncateStatus(lastStatus)}
+        {/* Header: progress counter + elapsed + retry chip + current file. */}
+        <Box marginBottom={1} flexDirection="column">
+          <Box justifyContent="space-between">
+            <Box gap={1}>
+              <Text color={Colors.body} bold>
+                {total > 0
+                  ? // Avoid "X / Y" — Y can grow as the agent adds new tasks
+                    // mid-run, which makes the progress bar look like it's
+                    // going backwards (6 tasks → 9 tasks). Show absolute
+                    // counts instead so the user sees forward motion.
+                    // `completedDisplay` is a high-water mark, so the "done"
+                    // count never regresses if new tasks appear after the
+                    // user already saw earlier ones finish.
+                    pending + inProgress > 0
+                    ? `${completedDisplay} done · ${inProgress + pending} to go`
+                    : `${completedDisplay} tasks complete`
+                  : 'Agent running'}
               </Text>
-            )}
-            {showColdStartHint && (
               <Text color={Colors.muted}>
-                {Icons.dot} Still on the agent's first response — cold start
-                can take 30–60s while it loads skills and reads your project.
-                The status above shows it's working, not stuck.
+                {Icons.dot} {formatElapsed(elapsed)}
+                {showColdStartHint ? ' (cold start: ~30–60s)' : ''}
+              </Text>
+              <RetryStatusChip
+                retryState={store.session.retryState}
+                now={Date.now()}
+              />
+            </Box>
+            {currentFile && (
+              <Text color={Colors.muted} wrap="truncate-end">
+                {currentFile}
               </Text>
             )}
           </Box>
@@ -478,11 +445,19 @@ export const RunScreen = ({ store }: RunScreenProps) => {
   const activePostAgentStep = store.session.postAgentSteps.find(
     (s) => s.status === PostAgentStepStatus.InProgress,
   );
-  const lastStatus =
+  const rawLastStatus =
     activePostAgentStep?.activeForm ??
     (store.statusMessages.length > 0
       ? store.statusMessages[store.statusMessages.length - 1]
       : undefined);
+  // The bottom TabContainer status pill is the single source of truth for
+  // live activity now. Cap raw streamed content (rare protocol fragments
+  // from `runAgentLocally`) before it reaches the pill — Yoga's
+  // `overflow="hidden"` handles wide terminals, but a JS cap is the
+  // belt-and-braces guard against unbounded strings.
+  const lastStatus = rawLastStatus
+    ? truncateStatus(rawLastStatus)
+    : undefined;
 
   const hasEvents = store.eventPlan.length > 0;
 
