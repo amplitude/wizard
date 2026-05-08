@@ -1,0 +1,19 @@
+{
+  "name": "generic/probe",
+  "ring": 1,
+  "integrationHint": "generic",
+  "buildCommand": ["true"],
+  "expectedEnvPrefix": "",
+  "expectedInitFile": "amplitude.js",
+  "expectedEvents": ["Page Viewed"],
+  "forbiddenPaths": [
+    "next.config.js",
+    "next.config.mjs",
+    "vite.config.ts",
+    "vite.config.js",
+    "webpack.config.js",
+    "babel.config.js"
+  ],
+  "useDetection": false,
+  "notes": "Unknown-framework probe — stripped-down vanilla HTML/JS app with no framework markers. Asserts the agent does not invent a framework and does not hardcode the wrong env var prefix when detection falls through. useDetection=false because we want to grade the wizard's own detection pipeline against `generic` as ground truth, not pre-bias it. Build command is `true` (no-op) — there's no bundler to run; Layer 3 records a clean install/build pair so coverage shape is preserved without inventing tooling. Layer 1 env-var-prefix scorer accepts an empty expectedEnvPrefix as a no-prefix sentinel."
+}

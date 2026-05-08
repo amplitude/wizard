@@ -23,6 +23,11 @@ export const FRAMEWORK_TO_SDK: Record<string, string> = {
   vue: '@amplitude/unified',
   react: '@amplitude/unified',
   'react-vite': '@amplitude/unified',
+  // The wizard's `Integration` enum exposes a single `react-router` value;
+  // the `*-7-*` and `-6` keys here are evals-side aliases that scenarios
+  // may carry as a richer ground-truth hint than the CLI accepts. They
+  // resolve to the same SDK family.
+  'react-router': '@amplitude/unified',
   'react-router-6': '@amplitude/unified',
   'react-router-7-data': '@amplitude/unified',
   'react-router-7-declarative': '@amplitude/unified',
@@ -41,6 +46,12 @@ export const FRAMEWORK_TO_SDK: Record<string, string> = {
   android: 'com.amplitude:analytics-android',
   flutter: 'amplitude_flutter',
   'react-native': '@amplitude/analytics-react-native',
+  // Expo apps ship the React Native SDK — same package, same scorer
+  // surface. There's no `expo` entry in the wizard's Integration enum
+  // yet (see skill / detector drift sidebar in docs/evals.md), so live
+  // runs of this scenario will fail at `--integration expo`. The Ring 1
+  // golden replay still grades the integration shape correctly.
+  expo: '@amplitude/analytics-react-native',
 
   // Server frameworks (non-JS).
   python: 'amplitude-analytics',

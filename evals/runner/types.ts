@@ -101,6 +101,20 @@ export interface Artifact {
    * Useful for triage so you don't mistake a replay for a real run.
    */
   source: 'live' | 'golden';
+  /**
+   * NDJSON run log captured from a SECOND consecutive wizard run on
+   * the same working tree. Optional — the orchestrator only populates
+   * this when the scenario opts in to idempotency coverage (criterion
+   * 16) by setting `runTwice: true` on the scenario, or by providing a
+   * `golden/run-second.ndjson` for replay mode.
+   *
+   * Layer 1's `idempotent-rerun` scorer compares the second run's
+   * `file_change_applied` events to the first; a clean re-run should
+   * produce the same set or a strict subset (modify-only, no
+   * surprise creates / deletes). Absent → scorer skip-passes with
+   * weight 0 (no signal, no penalty).
+   */
+  secondRunLog?: AgentEventEnvelope[];
 }
 
 /**

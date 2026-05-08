@@ -1,0 +1,24 @@
+{
+  "name": "nextjs-app-router-pre-existing-vendor",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "dev": "next dev",
+    "build": "next build",
+    "start": "next start -p 8083",
+    "lint": "next lint"
+  },
+  "dependencies": {
+    "@amplitude/analytics-browser": "^2.11.0",
+    "next": "15.5.14",
+    "prettier": "^3.5.2",
+    "react": "^18",
+    "react-dom": "^18"
+  },
+  "devDependencies": {
+    "@types/node": "^20",
+    "@types/react": "^18",
+    "@types/react-dom": "^18",
+    "typescript": "^5"
+  }
+}

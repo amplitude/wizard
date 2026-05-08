@@ -1,0 +1,11 @@
+{
+  "expo": {
+    "name": "expo-vanilla-test-app",
+    "slug": "expo-vanilla-test-app",
+    "version": "1.0.0",
+    "orientation": "portrait",
+    "newArchEnabled": true,
+    "scheme": "evalapp",
+    "plugins": ["expo-router"]
+  }
+}

@@ -75,6 +75,26 @@ export const scorer: Scorer = {
     const expected = resolveExpectedSdkPackage(scenario);
 
     if (deps[expected]) {
+      // Stale-legacy-SDK coexistence is a hard fail. The "pre-existing
+      // vendor" Ring 1 scenario exercises "the wizard finds an old
+      // @amplitude/analytics-browser install and migrates the project
+      // to @amplitude/unified." A migration that leaves the legacy
+      // package in deps is a known regression class (failure mode #10
+      // in the spec — "Two SDK majors coexisting after a pre-existing
+      // vendor run") and the agent should never ship it. Maps to
+      // criterion 1 alongside criterion 6 (single init).
+      if (
+        expected === '@amplitude/unified' &&
+        deps[KNOWN_WRONG_BROWSER_FAMILY]
+      ) {
+        return {
+          pass: false,
+          hardFail: true,
+          weight: 0,
+          detail: `package.json declares both ${expected} and ${KNOWN_WRONG_BROWSER_FAMILY}; legacy SDK must be removed during migration`,
+          evidencePath: 'package.json',
+        };
+      }
       return { pass: true, weight: 0 };
     }
 
