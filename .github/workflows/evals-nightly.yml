@@ -81,11 +81,15 @@ jobs:
           EVAL_SEED: ${{ matrix.seed }}
         run: pnpm evals:run ${{ matrix.scenario }} --runtime --judge
 
+      - name: Sanitize scenario name
+        id: sanitize
+        run: echo "name=$(echo '${{ matrix.scenario }}' | tr '/' '-')" >> $GITHUB_OUTPUT
+
       - name: Upload report
         if: always()
         uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
         with:
-          name: eval-report-${{ matrix.scenario }}-seed${{ matrix.seed }}
+          name: eval-report-${{ steps.sanitize.outputs.name }}-seed${{ matrix.seed }}
           path: evals/reports/**/report.json
           retention-days: 30
           if-no-files-found: ignore

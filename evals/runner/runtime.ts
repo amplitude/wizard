@@ -253,7 +253,10 @@ export async function runRuntimeProbe(
         waitUntil: 'networkidle',
       });
       pageStatusCode = response?.status() ?? 0;
-      ok = consoleErrors.length === 0 && pageStatusCode > 0;
+      ok =
+        consoleErrors.length === 0 &&
+        pageStatusCode >= 200 &&
+        pageStatusCode < 400;
     } finally {
       await browser.close();
     }
