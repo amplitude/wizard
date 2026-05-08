@@ -42,7 +42,16 @@ jobs:
         with:
           node-version-file: 'package.json'
           cache: 'pnpm'
+      # Shares cache key with build.yml so this hits warm cache once any
+      # build.yml job has populated it for the current pnpm-lock.yaml hash.
+      - name: Cache node_modules
+        id: node-modules-cache
+        uses: actions/cache@v4
+        with:
+          path: node_modules
+          key: node-modules-${{ runner.os }}-node20-${{ hashFiles('pnpm-lock.yaml') }}
       - name: Install dependencies with pnpm
+        if: steps.node-modules-cache.outputs.cache-hit != 'true'
         run: pnpm install --frozen-lockfile
       - name: Run bench harness
         run: pnpm bench
