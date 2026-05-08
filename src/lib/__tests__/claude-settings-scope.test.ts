@@ -265,21 +265,118 @@ describe('applyScopedSettings', () => {
     delete process.env.AMPLITUDE_WIZARD_COMPACTION_WINDOW;
   });
 
-  it('respects an existing autoCompactWindow set by the user (does not override)', () => {
+  it('respects an existing autoCompactWindow set by the user above the pre-#634 ceiling', () => {
     process.env.ANTHROPIC_BASE_URL = 'https://gateway.example.com';
 
-    // User has their own preferred value at the local layer.
+    // User deliberately set 500K — above the 200K pre-#634 wizard
+    // ceiling, so we know the wizard never wrote this and must respect it.
     const localPath = path.join(workdir, '.claude', 'settings.local.json');
     fs.mkdirSync(path.dirname(localPath), { recursive: true });
-    const prior = JSON.stringify({ autoCompactWindow: 50_000 }, null, 2);
+    const prior = JSON.stringify({ autoCompactWindow: 500_000 }, null, 2);
     fs.writeFileSync(localPath, prior);
 
     const handle = applyScopedSettings(workdir);
     const written = JSON.parse(fs.readFileSync(handle!.filePath, 'utf-8'));
-    expect(written.autoCompactWindow).toBe(50_000);
+    expect(written.autoCompactWindow).toBe(500_000);
+    // No wizard-managed marker is added when we respect the user value.
+    expect(written).not.toHaveProperty('_wizardManagedAutoCompact');
 
     handle!.restore();
     // User's original file is intact.
     expect(fs.readFileSync(localPath, 'utf-8')).toBe(prior);
+  });
+
+  // ── stale pre-#634 value upgrade ───────────────────────────────────
+  // Lever 1 fix: pre-#634 wizard runs wrote `autoCompactWindow: 120000`
+  // with no way to distinguish the wizard's own write from a user
+  // override. The new logic uses a `_wizardManagedAutoCompact: true`
+  // marker for unambiguous wizard ownership, plus a 200K safety ceiling
+  // for older unmarked values that were almost certainly stale wizard
+  // writes (the wizard never shipped a default above 200K).
+
+  it('re-stamps an existing wizard-managed autoCompactWindow to the current default', () => {
+    process.env.ANTHROPIC_BASE_URL = 'https://gateway.example.com';
+
+    // Simulate a pre-#634 run that left a stale 120K with the marker
+    // (the world after this PR ships).
+    const localPath = path.join(workdir, '.claude', 'settings.local.json');
+    fs.mkdirSync(path.dirname(localPath), { recursive: true });
+    const prior = JSON.stringify(
+      { autoCompactWindow: 120_000, _wizardManagedAutoCompact: true },
+      null,
+      2,
+    );
+    fs.writeFileSync(localPath, prior);
+
+    const handle = applyScopedSettings(workdir);
+    const written = JSON.parse(fs.readFileSync(handle!.filePath, 'utf-8'));
+    expect(written.autoCompactWindow).toBe(750_000);
+    expect(written._wizardManagedAutoCompact).toBe(true);
+
+    handle!.restore();
+    // Original (120K + marker) bytes are restored verbatim — the wizard
+    // never persists its in-memory upgrade past restore.
+    expect(fs.readFileSync(localPath, 'utf-8')).toBe(prior);
+  });
+
+  it('upgrades an unmarked stale 120K value (pre-#634 wizard write)', () => {
+    process.env.ANTHROPIC_BASE_URL = 'https://gateway.example.com';
+
+    // Pre-#634 the marker did not exist, so older wizard runs left a
+    // 120K value with no marker. The 200K safety ceiling lets us
+    // recognise these as wizard writes and upgrade them.
+    const localPath = path.join(workdir, '.claude', 'settings.local.json');
+    fs.mkdirSync(path.dirname(localPath), { recursive: true });
+    const prior = JSON.stringify({ autoCompactWindow: 120_000 }, null, 2);
+    fs.writeFileSync(localPath, prior);
+
+    const handle = applyScopedSettings(workdir);
+    const written = JSON.parse(fs.readFileSync(handle!.filePath, 'utf-8'));
+    expect(written.autoCompactWindow).toBe(750_000);
+    // Marker is added on upgrade so future runs follow the
+    // unambiguous re-stamp path instead of relying on the ceiling.
+    expect(written._wizardManagedAutoCompact).toBe(true);
+
+    handle!.restore();
+    // User's pre-existing file is restored byte-for-byte (no marker
+    // written to disk past the wizard's lifetime).
+    expect(fs.readFileSync(localPath, 'utf-8')).toBe(prior);
+  });
+
+  it('writes the wizard-managed marker on a fresh write', () => {
+    process.env.ANTHROPIC_BASE_URL = 'https://gateway.example.com';
+
+    const handle = applyScopedSettings(workdir);
+    const written = JSON.parse(fs.readFileSync(handle!.filePath, 'utf-8'));
+    expect(written.autoCompactWindow).toBe(750_000);
+    expect(written._wizardManagedAutoCompact).toBe(true);
+  });
+
+  it('does NOT add the marker or upgrade when the env override is disabled', () => {
+    process.env.ANTHROPIC_BASE_URL = 'https://gateway.example.com';
+    process.env.AMPLITUDE_WIZARD_COMPACTION_WINDOW = 'disable';
+
+    // Even with a stale wizard-marked value, the explicit env opt-out
+    // wins — we don't write or rewrite the key.
+    const localPath = path.join(workdir, '.claude', 'settings.local.json');
+    fs.mkdirSync(path.dirname(localPath), { recursive: true });
+    const prior = JSON.stringify(
+      { autoCompactWindow: 120_000, _wizardManagedAutoCompact: true },
+      null,
+      2,
+    );
+    fs.writeFileSync(localPath, prior);
+
+    const handle = applyScopedSettings(workdir);
+    const written = JSON.parse(fs.readFileSync(handle!.filePath, 'utf-8'));
+    // The prior values pass through untouched (we only managed the env
+    // block on this code path).
+    expect(written.autoCompactWindow).toBe(120_000);
+    expect(written._wizardManagedAutoCompact).toBe(true);
+
+    handle!.restore();
+    expect(fs.readFileSync(localPath, 'utf-8')).toBe(prior);
+
+    delete process.env.AMPLITUDE_WIZARD_COMPACTION_WINDOW;
   });
 });
