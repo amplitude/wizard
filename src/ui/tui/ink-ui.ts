@@ -128,6 +128,12 @@ export class InkUI implements WizardUI {
     this.store.setCurrentActivity(activity);
   }
 
+  pushDiscoveryFact(
+    fact: import('../../lib/wizard-session.js').DiscoveryFact,
+  ): void {
+    this.store.pushDiscoveryFact(fact);
+  }
+
   startRun(): void {
     this.store.setRunPhase(RunPhase.Running);
   }

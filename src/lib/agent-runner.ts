@@ -769,10 +769,50 @@ async function runAgentWizardBody(
 
   // Disclosure text is static — IntroScreen renders it directly.
 
+  // Helper: append a single chip to the cold-start "discovery feed" the
+  // TUI fades into the empty middle of RunScreen. Each fact has a stable
+  // id so re-publishing on a retry path is a no-op; non-TUI UIs ignore
+  // the call entirely. Wrapped in try/catch so a UI hiccup never blocks
+  // the agent from starting — purely cosmetic.
+  const publishDiscoveryFact = (
+    id: string,
+    body: { label: string; value: string },
+  ): void => {
+    try {
+      getUI().pushDiscoveryFact({
+        id,
+        label: body.label,
+        value: body.value,
+        discoveredAt: Date.now(),
+      });
+    } catch (err) {
+      logToFile(
+        `[discovery-feed] pushDiscoveryFact(${id}) failed: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+    }
+  };
+
   const typeScriptDetected = isUsingTypeScript({
     installDir: session.installDir,
   });
   session.typescript = typeScriptDetected;
+
+  // Cosmetic: surface each cold-start fact as it lands in the wizard's
+  // "discovery feed" so RunScreen has *something* to fade in during the
+  // 30-60s agent boot. The values themselves are already on the session
+  // (used by the preflight context block); we just echo them to the TUI.
+  // No-op for non-TUI implementations.
+  publishDiscoveryFact('framework', {
+    label: 'Framework',
+    value:
+      session.detectedFrameworkLabel ?? config.metadata.name ?? 'detecting…',
+  });
+  publishDiscoveryFact('typescript', {
+    label: 'TypeScript',
+    value: typeScriptDetected ? 'yes' : 'no',
+  });
 
   // Framework detection and version
   const usesPackageJson = config.detection.usesPackageJson !== false;
@@ -799,6 +839,16 @@ async function runAgentWizardBody(
     }
   } else {
     frameworkVersion = config.detection.getVersion(null);
+  }
+
+  // Refine the framework chip with the resolved version once known.
+  if (frameworkVersion && frameworkVersion !== 'latest') {
+    const baseLabel =
+      session.detectedFrameworkLabel ?? config.metadata.name ?? 'framework';
+    publishDiscoveryFact('framework-version', {
+      label: 'Version',
+      value: `${baseLabel} ${frameworkVersion}`,
+    });
   }
 
   // Set analytics tags for framework version
@@ -982,6 +1032,23 @@ async function runAgentWizardBody(
       }`,
     );
   }
+
+  if (packageManagerInfo?.primary) {
+    publishDiscoveryFact('package-manager', {
+      label: 'Package manager',
+      value: packageManagerInfo.primary.label,
+    });
+  }
+  if (session.selectedProjectName) {
+    publishDiscoveryFact('project', {
+      label: 'Project',
+      value: session.selectedProjectName,
+    });
+  }
+  publishDiscoveryFact('region', {
+    label: 'Region',
+    value: cloudRegion.toUpperCase(),
+  });
 
   const preflightBlock = buildPreflightContext({
     installDir: session.installDir,

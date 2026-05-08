@@ -2894,4 +2894,71 @@ describe('WizardStore', () => {
       expect(store.session.requiresAccountConfirmation).toBe(false);
     });
   });
+
+  describe('pushDiscoveryFact', () => {
+    it('appends a fact to the cold-start discovery feed', () => {
+      const store = createStore();
+      expect(store.session.discoveryFacts).toEqual([]);
+
+      store.pushDiscoveryFact({
+        id: 'framework',
+        label: 'Framework',
+        value: 'Next.js 15',
+        discoveredAt: 1_700_000_000_000,
+      });
+
+      expect(store.session.discoveryFacts).toHaveLength(1);
+      expect(store.session.discoveryFacts[0]).toMatchObject({
+        id: 'framework',
+        label: 'Framework',
+        value: 'Next.js 15',
+      });
+    });
+
+    it('dedupes by id — re-pushing the same id is a no-op', () => {
+      const store = createStore();
+      store.pushDiscoveryFact({
+        id: 'framework',
+        label: 'Framework',
+        value: 'Next.js 15',
+        discoveredAt: 1,
+      });
+      // Same id, different value — should be ignored.
+      store.pushDiscoveryFact({
+        id: 'framework',
+        label: 'Framework',
+        value: 'Next.js 14',
+        discoveredAt: 2,
+      });
+      expect(store.session.discoveryFacts).toHaveLength(1);
+      expect(store.session.discoveryFacts[0].value).toBe('Next.js 15');
+    });
+
+    it('preserves insertion order across multiple distinct facts', () => {
+      const store = createStore();
+      store.pushDiscoveryFact({
+        id: 'framework',
+        label: 'Framework',
+        value: 'Next.js',
+        discoveredAt: 1,
+      });
+      store.pushDiscoveryFact({
+        id: 'package-manager',
+        label: 'Package manager',
+        value: 'pnpm',
+        discoveredAt: 2,
+      });
+      store.pushDiscoveryFact({
+        id: 'typescript',
+        label: 'TypeScript',
+        value: 'yes',
+        discoveredAt: 3,
+      });
+      expect(store.session.discoveryFacts.map((f) => f.id)).toEqual([
+        'framework',
+        'package-manager',
+        'typescript',
+      ]);
+    });
+  });
 });
