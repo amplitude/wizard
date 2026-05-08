@@ -1974,7 +1974,12 @@ async function runAgentWizardBody(
   // codebases hit the wizard before the chunked write phase is end-to-end
   // wired through the SDK (the schema + tools land in this PR; the
   // multi-session driver is a follow-up — see PR description).
-  {
+  // Pagination breadcrumb is fire-and-forget — wrap in try/catch so a failed
+  // dynamic import or unexpected runtime error here can never block the
+  // critical commitPlannedEventsStep that follows. Without this guard a
+  // module-load issue or analytics throw would prevent the user's approved
+  // event plan from being committed to the Amplitude tracking plan.
+  try {
     const eventCount = agentResult.plannedEvents?.length ?? 0;
     const { shouldPaginate, resolveChunkSize, buildBatches } = await import(
       './event-plan-pagination.js'
@@ -1994,6 +1999,12 @@ async function runAgentWizardBody(
       'total batches': totalBatches,
       integration: config.metadata.integration,
     });
+  } catch (err) {
+    logToFile(
+      `[agent-runner] pagination breadcrumb failed (non-fatal): ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
   }
 
   const plannedEventsSummary = await commitPlannedEventsStep(

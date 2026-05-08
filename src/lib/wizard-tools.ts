@@ -18,6 +18,7 @@ import {
   readLocalEventPlan,
   readLocalEventPlanRich,
 } from './event-plan-parser.js';
+import { MIN_CHUNK_SIZE, MAX_CHUNK_SIZE } from './event-plan-pagination.js';
 import { recordEventPlanDecision } from './agent/event-plan-feedback-state.js';
 import {
   ensureDir,
@@ -2080,10 +2081,11 @@ For codebases with >50 events the wizard runs the WRITE phase in chunks of ~25 e
       chunkSize: z
         .number()
         .int()
-        .min(1)
+        .min(MIN_CHUNK_SIZE)
+        .max(MAX_CHUNK_SIZE)
         .optional()
         .describe(
-          'Events per batch (declared by the agent for transparency). Default 25; configurable via AMPLITUDE_WIZARD_EVENT_PLAN_CHUNK_SIZE. The runner is the source of truth for chunking — this field is informational.',
+          `Events per batch (declared by the agent for transparency). Default 25; configurable via AMPLITUDE_WIZARD_EVENT_PLAN_CHUNK_SIZE. Must be in [${MIN_CHUNK_SIZE}, ${MAX_CHUNK_SIZE}] to match the validator. Omit for single-batch (legacy) plans. The runner is the source of truth for chunking — this field is informational.`,
         ),
       reason: reasonField,
     },
@@ -2302,7 +2304,12 @@ This tool does not persist or prompt; it's a pure computation. Follow up with co
       const paginated = shouldPaginate(totalEvents);
       // Below the threshold we still emit a single batch entry so the
       // schema is uniform — the agent can iterate the array unconditionally.
-      const effectiveChunk = paginated ? chunkSize : totalEvents;
+      // For non-paginated plans use max(totalEvents, 1) for the build call so
+      // we always get one batch covering [0, totalEvents). The reported
+      // `chunkSize` always echoes the resolved (validator-compatible) value
+      // so an agent can hand it straight to confirm_event_plan without
+      // tripping the chunkSize ≥ MIN_CHUNK_SIZE check on small projects.
+      const effectiveChunk = paginated ? chunkSize : Math.max(totalEvents, 1);
       const batches = buildBatches(totalEvents, effectiveChunk);
       const suggestedBatches = batches.map((b) => ({
         batchIndex: b.batchIndex,
@@ -2311,14 +2318,19 @@ This tool does not persist or prompt; it's a pure computation. Follow up with co
         end: b.end,
         eventNames: args.events.slice(b.start, b.end).map((e) => e.name),
       }));
+      // Report the resolved (validator-compatible) chunkSize unconditionally.
+      // When paginated is false the field is informational — the agent will
+      // skip batch metadata entirely. Echoing the resolved default avoids
+      // returning a value (e.g. 1–4 for a tiny project) that confirm_event_plan
+      // would reject as below MIN_CHUNK_SIZE if the agent forwarded it.
       const payload = {
         totalEvents,
         paginated,
-        chunkSize: effectiveChunk,
+        chunkSize,
         suggestedBatches,
       };
       logToFile(
-        `propose_event_plan: total=${totalEvents} paginated=${paginated} chunkSize=${effectiveChunk} batches=${batches.length}`,
+        `propose_event_plan: total=${totalEvents} paginated=${paginated} chunkSize=${chunkSize} effectiveChunk=${effectiveChunk} batches=${batches.length}`,
       );
       return {
         content: [{ type: 'text' as const, text: JSON.stringify(payload) }],
