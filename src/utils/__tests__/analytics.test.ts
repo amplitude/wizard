@@ -140,6 +140,38 @@ describe('Analytics', () => {
     });
   });
 
+  describe('disable() — --no-telemetry hard switch', () => {
+    it('isDisabled returns false on a fresh instance', () => {
+      expect(analytics.isDisabled()).toBe(false);
+    });
+
+    it('disable() flips the flag idempotently', () => {
+      analytics.disable();
+      expect(analytics.isDisabled()).toBe(true);
+      analytics.disable();
+      expect(analytics.isDisabled()).toBe(true);
+    });
+
+    it('capture() short-circuits when disabled — no SDK track call', () => {
+      const trackInstance = mockCreateInstance.mock.results[0]?.value as {
+        track: ReturnType<typeof vi.fn>;
+      };
+      analytics.disable();
+      analytics.capture('test event', { foo: 'bar' });
+      expect(trackInstance.track).not.toHaveBeenCalled();
+    });
+
+    it('identifyUser() short-circuits when disabled — no SDK identify call', () => {
+      const trackInstance = mockCreateInstance.mock.results[0]?.value as {
+        identify: ReturnType<typeof vi.fn>;
+      };
+      analytics.setDistinctId('user-123');
+      analytics.disable();
+      analytics.identifyUser({ email: 'someone@example.com' });
+      expect(trackInstance.identify).not.toHaveBeenCalled();
+    });
+  });
+
   describe('resolveTelemetryApiKey', () => {
     const DEV_KEY = 'ce58b28cace35f7df0eb241b0cd72044';
     const PROD_KEY = 'e5a2c9bdffe949f7da77e6b481e118fa';

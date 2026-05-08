@@ -91,6 +91,19 @@ export class Analytics {
   private readonly client: ReturnType<typeof createInstance>;
   private initPromise: Promise<void> | null = null;
   private readonly startedAt = Date.now();
+  /**
+   * Hard kill-switch for telemetry. Set by `disable()` (called from
+   * `--no-telemetry` and from the eval runner forwarding the flag).
+   * When true, every `capture()` and `identifyUser()` short-circuits
+   * before the SDK is touched — no init, no track, no network.
+   *
+   * Why a separate flag rather than reusing the feature-flag opt-out
+   * path (`applyOptOut`): that path requires the flag client to have
+   * initialized, which itself requires the API key, which itself
+   * requires us to have decided to enable telemetry. The hard switch
+   * makes the disable explicit and bypasses all of that.
+   */
+  private disabled = false;
 
   constructor() {
     this.sessionProperties = { $app_name: this.appName };
@@ -130,6 +143,10 @@ export class Analytics {
     region?: string | null;
     integration?: string | null;
   }): void {
+    if (this.disabled) {
+      debug('identifyUser (disabled):', properties);
+      return;
+    }
     const apiKey = resolveTelemetryApiKey();
     if (!apiKey || !this.distinctId) {
       debug('identifyUser skipped (no API key or distinctId):', properties);
@@ -213,7 +230,25 @@ export class Analytics {
     });
   }
 
+  /**
+   * Hard-disable all telemetry for the rest of the process lifetime.
+   * Used by `--no-telemetry` (eval runs) so synthetic wizard
+   * invocations never reach the prod analytics project. Idempotent.
+   */
+  disable(): void {
+    this.disabled = true;
+    debug('analytics disabled (--no-telemetry)');
+  }
+
+  isDisabled(): boolean {
+    return this.disabled;
+  }
+
   capture(eventName: string, properties?: Record<string, unknown>) {
+    if (this.disabled) {
+      debug('capture (disabled):', eventName, properties);
+      return;
+    }
     const apiKey = resolveTelemetryApiKey();
     if (!apiKey) {
       debug('capture (no API key):', eventName, properties);

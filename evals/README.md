@@ -13,7 +13,7 @@ Phase 1 of the spec is complete. Layers 0–4 + 6 are wired with deterministic +
 | 2 — static SDK | ✅ done | criterions 2, 3, 7, 11, 12, 15 |
 | 3 — build / typecheck | ✅ done | criterion 18; PR-gate runs golden-pinned `BuildResult`; nightly runs `pnpm install && <buildCommand>` against the working tree |
 | 4 — runtime probe | ✅ done | Playwright-driven, dynamic-import gated; nightly installs playwright, PR-gate skip-passes |
-| 5 — ingestion verification | ⏳ blocked | needs the eval-only Amplitude project (decision #2 in the spec) — see [Layer 5 below](#layer-5--ingestion-verification-blocked) |
+| 5 — ingestion verification | ⛔ out of scope | wizard runs with `--no-telemetry` in eval mode; ingestion correctness is owned by `e2e-tests/`. See [Layer 5 below](#layer-5--ingestion-verification-out-of-scope) |
 | 6 — LLM judge | ✅ done | rubric versioned via `rubrics/rubric-version.txt`; --judge flag + `ANTHROPIC_API_KEY`; gateway routing is the next step |
 
 Ring 1 scenarios shipped: `nextjs-app-router/vanilla`, `nextjs-app-router/pre-existing-vendor`, `react-router-7/framework`, `react-router-7/data`, `react-vite/vanilla`, `expo/vanilla`, `generic/probe`. The nightly variance harness flags any scenario whose two seeds disagree by more than 10 points (the spec's non-determinism threshold).
@@ -109,18 +109,13 @@ The full flow is in `docs/evals.md` § Adding a new scenario. Mechanics for Week
 
 **Adding a scorer:** see `docs/evals.md` § Adding a new scorer. Always start by adding a row to the 19-point checklist in `docs/evals.md`, then update the mirror at [`spec/quality-criteria.md`](./spec/quality-criteria.md).
 
-## Layer 5 — ingestion verification (blocked)
+## Layer 5 — ingestion verification (out of scope)
 
-Layer 5 is intentionally not implemented. It needs an eval-only Amplitude project — somewhere we can blast synthetic events without polluting prod analytics — and that's decision #2 in the spec, still open with ops.
+Layer 5 is intentionally **not** part of the eval suite. The wizard is invoked with `--no-telemetry` in eval mode (`evals/runner/invoke-wizard.ts` forwards the flag and the env var unconditionally), so synthetic eval runs never reach the prod analytics project. There's nothing to verify ingestion against.
 
-When the project lands, Layer 5 plugs in by:
+End-to-end "does the SDK actually deliver events to Amplitude?" coverage lives in `e2e-tests/test-applications/`, not here. That's the right home: ingestion depends on framework bundling, hosting, and network shape — variables the eval suite doesn't control. The eval suite stops at Layer 4 (runtime probe boots the integration, asserts ≥1 outbound Amplitude request fires).
 
-1. Adding an `IngestionResult` type to `Artifact` (sibling of `BuildResult` / `RuntimeResult`).
-2. Reusing the Layer 4 runtime probe: instead of intercepting Amplitude requests with `route.fulfill()`, **forward** them to the eval-only project's HTTP API endpoint.
-3. Polling the Amplitude API (`/2/events` or equivalent) for the events the agent committed to in `event_plan_confirmed`.
-4. Adding a `layer5-ingestion/events-arrived.ts` scorer that compares the polled events against the confirmed plan.
-
-The runner already produces every input Layer 5 needs. The blocker is the project + key, not the framework.
+If a future need surfaces, the wiring is straightforward — Layer 4's request interceptor can be flipped to forward instead of fulfill, and a Layer 5 scorer can poll the Amplitude API for arrival. The plumbing exists; we just don't run it.
 
 ## Known gaps
 

@@ -429,6 +429,12 @@ void yargs(hideBin(process.argv))
       describe: 'emit machine-readable JSON output (implied when piped)',
       type: 'boolean',
     },
+    'no-telemetry': {
+      default: false,
+      describe:
+        'disable wizard internal telemetry for this run (used by the eval suite so synthetic runs do not pollute prod analytics)',
+      type: 'boolean',
+    },
     human: {
       default: false,
       describe: 'force human-readable output (overrides --json auto-detect)',

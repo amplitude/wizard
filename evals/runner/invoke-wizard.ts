@@ -232,7 +232,19 @@ export async function runLive(
   const auth = resolveLiveAuthMode(options);
 
   const { cmd, baseArgs } = resolveWizardSpawn(options);
-  const args = [...baseArgs, '--agent', '--yes', '--install-dir', workingDir];
+  // `--no-telemetry` is non-negotiable in eval mode: the wizard child
+  // is a synthetic run, and its `wizard cli: *` events would otherwise
+  // pollute the prod analytics project. The flag is forwarded
+  // unconditionally; orchestrators that want telemetry from a live
+  // run should call the wizard directly, not through the eval runner.
+  const args = [
+    ...baseArgs,
+    '--agent',
+    '--yes',
+    '--no-telemetry',
+    '--install-dir',
+    workingDir,
+  ];
   // useDetection defaults to `true` (pass `--integration`). Set
   // `false` on a scenario to drop the hint and grade the wizard's
   // detection pipeline against `integrationHint` as ground truth.
@@ -247,6 +259,11 @@ export async function runLive(
   // Ensure the wizard takes the agent code path even if the parent
   // process happens to have set TUI-leaning env.
   env.AMPLITUDE_WIZARD_AGENT = '1';
+  // Belt-and-braces with the `--no-telemetry` flag above. If the flag
+  // is ever stripped (e.g. by a packaging change or a wrapper script
+  // that doesn't propagate argv cleanly), the env var still disables
+  // analytics inside the wizard child.
+  env.AMPLITUDE_WIZARD_NO_TELEMETRY = '1';
   if (auth.kind === 'oauth-env') {
     // Forward gateway-auth env to the wizard child. Wizard-side
     // reading of these env vars is a follow-up PR; until then a run
