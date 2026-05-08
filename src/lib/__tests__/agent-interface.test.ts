@@ -903,6 +903,163 @@ describe('runAgent', () => {
       },
     );
 
+    // Regression: production audit 2026-05-07. The 60s stall detector
+    // re-armed the moment `compact_boundary` landed in the SDK stream,
+    // even though the model still had to spend 60–120s rebuilding context
+    // from the compacted summary before the next user-visible chunk could
+    // stream. The detector misclassified that gap as a stall and aborted
+    // the SDK query, and the outer retry loop burned the entire
+    // conversation arc into a chain of stall→retry→stall (5 retries on
+    // session 72c71b61, ~13 min wasted after a successful compaction at
+    // 23:14:21). The fix opens a `POST_COMPACT_GRACE_MS` (120s) window
+    // when compact_boundary is observed, during which a stall timer fire
+    // suppresses the abort and re-arms; the grace clears the moment the
+    // next real progress message arrives.
+    it(
+      'grants a post-compaction grace window before re-arming the stall detector',
+      { timeout: 15_000 },
+      async () => {
+        vi.useFakeTimers();
+
+        const { analytics } = (await import('../../utils/analytics')) as {
+          analytics: { wizardCapture: Mock };
+        };
+        analytics.wizardCapture.mockClear();
+
+        let queryCallCount = 0;
+        let signalHandle: AbortSignal | undefined;
+        let yieldCompactBoundary: (() => void) | undefined;
+
+        mockQuery.mockImplementation(
+          (params: { options: Record<string, unknown> }) => {
+            queryCallCount++;
+            const signal = params.options.abortSignal as AbortSignal;
+            signalHandle = signal;
+
+            if (queryCallCount === 1) {
+              // Stream sequence:
+              //   1. assistant chunk (puts the run in `active` phase, so
+              //      stall timeout = STALL_TIMEOUT_MS, not the cold-start
+              //      window)
+              //   2. compact_boundary system message
+              //   3. silence — the post-compact rebuild gap. Without the
+              //      fix the 60s stall timer would abort here.
+              return (async function* () {
+                yield {
+                  type: 'assistant',
+                  message: { content: [{ type: 'text', text: 'working' }] },
+                };
+                // Pause so the test can advance timers between yields and
+                // observe the timer state inside the gap. Resolved by the
+                // controller below.
+                await new Promise<void>((resolve) => {
+                  yieldCompactBoundary = resolve;
+                });
+                yield {
+                  type: 'system',
+                  subtype: 'compact_boundary',
+                  compact_metadata: {
+                    trigger: 'auto',
+                    pre_tokens: 100_000,
+                    post_tokens: 20_000,
+                    duration_ms: 8_000,
+                  },
+                };
+                // Hang until aborted. If the grace window is honoured the
+                // first abort happens AFTER `STALL_TIMEOUT_MS +
+                // POST_COMPACT_GRACE_MS` (60s + 120s = 180s) elapses
+                // without progress. Without the fix it aborts at 60s and
+                // the test would observe the stall capture far too early.
+                await new Promise<never>((_, reject) => {
+                  signal.addEventListener('abort', () =>
+                    reject(new Error('Stall aborted')),
+                  );
+                });
+              })();
+            }
+
+            // Subsequent retries after the eventual abort just succeed
+            // immediately — the test only cares about attempt 1's timing.
+            return (async function* () {
+              yield {
+                type: 'result',
+                subtype: 'success',
+                is_error: false,
+                result: '',
+              };
+            })();
+          },
+        );
+
+        const runPromise = runAgent(
+          defaultAgentConfig,
+          'test prompt',
+          defaultOptions,
+          mockSpinner as unknown as SpinnerHandle,
+          { successMessage: 'Done', errorMessage: 'Failed' },
+        );
+
+        // Step 1: let the SDK setup + first yield run. The mock generator
+        // pauses on `yieldCompactBoundary` after emitting the assistant
+        // chunk. `runAgent` does substantial async setup before reaching
+        // the SDK call. Spin the microtask queue with multiple short
+        // ticks so the SDK call lands and the assistant chunk is
+        // consumed without yet crossing the cold-start STALL_TIMEOUT_MS.
+        for (let i = 0; i < 50; i++) {
+          await vi.advanceTimersByTimeAsync(10);
+        }
+        expect(queryCallCount).toBe(1);
+        expect(signalHandle).toBeDefined();
+        // Release the pause → compact_boundary is yielded, the message
+        // loop processes it, opens the post-compaction grace window, and
+        // re-enters the await on `signal.addEventListener('abort', …)`.
+        yieldCompactBoundary?.();
+        for (let i = 0; i < 10; i++) {
+          await vi.advanceTimersByTimeAsync(10);
+        }
+
+        // Step 2: walk past the normal STALL_TIMEOUT_MS (60s). With the
+        // grace window in place the stall detector must NOT fire — the
+        // model is mid-rebuild after compaction. Pre-fix this is exactly
+        // when the 13-min retry storm started.
+        await vi.advanceTimersByTimeAsync(60_000);
+        let stallCalls = (
+          analytics.wizardCapture.mock.calls as unknown[][]
+        ).filter((args) => args[0] === 'agent stall detected');
+        expect(stallCalls).toHaveLength(0);
+        expect(signalHandle?.aborted).toBe(false);
+        expect(queryCallCount).toBe(1);
+
+        // Walk to ~110s post-compaction — still inside the 120s grace
+        // window, still no abort.
+        await vi.advanceTimersByTimeAsync(50_000);
+        stallCalls = (analytics.wizardCapture.mock.calls as unknown[][]).filter(
+          (args) => args[0] === 'agent stall detected',
+        );
+        expect(stallCalls).toHaveLength(0);
+        expect(signalHandle?.aborted).toBe(false);
+
+        // Step 3: walk well past the grace window (120s) AND the next
+        // STALL_TIMEOUT_MS (60s). The detector MUST be allowed to fire
+        // again — the grace is bounded, not permanent. Without this
+        // assertion the fix could mask real post-compact hangs. Once the
+        // grace expires and the next stall tick lands, the controller
+        // aborts attempt 1, the outer loop retries, and attempt 2 yields
+        // the success result.
+        await vi.advanceTimersByTimeAsync(1_500_000);
+        const result = await runPromise;
+        expect(result).toEqual({ plannedEvents: [] });
+
+        // The grace was bounded: a stall WAS detected after the window
+        // closed and a second attempt was taken.
+        stallCalls = (analytics.wizardCapture.mock.calls as unknown[][]).filter(
+          (args) => args[0] === 'agent stall detected',
+        );
+        expect(stallCalls.length).toBeGreaterThanOrEqual(1);
+        expect(queryCallCount).toBeGreaterThanOrEqual(2);
+      },
+    );
+
     // Bugbot thread (PR #594): "Outer retry loop activity not cleared on
     // exhaustion". The outer retry loop sets a `rate-limit-retry` activity
     // before each backoff sleep but used to skip flipping the

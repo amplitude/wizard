@@ -2198,6 +2198,20 @@ export async function runAgent(
     // both a tighter cap AND a more accurate one — a healthy
     // sonnet-4-6 run starts streaming within 5–10s of `requesting`.
     const STALL_TIMEOUT_MS = 60_000;
+    // Post-compaction grace window: after a `compact_boundary` system message
+    // lands, the model must rebuild its working context from the compacted
+    // summary before the next user-visible chunk can stream. On large
+    // contexts via Vertex this rebuild routinely takes 60–120s of upstream
+    // silence — well past `STALL_TIMEOUT_MS`. Without this grace window the
+    // 60s stall timer would fire mid-rebuild, abort the SDK query, and the
+    // outer retry loop would burn the entire conversation arc into a chain
+    // of stall→retry→stall (production audit 2026-05-07: 5 stall retries on
+    // session 72c71b61 burned ~13 min after a successful compaction at
+    // 23:14:21). Compaction itself succeeded — only the post-compact stream
+    // gap was misclassified as a stall. Granting 120s before the detector
+    // can fire again rides through the rebuild and lets the next real
+    // chunk clear the grace flag (see `inPostCompactWindow` below).
+    const POST_COMPACT_GRACE_MS = 120_000;
 
     // (Auth tracking declared at outer function scope — see above the try
     // block — so the outer catch can also branch on authErrorDetected.)
@@ -2597,6 +2611,15 @@ export async function runAgent(
       let receivedFirstMessage = false;
       let lastMessageType = 'none';
       let lastMessageTime = Date.now();
+      // Timestamp (ms since epoch) until which the stall detector must
+      // tolerate upstream silence because the model is rebuilding context
+      // after a compaction round-trip. Set when `compact_boundary` is
+      // observed in the SDK stream (see the `compact_boundary` handler in
+      // the message loop below). Cleared on the next real user-visible
+      // chunk (text-delta, tool-call, etc.) so the detector returns to
+      // normal sensitivity as soon as the post-compact stream resumes.
+      // `null` means no grace active.
+      let postCompactGraceUntil: number | null = null;
 
       const resetStaleTimer = () => {
         if (staleTimer) clearTimeout(staleTimer);
@@ -2615,6 +2638,29 @@ export async function runAgent(
               `Agent stall heartbeat suppressed — user prompt is active (attempt ${
                 attempt + 1
               }, last message: ${lastMessageType})`,
+            );
+            resetStaleTimer();
+            return;
+          }
+          // Within the post-compaction grace window. The model is silent
+          // because it's rebuilding context from the compacted summary,
+          // not because the upstream is hung. Suppress the abort and
+          // re-arm; the next chunk that arrives clears the grace flag.
+          // Once the grace deadline passes without any chunk, the timer
+          // re-arms again and on its next fire `postCompactGraceUntil`
+          // will be in the past, so we DO abort — that path catches a
+          // real post-compact hang (e.g. gateway dropped the stream).
+          if (
+            postCompactGraceUntil !== null &&
+            Date.now() < postCompactGraceUntil
+          ) {
+            const remaining = Math.round(
+              (postCompactGraceUntil - Date.now()) / 1000,
+            );
+            logToFile(
+              `Agent stall heartbeat suppressed — post-compaction grace window (${remaining}s remaining, attempt ${
+                attempt + 1
+              })`,
             );
             resetStaleTimer();
             return;
@@ -3155,6 +3201,21 @@ export async function runAgent(
               (rawMessage as Record<string, unknown>)?.type?.toString() ??
               'unknown';
             lastMessageType = rawType;
+            // Real user-visible progress arrived. Clear any active
+            // post-compaction grace window — the model has resumed
+            // streaming, so the stall detector returns to normal
+            // sensitivity. Skip on `compact_boundary` itself: that
+            // message is the *cause* of the grace window we're about
+            // to set in the dedicated handler below; clearing here
+            // would wipe the grace one tick before it takes effect.
+            const rawSubtype =
+              (rawMessage as Record<string, unknown>)?.subtype?.toString() ??
+              '';
+            const isCompactBoundary =
+              rawType === 'system' && rawSubtype === 'compact_boundary';
+            if (!isCompactBoundary && postCompactGraceUntil !== null) {
+              postCompactGraceUntil = null;
+            }
             resetStaleTimer();
             // Real progress arrived — clear any cold-start / compaction /
             // rate-limit-retry activity. Same line clears all three because
@@ -3354,6 +3415,24 @@ export async function runAgent(
             } catch {
               // Never let UI emit failures abort the stream.
             }
+            // Open the post-compaction grace window. The SDK has just
+            // emitted compact_boundary, but the model still needs to
+            // rebuild its working context from the compacted summary
+            // before it can stream the next user-visible chunk. On large
+            // contexts via Vertex this rebuild is regularly 60–120s of
+            // upstream silence; without this grace flag the 60s stall
+            // timer would fire mid-rebuild and abort the SDK query
+            // (production audit 2026-05-07: 5 stall retries on session
+            // 72c71b61 burned ~13 min of conversation arc this way).
+            // Cleared on the next non-`compact_boundary` progress
+            // message above; if no progress arrives within the grace
+            // window the stall timer fires normally on its next tick.
+            postCompactGraceUntil = Date.now() + POST_COMPACT_GRACE_MS;
+            logToFile(
+              `Post-compaction grace window opened (${
+                POST_COMPACT_GRACE_MS / 1000
+              }s) — stall detector will tolerate upstream silence while the model rebuilds context`,
+            );
           }
 
           // Short-circuit the SDK's 401 retry storm. The SDK retries 401s up
