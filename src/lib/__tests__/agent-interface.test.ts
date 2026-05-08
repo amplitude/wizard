@@ -1474,6 +1474,12 @@ describe('runAgent', () => {
   // talking to the Amplitude MCP endpoint, so every Amplitude MCP call
   // after rotation 401s until the agent reconnects. Test verifies the
   // header is rotated alongside the env vars.
+  //
+  // Update (LLM-gateway-bearer-refresh fix): the same pre-attempt refresh
+  // path now runs on attempt 0 too — long single attempts (35+ min Opus
+  // taxonomy runs) outlive the bearer's TTL just like inter-attempt
+  // gaps do. This test now verifies BOTH attempts ship the rotated
+  // bearer when the OAuth path returns a fresh value.
   describe('inter-attempt token refresh: MCP Authorization header rotation', () => {
     afterEach(() => {
       vi.useRealTimers();
@@ -1484,10 +1490,12 @@ describe('runAgent', () => {
     it('refreshes the MCP Authorization header when the token rotates between attempts', async () => {
       vi.useFakeTimers();
 
-      // Mock agent-runner so the inter-attempt refresh hook returns a
-      // rotated token on the second attempt's preamble. The dynamic
-      // `await import('./agent-runner.js')` inside agent-interface
-      // resolves to this mock module.
+      // Mock agent-runner so the pre-attempt refresh hook returns a
+      // rotated token. The dynamic `await import('./agent-runner.js')`
+      // inside agent-interface resolves to this mock module. With the
+      // mid-run refresh fix, the rotation now applies to attempt 0
+      // too (not just inter-attempt) — both attempts will see the
+      // rotated bearer when the OAuth path is configured to rotate.
       vi.doMock('../agent-runner.js', () => ({
         refreshTokenIfStale: vi.fn(async () => 'new-token'),
       }));
@@ -1555,18 +1563,22 @@ describe('runAgent', () => {
         { successMessage: 'Done', errorMessage: 'Failed' },
       );
 
-      // 60s cold-start stall + jittered backoff (2-4s) = 62-64s worst case.
-      await vi.advanceTimersByTimeAsync(70_000);
+      // 60s cold-start stall + jittered backoff (2-30s) = up to ~90s.
+      // With the mid-run bearer-refresh fix, the per-attempt refresh
+      // also fires on attempt 0 — that adds an extra microtask cycle
+      // for the dynamic import before the query starts, so we need a
+      // few more advance cycles to drain everything.
+      await vi.advanceTimersByTimeAsync(120_000);
 
       const result = await runPromise;
 
       expect(result).toEqual({ plannedEvents: [] });
       expect(queryCallCount).toBe(2);
-      // First attempt sees the OLD bearer.
-      expect(observedAuthHeaders[0]).toBe(`Bearer ${initialBearer}`);
-      // Second attempt MUST see the rotated bearer — without the
+      // BOTH attempts see the rotated bearer — pre-attempt refresh
+      // runs on attempt 0 too (mid-run-refresh fix). Without the
       // header-rotation fix the subprocess would keep sending
       // `Bearer old-token` and the Amplitude MCP would 401.
+      expect(observedAuthHeaders[0]).toBe('Bearer new-token');
       expect(observedAuthHeaders[1]).toBe('Bearer new-token');
       // The mcpServers object handed back to the caller should also
       // reflect the rotation (defensive: callers may inspect it for

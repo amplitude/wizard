@@ -109,6 +109,10 @@ import {
 } from './agent/ai-sdk-gateway-probe.js';
 import { sdkStandardFallbackModel, selectModel } from './agent/model-config.js';
 import { buildSkillTierSystemPromptAppend } from './agent/skill-tier-prompt.js';
+import {
+  refreshGatewayBearer,
+  startGatewayBearerRefreshTimer,
+} from './llm-gateway-bearer-refresh.js';
 
 export { selectModel, sdkStandardFallbackModel };
 export { parseEventPlanContent };
@@ -2016,7 +2020,45 @@ export async function runAgent(
   let eventPlanHandle: DualPathWatcherHandle | undefined;
   let dashboardHandle: DualPathWatcherHandle | undefined;
 
+  // Mid-run LLM gateway bearer refresh. A 35+ minute single attempt can
+  // outlive the OAuth bearer's TTL; without this the run dies at the
+  // finish line with `400 authentication_error: Token revoked or
+  // expired` from `core.amplitude.com/wizard/v1/messages`. The timer
+  // wakes every 5 min, calls the same `refreshTokenIfStale` path the
+  // pre-run / inter-attempt refreshes use, and rotates `process.env`
+  // + `mcpServers['amplitude-wizard'].headers.Authorization` so the
+  // next `query()` re-read of `process.env` ships a current bearer.
+  // The handle is `unref()`-ed inside the helper so it never blocks
+  // process exit; we still clear it in `finally` for cleanliness.
+  let stopGatewayBearerRefresh: (() => void) | undefined;
+
   try {
+    // Start the periodic refresh timer as soon as we know the gateway
+    // path is in use (not direct API key, not local claude). Skipping
+    // it on the bypass paths avoids a useless OAuth probe on every
+    // tick when there's no Amplitude bearer in play.
+    //
+    // Wrapping `refreshTokenIfStale` in a thunk that does the import
+    // lazily, when the timer actually fires, keeps the hot startup
+    // path free of an extra dynamic import + circular-graph evaluation
+    // (the per-attempt block does the same import; we'd otherwise
+    // resolve `agent-runner.js` twice in quick succession during the
+    // setup window). It also matches the lazy-import idiom the
+    // per-attempt block already uses.
+    if (!agentConfig.useDirectApiKey && !agentConfig.useLocalClaude) {
+      stopGatewayBearerRefresh = startGatewayBearerRefreshTimer({
+        mcpServers: agentConfig.mcpServers,
+        refreshTokenIfStale: async (current, label) => {
+          const { refreshTokenIfStale } = await import('./agent-runner.js');
+          return refreshTokenIfStale(current, label);
+        },
+        updateAmplitudeMcpBearer,
+        onRotated: () => {
+          logToFile('Mid-run OAuth bearer rotated by periodic timer');
+          analytics.wizardCapture('agent mid-run token refresh', {});
+        },
+      });
+    }
     // Tools needed for the wizard:
     // - File operations: Read, Write, Edit
     // - Search: Glob, Grep
@@ -2419,63 +2461,54 @@ export async function runAgent(
         // into a fresh retry's pill.
         resetStreamPill();
 
-        // Refresh the OAuth access token if it's within the pre-expiry
-        // buffer. Long agent runs (Opus + extended thinking, multi-step
-        // taxonomy) can outlive the original token's lifetime; without
-        // an inter-attempt refresh, the next SDK subprocess gets 401 and
-        // the wizard exits as AUTH_ERROR even though a refresh would
-        // have rotated us to a valid token. Pre-run refresh
-        // (`refreshTokenIfStale('pre-run')` in agent-runner.ts) handles
-        // attempt 0; this covers attempts 1+. The SDK subprocess reads
-        // ANTHROPIC_AUTH_TOKEN / CLAUDE_CODE_OAUTH_TOKEN from
-        // `process.env` on spawn, so mutating those there is sufficient
-        // to make the fresh token take effect on the next `query()`
-        // call below.
-        //
-        // CRITICAL: also rotate the bearer in
-        // `agentConfig.mcpServers['amplitude-wizard'].headers` — the SDK
-        // serializes the mcpServers config (built once in
-        // `initializeAgent`) and hands it to the spawned subprocess,
-        // which uses those exact headers on every request to the
-        // Amplitude MCP endpoint. Without rotating it here, the
-        // subprocess keeps sending the OLD `Authorization: Bearer
-        // <stale>` header even though the env vars are fresh, and every
-        // Amplitude MCP call 401s until the agent reconnects. Bugbot
-        // catch on PR #608.
-        try {
-          const { refreshTokenIfStale } = await import('./agent-runner.js');
-          const currentToken = process.env.ANTHROPIC_AUTH_TOKEN ?? '';
-          if (currentToken) {
-            const refreshed = await refreshTokenIfStale(
-              currentToken,
-              'inter-attempt',
-            );
-            if (refreshed && refreshed !== currentToken) {
-              process.env.ANTHROPIC_AUTH_TOKEN = refreshed;
-              process.env.CLAUDE_CODE_OAUTH_TOKEN = refreshed;
-              updateAmplitudeMcpBearer(agentConfig.mcpServers, refreshed);
-              logToFile(
-                `Inter-attempt OAuth token rotated before attempt ${
-                  attempt + 1
-                }`,
-              );
-              analytics.wizardCapture('agent inter-attempt token refresh', {
-                attempt,
-              });
-            }
-          }
-        } catch (err) {
-          // Refresh failure is non-fatal — fall through and let the SDK
-          // see whatever token is currently set. If the token is
-          // genuinely expired the next attempt will surface AUTH_ERROR
-          // exactly as before. Logging-only ensures we know if this
-          // path silently breaks.
-          logToFile(
-            `Inter-attempt token refresh failed (continuing with existing token): ${
-              err instanceof Error ? err.message : String(err)
-            }`,
-          );
-        }
+        // Inter-attempt refresh moved below so it runs for ALL attempts
+        // (including attempt 0) — see the `proactiveBearerRefresh` block
+        // outside this `if (attempt > 0)` guard. A 35-min single attempt
+        // can outlive the bearer too, not just the inter-attempt window.
+      }
+
+      // Proactive LLM gateway bearer refresh — runs before EVERY attempt,
+      // not just retries. Long single attempts (Opus + extended thinking,
+      // multi-step taxonomy) can outlive the bearer's TTL; without this
+      // the SDK subprocess ships a stale `Authorization: Bearer …` to
+      // `https://core.amplitude.com/wizard/v1/messages` and the gateway
+      // returns `400 authentication_error: Token revoked or expired`
+      // — discarding the entire run at the finish line. The mid-attempt
+      // periodic timer (`startGatewayBearerRefreshTimer` below) keeps the
+      // on-disk token fresh while the SDK is streaming; this pre-attempt
+      // refresh ensures the env vars + MCP headers `query()` reads
+      // reflect the latest bearer at attempt boundaries.
+      //
+      // CRITICAL: rotates `agentConfig.mcpServers['amplitude-wizard']
+      // .headers.Authorization` in addition to `process.env` — the SDK
+      // serializes the mcpServers config once in `initializeAgent` and
+      // hands it to the spawned subprocess, which keeps using those
+      // exact headers until reconnection. Bugbot catch on PR #608.
+      try {
+        const { refreshTokenIfStale } = await import('./agent-runner.js');
+        await refreshGatewayBearer({
+          label: attempt > 0 ? 'inter-attempt' : 'pre-attempt',
+          mcpServers: agentConfig.mcpServers,
+          refreshTokenIfStale,
+          updateAmplitudeMcpBearer,
+          onRotated: () => {
+            logToFile(`OAuth bearer rotated before attempt ${attempt + 1}`);
+            analytics.wizardCapture('agent inter-attempt token refresh', {
+              attempt,
+            });
+          },
+        });
+      } catch (err) {
+        // Refresh failure is non-fatal — fall through and let the SDK
+        // see whatever token is currently set. If the token is
+        // genuinely expired the next attempt will surface AUTH_ERROR
+        // exactly as before. Logging-only ensures we know if this
+        // path silently breaks.
+        logToFile(
+          `Pre-attempt token refresh failed (continuing with existing token): ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
       }
 
       // Fresh prompt stream per attempt — stdin stays open until result received
@@ -3856,6 +3889,15 @@ export async function runAgent(
     throw error;
   } finally {
     clearInterval(heartbeatInterval);
+    // Stop the mid-run bearer refresh timer first — it's already
+    // `unref()`-ed inside the helper so it can't block process exit,
+    // but clearing it here keeps the test surface tidy and avoids a
+    // late tick firing during teardown.
+    try {
+      stopGatewayBearerRefresh?.();
+    } catch (e) {
+      logToFile('Failed to stop bearer-refresh timer:', e);
+    }
     // `dispose()` closes EVERY watcher the helper created plus any
     // pending poll-fallback timer — there's no path where one of the
     // two file handles can leak when both canonical and legacy paths
