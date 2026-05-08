@@ -232,7 +232,11 @@ export async function runAgentDispatch(
 
     if (result.error) {
       spinner.stop(config?.errorMessage ?? 'Integration failed');
-      return { error: result.error, message: result.message };
+      return {
+        error: result.error,
+        message: result.message,
+        ...(result.authSubkind ? { authSubkind: result.authSubkind } : {}),
+      };
     }
     spinner.stop(config?.successMessage ?? 'Amplitude integration complete');
     return {};
