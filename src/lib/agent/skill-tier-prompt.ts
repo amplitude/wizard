@@ -12,9 +12,46 @@ import {
   type SkillMenuFileContent,
 } from '../wizard-tools/bundled-skills.js';
 
-const MAX_SKILL_MENU_PROMPT_CHARS = 12_000;
+/**
+ * Hard cap on the rendered menu's char count inside the system prompt.
+ *
+ * The menu is rendered as id-only (see {@link toIdOnlyPayload}), which is
+ * roughly 2-3× more compact than the full `{ id, name }` shape that gets
+ * written to `.claude/skills/skill-menu.json`. The model never reads `name`
+ * from the prompt — it matches on `id` when calling `load_skill` — so
+ * dropping `name` here is pure win on per-turn cache cost without losing
+ * any signal. The on-disk file keeps the full shape so external tooling
+ * that reads it (or the `load_skill_menu` MCP tool, when enabled) still
+ * sees human-readable names.
+ *
+ * Cap reduced from 12_000 → 6_000: the bundled menu currently renders to
+ * ~1.2 KB id-only, so 6 KB leaves >4× headroom for skill-list growth
+ * before trimming kicks in.
+ */
+const MAX_SKILL_MENU_PROMPT_CHARS = 6_000;
 
-type SkillMenuPayload = SkillMenuFileContent;
+/**
+ * Id-only payload: same `categories` shape as the on-disk menu, but each
+ * entry is just the string `id` instead of `{ id, name }`. The model only
+ * ever needs `id` to call `load_skill`, so shipping `name` to every turn
+ * is dead system-prompt weight.
+ */
+interface IdOnlySkillMenuPayload {
+  categories: Record<string, string[]>;
+}
+
+type SkillMenuPayload = IdOnlySkillMenuPayload;
+
+function toIdOnlyPayload(full: SkillMenuFileContent): IdOnlySkillMenuPayload {
+  return {
+    categories: Object.fromEntries(
+      Object.entries(full.categories).map(([name, entries]) => [
+        name,
+        entries.map((e) => e.id),
+      ]),
+    ),
+  };
+}
 
 function renderMenu(payload: SkillMenuPayload): string {
   return JSON.stringify(payload);
@@ -36,11 +73,10 @@ function fitMenuToBudget(payload: SkillMenuPayload): string | null {
   let rendered = renderMenu(payload);
   if (rendered.length <= MAX_SKILL_MENU_PROMPT_CHARS) return rendered;
 
-  // Per-entry serialized length plus the comma that separates it from a
-  // sibling. This over-counts by one comma per category (the last entry has
-  // no trailing comma) but the final renderMenu() call below settles the
-  // exact length, so the estimate just needs to be a safe upper bound.
-  const entryCost = new Map<{ id: string; name: string }, number>();
+  // Per-entry serialized length plus the comma separating it from a sibling.
+  // Over-counts by one comma per category (last entry has no trailing comma)
+  // but the final renderMenu() pass below corrects to exact length.
+  const entryCost = new Map<string, number>();
   for (const entries of Object.values(payload.categories)) {
     for (const entry of entries) {
       entryCost.set(entry, JSON.stringify(entry).length + 1);
@@ -91,7 +127,12 @@ function fitMenuToBudget(payload: SkillMenuPayload): string | null {
 export function buildSkillTierSystemPromptAppend(): string {
   if (!isSkillTiersEnabled()) return '';
   try {
-    const payload: SkillMenuPayload = buildSkillMenuFileContent();
+    // Render as id-only ({ categories: { <cat>: ["<id>", ...] } }) — the
+    // model only needs ids to call `load_skill`. Names live in the on-disk
+    // `skill-menu.json` for tools / humans that want them.
+    const payload: SkillMenuPayload = toIdOnlyPayload(
+      buildSkillMenuFileContent(),
+    );
     // Truncating the JSON mid-token (the previous behaviour) produced
     // syntactically invalid JSON inside a fenced code block, which made the
     // model hallucinate ids. Instead, drop entries until the menu fits, and
