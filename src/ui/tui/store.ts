@@ -2205,12 +2205,20 @@ export class WizardStore {
   }
 
   /**
-   * Refresh per-step `activeForm` text from the agent's `TodoWrite`
-   * output. Status is owned by `applyJourneyTransition`; this method
-   * never touches it. Incoming todos that don't exactly match a
-   * canonical label are dropped.
+   * Sync the canonical 4-row task list against the agent's `TodoWrite`
+   * payload. Refreshes per-step `activeForm` flavor text and forwards
+   * the agent's authoritative `status` (`in_progress` / `completed`)
+   * to `applyJourneyTransition`, which owns the monotonic guard so a
+   * completed step can never regress.
    *
-   * Safe fallback: when no journey transition has fired yet (early in a
+   * Incoming todos that don't exactly match a canonical label are
+   * dropped. The classifier in `src/lib/journey-state.ts` remains the
+   * source of truth for tool-derived inferences; this method adds the
+   * agent's explicit signal alongside it so the user-visible list
+   * advances deterministically even when the agent has not yet hit a
+   * classifier-recognized tool call.
+   *
+   * Safe fallback: when no status has been recorded yet (early in a
    * run, or in tests that exercise syncTodos directly), the renderer
    * still seeds the canonical 4 rows as `pending` so the user-visible
    * list is never empty.
@@ -2226,6 +2234,13 @@ export class WizardStore {
       if (idx < 0) continue;
       if (todo.activeForm && todo.activeForm.trim()) {
         next[CANONICAL_STEPS[idx].id] = todo.activeForm;
+      }
+      // Honour status from TodoWrite. The monotonic guard inside
+      // applyJourneyTransition prevents regressions (e.g. a
+      // completed step stays completed even if a later TodoWrite
+      // restates it as in_progress).
+      if (todo.status === 'in_progress' || todo.status === 'completed') {
+        this.applyJourneyTransition(CANONICAL_STEPS[idx].id, todo.status);
       }
     }
     this.$journeyActiveForms.set(next);
