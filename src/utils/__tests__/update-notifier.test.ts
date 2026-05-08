@@ -4,6 +4,7 @@ import * as path from 'node:path';
 import * as os from 'node:os';
 import {
   buildRegistryUrl,
+  formatNotice,
   scheduleUpdateCheck,
   _drainPendingNoticeForTest,
 } from '../update-notifier.js';
@@ -33,6 +34,42 @@ describe('buildRegistryUrl', () => {
   it('never encodes the @ sentinel', () => {
     const url = buildRegistryUrl('@amplitude/wizard');
     expect(url).not.toContain('%40');
+  });
+});
+
+describe('formatNotice — styled box', () => {
+  it('includes box-drawing characters for a visible border', () => {
+    const notice = formatNotice('@amplitude/wizard', '1.0.0', '2.0.0');
+    expect(notice).toContain('┌');
+    expect(notice).toContain('┐');
+    expect(notice).toContain('└');
+    expect(notice).toContain('┘');
+    expect(notice).toContain('│');
+  });
+
+  it('shows the version transition', () => {
+    const notice = formatNotice('@amplitude/wizard', '1.0.0', '2.0.0');
+    expect(notice).toContain('1.0.0');
+    expect(notice).toContain('2.0.0');
+    expect(notice).toContain('→');
+  });
+
+  it('includes npx and npm update instructions', () => {
+    const notice = formatNotice('@amplitude/wizard', '1.0.0', '2.0.0');
+    expect(notice).toContain('npx @amplitude/wizard@latest');
+    expect(notice).toContain('npm install -g @amplitude/wizard');
+  });
+
+  it('shows the Update available header', () => {
+    const notice = formatNotice('@amplitude/wizard', '1.0.0', '2.0.0');
+    expect(notice).toContain('Update available');
+  });
+
+  it('uses the package name for the title', () => {
+    const notice = formatNotice('some-other-pkg', '0.1.0', '0.2.0');
+    expect(notice).toContain('some-other-pkg');
+    expect(notice).toContain('npx some-other-pkg@latest');
+    expect(notice).toContain('npm install -g some-other-pkg');
   });
 });
 
@@ -91,8 +128,10 @@ describe('scheduleUpdateCheck — deferred stderr write', () => {
   it('buffers the notice for later exit-time flush', async () => {
     await scheduleUpdateCheck('@amplitude/wizard', '1.0.0');
     const buffered = _drainPendingNoticeForTest();
-    expect(buffered).toMatch(/new version of @amplitude\/wizard is available/);
-    expect(buffered).toMatch(/1\.0\.0 → 99\.0\.0/);
+    expect(buffered).toContain('Update available');
+    expect(buffered).toContain('@amplitude/wizard');
+    expect(buffered).toContain('1.0.0');
+    expect(buffered).toContain('99.0.0');
   });
 
   it('does not buffer when current version is already latest', async () => {
