@@ -205,15 +205,21 @@ export async function bridgeWizardToolsMcp(
     // helper's expected param type, avoids forcing `@types/json-schema`
     // into the wizard's direct deps. The MCP server already validated
     // the schema shape at registration time.
+    //
+    // **Important**: omit the `validate` option entirely. When `validate`
+    // is absent, AI-SDK's `safeValidateTypes` returns the parsed JSON
+    // input unchanged (`{ success: true, value, rawValue: value }`) and
+    // hands that value to `execute(input)`. If we instead supplied a
+    // `validate: () => ({ success: true, value: undefined })`, the SDK
+    // would dutifully replace the parsed input with `undefined` and
+    // every bridged tool's `execute` would receive `undefined` →
+    // `client.callTool({ arguments: {} })`, silently dropping every
+    // model-supplied argument. The McpServer is the single source of
+    // truth for validation (the design rationale above); omitting
+    // `validate` here defers validation to the server without erasing
+    // the input payload.
     const schema = jsonSchema(
       t.inputSchema as unknown as Parameters<typeof jsonSchema>[0],
-      {
-        // Skip client-side validation: the McpServer revalidates against
-        // the same schema before invoking the handler. Double validation
-        // would be redundant and any drift between the two would surface
-        // as a confusing "valid input rejected" error.
-        validate: () => ({ success: true, value: undefined as unknown }),
-      },
     );
 
     tools[aiSdkName] = dynamicTool({
