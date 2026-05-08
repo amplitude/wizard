@@ -16,21 +16,25 @@ import {
 //
 // Performance notes:
 //
-// 1. Aggregate `checkAllExternalServices()` only needs to hit `summary.json`
-//    for the three Statuspage hosts — it returns BOTH the page-level
-//    indicator and the component list in a single response. The combined
-//    helpers below (`checkAmplitudeStatusAndComponents`, etc.) make one
-//    request and derive both results, cutting three round-trips out of the
-//    cold-start aggregate check.
+// Aggregate `checkAllExternalServices()` only needs to hit `summary.json`
+// for the three Statuspage hosts — it returns BOTH the page-level
+// indicator and the component list in a single response. The combined
+// helpers below (`checkAmplitudeStatusAndComponents`, etc.) make one
+// request and derive both results, cutting three round-trips out of the
+// cold-start aggregate check.
 //
-//    The standalone `check*OverallHealth` / `check*ComponentHealth` exports
-//    are retained for ad-hoc callers (e.g. `OutageScreen` polls overall
-//    only, no point pulling component data every 30s).
+// The standalone `check*OverallHealth` / `check*ComponentHealth` exports
+// are retained for ad-hoc callers (e.g. `OutageScreen` polls overall
+// only, no point pulling component data every 30s).
 //
-// 2. We pass `keepalive: true` to every `fetch` so the underlying TLS
-//    socket can be reused across the parallel checks against the same
-//    statuspage host (undici is not a direct dependency yet, so we rely on
-//    Node's built-in fetch keep-alive flag rather than a shared `Agent`).
+// HTTP connection reuse: Node 20+'s built-in `fetch` is implemented on
+// top of undici, which maintains an internal connection pool keyed by
+// origin and reuses TLS sockets across requests automatically. We do
+// NOT pass `keepalive: true` — that flag is the WHATWG service-worker
+// "request can outlive the page" semantic, not a connection-reuse
+// hint (https://github.com/nodejs/undici/issues/2169). The parallel
+// fetches against the same Statuspage host already share a socket via
+// undici's pool without any extra configuration.
 // ---------------------------------------------------------------------------
 
 const log = createLogger('health-checks/statuspage');
@@ -119,7 +123,6 @@ async function fetchStatuspageIndicator(
     const tid = setTimeout(() => controller.abort(), timeoutMs);
     const res = await fetch(url, {
       signal: controller.signal,
-      keepalive: true,
     });
     clearTimeout(tid);
 
@@ -160,7 +163,6 @@ export async function fetchStatuspageOverallAndComponents(
     const tid = setTimeout(() => controller.abort(), timeoutMs);
     const res = await fetch(url, {
       signal: controller.signal,
-      keepalive: true,
     });
     clearTimeout(tid);
 

@@ -923,14 +923,22 @@ describe('health-checks', () => {
       expect(calledUrls).toContain(URLS.mcpLanding);
     });
 
-    it('passes keepalive: true to every fetch (TLS socket reuse across the parallel checks)', async () => {
+    it('does not pass `keepalive: true` (that flag is service-worker semantics, not connection reuse — undici pools connections automatically)', async () => {
+      // Regression guard for https://github.com/nodejs/undici/issues/2169.
+      // The `keepalive` Fetch option controls whether a request can outlive
+      // its global context (page unload / worker termination), NOT HTTP
+      // connection keep-alive. Node 20+ fetch already reuses TLS sockets
+      // via undici's internal pool — passing the flag is misleading at
+      // best and a no-op at worst.
       await checkAllExternalServices();
       const calls = (global.fetch as Mock).mock.calls;
       expect(calls.length).toBeGreaterThan(0);
       for (const call of calls) {
         const opts = call[1] as { keepalive?: boolean } | undefined;
+        // Each call should pass an options bag (signal lives there) but
+        // must NOT include the misleading keepalive flag.
         expect(opts).toBeDefined();
-        expect(opts).toMatchObject({ keepalive: true });
+        expect(opts?.keepalive).toBeUndefined();
       }
     });
   });

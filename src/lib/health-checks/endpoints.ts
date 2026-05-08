@@ -27,13 +27,14 @@ async function fetchEndpointHealth(
   try {
     const controller = new AbortController();
     const tid = setTimeout(() => controller.abort(), timeoutMs);
-    // keepalive: true lets Node's built-in fetch reuse the underlying TLS
-    // socket across the parallel readiness checks, saving ~100ms per check
-    // on cold start when several endpoints share a host (or sit behind the
-    // same edge network). Cheap to leave on for single-shot endpoints too.
+    // Node 20+'s built-in fetch (powered by undici) maintains an internal
+    // connection pool keyed by origin and reuses TLS sockets across
+    // requests automatically — no flag required. We deliberately do NOT
+    // pass `keepalive: true`: that's the WHATWG service-worker "outlive
+    // the page" semantic, not a connection-reuse hint
+    // (https://github.com/nodejs/undici/issues/2169).
     const res = await fetch(url, {
       signal: controller.signal,
-      keepalive: true,
     });
     clearTimeout(tid);
 
