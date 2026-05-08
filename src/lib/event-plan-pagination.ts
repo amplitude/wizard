@@ -36,13 +36,13 @@ export const DEFAULT_CHUNK_SIZE = 25;
  * prompt, skill bodies, integration scaffolding) dominates payload, and
  * the wizard does more agent round-trips than it saves on context rot.
  */
-const MIN_CHUNK_SIZE = 5;
+export const MIN_CHUNK_SIZE = 5;
 
 /**
  * Upper bound on chunk size. Above this the chunk approaches the
  * single-batch failure mode the pagination is supposed to avoid.
  */
-const MAX_CHUNK_SIZE = 100;
+export const MAX_CHUNK_SIZE = 100;
 
 /** Env override for chunk size. Documented in CLAUDE.md. */
 const CHUNK_SIZE_ENV = 'AMPLITUDE_WIZARD_EVENT_PLAN_CHUNK_SIZE';
