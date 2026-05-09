@@ -1083,7 +1083,6 @@ async function runAgentWizardBody(
     value: cloudRegion.toUpperCase(),
   });
 
-
   // Initialize and run agent
   const spinner = getUI().spinner();
 
