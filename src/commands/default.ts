@@ -1200,6 +1200,18 @@ export const defaultCommand: CommandModule = {
             // getUI().startRun() call.
             tui.store.setRunPhase(RunPhaseEnum.Running);
             tui.store.completeSetup();
+            // S1 — Optimistic transition: flip "Detect your project setup"
+            // to in_progress synchronously when RunScreen mounts. Without
+            // this, the canonical task list sits at "0 done · 4 to go"
+            // with every row dim/pending until the agent's first TodoWrite
+            // fires (typically 30+ seconds into cold start). The agent IS
+            // working on detection during that window — skill staging,
+            // package-manager scan, preflight context build. Marking
+            // 'detect' in_progress on mount makes the task list reflect
+            // reality from frame 1. The agent's first TodoWrite will
+            // either reaffirm in_progress (no-op via monotonic guard) or
+            // advance past it; applyJourneyTransition is idempotent.
+            tui.store.applyJourneyTransition('detect', 'in_progress');
           });
 
           // Session checkpointing — save at key transitions so crash
