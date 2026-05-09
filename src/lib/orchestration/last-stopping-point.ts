@@ -255,9 +255,16 @@ function deriveNextAction(args: {
 
   if (args.stoppedTasks.length > 0) {
     const recent = args.stoppedTasks[0];
+    // Use the configurable `cliPrefix` (sourced from
+    // `options.cliInvocation`) for both the inline shell hint in
+    // `description` and the structured `command`. Hardcoding
+    // `CLI_INVOCATION` here meant a custom invocation (e.g. test harness,
+    // alternate `wizard` symlink) would print the wrong command name in
+    // the human-readable hint while emitting the correct one in JSON.
+    const cliInline = cliPrefix.join(' ');
     return {
       kind: 'inspect_failure',
-      description: `Most recent stop: ${recent.label} (${recent.state}). Inspect with \`${CLI_INVOCATION} task ${recent.id}\`.`,
+      description: `Most recent stop: ${recent.label} (${recent.state}). Inspect with \`${cliInline} task ${recent.id}\`.`,
       command: [...cliPrefix, 'task', recent.id, ...installDirArgs],
     };
   }
@@ -403,6 +410,29 @@ export function computeLastStoppingPoint(
     pendingMcpActions,
     pendingManualVerifications,
     nextAction,
-    resumeCommand: nextAction.command.join(' '),
+    // Shell-quote any argv element that contains whitespace, quotes, or
+    // shell metacharacters so the human-facing `resumeCommand` is
+    // copy-pasteable when `installDir` (or any other argv) contains a
+    // space — e.g. `/Users/me/my project`. Without this, the joined
+    // string `wizard --install-dir /Users/me/my project` reaches the
+    // shell as two separate words. The structured `command` array is
+    // already correct; this only affects the human display.
+    resumeCommand: shellJoin(nextAction.command),
   };
+}
+
+/** POSIX-shell-quote each token, then join with spaces. */
+function shellJoin(argv: string[]): string {
+  return argv.map(shellQuote).join(' ');
+}
+
+function shellQuote(arg: string): string {
+  // Empty string must become '' so the shell sees an explicit empty arg.
+  if (arg === '') return "''";
+  // If the token is entirely "safe" (alnum + a small punctuation set we
+  // know the shell won't interpret) leave it bare for readability.
+  if (/^[A-Za-z0-9_\-\/.:=@+,]+$/.test(arg)) return arg;
+  // Otherwise wrap in single quotes; embedded single quotes get the
+  // standard `'\''` close/escape/reopen dance.
+  return "'" + arg.replace(/'/g, "'\\''") + "'";
 }
