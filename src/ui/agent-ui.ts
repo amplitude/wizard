@@ -33,6 +33,7 @@ import {
   type RecoverableHint,
   type SuggestedAction,
 } from '../lib/agent-events';
+import { normalizeCliCommand } from '../lib/cli-display';
 import { registerSetupComplete } from '../lib/setup-complete-registry';
 import { createInterface } from 'readline';
 import { z } from 'zod';
@@ -507,10 +508,7 @@ export class AgentUI implements WizardUI {
             recoverable: 'reinvoke_with_flag',
             suggestedAction: {
               command: [
-                'npx',
-                '@amplitude/wizard',
-                '--app-name',
-                '<different-name>',
+                ...normalizeCliCommand(['--app-name', '<different-name>']),
               ],
             },
           };
@@ -519,10 +517,7 @@ export class AgentUI implements WizardUI {
             recoverable: 'reinvoke_with_flag',
             suggestedAction: {
               command: [
-                'npx',
-                '@amplitude/wizard',
-                '--app-name',
-                '<your-name>',
+                ...normalizeCliCommand(['--app-name', '<your-name>']),
               ],
             },
           };
@@ -530,7 +525,7 @@ export class AgentUI implements WizardUI {
           return {
             recoverable: 'reinvoke_with_flag',
             suggestedAction: {
-              command: ['npx', '@amplitude/wizard', '--org', '<org-id>'],
+              command: [...normalizeCliCommand(['--org', '<org-id>'])],
             },
           };
         case 'QUOTA_REACHED':

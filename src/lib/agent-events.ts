@@ -24,6 +24,8 @@
  * stay in sync.
  */
 
+import { normalizeCliCommand } from './cli-display';
+
 /**
  * Envelope (top-level) wire-format version. Bump on any breaking change
  * to the FRAME shape — i.e. the keys directly on the JSON line itself
@@ -831,7 +833,7 @@ export function classifyRunError(error: Error): {
     return {
       recoverable: 'human_required',
       suggestedAction: {
-        command: ['npx', '@amplitude/wizard', 'login'],
+        command: [...normalizeCliCommand(['login'])],
         docsUrl: 'https://github.com/amplitude/wizard#login',
       },
     };
@@ -857,7 +859,7 @@ export function classifyRunError(error: Error): {
     return {
       recoverable: 'reinvoke_with_flag',
       suggestedAction: {
-        command: ['npx', '@amplitude/wizard', '--yes'],
+        command: [...normalizeCliCommand(['--yes'])],
       },
     };
   }
@@ -886,7 +888,7 @@ export function classifyRunError(error: Error): {
   return {
     recoverable: 'fatal',
     suggestedAction: {
-      command: ['npx', '@amplitude/wizard', 'feedback'],
+      command: [...normalizeCliCommand(['feedback'])],
     },
   };
 }
