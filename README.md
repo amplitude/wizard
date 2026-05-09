@@ -323,6 +323,23 @@ Tools exposed:
 | `verify_setup` | No-network check that SDK + API key + framework are all in place. Returns `{ outcome, failures }`. |
 | `get_auth_status` | Whether the user is logged in and when their token expires |
 | `get_auth_token` | Return the stored OAuth access token (security-sensitive) |
+| `get_event_plan` | Read the persisted event taxonomy after `confirm_event_plan` |
+| `record_dashboard_plan` | Persist a dashboard plan (charts + dashboard wrapper) |
+| `get_dashboard_plan` | Read the persisted dashboard plan |
+| `get_orchestration_status` | Same envelope as `wizard orchestration status --json` |
+| `get_last_stopping_point` | Just the `lastStoppingPoint` snapshot |
+| `list_tasks` / `get_task` | Browse the task lifecycle |
+| `list_sessions` / `get_session` | Browse wizard sessions |
+| `list_choices` / `get_choice` | Pending user-choice checkpoints |
+| `list_manual_verifications` / `get_manual_verification` | Pending manual verifications |
+| `list_mcp_capabilities` / `get_mcp_capability` | MCP-app lifecycle (incl. `install_skipped`) |
+
+The orchestration tools are **read-only** by design. To answer a Choice
+or mark a Verification, spawn the matching CLI subcommand —
+`wizard choice answer <id> --option <…> --confirm-human` /
+`wizard verification mark <id> --status passed`. See
+[`docs/agent-consumability.md`](./docs/agent-consumability.md) for
+example consumers.
 
 ## Commands
 
@@ -337,6 +354,7 @@ Available at any point during the wizard:
 | `/create-project` | Create a new Amplitude project inline |
 | `/mcp` | Install or remove the Amplitude MCP server in your editor |
 | `/slack` | Set up the Amplitude Slack integration |
+| `/status` | Show orchestration status: pending choices, verifications, MCP capabilities, next action |
 | `/feedback` | Send product feedback (with optional consent-gated diagnostics) |
 | `/clear` | Clear the Q&A conversation history |
 | `/debug` | Print a diagnostic snapshot (safe to share) |

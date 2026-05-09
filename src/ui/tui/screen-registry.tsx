@@ -25,6 +25,7 @@ import { SlackScreen } from './screens/SlackScreen.js';
 import { LogoutScreen } from './screens/LogoutScreen.js';
 import { LoginScreen } from './screens/LoginScreen.js';
 import { OutroScreen } from './screens/OutroScreen.js';
+import { StatusOverlayScreen } from './screens/StatusOverlayScreen.js';
 import { createMcpInstaller } from './services/mcp-installer.js';
 import type { McpInstaller } from './services/mcp-installer.js';
 import { SnakeGame } from './primitives/index.js';
@@ -69,6 +70,7 @@ export function createScreens(
     [Overlay.Login]: (
       <LoginScreen store={store} onComplete={() => store.hideLoginOverlay()} />
     ),
+    [Overlay.Status]: <StatusOverlayScreen store={store} />,
 
     // Wizard flow
     [Screen.Intro]: <IntroScreen store={store} />,

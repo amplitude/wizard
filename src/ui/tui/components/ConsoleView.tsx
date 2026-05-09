@@ -286,6 +286,12 @@ function executeCommand(raw: string, store: WizardStore): string | void {
       })();
       break;
     }
+    case '/status':
+      // PR 3 — show the orchestration "What's happening?" overlay.
+      // Renders the same data `wizard orchestration status --json`
+      // emits, but as a TUI-friendly view.
+      store.showStatusOverlay();
+      break;
     case '/exit':
       store.setOutroData({ kind: OutroKind.Cancel, message: 'Exited.' });
       break;

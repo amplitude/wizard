@@ -586,3 +586,136 @@ the in-memory `WizardSession` snapshot. This is intentional:
   logic in `src/steps/mcp-*` and `src/lib/wizard-tools.ts` keeps
   working untouched. PR 3 reads from the lifecycle as the source of
   truth and retires the duplicates.
+
+## PR 3 — TUI integration + MCP tool parity + perf + resilience
+
+### TUI integration model
+
+PR 3 introduces a TUI overlay (`/status`) that renders the same data
+`wizard orchestration status --json` emits, sectioned for human reading:
+
+- Session, mode (interactive / agent / nested-agent)
+- Active tasks, pending choices, pending verifications, MCP capabilities
+- Owned branches / worktrees / PRs
+- Recommended next action + resume command
+
+The overlay is a passive render of the durable orchestration store —
+every render pulls a fresh snapshot via the shared `envelopes.ts`
+builders. There is no separate stream subscription, so the TUI cannot
+drift out of sync with what `wizard orchestration status --json` would
+report from another shell.
+
+`StatusOverlayScreen` is wired into the existing `Overlay` enum and
+slash-command dispatch so `/status` opens it from anywhere in the
+wizard. Esc dismisses.
+
+A bottom-of-screen `ManualVerificationRibbon` is mounted on `OutroScreen`
+so success-looking UI cannot appear while a verification is still
+pending — the resume command is rendered inline. `ChoiceCheckpointBanner`
+is a reusable component (see `src/ui/tui/components/`) for surfacing a
+typed `Choice` record on any screen with the full UX contract: why-asking,
+recommended option, safe default, "skipping is/isn't safe", reversibility.
+
+### Shared `envelopes.ts` layer
+
+`src/lib/orchestration/envelopes.ts` centralizes every JSON shape the CLI
+and the MCP server emit. Builders are pure (no I/O beyond reading the
+store) and validate against the matching `*EnvelopeSchema` before
+returning. CLI commands (`src/commands/orchestration.ts`,
+`src/commands/choice.ts`, `src/commands/verification.ts`) and the MCP
+server (`src/lib/wizard-mcp-server.ts`) call into the SAME builders, so
+the two surfaces are byte-for-byte identical (modulo `generatedAt`).
+
+A `withReadCache(fn)` helper amortises the cost of multiple builder
+calls inside a single command/tool invocation: every builder called
+inside the closure shares one parsed `OrchestrationStoreFile` instead of
+re-reading the file from disk. The cache is per-call; the long-running
+MCP server never sees stale state because it scopes a fresh cache key
+to each tool call.
+
+### MCP-server tool parity table
+
+The external MCP server (`amplitude-wizard mcp serve`) now mirrors every
+read-only orchestration CLI command as a typed MCP tool. Outer coding
+agents can call these instead of shelling out to the CLI.
+
+| CLI                                          | MCP tool                       |
+|---------------------------------------------|-------------------------------|
+| `wizard orchestration status --json`         | `get_orchestration_status`    |
+| (subset)                                     | `get_last_stopping_point`     |
+| `wizard tasks --json`                        | `list_tasks`                  |
+| `wizard task <id> --json`                    | `get_task`                    |
+| `wizard sessions --json`                     | `list_sessions`               |
+| `wizard session <id> --json`                 | `get_session`                 |
+| `wizard choice list --json`                  | `list_choices`                |
+| `wizard choice show <id> --json`             | `get_choice`                  |
+| `wizard verification list --json`            | `list_manual_verifications`   |
+| `wizard verification show <id> --json`       | `get_manual_verification`     |
+| (new)                                        | `list_mcp_capabilities`       |
+| (new)                                        | `get_mcp_capability`          |
+
+Mutations stay on the CLI by design — the MCP server is read-only.
+Hosts that need to answer a Choice or mark a Verification spawn the
+matching CLI subcommand (`wizard choice answer <id> --option <…>
+--confirm-human`, `wizard verification mark <id> --status passed`).
+
+### Performance hot-paths
+
+PR 3 measures, then fixes, three perf items:
+
+| Path                                       | Before                | After                | Mechanism |
+|--------------------------------------------|-----------------------|----------------------|-----------|
+| `buildStatusEnvelope` (empty store)        | ~6 ms                 | ~3-6 ms              | one-shot read; no redundant `.parse()` after the builder validates internally |
+| 50× three-builder render of seeded store   | 3 reads / iter        | 1 read / iter        | per-invocation `OrchestrationStoreFile` cache |
+| `gh pr view` repeated in same run          | up to 4× per run      | 1× per run           | `memoizeAsync` in `src/lib/per-run-cache.ts` |
+| repeat MCP availability probe              | uncached              | cached per run id    | same `memoize` helper |
+
+The wizard's full `wizard status --json` cold-start is still ~430 ms
+on a typical dev box because Node + import overhead dominates. Bundling
+the CLI with esbuild is the next obvious lever — deferred to a follow-up.
+
+### Resilience — token-expired-during-long-task
+
+When `agent-runner.ts` catches an `AUTH_ERROR` mid-stream, in addition to
+setting the existing `outroData.preserveFiles` flag (which surfaces the
+`[K] Keep / [R] Revert` UI in `OutroScreen`), the runner now also writes
+to the orchestration store:
+
+1. A pending `Choice` (kind = `keep_or_revert_files`, requiresHuman: true,
+   recommended/safeDefault = `keep`).
+2. A pending `Verification` (kind = `manual_pr_test`).
+3. `wizard status --json` thereafter shows `lastStoppingPoint.nextAction.kind
+   === 'await_user_choice'` plus the pending verification.
+
+The `[K]/[R]` UI in `OutroScreen` continues to drive the user-facing flow;
+the orchestration store records mirror that decision so an outer agent
+inspecting the wizard's state after the fact (or another shell running
+`wizard status --json`) sees a consistent picture.
+
+`promptId` is keyed on the active session id so duplicate AUTH_ERROR
+fires (very rare, but possible if the runner retries) don't pile up
+multiple Choice records. The mirror is best-effort — a failure to write
+to the orchestration store is logged but never breaks the existing
+preserveFiles / abort flow.
+
+### Anti-nag visibility in the TUI
+
+The `/status` overlay surfaces every MCP capability in the store —
+including `install_skipped` ones. The `lastStateChangeReason` is
+rendered inline. The user can see at a glance "Amplitude MCP — skipped
+(user-declined-on-prompt)" but never gets re-prompted, satisfying the
+PR 2 anti-nag invariant.
+
+### What's deliberately not in PR 3
+
+- Full TUI redesign / information-architecture refactor. PR 3 lands the
+  state-driven foundation. The screen-tree overhaul (single, unified
+  context-aware view) is large enough to warrant its own effort.
+- Widening the wiring beachhead beyond env-selection + event-plan-approval.
+  Every other prompt site keeps its existing transient-screen-text path.
+- Retiring `WizardSession`. The legacy in-memory session is still the
+  source of truth for screen routing, journey state, and most session-
+  scoped flags. Bridging the two stores is a follow-up.
+- Bundling for cold-start. Node + import overhead is unchanged; future PR
+  switches the CLI to an esbuild-bundled binary so cold-start drops below
+  the brief's 200 ms target.

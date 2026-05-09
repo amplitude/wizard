@@ -109,3 +109,32 @@ export {
   type AddMcpCapabilityInput,
 } from './mcp-app-lifecycle';
 export { newChoiceId, newVerificationId, newMcpCapabilityId } from './store';
+
+// PR 3 — shared envelope builders consumed by both CLI commands and the
+// external MCP server. Centralizing them guarantees byte-for-byte output
+// parity between the two surfaces.
+export {
+  buildStatusEnvelope,
+  buildLastStoppingPointEnvelope,
+  buildResumeEnvelope,
+  buildTasksEnvelope,
+  buildTaskEnvelope,
+  buildSessionsEnvelope,
+  buildSessionEnvelope,
+  buildChoicesEnvelope,
+  buildChoiceEnvelope,
+  buildVerificationsEnvelope,
+  buildVerificationEnvelope,
+  buildMcpCapabilitiesEnvelope,
+  buildMcpCapabilityEnvelope,
+  withReadCache,
+  readStoreCached,
+  _resetEnvelopeReadCache,
+  ENVELOPE_SCHEMAS,
+  LastStoppingPointEnvelopeSchema,
+  McpCapabilitiesEnvelopeSchema,
+  McpCapabilityEnvelopeSchema,
+  type LastStoppingPointEnvelope,
+  type McpCapabilitiesEnvelope,
+  type McpCapabilityEnvelope,
+} from './envelopes';

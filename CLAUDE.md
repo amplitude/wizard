@@ -40,7 +40,7 @@ Built with [Ink](https://github.com/vadimdemedes/ink) (React for CLIs) + nanosto
 | `store.ts` | `WizardStore`, `Screen`, `Overlay`, `Flow` — nanostore-backed reactive state |
 | `router.ts` | `WizardRouter` — resolves active screen from session state via flow pipeline; manages overlay stack |
 | `flows.ts` | Declarative flow pipelines (`Screen` + `Flow` enums, `FlowEntry` arrays) |
-| `screen-registry.tsx` | Maps all 24 screen/overlay names (18 `Screen` + 6 `Overlay`) to React components |
+| `screen-registry.tsx` | Maps all 25 screen/overlay names (18 `Screen` + 7 `Overlay`, incl. PR 3's `Overlay.Status` for `/status`) to React components |
 | `screens/` | 17 screen components (Auth, Run, Outro, MCP, Slack, etc.) — `Screen.Options` resolves to `null` and has no component file |
 | `components/` | `ConsoleView`, `JourneyStepper`, `HeaderBar`, `KeyHintBar`, `AmplitudeLogo`, `BrailleSpinner` |
 | `hooks/` | `useWizardStore` (stable subscription), `useAsyncEffect` (AbortController-based), `useScreenInput`, `useEscapeBack`, `useStdoutDimensions` |
@@ -74,7 +74,8 @@ Machine-consumable execution mode for CI pipelines and agent orchestrators. Uses
 | `constants.ts` | `Integration` enum (detection/display order matters), env flags, URLs |
 | `commandments.ts` | Wizard-wide system prompt rules always appended to the agent |
 | `wizard-tools.ts` | In-process MCP server consumed by the wizard's own internal Claude agent. Tools: `check_env_keys`, `set_env_values`, `detect_package_manager`, `confirm_event_plan`, `confirm`, `choose`, `report_status`, `wizard_feedback` (plus `load_skill_menu` / `install_skill`, currently disabled — see comment in `createWizardToolsServer`). Distinct from `wizard-mcp-server.ts` below |
-| `wizard-mcp-server.ts` | **External** stdio MCP server invoked via `amplitude-wizard mcp serve`. Read-only — wraps `agent-ops.ts` so third-party AI coding agents (Claude Code, Cursor, Codex) can call wizard ops as typed tools instead of parsing CLI stdout |
+| `wizard-mcp-server.ts` | **External** stdio MCP server invoked via `amplitude-wizard mcp serve`. Read-only — wraps `agent-ops.ts` so third-party AI coding agents (Claude Code, Cursor, Codex) can call wizard ops as typed tools instead of parsing CLI stdout. PR 3 added orchestration tool parity (`get_orchestration_status`, `list_tasks`, `list_choices`, `list_manual_verifications`, `list_mcp_capabilities`, etc.) — tools share the SAME Zod-validated envelopes the matching CLI commands emit, via `src/lib/orchestration/envelopes.ts` |
+| `orchestration/envelopes.ts` | **Shared envelope builders.** Every JSON shape the CLI and the MCP server emit comes from one builder per surface (`buildStatusEnvelope`, `buildTasksEnvelope`, `buildChoicesEnvelope`, etc.). Both surfaces call into the same builder so they're byte-for-byte aligned. `withReadCache(fn)` memoises the parsed `OrchestrationStoreFile` for the lifetime of one CLI command / MCP tool call |
 | `mcp-with-fallback.ts` | `callAmplitudeMcp<T>` — resilient MCP helper. Tries a direct HTTP call to the Amplitude MCP server; if it returns null or throws (e.g. tool removed), falls back to a minimal Claude agent with only the Amplitude MCP configured. Accepts `abortSignal` for clean exit handling. Use this for any new MCP-based data fetching. |
 | `safe-tools.ts` | Allowlisted tools for the agent sandbox |
 | `middleware/` | Benchmark pipeline, message schemas |
