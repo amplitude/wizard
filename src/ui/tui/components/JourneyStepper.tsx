@@ -9,10 +9,11 @@
  */
 
 import { Box, Text } from 'ink';
-import type { WizardStore } from '../store.js';
+import type { WizardStore, WizardSession } from '../store.js';
 import { useWizardStore } from '../hooks/useWizardStore.js';
 import { Screen, Flow } from '../router.js';
 import { Colors, Icons, Brand } from '../styles.js';
+import { OutroKind } from '../session-constants.js';
 
 /** Human-readable labels for wizard flow steps. */
 const WIZARD_STEPS: Array<{ screen: Screen; label: string }> = [
@@ -47,7 +48,7 @@ const STEP_SCREENS: Record<string, Screen[]> = {
   Done: [Screen.Outro, Screen.Slack],
 };
 
-type StepState = 'completed' | 'active' | 'future';
+type StepState = 'completed' | 'active' | 'future' | 'failed';
 
 function getStepState(
   stepLabel: string,
@@ -63,6 +64,43 @@ function getStepState(
   if (allDone) return 'completed';
 
   return 'future';
+}
+
+/**
+ * When the wizard halts with an OutroKind.Error, the positional
+ * "currentScreen is past it, so it's ✓" logic in getStepState renders
+ * every prior phase as completed — including the phase that actually
+ * failed. The user sees `✓ Welcome ─ ✓ Auth ─ ✓ Setup ─ ✓ Verify ─ ● Done`
+ * followed by "Setup failed", a direct contradiction.
+ *
+ * Derive the failed phase from session milestones rather than
+ * threading new state through OutroData: the milestones already encode
+ * "how far did the user actually get?" and don't need the agent runner
+ * to remember which phase it was in at crash time.
+ *
+ * Returns the label of the step that was in-progress when the run died,
+ * or `null` when no error is active.
+ */
+function getFailedStepLabel(session: WizardSession): string | null {
+  if (session.outroData?.kind !== OutroKind.Error) return null;
+
+  // Walk milestones in flow order. The FIRST step that isn't fully
+  // complete is the one that failed. Falls back to the last step
+  // (Done) if every milestone passed — the failure must have been
+  // during outro/post-success teardown.
+  if (!session.introConcluded) return 'Welcome';
+  const authComplete =
+    session.credentials !== null &&
+    (session.selectedOrgName !== null || session.selectedOrgId !== null) &&
+    session.selectedProjectName !== null &&
+    session.selectedEnvName !== null;
+  if (!authComplete) return 'Auth';
+  // Setup is "complete" only when the run finished without erroring.
+  // RunPhase.Error means Setup itself blew up; RunPhase.Idle/Running
+  // here implies the wizard never got past Setup either.
+  if (session.runPhase !== 'completed') return 'Setup';
+  if (!session.dataIngestionConfirmed) return 'Verify';
+  return 'Done';
 }
 
 /** Build set of screens the flow has already passed. */
@@ -91,13 +129,32 @@ export const JourneyStepper = ({ store, width }: JourneyStepperProps) => {
 
   const currentScreen = store.currentScreen;
   const completedScreens = getCompletedScreens(currentScreen);
+  const failedStepLabel = getFailedStepLabel(store.session);
 
   // Determine if we have room for labels (need ~50 chars for all labels)
   const showLabels = width >= 60;
 
+  // When an error is active we override the positional state for every
+  // step from the failed one onward: failed → ✗, everything after → ○.
+  // Without this override the stepper renders ✓ on phases that did not
+  // actually complete (the "✓ Setup … Setup failed" contradiction).
+  let pastFailed = false;
   const steps = WIZARD_STEPS.map((step) => {
-    const state = getStepState(step.label, currentScreen, completedScreens);
-    return { ...step, state };
+    const baseState = getStepState(
+      step.label,
+      currentScreen,
+      completedScreens,
+    );
+    if (failedStepLabel !== null) {
+      if (step.label === failedStepLabel) {
+        pastFailed = true;
+        return { ...step, state: 'failed' as const };
+      }
+      if (pastFailed) {
+        return { ...step, state: 'future' as const };
+      }
+    }
+    return { ...step, state: baseState };
   });
 
   return (
@@ -108,6 +165,8 @@ export const JourneyStepper = ({ store, width }: JourneyStepperProps) => {
             ? Icons.checkmark
             : step.state === 'active'
             ? Icons.bullet
+            : step.state === 'failed'
+            ? Icons.cross
             : Icons.bulletOpen;
 
         const color =
@@ -115,15 +174,23 @@ export const JourneyStepper = ({ store, width }: JourneyStepperProps) => {
             ? Brand.lilac
             : step.state === 'active'
             ? Colors.accent
+            : step.state === 'failed'
+            ? Colors.error
             : Colors.muted;
 
         return (
           <Box key={step.label}>
-            <Text color={color} bold={step.state === 'active'}>
+            <Text
+              color={color}
+              bold={step.state === 'active' || step.state === 'failed'}
+            >
               {icon}
             </Text>
             {showLabels && (
-              <Text color={color} bold={step.state === 'active'}>
+              <Text
+                color={color}
+                bold={step.state === 'active' || step.state === 'failed'}
+              >
                 {step.state === 'active'
                   ? ` ${step.label} ←`
                   : ` ${step.label}`}
