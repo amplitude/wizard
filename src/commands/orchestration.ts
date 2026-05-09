@@ -45,7 +45,13 @@ async function resolveCommonOpts(argv: {
   json?: boolean;
   human?: boolean;
 }): Promise<CommonOpts> {
-  const installDir = argv.installDir ?? process.cwd();
+  // Run user-provided `--install-dir` through `resolveInstallDir` so a
+  // quoted / env-sourced `~` actually expands to the home directory —
+  // otherwise the orchestration store is looked up under
+  // `<cwd>/~/myapp` instead of `<home>/myapp`. Mirrors the behavior in
+  // `commands/dashboard.ts` and `lib/wizard-session.ts`.
+  const { resolveInstallDir } = await import('../utils/install-dir.js');
+  const installDir = resolveInstallDir(argv.installDir);
   const { resolveMode } = await import('../lib/mode-config.js');
   const { jsonOutput } = resolveMode({
     json: argv.json,
@@ -583,7 +589,10 @@ export const resumeCommand: CommandModule = {
         if (execute) {
           // Spawn the resume command. Default behavior is "print only" for
           // safety — orchestrators that want auto-execution opt in.
-          const { spawn } = await import('node:child_process');
+          // Use cross-platform-spawn so the npm-installed `amplitude-wizard`
+          // .cmd shim resolves on Windows (Node's built-in spawn does not
+          // consult PATHEXT).
+          const { spawn } = await import('../utils/cross-platform-spawn.js');
           const [cmd, ...rest] = command;
           if (!cmd) {
             if (opts.jsonOutput)
