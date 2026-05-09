@@ -177,7 +177,13 @@ vi.mock('../utils/get-api-key', () => ({
   getAPIKey: vi.fn().mockResolvedValue(null),
 }));
 vi.mock('../lib/credential-resolution', () => ({
-  resolveCredentials: vi.fn().mockResolvedValue(undefined),
+  // resolveCredentials returns a discriminated `ResolveCredentialsResult`
+  // since fix(self-heal) — `'unauthenticated'` is the closest analogue to
+  // the pre-fix `undefined` (no creds populated, no defer signal). Tests
+  // that exercise specific branches override this with `mockResolvedValueOnce`.
+  resolveCredentials: vi
+    .fn()
+    .mockResolvedValue({ outcome: 'unauthenticated' as const }),
   resolveEnvironmentSelection: vi.fn().mockResolvedValue(false),
 }));
 vi.mock('../utils/environment', () => ({

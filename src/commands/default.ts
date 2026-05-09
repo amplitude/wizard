@@ -411,11 +411,26 @@ export const defaultCommand: CommandModule = {
             }
 
             // Resolve credentials using shared logic (token refresh,
-            // env auto-select, pendingOrgs population)
+            // env auto-select, pendingOrgs population). The discriminated
+            // result is logged at the bin layer so a tail of `log.txt`
+            // shows a concrete reason for "still on AuthScreen" instead
+            // of just `[credential-resolution] N environments found —
+            // deferring`. Pre-fix the void return obscured the post-defer
+            // state from anyone debugging the second-run-after-`git
+            // reset --hard` stall — see fix(self-heal) #N.
             const { resolveCredentials } = await import(
               '../lib/credential-resolution.js'
             );
-            await resolveCredentials(session);
+            const credentialResolution = await resolveCredentials(session);
+            logToFile(
+              `[bin] credential-resolution outcome: ${credentialResolution.outcome}`,
+              credentialResolution.outcome === 'needs_user_choice'
+                ? {
+                    kind: credentialResolution.kind,
+                    envsWithKey: credentialResolution.envsWithKey,
+                  }
+                : undefined,
+            );
 
             // If resolveCredentials silently picked an org/project from
             // disk (returning-user path), require an explicit confirmation
