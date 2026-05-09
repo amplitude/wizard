@@ -612,6 +612,11 @@ export async function resolveCredentials(
                   }".`,
                 };
               }
+              // The user IS authenticated — their filters just didn't
+              // match. Stamp deferredEnvCount so the final return logic
+              // produces `'needs_user_choice'` instead of falling
+              // through to `'unauthenticated'`.
+              deferredEnvCount = envsWithKey.length;
             }
           } else if (
             envsWithKey.length === 1 &&
