@@ -1191,11 +1191,9 @@ async function runAgentWizardBody(
         sessionToOptions(session),
       ),
     (err) =>
-      logToFile(
-        `[preflight] detectPackageManager failed: ${
-          err instanceof Error ? err.message : String(err)
-        }`,
-      ),
+      preflightLog.warn('detectPackageManager failed', {
+        'error message': err instanceof Error ? err.message : String(err),
+      }),
   );
 
   if (packageManagerInfo?.primary) {
