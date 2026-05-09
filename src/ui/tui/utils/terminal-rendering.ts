@@ -155,7 +155,9 @@ function buildTerminalMarked(width: number): Marked {
   const idealFile = Math.floor(renderWidth * 0.32);
   const idealDesc = usableWidth - idealEvent - idealFile;
   const flooredSum =
-    Math.max(14, idealEvent) + Math.max(20, idealFile) + Math.max(20, idealDesc);
+    Math.max(14, idealEvent) +
+    Math.max(20, idealFile) +
+    Math.max(20, idealDesc);
   const fitsWithFloors = flooredSum <= usableWidth;
   const eventCol = fitsWithFloors ? Math.max(14, idealEvent) : idealEvent;
   const fileCol = fitsWithFloors ? Math.max(20, idealFile) : idealFile;
