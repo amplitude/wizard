@@ -5,6 +5,7 @@ import {
   getLlmGatewayUrlFromHost,
   getMcpHostFromRegion,
   getMcpUrlFromZone,
+  WIZARD_LLM_PROXY_URL_DEFAULT,
 } from '../urls.js';
 
 // ── getCloudUrlFromRegion ─────────────────────────────────────────────────────
@@ -96,7 +97,7 @@ describe('getLlmGatewayUrlFromHost', () => {
   // /v1/messages). It accepts the wizard's existing OAuth bearer in
   // `Authorization: Bearer ...` (or `x-api-key`). Region selection is a
   // server-side concern; the client URL no longer varies by region.
-  const PROD_LLM_PROXY = 'https://wizard.amplitude.com/web-api/wizard';
+  const PROD_LLM_PROXY = WIZARD_LLM_PROXY_URL_DEFAULT;
 
   it('returns the override URL when WIZARD_LLM_PROXY_URL is set', () => {
     process.env.WIZARD_LLM_PROXY_URL = 'http://my-custom-proxy:9999';
