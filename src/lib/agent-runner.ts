@@ -883,16 +883,21 @@ async function runAgentWizardBody(
   const skipAmplitudeMcp =
     config.prompts.buildPrompt !== undefined || !accessToken;
 
-  // Cold-start phase 1: skill staging. The next ~30s is bundled-skill copy
-  // + on-disk resolution; surface it on the activity line so the user
+  // Cold-start phase 1: skill staging. The next few seconds is bundled-skill
+  // copy + on-disk resolution; surface it on the activity line so the user
   // doesn't read the silence as a hung process. Cleared on the matching
-  // setCurrentActivity(null) below once initialization completes.
+  // setCurrentActivity(null) below once initialization completes. We split
+  // cold start into three labeled phases (skills → project read → agent
+  // init) so the user sees a status change every 5-15s instead of a single
+  // 30-60s silent block. The total cold-start window stays the same; only
+  // the perceived progress changes.
+  const coldStartStartedAt = Date.now();
   try {
     getUI().setCurrentActivity({
       kind: 'cold-start',
       message: 'Loading skills...',
-      startedAt: Date.now(),
-      estimatedDurationSec: 90,
+      startedAt: coldStartStartedAt,
+      estimatedDurationSec: 45,
     });
   } catch (err) {
     logToFile('cold-start: setCurrentActivity (skills) failed', err);
@@ -936,6 +941,22 @@ async function runAgentWizardBody(
       );
     }
     integrationSkillIdForPrompt = resolved?.skillId ?? null;
+  }
+
+  // Cold-start phase 2: project read. The next 1-5s is package-manager
+  // detection + preflight context build (file walks). Update the activity
+  // line so the user sees a fresh status before the silence resumes —
+  // without this, "Loading skills..." sits stale through this whole
+  // window even though we've moved on.
+  try {
+    getUI().setCurrentActivity({
+      kind: 'cold-start',
+      message: 'Reading your project...',
+      startedAt: coldStartStartedAt,
+      estimatedDurationSec: 45,
+    });
+  } catch (err) {
+    logToFile('cold-start: setCurrentActivity (project read) failed', err);
   }
 
   // Pre-flight context block — gives the agent every piece of state the
@@ -1046,15 +1067,19 @@ async function runAgentWizardBody(
   // outro hook needed.
   getUI().startRun();
 
-  // Cold-start phase 2: agent SDK init (MCP server connect, model handshake,
-  // system-prompt cache prime). Frequently the longest single block of pre-
-  // first-message silence on a fresh run.
+  // Cold-start phase 3: agent SDK init (MCP server connect, model handshake,
+  // system-prompt cache prime, first LLM round-trip). Frequently the longest
+  // single block of pre-first-message silence on a fresh run. We reuse
+  // `coldStartStartedAt` so the elapsed-time counter in the ActivityLine
+  // climbs continuously across all three cold-start phases — the user sees
+  // one continuous "we're working on it" timer instead of three separate
+  // counters that each reset to 0s.
   try {
     getUI().setCurrentActivity({
       kind: 'cold-start',
-      message: 'Initializing agent...',
-      startedAt: Date.now(),
-      estimatedDurationSec: 90,
+      message: 'Starting the agent...',
+      startedAt: coldStartStartedAt,
+      estimatedDurationSec: 45,
     });
   } catch (err) {
     logToFile('cold-start: setCurrentActivity (init) failed', err);

@@ -68,8 +68,67 @@ export interface StructuredUpstreamError {
    * that this is a payload-shape rejection and retrying is futile;
    * absence means the proxy fell back to a generic message and the
    * caller should treat it as a transient gateway issue.
+   *
+   * Modern proxy builds also expose two well-known fields on this object
+   * when the rejection is "this model isn't on Vertex's allowlist":
+   * `received_model` (the model name the wizard sent) and
+   * `supported_models` (the list of names Vertex would have accepted).
+   * When present, the runner uses them to render an actionable
+   * `"Model 'X' is not supported. Try one of: ..."` remediation line
+   * instead of the verbatim Vertex message.
    */
   upstream?: unknown;
+  /**
+   * Convenience accessors populated when the proxy includes
+   * `error.upstream.received_model` (the model name the wizard sent).
+   * Keeps callers from spelunking through `unknown`.
+   */
+  receivedModel?: string;
+  /** `error.upstream.supported_models` — names Vertex would have accepted. */
+  supportedModels?: string[];
+}
+
+/**
+ * Extract the well-known `received_model` / `supported_models` fields from
+ * the proxy's `error.upstream` envelope. Both are optional — older proxy
+ * builds don't surface them, and not every payload-shape rejection carries
+ * them (e.g. `additionalProperties` schema rejections). Returns plain values
+ * so `unknown` doesn't leak past this module.
+ *
+ * Exported for unit testing.
+ */
+export function extractUpstreamModelFields(upstream: unknown): {
+  receivedModel?: string;
+  supportedModels?: string[];
+} {
+  if (upstream === null || typeof upstream !== 'object') return {};
+  const u = upstream as Record<string, unknown>;
+  const out: { receivedModel?: string; supportedModels?: string[] } = {};
+  if (typeof u.received_model === 'string' && u.received_model.length > 0) {
+    out.receivedModel = u.received_model;
+  }
+  if (Array.isArray(u.supported_models)) {
+    const models = u.supported_models.filter(
+      (v): v is string => typeof v === 'string' && v.length > 0,
+    );
+    if (models.length > 0) out.supportedModels = models;
+  }
+  return out;
+}
+
+/**
+ * Build the actionable remediation line we surface to the user when the
+ * proxy's structured 400 carries `received_model` + `supported_models`.
+ * Returns `null` when either field is missing — callers should fall back
+ * to the proxy's verbatim `message`.
+ */
+export function formatUnsupportedModelMessage(
+  err: Pick<StructuredUpstreamError, 'receivedModel' | 'supportedModels'>,
+): string | null {
+  if (!err.receivedModel || !err.supportedModels?.length) return null;
+  return `Model '${
+    err.receivedModel
+  }' is not supported. Try one of: ${err.supportedModels.join(', ')}`;
 }
 
 /**
@@ -111,10 +170,15 @@ export function parseStructuredUpstreamError(
       };
       const err = parsed?.error;
       if (err && typeof err.message === 'string') {
+        const { receivedModel, supportedModels } = extractUpstreamModelFields(
+          err.upstream,
+        );
         return {
           status,
           message: err.message,
           upstream: err.upstream,
+          ...(receivedModel ? { receivedModel } : {}),
+          ...(supportedModels ? { supportedModels } : {}),
         };
       }
       // Parsed but didn't match the expected shape — give up rather than
@@ -153,6 +217,17 @@ export const AGENT_TRANSIENT_SDK_OUTPUT_PATTERNS = [
   { pattern: 'API Error: 504', label: 'api_504' },
   { pattern: 'API Error: 529', label: 'api_529' },
   { pattern: 'DEADLINE_EXCEEDED', label: 'deadline_exceeded' },
+  // Per-chunk stream timeout from `wizard-proxy/streaming.ts`: the proxy
+  // bounds the gap between SSE chunks coming back from Vertex, and emits
+  // a sentinel error when the gap exceeds the threshold. A whole-request
+  // 408 / DEADLINE_EXCEEDED won't fire here because the connection is
+  // already streaming — without this matcher a chunk-deadline storm exits
+  // as a generic API_ERROR with no outer-loop retry. Match a couple of
+  // sentinel substrings so the matcher is robust to copy tweaks on the
+  // proxy side. Re-classified as transient (retry the whole
+  // conversation) the same way `DEADLINE_EXCEEDED` is.
+  { pattern: 'chunk_deadline_exceeded', label: 'chunk_deadline_exceeded' },
+  { pattern: 'stream chunk timeout', label: 'chunk_deadline_exceeded' },
 ] as const;
 
 export type TransientSdkOutputMatch =
@@ -218,6 +293,13 @@ export function isTransientThrownSdkErrorMessage(errMsg: string): boolean {
     errMsg.includes('API Error: 504') ||
     errMsg.includes('API Error: 529') ||
     errMsg.includes('DEADLINE_EXCEEDED') ||
+    // Per-chunk stream timeout — see comment on
+    // `AGENT_TRANSIENT_SDK_OUTPUT_PATTERNS`. The thrown-error branch needs
+    // the same matcher because the SDK can surface the proxy's chunk
+    // sentinel via either the stream output OR a thrown error, depending
+    // on where the timeout fired relative to the read loop.
+    errMsg.includes('chunk_deadline_exceeded') ||
+    errMsg.includes('stream chunk timeout') ||
     errMsg.includes('Stream closed') ||
     errMsg.includes('invalid_request_error')
   );

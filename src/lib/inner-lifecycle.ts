@@ -44,6 +44,7 @@ import {
 } from './agent-events.js';
 import type { HookCallback } from './agent-hooks.js';
 import { getFileChangeLedger } from './file-change-ledger.js';
+import { formatToolCallLabel } from './tool-call-label.js';
 
 /**
  * Type guard: returns the UI cast to AgentUI if we're in agent mode,
@@ -135,6 +136,31 @@ export function createInnerLifecycleHooks(config: InnerLifecycleConfig): {
     // the inner agent did, but redundant in the TUI (the agent's own
     // TodoWrite items already show user-facing progress).
     if (agentUI) agentUI.emitToolCall({ tool: toolName, summary });
+
+    // Live substep narration for InkUI: surface a single human-readable
+    // line per tool call ("Reading package.json", "Running pnpm add …")
+    // so the active task in the Tasks list shows WHAT the wizard is
+    // doing, not just a spinning chevron. Pure pass-through to the
+    // formatter — null-returns (TodoWrite, sub-agent Task,
+    // wizard-tools MCP plumbing) are filtered here so the store only
+    // ever sees user-meaningful labels.
+    try {
+      const label = formatToolCallLabel({
+        toolName,
+        summary,
+        // installDir is best-effort — the hook input doesn't carry it
+        // and threading it through every call site is invasive. The
+        // formatter's `shortPath` falls back to basename for absolute
+        // paths longer than 40 chars, so unrelativized paths still
+        // render readably.
+      });
+      if (label) {
+        getUI().recordToolActivity?.(label);
+      }
+    } catch {
+      // Defensive — substep narration is purely cosmetic. A failed format
+      // must never abort the agent loop.
+    }
 
     // File-change events go through the abstract WizardUI so InkUI can
     // populate the FileWritesPanel and AgentUI keeps emitting NDJSON

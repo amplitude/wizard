@@ -263,9 +263,93 @@ export interface CreateProjectResult {
   name: string;
 }
 
+/**
+ * Parse a `Retry-After` header into milliseconds. RFC 7231 §7.1.3 allows two
+ * forms: a non-negative number of seconds, or an HTTP-date. Returns `null`
+ * for missing / malformed values, `0` for HTTP-dates already in the past,
+ * and clamps absurdly large values to `RETRY_AFTER_MAX_MS` so a misbehaving
+ * gateway can't hang the wizard for an hour.
+ *
+ * Exported for unit testing — not used outside this module.
+ */
+export function parseRetryAfterMs(
+  raw: string | undefined | null,
+  now: () => number = Date.now,
+): number | null {
+  if (raw == null) return null;
+  const trimmed = String(raw).trim();
+  if (trimmed === '') return null;
+
+  // delta-seconds form (non-negative integer of seconds).
+  if (/^\d+$/.test(trimmed)) {
+    const seconds = Number(trimmed);
+    if (!Number.isFinite(seconds) || seconds < 0) return null;
+    return clampRetryAfter(seconds * 1000);
+  }
+
+  // HTTP-date form. `Date.parse` accepts RFC 1123 / 850 / ISO 8601 — covers
+  // every shape gateways realistically emit.
+  const epoch = Date.parse(trimmed);
+  if (!Number.isFinite(epoch)) return null;
+  const delta = epoch - now();
+  if (delta <= 0) return 0;
+  return clampRetryAfter(delta);
+}
+
+const RETRY_AFTER_MAX_MS = 5 * 60 * 1000;
+
+function clampRetryAfter(ms: number): number {
+  if (ms < 0) return 0;
+  if (ms > RETRY_AFTER_MAX_MS) return RETRY_AFTER_MAX_MS;
+  return ms;
+}
+
+/**
+ * Build user-facing copy for a 429 / 503 response. When the upstream
+ * supplied a `Retry-After` hint we surface the wait so the user sees a
+ * concrete delay rather than the previous static "wait a moment" line.
+ */
+function rateLimitedMessage(
+  retryAfterMs: number | null,
+  context: string,
+): string {
+  if (retryAfterMs == null) {
+    return `Rate limited while ${context}. Please wait a moment and retry.`;
+  }
+  // Round up — undershooting the server's hint just bounces the next
+  // retry; overshooting by ≤1s is harmless.
+  const seconds = Math.max(1, Math.ceil(retryAfterMs / 1000));
+  return `Rate limited while ${context}. Retrying in ${seconds}s…`;
+}
+
+/**
+ * Pull `Retry-After` out of an axios response. Header keys are lowercased
+ * by axios, but we still walk case-insensitively for defensive correctness
+ * (some HTTP/2 stacks preserve original casing). Multi-value arrays are
+ * narrowed to the first non-empty entry.
+ */
+function extractRetryAfterHeader(
+  headers: Record<string, unknown> | undefined,
+): string | null {
+  if (!headers) return null;
+  for (const key of Object.keys(headers)) {
+    if (key.toLowerCase() !== 'retry-after') continue;
+    const v: unknown = headers[key];
+    if (typeof v === 'string' && v.trim() !== '') return v;
+    if (Array.isArray(v)) {
+      const first: unknown = v.find(
+        (s: unknown) => typeof s === 'string' && s.trim() !== '',
+      );
+      if (typeof first === 'string') return first;
+    }
+  }
+  return null;
+}
+
 function fallbackCreateProjectErrorForStatus(
   status: number,
   url: string,
+  retryAfterMs: number | null = null,
 ): ApiError {
   // If the backend error body is unavailable or malformed, preserve the
   // HTTP-specific meaning so callers don't receive a vague generic error.
@@ -301,9 +385,13 @@ function fallbackCreateProjectErrorForStatus(
       'NAME_TAKEN',
     );
   }
-  if (status === 429) {
+  // 429 is the canonical rate-limit. 503 also surfaces Retry-After when
+  // the upstream is in a brief overload window — the proxy strips
+  // Retry-After when remapping 503 → 502 (#114018), so by the time we see
+  // a 503 here, it's a true downstream "back off" signal worth honoring.
+  if (status === 429 || status === 503) {
     return new ApiError(
-      'Rate limited while creating project. Please wait a moment and retry.',
+      rateLimitedMessage(retryAfterMs, 'creating project'),
       status,
       url,
       'INTERNAL',
@@ -405,101 +493,142 @@ export async function createAmplitudeApp(
     throw new ApiError('orgId is required', 400, url, 'INVALID_REQUEST');
   }
 
-  try {
-    const response = await apiClient.post(
-      url,
-      {
-        orgId: input.orgId,
-        name: input.name.trim(),
-        // Only send description when provided to keep the payload minimal.
-        ...(input.description ? { description: input.description } : {}),
-      },
-      {
-        headers: {
-          // The wizard-proxy auth middleware introspects via Hydra, which
-          // only accepts OAuth access tokens (not id_tokens), sent with
-          // the `Bearer ` prefix.
-          Authorization: `Bearer ${accessToken}`,
-          'Content-Type': 'application/json',
-          'User-Agent': WIZARD_USER_AGENT,
+  // Single-shot retry on a transient 401. Looping past one retry hits the
+  // proxy's 30s negative-cache for failed token introspections (#114330) —
+  // additional attempts return fast 401s with no recovery. One retry is
+  // enough to ride through a token-refresh / clock-skew blip without
+  // burning the negative-cache window.
+  const MAX_AUTH_RETRIES = 1;
+  let authAttempt = 0;
+  for (;;) {
+    try {
+      const response = await apiClient.post(
+        url,
+        {
+          orgId: input.orgId,
+          name: input.name.trim(),
+          // Only send description when provided to keep the payload minimal.
+          ...(input.description ? { description: input.description } : {}),
         },
-        timeout: 20_000,
-      },
-    );
+        {
+          headers: {
+            // The wizard-proxy auth middleware introspects via Hydra, which
+            // only accepts OAuth access tokens (not id_tokens), sent with
+            // the `Bearer ` prefix.
+            Authorization: `Bearer ${accessToken}`,
+            'Content-Type': 'application/json',
+            'User-Agent': WIZARD_USER_AGENT,
+          },
+          timeout: 20_000,
+        },
+      );
 
-    const parsed = CreateProjectSuccessSchema.parse(response.data);
-    // Best-effort analytics — `apiKey` intentionally omitted so it never
-    // leaves this function in plaintext.
-    analytics.wizardCapture('Project Created', {
-      source: 'wizard_cli',
-      app_id: parsed.appId,
-      zone,
-      org_id: input.orgId,
-    });
-    return parsed;
-  } catch (error) {
-    // Re-throw our own ApiError instances untouched.
-    if (error instanceof ApiError) {
-      analytics.captureException(error, { endpoint: url, code: error.code });
-      throw error;
-    }
+      const parsed = CreateProjectSuccessSchema.parse(response.data);
+      // Best-effort analytics — `apiKey` intentionally omitted so it never
+      // leaves this function in plaintext.
+      analytics.wizardCapture('Project Created', {
+        source: 'wizard_cli',
+        app_id: parsed.appId,
+        zone,
+        org_id: input.orgId,
+      });
+      return parsed;
+    } catch (error) {
+      // Re-throw our own ApiError instances untouched.
+      if (error instanceof ApiError) {
+        analytics.captureException(error, { endpoint: url, code: error.code });
+        throw error;
+      }
 
-    // Axios errors include non-2xx responses and network failures.
-    if (axios.isAxiosError(error)) {
-      const status = error.response?.status;
-      if (status) {
-        // Preferred path: parse the backend's structured error payload.
-        const errBody = CreateProjectErrorSchema.safeParse(
-          error.response?.data,
-        );
-        if (errBody.success) {
-          const { code, message } = errBody.data.error;
-          const apiError = new ApiError(message, status, url, code);
-          analytics.captureException(apiError, { endpoint: url, code });
+      // Axios errors include non-2xx responses and network failures.
+      if (axios.isAxiosError(error)) {
+        const status = error.response?.status;
+        // One-shot retry on 401 — see comment on `MAX_AUTH_RETRIES`.
+        if (status === 401 && authAttempt < MAX_AUTH_RETRIES) {
+          authAttempt++;
+          logToFile('createAmplitudeApp: 401 — retrying once');
+          continue;
+        }
+        if (status) {
+          const retryAfterMs = parseRetryAfterMs(
+            extractRetryAfterHeader(
+              error.response?.headers as Record<string, unknown> | undefined,
+            ),
+          );
+          // Preferred path: parse the backend's structured error payload.
+          const errBody = CreateProjectErrorSchema.safeParse(
+            error.response?.data,
+          );
+          if (errBody.success) {
+            const { code, message } = errBody.data.error;
+            // Replace the proxy's generic copy with our Retry-After-aware
+            // line for 429/503 — the structured body usually says "rate
+            // limited" without a hint, and the user-facing surface
+            // benefits from the concrete delay.
+            const finalMessage =
+              (status === 429 || status === 503) && retryAfterMs !== null
+                ? rateLimitedMessage(retryAfterMs, 'creating project')
+                : message;
+            const apiError = new ApiError(finalMessage, status, url, code);
+            analytics.captureException(apiError, { endpoint: url, code });
+            throw apiError;
+          }
+
+          // If the payload shape is unexpected, preserve HTTP semantics (e.g. 429).
+          const apiError = fallbackCreateProjectErrorForStatus(
+            status,
+            url,
+            retryAfterMs,
+          );
+          analytics.captureException(apiError, {
+            endpoint: url,
+            code: apiError.code,
+          });
           throw apiError;
         }
 
-        // If the payload shape is unexpected, preserve HTTP semantics (e.g. 429).
-        const apiError = fallbackCreateProjectErrorForStatus(status, url);
+        // Network failures (DNS, timeout, reset, etc.) have no HTTP response.
+        const apiError = new ApiError(
+          error.message || 'Network error creating project',
+          undefined,
+          url,
+          'INTERNAL',
+        );
         analytics.captureException(apiError, {
           endpoint: url,
-          code: apiError.code,
+          code: 'INTERNAL',
         });
         throw apiError;
       }
 
-      // Network failures (DNS, timeout, reset, etc.) have no HTTP response.
+      if (error instanceof z.ZodError) {
+        const apiError = new ApiError(
+          'Invalid response from create-project endpoint',
+          undefined,
+          url,
+          'INTERNAL',
+        );
+        analytics.captureException(apiError, {
+          endpoint: url,
+          code: 'INTERNAL',
+        });
+        throw apiError;
+      }
+
       const apiError = new ApiError(
-        error.message || 'Network error creating project',
+        `Unexpected error creating project: ${
+          error instanceof Error ? error.message : 'Unknown error'
+        }`,
         undefined,
         url,
         'INTERNAL',
       );
-      analytics.captureException(apiError, { endpoint: url, code: 'INTERNAL' });
+      analytics.captureException(apiError, {
+        endpoint: url,
+        code: 'INTERNAL',
+      });
       throw apiError;
     }
-
-    if (error instanceof z.ZodError) {
-      const apiError = new ApiError(
-        'Invalid response from create-project endpoint',
-        undefined,
-        url,
-        'INTERNAL',
-      );
-      analytics.captureException(apiError, { endpoint: url, code: 'INTERNAL' });
-      throw apiError;
-    }
-
-    const apiError = new ApiError(
-      `Unexpected error creating project: ${
-        error instanceof Error ? error.message : 'Unknown error'
-      }`,
-      undefined,
-      url,
-      'INTERNAL',
-    );
-    analytics.captureException(apiError, { endpoint: url, code: 'INTERNAL' });
-    throw apiError;
   }
 }
 

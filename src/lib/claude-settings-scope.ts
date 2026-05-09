@@ -106,6 +106,42 @@ type ScopedEnvKey = (typeof SCOPED_ENV_KEYS)[number];
 const DEFAULT_AUTO_COMPACT_WINDOW = 750_000;
 
 /**
+ * Marker written alongside `autoCompactWindow` so the next wizard run can
+ * recognise its own prior write and re-stamp with the current default.
+ *
+ * Why this exists: pre-#634 wizard runs (default = 120_000) wrote the
+ * value into `.claude/settings.local.json` with no way to distinguish the
+ * wizard's own write from a deliberate user override. The "respect prior
+ * value" guard then refused to upgrade those stale 120K values when
+ * #634 raised the default to 750K — leaving every affected user stuck
+ * with compaction firing at ~88K tokens (120K × 0.73 SDK safety cushion)
+ * for 4–6 unnecessary compactions per Excalidraw-class run, ~100s each.
+ *
+ * The fix: write this marker any time the wizard owns the value. On the
+ * next run, presence of the marker is unambiguous proof that the wizard
+ * (not the user) put the value there, so it's safe to overwrite with the
+ * current default.
+ *
+ * The marker key is intentionally underscore-prefixed and verbose so it
+ * never collides with a real Claude Code SDK setting.
+ *
+ * Lifetime: this lives in the file ONLY while the wizard owns it. The
+ * restore-on-exit path rewrites the user's original raw bytes verbatim,
+ * which never contained the marker — so an untouched user file never
+ * sees a wizard-internal key persisted.
+ */
+const WIZARD_MANAGED_MARKER = '_wizardManagedAutoCompact' as const;
+
+/**
+ * Highest `autoCompactWindow` value any pre-#634 wizard ever wrote
+ * (the historical default before 1M-context support landed). We treat
+ * unmarked values at or below this ceiling as "almost certainly a stale
+ * wizard write" and upgrade them. Anything above 200K is treated as a
+ * deliberate user customisation and respected, even without a marker.
+ */
+const PRE_634_WIZARD_CEILING = 200_000;
+
+/**
  * Resolve the wizard's auto-compact-window override. Returns `null`
  * when the override is explicitly disabled (env=`0` / `disable` / `off`)
  * so the caller skips writing the key entirely. Invalid env values fall
@@ -136,6 +172,13 @@ interface ClaudeSettingsLocal {
    * conservative window — see `DEFAULT_AUTO_COMPACT_WINDOW` above.
    */
   autoCompactWindow?: number;
+  /**
+   * Internal marker — when `true`, the value of `autoCompactWindow` was
+   * written by a prior wizard run (not by the user). The wizard treats
+   * this as its own value and re-stamps it with the current default on
+   * the next run. See `WIZARD_MANAGED_MARKER` for the full rationale.
+   */
+  _wizardManagedAutoCompact?: boolean;
   [key: string]: unknown;
 }
 
@@ -264,27 +307,64 @@ export function applyScopedSettings(
     env: mergedEnv,
   };
 
-  // Lower the SDK's auto-compact threshold so compaction fires earlier
-  // with a smaller summary instead of waiting until the context is
-  // nearly full. The audit (May 2026) traced lost user-feedback context
-  // to a compaction that fired at pre_tokens=168,943 — too late for the
-  // summarizer to keep load-bearing turns. ONLY override when the user
-  // hasn't set their own value at the local layer (project-layer
-  // overrides are deliberately respected — that's the user's setting).
+  // Set / upgrade the SDK's auto-compact threshold so compaction effectively
+  // never fires on a normal-sized run with Sonnet 4.6's 1M context. The
+  // tricky bit is deciding when an existing value in the prior file is the
+  // wizard's own stale write vs. a deliberate user customisation:
+  //
+  //   1. Marker present (`_wizardManagedAutoCompact: true`)
+  //        → unambiguously wizard-owned. Re-stamp with current default.
+  //          This is the path that fixes the pre-#634 stale-120K bug for
+  //          everyone going forward.
+  //   2. Marker absent + value ≤ PRE_634_WIZARD_CEILING (200K)
+  //        → almost certainly a stale wizard write from before the marker
+  //          existed (the historical default was 120K; the wizard never
+  //          shipped a default above 200K). Upgrade with a one-time log
+  //          so the change is visible in `~/.amplitude/wizard/runs/.../log.txt`.
+  //   3. Marker absent + value > 200K
+  //        → the user set a window the wizard never would have. Respect it.
+  //          (Same as the original "respect prior value" semantics.)
+  //   4. No prior value at all
+  //        → write the default + marker.
+  //
+  // In every "wizard owns this" path we also stamp the marker so future
+  // runs follow path (1) instead of having to guess again via path (2).
+  // The restore-on-exit path rewrites the user's original raw bytes
+  // verbatim, so the marker never persists past the wizard's lifetime.
   const autoCompactWindow = resolveAutoCompactWindow();
-  if (autoCompactWindow !== null && prior?.autoCompactWindow === undefined) {
-    merged.autoCompactWindow = autoCompactWindow;
-    logToFile(
-      `claude-settings-scope: setting autoCompactWindow=${autoCompactWindow}`,
-    );
-  } else if (autoCompactWindow === null) {
+  if (autoCompactWindow === null) {
     logToFile(
       'claude-settings-scope: autoCompactWindow override disabled via env',
     );
   } else {
-    logToFile(
-      `claude-settings-scope: respecting user autoCompactWindow=${prior?.autoCompactWindow}`,
-    );
+    const priorValue = prior?.autoCompactWindow;
+    const priorMarker = prior?.[WIZARD_MANAGED_MARKER] === true;
+    const noPrior = priorValue === undefined;
+    const wizardOwned = priorMarker;
+    const looksStale =
+      !priorMarker &&
+      typeof priorValue === 'number' &&
+      priorValue <= PRE_634_WIZARD_CEILING;
+
+    if (noPrior || wizardOwned) {
+      merged.autoCompactWindow = autoCompactWindow;
+      merged[WIZARD_MANAGED_MARKER] = true;
+      logToFile(
+        wizardOwned
+          ? `claude-settings-scope: re-stamping wizard-managed autoCompactWindow=${autoCompactWindow} (was ${priorValue})`
+          : `claude-settings-scope: setting autoCompactWindow=${autoCompactWindow}`,
+      );
+    } else if (looksStale) {
+      merged.autoCompactWindow = autoCompactWindow;
+      merged[WIZARD_MANAGED_MARKER] = true;
+      logToFile(
+        `claude-settings-scope: upgrading stale unmarked autoCompactWindow ${priorValue} -> ${autoCompactWindow} (≤ ${PRE_634_WIZARD_CEILING}; treating as pre-#634 wizard write)`,
+      );
+    } else {
+      logToFile(
+        `claude-settings-scope: respecting user autoCompactWindow=${priorValue}`,
+      );
+    }
   }
 
   try {

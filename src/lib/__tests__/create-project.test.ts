@@ -11,6 +11,7 @@ import {
   createAmplitudeApp,
   validateProjectName,
   getWizardProxyBase,
+  parseRetryAfterMs,
   ApiError,
   PROJECT_NAME_MAX_LENGTH,
 } from '../api';
@@ -53,10 +54,11 @@ function makeAxiosError(
   status: number,
   data: unknown,
   message = `Request failed with status code ${status}`,
+  headers: Record<string, string> = {},
 ) {
   return Object.assign(new Error(message), {
     isAxiosError: true,
-    response: { status, data },
+    response: { status, data, headers },
     config: { url: 'https://example.test/wizard/projects' },
     toJSON: () => ({}),
   });
@@ -241,5 +243,132 @@ describe('createAmplitudeApp', () => {
     });
     const body = mockedAxios.post.mock.calls[0][1] as Record<string, unknown>;
     expect(body.name).toBe('Trimmed');
+  });
+
+  it('surfaces Retry-After (in seconds) on 429 with malformed body', async () => {
+    // Static "wait a moment" copy was unfriendly to users. With a
+    // numeric Retry-After header we now show the concrete delay.
+    mockedAxios.post.mockRejectedValueOnce(
+      makeAxiosError(429, {}, undefined, { 'retry-after': '7' }),
+    );
+    await expect(
+      createAmplitudeApp('tok', 'us', { orgId: 'org', name: 'Name' }),
+    ).rejects.toMatchObject({
+      code: 'INTERNAL',
+      statusCode: 429,
+      message: expect.stringContaining('Retrying in 7s'),
+    });
+  });
+
+  it('surfaces Retry-After on 503 (worth honoring per #114018)', async () => {
+    // The proxy strips Retry-After when remapping 503 → 502, so by the
+    // time we see a 503 here it's a true downstream "back off" signal.
+    mockedAxios.post.mockRejectedValueOnce(
+      makeAxiosError(503, {}, undefined, { 'retry-after': '3' }),
+    );
+    await expect(
+      createAmplitudeApp('tok', 'us', { orgId: 'org', name: 'Name' }),
+    ).rejects.toMatchObject({
+      code: 'INTERNAL',
+      statusCode: 503,
+      message: expect.stringContaining('Retrying in 3s'),
+    });
+  });
+
+  it('overrides the structured 429 message with Retry-After when present', async () => {
+    // The proxy may emit a structured `INTERNAL: rate limited` body —
+    // we still want the user-facing line to surface the concrete wait.
+    mockedAxios.post.mockRejectedValueOnce(
+      makeAxiosError(
+        429,
+        { error: { code: 'INTERNAL', message: 'rate limited' } },
+        undefined,
+        { 'retry-after': '5' },
+      ),
+    );
+    await expect(
+      createAmplitudeApp('tok', 'us', { orgId: 'org', name: 'Name' }),
+    ).rejects.toMatchObject({
+      code: 'INTERNAL',
+      statusCode: 429,
+      message: expect.stringContaining('Retrying in 5s'),
+    });
+  });
+
+  it('falls back to generic copy on 429 with no Retry-After header', async () => {
+    mockedAxios.post.mockRejectedValueOnce(makeAxiosError(429, {}));
+    await expect(
+      createAmplitudeApp('tok', 'us', { orgId: 'org', name: 'Name' }),
+    ).rejects.toMatchObject({
+      code: 'INTERNAL',
+      statusCode: 429,
+      message: expect.stringContaining('wait a moment'),
+    });
+  });
+
+  it('retries once on a transient 401 then surfaces the second response', async () => {
+    // Token-refresh / clock-skew blip: the wizard-proxy 401s once during
+    // a Hydra introspection race, then the next call sails through.
+    mockedAxios.post.mockRejectedValueOnce(makeAxiosError(401, {}));
+    mockedAxios.post.mockResolvedValueOnce({
+      status: 200,
+      data: { appId: '99', apiKey: 'k', name: 'P' },
+    });
+
+    const result = await createAmplitudeApp('tok', 'us', {
+      orgId: 'org',
+      name: 'P',
+    });
+
+    expect(result).toEqual({ appId: '99', apiKey: 'k', name: 'P' });
+    // Two attempts: original 401 + one retry.
+    expect(mockedAxios.post).toHaveBeenCalledTimes(2);
+  });
+
+  it('does not retry past the first 401 (proxy negative-cache window #114330)', async () => {
+    // Looping past one retry hits the proxy's 30s negative-cache for
+    // failed token introspections — additional attempts return fast 401s
+    // with no recovery.
+    mockedAxios.post
+      .mockRejectedValueOnce(makeAxiosError(401, {}))
+      .mockRejectedValueOnce(makeAxiosError(401, {}))
+      .mockRejectedValueOnce(makeAxiosError(401, {}));
+
+    await expect(
+      createAmplitudeApp('tok', 'us', { orgId: 'org', name: 'Name' }),
+    ).rejects.toMatchObject({ statusCode: 401 });
+    // Exactly two attempts: original + one retry.
+    expect(mockedAxios.post).toHaveBeenCalledTimes(2);
+  });
+});
+
+describe('parseRetryAfterMs', () => {
+  it('parses delta-seconds form', () => {
+    expect(parseRetryAfterMs('5')).toBe(5_000);
+    expect(parseRetryAfterMs('0')).toBe(0);
+  });
+
+  it('parses HTTP-date form relative to "now"', () => {
+    const now = Date.parse('2026-05-08T00:00:00Z');
+    const future = 'Fri, 08 May 2026 00:00:30 GMT';
+    expect(parseRetryAfterMs(future, () => now)).toBe(30_000);
+  });
+
+  it('returns 0 for an HTTP-date already in the past', () => {
+    const now = Date.parse('2026-05-08T00:01:00Z');
+    const past = 'Fri, 08 May 2026 00:00:00 GMT';
+    expect(parseRetryAfterMs(past, () => now)).toBe(0);
+  });
+
+  it('clamps absurdly large hints to 5 minutes (defensive)', () => {
+    expect(parseRetryAfterMs('100000')).toBe(5 * 60 * 1000);
+  });
+
+  it('returns null for missing / empty / malformed input', () => {
+    expect(parseRetryAfterMs(null)).toBeNull();
+    expect(parseRetryAfterMs(undefined)).toBeNull();
+    expect(parseRetryAfterMs('')).toBeNull();
+    expect(parseRetryAfterMs('   ')).toBeNull();
+    expect(parseRetryAfterMs('not-a-thing')).toBeNull();
   });
 });
