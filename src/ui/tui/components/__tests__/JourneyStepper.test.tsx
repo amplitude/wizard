@@ -217,6 +217,67 @@ describe('JourneyStepper', () => {
     expect(out).toContain('✓ Verify');
   });
 
+  it('renders ✓ Done (not ● Done) when the user has reached a successful outro', () => {
+    // Visual regression guard: when the user is AT Done with Success,
+    // the active glyph must read as "completed" (✓), not "in progress"
+    // (●). The previous behavior reused the ● glyph for every active
+    // step, including Done — which made the final summary look like
+    // the wizard was still working (visually indistinguishable from
+    // mid-run Setup or Verify being underway).
+    const store = makeStore({
+      introConcluded: true,
+      region: 'us',
+      credentials: CREDS,
+      selectedOrgName: 'Acme',
+      selectedProjectName: 'Amplitude',
+      selectedEnvName: 'Production',
+      projectHasData: false,
+      activationLevel: 'none',
+      runPhase: RunPhase.Completed,
+      mcpComplete: true,
+      dataIngestionConfirmed: true,
+      slackComplete: true,
+      outroData: { kind: OutroKind.Success, changes: [] },
+    });
+    const out = frameOf(<JourneyStepper store={store} width={120} />);
+    // Done is the current step (← cursor) and now uses the checkmark.
+    expect(out).toContain('✓ Done ←');
+    expect(out).not.toContain('● Done');
+  });
+
+  it('keeps the in-progress ● Done glyph for non-success outros (error / cancel)', () => {
+    // The completed-success swap is gated on OutroKind.Success — error
+    // and cancel paths must keep the in-progress glyph so the visual
+    // difference between "succeeded" and "stopped here for some other
+    // reason" stays legible. (We tint the success path with the
+    // success color too; here we just guard the glyph fallback.)
+    //
+    // Note: this test conflicts with the milestone-based failure logic
+    // for Done — Outro is the failure-step only when every prior phase
+    // completed. Here all milestones pass and runPhase=Completed, so
+    // failedStepLabel is 'Done' which would render ✗. Use a state where
+    // failedStepLabel is null (e.g. cancelled outro) instead — then
+    // Done is just `active` and the in-progress glyph applies.
+    const store = makeStore({
+      introConcluded: true,
+      region: 'us',
+      credentials: CREDS,
+      selectedOrgName: 'Acme',
+      selectedProjectName: 'Amplitude',
+      selectedEnvName: 'Production',
+      projectHasData: false,
+      activationLevel: 'none',
+      runPhase: RunPhase.Completed,
+      mcpComplete: true,
+      dataIngestionConfirmed: true,
+      slackComplete: true,
+      outroData: { kind: OutroKind.Cancel },
+    });
+    const out = frameOf(<JourneyStepper store={store} width={120} />);
+    expect(out).toContain('● Done ←');
+    expect(out).not.toContain('✓ Done ←');
+  });
+
   it('keeps the active cursor on Setup throughout the agent run phase', () => {
     // Regression guard: every screen between DataSetup and DataIngestionCheck
     // must be mapped into STEP_SCREENS.Setup. If a screen is mid-flow but
