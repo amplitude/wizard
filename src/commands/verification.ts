@@ -84,14 +84,11 @@ const verificationListCommand: CommandModule = {
                 statusRaw as import('../lib/orchestration/checkpoints/verifications').VerificationStatus,
               ]
             : ['pending', 'failed'];
-        const verifications = store.listVerifications({
-          status: filter as
-            | import('../lib/orchestration/checkpoints/verifications').VerificationStatus[]
-            | undefined,
-          sessionId: sessionFilter,
-        });
-
         if (opts.jsonOutput) {
+          // JSON path delegates to the envelope builder, which re-reads
+          // the store internally. Skip the local `listVerifications`
+          // call so the hot path stays a single read — mirrors the
+          // same fix applied to `status` and `tasks` handlers.
           const envelope = buildVerificationsEnvelope({
             installDir: opts.installDir,
             status: filter as
@@ -102,6 +99,12 @@ const verificationListCommand: CommandModule = {
           emitJson(envelope);
         } else {
           const ui = getUI();
+          const verifications = store.listVerifications({
+            status: filter as
+              | import('../lib/orchestration/checkpoints/verifications').VerificationStatus[]
+              | undefined,
+            sessionId: sessionFilter,
+          });
           if (verifications.length === 0) {
             ui.log.info(chalk.dim('No matching verifications.'));
           } else {

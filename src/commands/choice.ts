@@ -106,12 +106,12 @@ const choiceListCommand: CommandModule = {
         // `--status all` (treated below).
         const effectiveStatus =
           statusRaw === 'all' ? undefined : status ?? 'pending';
-        const choices = store.listChoices({
-          status: effectiveStatus,
-          sessionId: sessionFilter,
-        });
 
         if (opts.jsonOutput) {
+          // JSON path delegates to the envelope builder, which re-reads
+          // the store internally. Skip the local `listChoices` call so
+          // the hot path stays a single read — mirrors the same fix
+          // applied to `status` and `tasks` handlers.
           const envelope = buildChoicesEnvelope({
             installDir: opts.installDir,
             status: effectiveStatus,
@@ -120,6 +120,10 @@ const choiceListCommand: CommandModule = {
           emitJson(envelope);
         } else {
           const ui = getUI();
+          const choices = store.listChoices({
+            status: effectiveStatus,
+            sessionId: sessionFilter,
+          });
           if (choices.length === 0) {
             ui.log.info(chalk.dim('No matching choices.'));
           } else {
