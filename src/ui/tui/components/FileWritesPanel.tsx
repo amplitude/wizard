@@ -99,7 +99,7 @@ export const truncatePathHead = (raw: string, maxWidth: number): string => {
   const basename = segments[segments.length - 1] ?? raw;
   // Basename alone overflows — middle-truncate it. Keeping the file
   // extension visible is the priority.
-  if (basename.length + 1 >= maxWidth) {
+  if (basename.length > maxWidth) {
     if (maxWidth <= 3) return '…';
     const keep = maxWidth - 1; // reserve 1 col for the ellipsis
     const head = Math.ceil(keep / 2);
@@ -112,10 +112,11 @@ export const truncatePathHead = (raw: string, maxWidth: number): string => {
   let acc = basename;
   for (let i = segments.length - 2; i >= 0; i--) {
     const next = `${segments[i]}/${acc}`;
-    // +1 for the leading ellipsis. Stop one segment short.
-    if (next.length + 1 > maxWidth) break;
+    // +2 for the leading `…/` prefix. Stop one segment short.
+    if (next.length + 2 > maxWidth) break;
     acc = next;
   }
+  if (acc === basename) return basename;
   return `…/${acc}`;
 };
 
@@ -157,7 +158,9 @@ const formatDuration = (ms: number): string => {
  * same string. Display-time relativization happens in `displayPath`
  * downstream.
  */
-const dedupeByPath = (entries: readonly FileWriteEntry[]): DedupedFileWrite[] => {
+const dedupeByPath = (
+  entries: readonly FileWriteEntry[],
+): DedupedFileWrite[] => {
   const byPath = new Map<string, DedupedFileWrite>();
   for (const entry of entries) {
     const prev = byPath.get(entry.path);
@@ -290,8 +293,9 @@ interface FileWriteRowProps {
 const KEYWORD_WIDTH = 7;
 /** Leading indent (' ' before icon) + status icon + space. */
 const ICON_WIDTH = 3;
-/** Single space gap between keyword cell and path cell. */
-const KEYWORD_PATH_GAP = 1;
+/** The keyword box width already includes a trailing space (width 7 for
+ *  a max-6-char label), so no extra gap column is needed. */
+const KEYWORD_PATH_GAP = 0;
 /** Separator between path and trailing detail (` · `). */
 const SEPARATOR = ' · ';
 /** Floor on usable columns when the terminal is unreasonably narrow. */
