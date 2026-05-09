@@ -79,12 +79,19 @@ interface Capture {
   state: string;
   /** Sanitized last frame from ink-testing-library. */
   frame: string;
+  /** Raw last frame with ANSI escapes preserved (for PNG renderer). */
+  rawFrame: string;
 }
 
 const captures: Capture[] = [];
 
-function record(screen: string, state: string, frame: string): void {
-  captures.push({ screen, state, frame });
+function record(
+  screen: string,
+  state: string,
+  frame: string,
+  rawFrame: string,
+): void {
+  captures.push({ screen, state, frame, rawFrame });
 }
 
 describe('capture wizard screens (writes docs/_tui-current-state.md)', () => {
@@ -94,8 +101,8 @@ describe('capture wizard screens (writes docs/_tui-current-state.md)', () => {
       frameworkConfig: null,
       installDir: '/projects/my-app',
     });
-    const { frame } = renderSnapshot(<IntroScreen store={store} />, store);
-    record('IntroScreen', 'detecting', frame);
+    const { frame, rawFrame } = renderSnapshot(<IntroScreen store={store} />, store);
+    record('IntroScreen', 'detecting', frame, rawFrame);
   });
 
   it('captures IntroScreen — detected (Next.js)', () => {
@@ -106,8 +113,8 @@ describe('capture wizard screens (writes docs/_tui-current-state.md)', () => {
       frameworkConfig: fakeNextjsConfig(),
       installDir: '/projects/my-app',
     });
-    const { frame } = renderSnapshot(<IntroScreen store={store} />, store);
-    record('IntroScreen', 'detected (Next.js)', frame);
+    const { frame, rawFrame } = renderSnapshot(<IntroScreen store={store} />, store);
+    record('IntroScreen', 'detected (Next.js)', frame, rawFrame);
   });
 
   it('captures IntroScreen — generic fallback', () => {
@@ -121,8 +128,8 @@ describe('capture wizard screens (writes docs/_tui-current-state.md)', () => {
       }),
       installDir: '/projects/my-app',
     });
-    const { frame } = renderSnapshot(<IntroScreen store={store} />, store);
-    record('IntroScreen', 'generic fallback', frame);
+    const { frame, rawFrame } = renderSnapshot(<IntroScreen store={store} />, store);
+    record('IntroScreen', 'generic fallback', frame, rawFrame);
   });
 
   it('captures IntroScreen — welcome back', () => {
@@ -153,8 +160,8 @@ describe('capture wizard screens (writes docs/_tui-current-state.md)', () => {
       integration: Integration.nextjs,
       frameworkConfig: fakeNextjsConfig(),
     });
-    const { frame } = renderSnapshot(<IntroScreen store={store} />, store);
-    record('IntroScreen', 'welcome back (returning user)', frame);
+    const { frame, rawFrame } = renderSnapshot(<IntroScreen store={store} />, store);
+    record('IntroScreen', 'welcome back (returning user)', frame, rawFrame);
   });
 
   it('captures IntroScreen — resume from checkpoint', () => {
@@ -167,16 +174,16 @@ describe('capture wizard screens (writes docs/_tui-current-state.md)', () => {
       selectedOrgName: 'Acme Corp',
       installDir: '/projects/my-app',
     });
-    const { frame } = renderSnapshot(<IntroScreen store={store} />, store);
-    record('IntroScreen', 'resume from checkpoint', frame);
+    const { frame, rawFrame } = renderSnapshot(<IntroScreen store={store} />, store);
+    record('IntroScreen', 'resume from checkpoint', frame, rawFrame);
   });
 
   it('captures SetupScreen — detecting configuration', () => {
     const store = makeStoreForSnapshot({
       frameworkConfig: fakeNextjsConfig(),
     });
-    const { frame } = renderSnapshot(<SetupScreen store={store} />, store);
-    record('SetupScreen', 'detecting', frame);
+    const { frame, rawFrame } = renderSnapshot(<SetupScreen store={store} />, store);
+    record('SetupScreen', 'detecting', frame, rawFrame);
   });
 
   it('captures AuthScreen — OAuth waiting', () => {
@@ -187,8 +194,8 @@ describe('capture wizard screens (writes docs/_tui-current-state.md)', () => {
         'https://app.amplitude.com/oauth?response_type=code&client_id=wizard',
       pendingOrgs: null,
     });
-    const { frame } = renderSnapshot(<AuthScreen store={store} />, store);
-    record('AuthScreen', 'OAuth waiting', frame);
+    const { frame, rawFrame } = renderSnapshot(<AuthScreen store={store} />, store);
+    record('AuthScreen', 'OAuth waiting', frame, rawFrame);
   });
 
   it('captures AuthScreen — org picker', () => {
@@ -201,8 +208,8 @@ describe('capture wizard screens (writes docs/_tui-current-state.md)', () => {
         { id: 'org-3', name: 'Initech', projects: [] },
       ],
     });
-    const { frame } = renderSnapshot(<AuthScreen store={store} />, store);
-    record('AuthScreen', 'org picker', frame);
+    const { frame, rawFrame } = renderSnapshot(<AuthScreen store={store} />, store);
+    record('AuthScreen', 'org picker', frame, rawFrame);
   });
 
   it('captures AuthScreen — project picker', () => {
@@ -224,72 +231,72 @@ describe('capture wizard screens (writes docs/_tui-current-state.md)', () => {
       selectedOrgId: 'org-1',
       selectedOrgName: 'Acme Corp',
     });
-    const { frame } = renderSnapshot(<AuthScreen store={store} />, store);
-    record('AuthScreen', 'project picker', frame);
+    const { frame, rawFrame } = renderSnapshot(<AuthScreen store={store} />, store);
+    record('AuthScreen', 'project picker', frame, rawFrame);
   });
 
   it('captures CreateProjectScreen — idle prompt', () => {
     const store = makeStoreForSnapshot({
       selectedOrgName: 'Acme Corp',
     });
-    const { frame } = renderSnapshot(
+    const { frame, rawFrame } = renderSnapshot(
       <CreateProjectScreen store={store} />,
       store,
     );
-    record('CreateProjectScreen', 'idle prompt', frame);
+    record('CreateProjectScreen', 'idle prompt', frame, rawFrame);
   });
 
   it('captures RegionSelectScreen — first time picker', () => {
     const store = makeStoreForSnapshot();
-    const { frame } = renderSnapshot(
+    const { frame, rawFrame } = renderSnapshot(
       <RegionSelectScreen store={store} />,
       store,
     );
-    record('RegionSelectScreen', 'first-time picker', frame);
+    record('RegionSelectScreen', 'first-time picker', frame, rawFrame);
   });
 
   it('captures SignupEmailScreen — empty input', () => {
     const store = makeStoreForSnapshot();
-    const { frame } = renderSnapshot(
+    const { frame, rawFrame } = renderSnapshot(
       <SignupEmailScreen store={store} />,
       store,
     );
-    record('SignupEmailScreen', 'empty input', frame);
+    record('SignupEmailScreen', 'empty input', frame, rawFrame);
   });
 
   it('captures SigningUpScreen — checking account', () => {
     const store = makeStoreForSnapshot({
       signupEmail: 'kelson@amplitude.com',
     });
-    const { frame } = renderSnapshot(<SigningUpScreen store={store} />, store);
-    record('SigningUpScreen', 'checking account', frame);
+    const { frame, rawFrame } = renderSnapshot(<SigningUpScreen store={store} />, store);
+    record('SigningUpScreen', 'checking account', frame, rawFrame);
   });
 
   it('captures SignupFullNameScreen — empty input', () => {
     const store = makeStoreForSnapshot({
       signupEmail: 'kelson@amplitude.com',
     });
-    const { frame } = renderSnapshot(
+    const { frame, rawFrame } = renderSnapshot(
       <SignupFullNameScreen store={store} />,
       store,
     );
-    record('SignupFullNameScreen', 'empty input', frame);
+    record('SignupFullNameScreen', 'empty input', frame, rawFrame);
   });
 
   it('captures ToSScreen — terms picker', () => {
     const store = makeStoreForSnapshot({
       signupEmail: 'kelson@amplitude.com',
     });
-    const { frame } = renderSnapshot(<ToSScreen store={store} />, store);
-    record('ToSScreen', 'terms picker', frame);
+    const { frame, rawFrame } = renderSnapshot(<ToSScreen store={store} />, store);
+    record('ToSScreen', 'terms picker', frame, rawFrame);
   });
 
   it('captures DataSetupScreen — analyzing project', () => {
     const store = makeStoreForSnapshot({
       integration: Integration.nextjs,
     });
-    const { frame } = renderSnapshot(<DataSetupScreen store={store} />, store);
-    record('DataSetupScreen', 'analyzing project', frame);
+    const { frame, rawFrame } = renderSnapshot(<DataSetupScreen store={store} />, store);
+    record('DataSetupScreen', 'analyzing project', frame, rawFrame);
   });
 
   it('captures ActivationOptionsScreen — installed waiting', () => {
@@ -304,11 +311,11 @@ describe('capture wizard screens (writes docs/_tui-current-state.md)', () => {
         eventsCheckedAt: Date.now(),
       },
     });
-    const { frame } = renderSnapshot(
+    const { frame, rawFrame } = renderSnapshot(
       <ActivationOptionsScreen store={store} />,
       store,
     );
-    record('ActivationOptionsScreen', 'installed - waiting for events', frame);
+    record('ActivationOptionsScreen', 'installed - waiting for events', frame, rawFrame);
   });
 
   it('captures RunScreen — cold start, first task in progress', () => {
@@ -378,18 +385,18 @@ describe('capture wizard screens (writes docs/_tui-current-state.md)', () => {
       },
     ]);
     store.pushStatus('Reading package.json');
-    const { frame } = renderSnapshot(<RunScreen store={store} />, store);
-    record('RunScreen', 'cold start, first task in progress', frame);
+    const { frame, rawFrame } = renderSnapshot(<RunScreen store={store} />, store);
+    record('RunScreen', 'cold start, first task in progress', frame, rawFrame);
   });
 
   it('captures McpScreen — looking for AI tools', () => {
     const store = makeStoreForSnapshot();
     const installer = createMcpInstaller(false);
-    const { frame } = renderSnapshot(
+    const { frame, rawFrame } = renderSnapshot(
       <McpScreen store={store} installer={installer} />,
       store,
     );
-    record('McpScreen', 'looking for AI tools', frame);
+    record('McpScreen', 'looking for AI tools', frame, rawFrame);
   });
 
   it('captures DataIngestionCheckScreen — listening', () => {
@@ -399,24 +406,24 @@ describe('capture wizard screens (writes docs/_tui-current-state.md)', () => {
       integration: Integration.nextjs,
       activationLevel: 'none',
     });
-    const { frame } = renderSnapshot(
+    const { frame, rawFrame } = renderSnapshot(
       <DataIngestionCheckScreen store={store} />,
       store,
     );
-    record('DataIngestionCheckScreen', 'listening for events', frame);
+    record('DataIngestionCheckScreen', 'listening for events', frame, rawFrame);
   });
 
   it('captures SlackScreen — connect prompt', () => {
     const store = makeStoreForSnapshot({
       region: 'us',
     });
-    const { frame } = renderSnapshot(<SlackScreen store={store} />, store);
-    record('SlackScreen', 'connect prompt', frame);
+    const { frame, rawFrame } = renderSnapshot(<SlackScreen store={store} />, store);
+    record('SlackScreen', 'connect prompt', frame, rawFrame);
   });
 
   it('captures LogoutScreen — confirm', () => {
     const store = makeStoreForSnapshot();
-    const { frame } = renderSnapshot(
+    const { frame, rawFrame } = renderSnapshot(
       <LogoutScreen
         installDir={store.session.installDir}
         onComplete={() => {}}
@@ -424,16 +431,16 @@ describe('capture wizard screens (writes docs/_tui-current-state.md)', () => {
       />,
       store,
     );
-    record('LogoutScreen', 'confirm prompt', frame);
+    record('LogoutScreen', 'confirm prompt', frame, rawFrame);
   });
 
   it('captures LoginScreen — refreshing credentials', () => {
     const store = makeStoreForSnapshot();
-    const { frame } = renderSnapshot(
+    const { frame, rawFrame } = renderSnapshot(
       <LoginScreen store={store} onComplete={() => {}} />,
       store,
     );
-    record('LoginScreen', 'refreshing credentials', frame);
+    record('LoginScreen', 'refreshing credentials', frame, rawFrame);
   });
 
   it('captures OutroScreen — success', () => {
@@ -451,8 +458,8 @@ describe('capture wizard screens (writes docs/_tui-current-state.md)', () => {
           'https://app.amplitude.com/analytics/amplitude/project/769610',
       },
     });
-    const { frame } = renderSnapshot(<OutroScreen store={store} />, store);
-    record('OutroScreen', 'success', frame);
+    const { frame, rawFrame } = renderSnapshot(<OutroScreen store={store} />, store);
+    record('OutroScreen', 'success', frame, rawFrame);
   });
 
   it('captures OutroScreen — error', () => {
@@ -465,8 +472,8 @@ describe('capture wizard screens (writes docs/_tui-current-state.md)', () => {
         docsUrl: 'https://amplitude.com/docs/get-started/quickstart',
       },
     });
-    const { frame } = renderSnapshot(<OutroScreen store={store} />, store);
-    record('OutroScreen', 'error', frame);
+    const { frame, rawFrame } = renderSnapshot(<OutroScreen store={store} />, store);
+    record('OutroScreen', 'error', frame, rawFrame);
   });
 
   it('captures OutroScreen — cancel', () => {
@@ -478,8 +485,8 @@ describe('capture wizard screens (writes docs/_tui-current-state.md)', () => {
         docsUrl: 'https://amplitude.com/docs/get-started/quickstart',
       },
     });
-    const { frame } = renderSnapshot(<OutroScreen store={store} />, store);
-    record('OutroScreen', 'cancel', frame);
+    const { frame, rawFrame } = renderSnapshot(<OutroScreen store={store} />, store);
+    record('OutroScreen', 'cancel', frame, rawFrame);
   });
 
   it('captures OutageScreen — degraded services banner', () => {
@@ -490,8 +497,8 @@ describe('capture wizard screens (writes docs/_tui-current-state.md)', () => {
         statusPageUrl: 'https://status.anthropic.com',
       },
     });
-    const { frame } = renderSnapshot(<OutageScreen store={store} />, store);
-    record('OutageScreen', 'degraded services', frame);
+    const { frame, rawFrame } = renderSnapshot(<OutageScreen store={store} />, store);
+    record('OutageScreen', 'degraded services', frame, rawFrame);
   });
 
   it('writes captures to docs/_tui-current-state.md', () => {
@@ -551,5 +558,25 @@ describe('capture wizard screens (writes docs/_tui-current-state.md)', () => {
 
     fs.mkdirSync(path.dirname(docPath), { recursive: true });
     fs.writeFileSync(docPath, out.join('\n'), 'utf8');
+
+    // Also dump an ANSI-preserved JSON sidecar for the offline PNG
+    // renderer (`scripts/render-tui-mocks.mjs`). Sanitized identically
+    // to the markdown so renders are reproducible across hosts.
+    const jsonPath = path.resolve(
+      __dirname,
+      '..',
+      '..',
+      '..',
+      '..',
+      'docs',
+      '_tui-current-state.json',
+    );
+    const jsonPayload = captures.map((c) => ({
+      screen: c.screen,
+      state: c.state,
+      frame: sanitize(c.frame),
+      rawFrame: sanitize(c.rawFrame),
+    }));
+    fs.writeFileSync(jsonPath, JSON.stringify(jsonPayload, null, 2), 'utf8');
   });
 });

@@ -1,0 +1,164 @@
+[
+  {
+    "screen": "IntroScreen",
+    "state": "detecting",
+    "frame": "\n                                          Amplitude Wizard\n                                AI-powered analytics setup in minutes\n\n                                     Target     /projects/my-app\n\n                                    ⠋ Scanning /projects/my-app…\n",
+    "rawFrame": "\n                                          Amplitude Wizard\n                                AI-powered analytics setup in minutes\n\n                                     Target     /projects/my-app\n\n                                    ⠋ Scanning /projects/my-app…\n"
+  },
+  {
+    "screen": "IntroScreen",
+    "state": "detected (Next.js)",
+    "frame": "\n                                          Amplitude Wizard\n                                AI-powered analytics setup in minutes\n\n                                   Target     /projects/my-app\n                                   Framework  ▲ Next.js (detected)\n\n              ⚠ No project manifest found here. This may not be the project you meant.\n\n                    Sign in to an existing Amplitude account, or create a new one\n                   ▸ [1] Continue — sign in to Amplitude (existing account)\n                     [2] Continue — create a new account (new organization)\n                     [3] Change framework\n                     [4] Change directory\n                     [5] Cancel",
+    "rawFrame": "\n                                          Amplitude Wizard\n                                AI-powered analytics setup in minutes\n\n                                   Target     /projects/my-app\n                                   Framework  ▲ Next.js (detected)\n\n              ⚠ No project manifest found here. This may not be the project you meant.\n\n                    Sign in to an existing Amplitude account, or create a new one\n                   ▸ [1] Continue — sign in to Amplitude (existing account)\n                     [2] Continue — create a new account (new organization)\n                     [3] Change framework\n                     [4] Change directory\n                     [5] Cancel"
+  },
+  {
+    "screen": "IntroScreen",
+    "state": "generic fallback",
+    "frame": "\n                                          Amplitude Wizard\n                                AI-powered analytics setup in minutes\n\n                                     Target     /projects/my-app\n                                     Framework  Generic\n\n              ⚠ No project manifest found here. This may not be the project you meant.\n\n              No framework detected. Continue with the generic guide or pick one below.\n\n                    Sign in to an existing Amplitude account, or create a new one\n                   ▸ [1] Continue — sign in to Amplitude (existing account)\n                     [2] Continue — create a new account (new organization)\n                     [3] Change framework\n                     [4] Change directory\n                     [5] Cancel",
+    "rawFrame": "\n                                          Amplitude Wizard\n                                AI-powered analytics setup in minutes\n\n                                     Target     /projects/my-app\n                                     Framework  Generic\n\n              ⚠ No project manifest found here. This may not be the project you meant.\n\n              No framework detected. Continue with the generic guide or pick one below.\n\n                    Sign in to an existing Amplitude account, or create a new one\n                   ▸ [1] Continue — sign in to Amplitude (existing account)\n                     [2] Continue — create a new account (new organization)\n                     [3] Change framework\n                     [4] Change directory\n                     [5] Cancel"
+  },
+  {
+    "screen": "IntroScreen",
+    "state": "welcome back (returning user)",
+    "frame": "\n                                 Welcome back, kelson@amplitude.com\n                                         Acme Analytics · US\n                              3 events instrumented · last run just now\n\n                               Target     /projects/my-app\n                               Framework  ▲ Next.js (detected)\n\n              ⚠ No project manifest found here. This may not be the project you meant.\n\n      Next: install the SDK and propose an event plan you'll review before any code is written.\n\n                You're signed in as kelson@amplitude.com. Continue to workspace setup.\n               ▸ [1] Continue — workspace setup (same login)\n                 [2] Change framework\n                 [3] Change region\n                 [4] Change directory\n                 [5] Cancel",
+    "rawFrame": "\n                                 Welcome back, kelson@amplitude.com\n                                         Acme Analytics · US\n                              3 events instrumented · last run just now\n\n                               Target     /projects/my-app\n                               Framework  ▲ Next.js (detected)\n\n              ⚠ No project manifest found here. This may not be the project you meant.\n\n      Next: install the SDK and propose an event plan you'll review before any code is written.\n\n                You're signed in as kelson@amplitude.com. Continue to workspace setup.\n               ▸ [1] Continue — workspace setup (same login)\n                 [2] Change framework\n                 [3] Change region\n                 [4] Change directory\n                 [5] Cancel"
+  },
+  {
+    "screen": "IntroScreen",
+    "state": "resume from checkpoint",
+    "frame": "\n\n                                          Amplitude Wizard\n\n                                 A previous session was interrupted.\n                                  Framework: Next.js\n                                  Organization: Acme Corp\n\n\n                                 ▸ [1] Resume where you left off\n                                   [2] Start fresh\n                                   [3] Cancel (exit wizard)",
+    "rawFrame": "\n\n                                          Amplitude Wizard\n\n                                 A previous session was interrupted.\n                                  Framework: Next.js\n                                  Organization: Acme Corp\n\n\n                                 ▸ [1] Resume where you left off\n                                   [2] Start fresh\n                                   [3] Cancel (exit wizard)"
+  },
+  {
+    "screen": "SetupScreen",
+    "state": "detecting",
+    "frame": "Detecting project configuration…",
+    "rawFrame": "Detecting project configuration…"
+  },
+  {
+    "screen": "AuthScreen",
+    "state": "OAuth waiting",
+    "frame": "⠋ Signing you in…\n\nIf the browser didn't open, copy and paste this URL:\nhttps://app.amplitude.com/oauth?response_type=code&client_id=wizard\n\n[R] Retry browser  [M] Enter API key manually  [Esc] Cancel",
+    "rawFrame": "⠋ Signing you in…\n\nIf the browser didn't open, copy and paste this URL:\nhttps://app.amplitude.com/oauth?response_type=code&client_id=wizard\n\n[R] Retry browser  [M] Enter API key manually  [Esc] Cancel"
+  },
+  {
+    "screen": "AuthScreen",
+    "state": "org picker",
+    "frame": "Select your organization\n\n\n▸ [1] Acme Corp\n  [2] Globex\n  [3] Initech",
+    "rawFrame": "Select your organization\n\n\n▸ [1] Acme Corp\n  [2] Globex\n  [3] Initech"
+  },
+  {
+    "screen": "AuthScreen",
+    "state": "project picker",
+    "frame": "✓ Organization: Acme Corp\n\nSelect a project\nin Acme Corp\n\n\n▸ [1] Production\n  [2] Staging\n  [3] Internal Tools\n  [4] Create new project…\n  [5] Start over",
+    "rawFrame": "✓ Organization: Acme Corp\n\nSelect a project\nin Acme Corp\n\n\n▸ [1] Production\n  [2] Staging\n  [3] Internal Tools\n  [4] Create new project…\n  [5] Start over"
+  },
+  {
+    "screen": "CreateProjectScreen",
+    "state": "idle prompt",
+    "frame": "Create a new Amplitude project\nin Acme Corp\n\nProject name\nLetters, numbers, and spaces. You can rename it later in Amplitude.\n\nMy new project\n\n· Press Enter to create, Esc to go back.",
+    "rawFrame": "Create a new Amplitude project\nin Acme Corp\n\nProject name\nLetters, numbers, and spaces. You can rename it later in Amplitude.\n\nMy new project\n\n· Press Enter to create, Esc to go back."
+  },
+  {
+    "screen": "RegionSelectScreen",
+    "state": "first-time picker",
+    "frame": "Select your data region\nSelect the region for your Amplitude project. This should match the region your organization uses.\n\n\n▸ [1] United States (app.amplitude.com)\n  [2] Europe (app.eu.amplitude.com)\n\n· Data residency affects API endpoints and compliance. You can change this later with /region.",
+    "rawFrame": "Select your data region\nSelect the region for your Amplitude project. This should match the region your organization uses.\n\n\n▸ [1] United States (app.amplitude.com)\n  [2] Europe (app.eu.amplitude.com)\n\n· Data residency affects API endpoints and compliance. You can change this later with /region."
+  },
+  {
+    "screen": "SignupEmailScreen",
+    "state": "empty input",
+    "frame": "Create your Amplitude account\nEnter your email to get started\n\nyour.email@example.com\n\n\n· We'll use this to create your Amplitude account",
+    "rawFrame": "Create your Amplitude account\nEnter your email to get started\n\nyour.email@example.com\n\n\n· We'll use this to create your Amplitude account"
+  },
+  {
+    "screen": "SigningUpScreen",
+    "state": "checking account",
+    "frame": "Create your Amplitude account\nChecking your account…\n\nkelson@amplitude.com\n\n⠋ · contacting Amplitude…",
+    "rawFrame": "Create your Amplitude account\nChecking your account…\n\nkelson@amplitude.com\n\n⠋ · contacting Amplitude…"
+  },
+  {
+    "screen": "SignupFullNameScreen",
+    "state": "empty input",
+    "frame": "One more thing\nWhat's your full name?\n\nFirst Last\n",
+    "rawFrame": "One more thing\nWhat's your full name?\n\nFirst Last\n"
+  },
+  {
+    "screen": "ToSScreen",
+    "state": "terms picker",
+    "frame": "Terms of Service\nBy continuing, you agree to Amplitude's terms\n\nPlease review and accept our Terms of Service and Privacy Policy to continue:\n\n→ Terms: https://amplitude.com/terms\n→ Privacy: https://amplitude.com/privacy\n\n\n▸ [1] I accept the Terms of Service and Privacy Policy\n  [2] I do not accept\n\n· This is required to create an Amplitude account",
+    "rawFrame": "Terms of Service\nBy continuing, you agree to Amplitude's terms\n\nPlease review and accept our Terms of Service and Privacy Policy to continue:\n\n→ Terms: https://amplitude.com/terms\n→ Privacy: https://amplitude.com/privacy\n\n\n▸ [1] I accept the Terms of Service and Privacy Policy\n  [2] I do not accept\n\n· This is required to create an Amplitude account"
+  },
+  {
+    "screen": "DataSetupScreen",
+    "state": "analyzing project",
+    "frame": "Checking project setup\n\n⠋ Analyzing your Amplitude project…\n\nLooking for existing SDK installation and event data",
+    "rawFrame": "Checking project setup\n\n⠋ Analyzing your Amplitude project…\n\nLooking for existing SDK installation and event data"
+  },
+  {
+    "screen": "ActivationOptionsScreen",
+    "state": "installed - waiting for events",
+    "frame": "Your SDK is partially set up ─ waiting for events\n\nWe can see your project is configured but hasn't received many events yet.\nWhat would you like to do?\n\n\n▸ [1] Help me test locally (run the setup agent)\n  [2] I'm blocked — write a support report (open log + save shareable report)\n  [3] Take me to the docs (https://amplitude.com/docs/sdks)\n  [4] I'm done for now (exit and resume later)",
+    "rawFrame": "Your SDK is partially set up ─ waiting for events\n\nWe can see your project is configured but hasn't received many events yet.\nWhat would you like to do?\n\n\n▸ [1] Help me test locally (run the setup agent)\n  [2] I'm blocked — write a support report (open log + save shareable report)\n  [3] Take me to the docs (https://amplitude.com/docs/sdks)\n  [4] I'm done for now (exit and resume later)"
+  },
+  {
+    "screen": "RunScreen",
+    "state": "cold start, first task in progress",
+    "frame": "Discovered · 5 facts\n ✓ Framework         JavaScript (Web)\n ✓ TypeScript        yes\n ✓ Package manager   Yarn V1\n ✓ Project           Amplitude\n ✓ Region            US\n0 done · 4 to go · 55s (cold start: ~30–60s)\n\nTasks\n\n› Detecting your project setup\n○ Install Amplitude\n○ Plan and approve events to track\n○ Wire up event tracking\n\n ◇ Detecting your project setup\n\n  Progress   Logs   Snake (WASD)                                                 ← → to switch tabs",
+    "rawFrame": "Discovered · 5 facts\n ✓ Framework         JavaScript (Web)\n ✓ TypeScript        yes\n ✓ Package manager   Yarn V1\n ✓ Project           Amplitude\n ✓ Region            US\n0 done · 4 to go · 55s (cold start: ~30–60s)\n\nTasks\n\n› Detecting your project setup\n○ Install Amplitude\n○ Plan and approve events to track\n○ Wire up event tracking\n\n ◇ Detecting your project setup\n\n  Progress   Logs   Snake (WASD)                                                 ← → to switch tabs"
+  },
+  {
+    "screen": "McpScreen",
+    "state": "looking for AI tools",
+    "frame": "💬 Chat with your Amplitude data\nWe’ll wire the Amplitude MCP into Claude Code, Cursor, Claude Desktop, and other AI tools you have\ninstalled. You can then ask questions, build charts, and check metrics from chat (e.g. “show me\nyesterday’s signups”).\n\n⠋ Looking for supported AI tools…",
+    "rawFrame": "💬 Chat with your Amplitude data\nWe’ll wire the Amplitude MCP into Claude Code, Cursor, Claude Desktop, and other AI tools you have\ninstalled. You can then ask questions, build charts, and check metrics from chat (e.g. “show me\nyesterday’s signups”).\n\n⠋ Looking for supported AI tools…"
+  },
+  {
+    "screen": "DataIngestionCheckScreen",
+    "state": "listening for events",
+    "frame": "\n  Start your app and trigger some user actions\n\n  → Start your dev server, then visit it and click around\n\n  Your SDK is installed. Once you interact with your app, events will start flowing into\n  Amplitude.\n\n    → If your dev server or build was already running, restart it so the new env values load.\n\n  ⠋ Listening for events…\n\n\n  [Enter] or [q] Skip verification  [x] Exit and resume later\n",
+    "rawFrame": "\n  Start your app and trigger some user actions\n\n  → Start your dev server, then visit it and click around\n\n  Your SDK is installed. Once you interact with your app, events will start flowing into\n  Amplitude.\n\n    → If your dev server or build was already running, restart it so the new env values load.\n\n  ⠋ Listening for events…\n\n\n  [Enter] or [q] Skip verification  [x] Exit and resume later\n"
+  },
+  {
+    "screen": "SlackScreen",
+    "state": "connect prompt",
+    "frame": "Slack Integration\n\nConnect Amplitude to Slack for chart previews, dashboard sharing,\nand real-time tracking plan notifications.\n\n Connect the \"Amplitude\" Slack app to your workspace?\n\n    Connect\n    Skip for now",
+    "rawFrame": "Slack Integration\n\nConnect Amplitude to Slack for chart previews, dashboard sharing,\nand real-time tracking plan notifications.\n\n Connect the \"Amplitude\" Slack app to your workspace?\n\n    Connect\n    Skip for now"
+  },
+  {
+    "screen": "LogoutScreen",
+    "state": "confirm prompt",
+    "frame": "Log Out\n\n Clear stored Amplitude credentials (wizard session + project binding)?\n\n    Log out\n    Cancel",
+    "rawFrame": "Log Out\n\n Clear stored Amplitude credentials (wizard session + project binding)?\n\n    Log out\n    Cancel"
+  },
+  {
+    "screen": "LoginScreen",
+    "state": "refreshing credentials",
+    "frame": "Re-authenticate\n\n⠋ Refreshing credentials…",
+    "rawFrame": "Re-authenticate\n\n⠋ Refreshing credentials…"
+  },
+  {
+    "screen": "OutroScreen",
+    "state": "success",
+    "frame": "\n  🎉 Amplitude is live!\n\n  ● Installed @amplitude/analytics-browser\n  ● Added .env.local with AMPLITUDE_API_KEY\n  ● Added 3 planned events to your tracking plan\n\n\n  ▸ [1] Open Amplitude (amplitude.com)\n    [2] Exit\n",
+    "rawFrame": "\n  🎉 Amplitude is live!\n\n  ● Installed @amplitude/analytics-browser\n  ● Added .env.local with AMPLITUDE_API_KEY\n  ● Added 3 planned events to your tracking plan\n\n\n  ▸ [1] Open Amplitude (amplitude.com)\n    [2] Exit\n"
+  },
+  {
+    "screen": "OutroScreen",
+    "state": "error",
+    "frame": "\n  ✗ Setup failed\n\n  The agent could not detect your framework. Re-run with --menu to pick one manually.\n\n  → Check your API key and network connection\n  → Run the wizard again with --debug for more detail\n  → Full log: <tmp>/amplitude-wizard.log (press L to open)\n  → Press C to write a sanitized bug report\n  → Docs: https://amplitude.com/docs/get-started/quickstart\n\n  Press any key to exit\n",
+    "rawFrame": "\n  ✗ Setup failed\n\n  The agent could not detect your framework. Re-run with --menu to pick one manually.\n\n  → Check your API key and network connection\n  → Run the wizard again with --debug for more detail\n  → Full log: <tmp>/amplitude-wizard.log (press L to open)\n  → Press C to write a sanitized bug report\n  → Docs: https://amplitude.com/docs/get-started/quickstart\n\n  Press any key to exit\n"
+  },
+  {
+    "screen": "OutroScreen",
+    "state": "cancel",
+    "frame": "\n  ─ Setup cancelled\n\n  Setup cancelled.\n\n  Resume later\n  Pick up where you left off — run npx @amplitude/wizard in this directory anytime.\n\n  Manual setup: https://amplitude.com/docs/get-started/quickstart\n\n  Press any key to exit\n",
+    "rawFrame": "\n  ─ Setup cancelled\n\n  Setup cancelled.\n\n  Resume later\n  Pick up where you left off — run npx @amplitude/wizard in this directory anytime.\n\n  Manual setup: https://amplitude.com/docs/get-started/quickstart\n\n  Press any key to exit\n"
+  },
+  {
+    "screen": "OutageScreen",
+    "state": "degraded services",
+    "frame": "◆ The setup agent is temporarily unavailable.\n\nStatus: Elevated error rates affecting Anthropic API requests via gateway.\nStatus page: https://status.anthropic.com\n\nThe wizard may not work reliably while services are affected.\n\n· Re-checking… (attempt 1 of 10)\n\n Continue anyway?\n\n    Continue [Enter]\n    Cancel [Esc]",
+    "rawFrame": "◆ The setup agent is temporarily unavailable.\n\nStatus: Elevated error rates affecting Anthropic API requests via gateway.\nStatus page: https://status.anthropic.com\n\nThe wizard may not work reliably while services are affected.\n\n· Re-checking… (attempt 1 of 10)\n\n Continue anyway?\n\n    Continue [Enter]\n    Cancel [Esc]"
+  }
+]

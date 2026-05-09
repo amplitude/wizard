@@ -107,6 +107,12 @@ const trimTrailingWs = (s: string): string =>
 export interface RenderedSnapshot {
   /** Sanitized terminal output, ready to feed `toMatchSnapshot()`. */
   frame: string;
+  /**
+   * Raw last frame WITH ANSI escapes preserved. Useful for offline
+   * renderers (e.g. capture-screens-ansi → PNG via Playwright) that
+   * need the color information snapshots intentionally drop.
+   */
+  rawFrame: string;
   /** The store that was rendered against — useful for follow-up assertions. */
   store: WizardStore;
   /**
@@ -137,6 +143,7 @@ export function renderSnapshot(
   unmount();
   return {
     frame: trimTrailingWs(stripAnsi(raw)),
+    rawFrame: raw,
     store,
     hints,
   };
