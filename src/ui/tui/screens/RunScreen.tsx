@@ -152,9 +152,7 @@ interface RunScreenProps {
  *   (#1) already follows the same pattern; this extends it to the
  *   in-loop journey steps.
  */
-export function resolveRunScreenStatus(
-  store: WizardStore,
-): string | undefined {
+export function resolveRunScreenStatus(store: WizardStore): string | undefined {
   const activePostAgentStep = store.session.postAgentSteps.find(
     (s) => s.status === PostAgentStepStatus.InProgress,
   );
@@ -468,7 +466,7 @@ const ProgressTab = ({ store }: { store: WizardStore }) => {
           entries={store.fileWrites}
           installDir={store.session.installDir}
           spinnerFrame={spinnerFrame}
-          width={cols}
+          width={cols - 2}
         />
 
         {/* Coaching: surfaces calmly after 90s of no task-count progress.
@@ -486,7 +484,7 @@ const ProgressTab = ({ store }: { store: WizardStore }) => {
               {Icons.dash}
               {coachingTier >= 2
                 ? " This is unusually slow. Press ← / → to switch to the Logs tab and see what's stuck — or Ctrl+C to cancel."
-                : ' Still working — press ← / → to switch to the Logs tab and see what\'s happening, or Ctrl+C to cancel.'}
+                : " Still working — press ← / → to switch to the Logs tab and see what's happening, or Ctrl+C to cancel."}
             </Text>
           </Box>
         )}
@@ -532,9 +530,7 @@ export const RunScreen = ({ store }: RunScreenProps) => {
   // `overflow="hidden"` handles wide terminals, but a JS cap is the
   // belt-and-braces guard against unbounded strings.
   const rawLastStatus = resolveRunScreenStatus(store);
-  const lastStatus = rawLastStatus
-    ? truncateStatus(rawLastStatus)
-    : undefined;
+  const lastStatus = rawLastStatus ? truncateStatus(rawLastStatus) : undefined;
 
   const hasEvents = store.eventPlan.length > 0;
 
