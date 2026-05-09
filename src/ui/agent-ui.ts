@@ -487,6 +487,7 @@ export class AgentUI implements WizardUI {
       | 'QUOTA_REACHED'
       | 'FORBIDDEN'
       | 'INVALID_REQUEST'
+      | 'IDEMPOTENCY_CONFLICT'
       | 'INTERNAL'
       | 'MISSING_NAME'
       | 'MISSING_ORG';
@@ -526,6 +527,11 @@ export class AgentUI implements WizardUI {
         case 'QUOTA_REACHED':
         case 'FORBIDDEN':
           return { recoverable: 'human_required' };
+        case 'IDEMPOTENCY_CONFLICT':
+          // Transient — a concurrent create with the same key is in
+          // flight. Orchestrators should retry shortly; the proxy
+          // resolves the conflict within seconds.
+          return { recoverable: 'retry' };
         case 'INTERNAL':
         default:
           return { recoverable: 'retry' };

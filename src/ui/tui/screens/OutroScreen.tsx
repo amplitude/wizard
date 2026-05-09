@@ -321,6 +321,29 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
       return;
     }
     if (showReport && key.escape) setShowReport(false);
+    // `O` while the report sub-view is up opens the dashboard URL in
+    // the OS-default browser. Mirrors the picker's "Open Amplitude"
+    // option so users don't have to leave the report to take the
+    // forward action — the report itself is read-only chrome.
+    if (showReport && (input === 'o' || input === 'O')) {
+      // ReportViewer's own input handler eats arrow keys for scrolling
+      // but does not claim O — safe to consume here. resolveZone
+      // tier 1 (in-session credentials) is authoritative this late in
+      // the flow; readDisk: false avoids re-walking the project root.
+      const zone = resolveZone(store.session, DEFAULT_AMPLITUDE_ZONE, {
+        readDisk: false,
+      });
+      const url = dashboardOpenUrl ?? OUTBOUND_URLS.overview[zone];
+      analytics.wizardCapture('outro action', {
+        action: 'dashboard',
+        'outro kind': store.session.outroData?.kind,
+        source: 'report-cta',
+      });
+      opn(url, { wait: false }).catch(() => {
+        /* fire-and-forget — opn failures are non-fatal */
+      });
+      return;
+    }
     // `D` while the success picker is showing pops the changed-files
     // view as a parallel review surface to the setup report. Cheap
     // shortcut so users can audit what was touched without leaving the
@@ -480,13 +503,61 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
   if (showReport) {
     return (
       <Box flexDirection="column" flexGrow={1} paddingX={2} paddingY={1}>
-        <Box marginBottom={1}>
+        {/* Header: bold accent title + small dim subtitle. The previous
+            "(Esc to go back)" inline next to the title visually competed
+            with the title itself — pulled down to the dedicated key-hint
+            line below the report so the eye lands on the CTA first. */}
+        <Box marginBottom={1} flexDirection="column">
           <Text bold color={Colors.accent}>
-            Setup Report
+            {Icons.diamond} Setup Report
           </Text>
-          <Text color={Colors.muted}> (Esc to go back)</Text>
+          <Text color={Colors.muted}>
+            What the wizard added to your project
+          </Text>
         </Box>
-        <ReportViewer filePath={reportPath} />
+        {/* Tell the viewer how many rows of sibling chrome it has to
+            share the content area with so the scroll area doesn't push
+            the CTA / key-hint footer off the bottom of the viewport.
+            Breakdown:
+              - paddingY={1} on this Box: 2 rows
+              - Header column (title + subtitle + marginBottom=1): 3 rows
+              - CTA box (marginTop=1 + 1 line): 2 rows when shown
+              - Key-hints box (marginTop adjusts; +1 line content): 1-2 rows
+            Without this, ReportViewer used a fixed `rows - 10` which
+            pre-dated the new sibling content this PR adds and would
+            clip the CTA off-screen on shorter terminals. */}
+        <ReportViewer
+          filePath={reportPath}
+          siblingRows={dashboardOpenUrl ? 8 : 7}
+        />
+        {/* Primary next-action — the report is read-only chrome; the
+            forward path is "open Amplitude". Surface it as the loudest
+            line on the screen so users don't bounce out of the terminal
+            wondering what to do after they finish reading. */}
+        {dashboardOpenUrl && (
+          <Box marginTop={1} flexDirection="column">
+            <Text>
+              <Text color={Colors.accent} bold>
+                {Icons.arrowRight} Open Amplitude:
+              </Text>{' '}
+              <TerminalLink url={dashboardOpenUrl}>
+                {dashboardOpenUrl}
+              </TerminalLink>
+            </Text>
+          </Box>
+        )}
+        <Box marginTop={dashboardOpenUrl ? 0 : 1}>
+          <Text color={Colors.muted}>
+            <Text bold color={Colors.accent}>
+              [O]
+            </Text>{' '}
+            Open in browser ·{' '}
+            <Text bold color={Colors.accent}>
+              [Esc]
+            </Text>{' '}
+            Back
+          </Text>
+        </Box>
       </Box>
     );
   }

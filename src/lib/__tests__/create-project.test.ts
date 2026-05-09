@@ -11,6 +11,7 @@ import {
   createAmplitudeApp,
   validateProjectName,
   getWizardProxyBase,
+  mapBackendCreateProjectErrorCode,
   parseRetryAfterMs,
   ApiError,
   PROJECT_NAME_MAX_LENGTH,
@@ -370,5 +371,107 @@ describe('parseRetryAfterMs', () => {
     expect(parseRetryAfterMs('')).toBeNull();
     expect(parseRetryAfterMs('   ')).toBeNull();
     expect(parseRetryAfterMs('not-a-thing')).toBeNull();
+  });
+});
+
+describe('createAmplitudeApp — idempotency', () => {
+  beforeEach(() => {
+    mockedAxios.post.mockReset();
+  });
+
+  afterEach(() => {
+    vi.clearAllMocks();
+  });
+
+  // ── Idempotency-Key wire shape (B.1 + A.1) ──────────────────────
+  it('attaches Idempotency-Key header when caller provides a UUID', async () => {
+    // The wizard-proxy validates this header with a UUID v4 regex —
+    // pinning the exact header name and value so a future refactor
+    // can't silently break dedup.
+    mockedAxios.post.mockResolvedValueOnce({
+      status: 200,
+      data: { appId: '1', apiKey: 'k', name: 'P' },
+    });
+    const key = '11111111-1111-4111-8111-111111111111';
+    await createAmplitudeApp('tok', 'us', {
+      orgId: 'org',
+      name: 'P',
+      idempotencyKey: key,
+    });
+    const config = mockedAxios.post.mock.calls[0][2] as {
+      headers: Record<string, string>;
+    };
+    expect(config.headers['Idempotency-Key']).toBe(key);
+  });
+
+  it('omits Idempotency-Key when caller does not provide one', async () => {
+    // Older callers / older proxy builds — the wire shape stays minimal.
+    mockedAxios.post.mockResolvedValueOnce({
+      status: 200,
+      data: { appId: '1', apiKey: 'k', name: 'P' },
+    });
+    await createAmplitudeApp('tok', 'us', { orgId: 'org', name: 'P' });
+    const config = mockedAxios.post.mock.calls[0][2] as {
+      headers: Record<string, string>;
+    };
+    expect(config.headers['Idempotency-Key']).toBeUndefined();
+  });
+
+  it('maps backend IDEMPOTENCY_KEY_IN_USE → IDEMPOTENCY_CONFLICT', async () => {
+    // The proxy's wire code is mechanism-focused; the wizard surfaces a
+    // friendlier code that orchestrators key off for "retry shortly".
+    mockedAxios.post.mockRejectedValueOnce(
+      makeAxiosError(409, {
+        error: { code: 'IDEMPOTENCY_KEY_IN_USE', message: 'in use' },
+      }),
+    );
+    await expect(
+      createAmplitudeApp('tok', 'us', { orgId: 'org', name: 'Name' }),
+    ).rejects.toMatchObject({
+      code: 'IDEMPOTENCY_CONFLICT',
+      statusCode: 409,
+      message: expect.stringContaining(
+        'A project with this idempotency key is being created concurrently',
+      ),
+    });
+  });
+
+  it('still maps NAME_TAKEN normally (no regression on the common 409)', async () => {
+    // Defense in depth: the structured-body parse must NOT misclassify
+    // a real "name taken" 409 as an idempotency conflict.
+    mockedAxios.post.mockRejectedValueOnce(
+      makeAxiosError(409, {
+        error: { code: 'NAME_TAKEN', message: 'taken' },
+      }),
+    );
+    await expect(
+      createAmplitudeApp('tok', 'us', { orgId: 'org', name: 'Name' }),
+    ).rejects.toMatchObject({ code: 'NAME_TAKEN', statusCode: 409 });
+  });
+});
+
+describe('mapBackendCreateProjectErrorCode', () => {
+  it('forwards known codes 1:1', () => {
+    expect(mapBackendCreateProjectErrorCode('NAME_TAKEN')).toBe('NAME_TAKEN');
+    expect(mapBackendCreateProjectErrorCode('QUOTA_REACHED')).toBe(
+      'QUOTA_REACHED',
+    );
+    expect(mapBackendCreateProjectErrorCode('FORBIDDEN')).toBe('FORBIDDEN');
+    expect(mapBackendCreateProjectErrorCode('INVALID_REQUEST')).toBe(
+      'INVALID_REQUEST',
+    );
+    expect(mapBackendCreateProjectErrorCode('INTERNAL')).toBe('INTERNAL');
+  });
+
+  it('renames IDEMPOTENCY_KEY_IN_USE → IDEMPOTENCY_CONFLICT', () => {
+    expect(mapBackendCreateProjectErrorCode('IDEMPOTENCY_KEY_IN_USE')).toBe(
+      'IDEMPOTENCY_CONFLICT',
+    );
+  });
+
+  it('falls back to INTERNAL on an unknown forward-compat code', () => {
+    // A newer proxy build emitting a code we don't recognise — wizard
+    // taxonomy stays total by collapsing to INTERNAL.
+    expect(mapBackendCreateProjectErrorCode('SOMETHING_NEW')).toBe('INTERNAL');
   });
 });
