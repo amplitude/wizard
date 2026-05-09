@@ -530,7 +530,7 @@ export const resumeCommand: CommandModule = {
         // and description belong to the session the user asked for, not the
         // most-recently-active session in the store.
         const lsp = computeLastStoppingPoint(opts.installDir, {
-          sessionId: session!.id,
+          sessionId: session.id,
         });
         const command = lsp.nextAction.command;
         const description = lsp.nextAction.description;
