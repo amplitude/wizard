@@ -17,6 +17,7 @@ import { render } from 'ink-testing-library';
 import { JourneyStepper } from '../JourneyStepper.js';
 import { WizardStore, Flow, RunPhase } from '../../store.js';
 import type { WizardSession } from '../../store.js';
+import { OutroKind } from '../../session-constants.js';
 
 // eslint-disable-next-line no-control-regex
 const ANSI_CSI = /\x1b\[[0-9;]*[A-Za-z]/g;
@@ -128,6 +129,92 @@ describe('JourneyStepper', () => {
     const completedIdx = out.indexOf('✓ Welcome');
     expect(activeIdx).toBeGreaterThanOrEqual(0);
     expect(completedIdx).toBe(-1);
+  });
+
+  it('marks Setup as ✗ (not ✓) when the agent crashes during the run', () => {
+    // Regression: pre-fix the stepper rendered every prior phase as
+    // completed (✓) on the error outro because positional logic walked
+    // the screen list past the failed step. A user saw
+    // `✓ Welcome ─ ✓ Auth ─ ✓ Setup ─ ✓ Verify ─ ● Done` followed by
+    // "Setup failed" — a direct contradiction. Now the in-progress
+    // phase at crash time renders ✗ and everything after it goes back
+    // to ○ (pending).
+    //
+    // `projectHasData: false` advances the flow past DataSetup so the
+    // resolver actually lands on the Outro (the wizard's real state at
+    // this point — DataSetup runs before the agent).
+    const store = makeStore({
+      introConcluded: true,
+      region: 'us',
+      credentials: CREDS,
+      selectedOrgId: '123',
+      selectedOrgName: 'Acme',
+      selectedProjectName: 'Amplitude',
+      selectedEnvName: 'Production',
+      projectHasData: false,
+      activationLevel: 'none',
+      runPhase: RunPhase.Error,
+      outroData: {
+        kind: OutroKind.Error,
+        message: 'Setup failed',
+      },
+    });
+    const out = frameOf(<JourneyStepper store={store} width={120} />);
+    // Welcome + Auth completed before the crash → still ✓
+    expect(out).toContain('✓ Welcome');
+    expect(out).toContain('✓ Auth');
+    // Setup is the failed phase → ✗
+    expect(out).toContain('✗ Setup');
+    expect(out).not.toContain('✓ Setup');
+    // Verify and Done were never reached → ○ (pending), no ✓
+    expect(out).not.toContain('✓ Verify');
+    expect(out).not.toContain('✓ Done');
+    expect(out).not.toContain('● Done');
+  });
+
+  it('marks Auth as ✗ when the wizard fails before credentials are set', () => {
+    // Auth failure (e.g. OAuth cancelled, region unreachable) should
+    // not paint Welcome → Auth as completed.
+    const store = makeStore({
+      introConcluded: true,
+      outroData: {
+        kind: OutroKind.Error,
+        message: 'Authentication failed',
+      },
+    });
+    const out = frameOf(<JourneyStepper store={store} width={120} />);
+    expect(out).toContain('✓ Welcome');
+    expect(out).toContain('✗ Auth');
+    expect(out).not.toContain('✓ Auth');
+  });
+
+  it('keeps ✓ on prior phases when the run completes successfully', () => {
+    // Counter-test for the error path — make sure non-error outros still
+    // show all completed phases as ✓ (no regression on the happy path).
+    const store = makeStore({
+      introConcluded: true,
+      region: 'us',
+      credentials: CREDS,
+      selectedOrgId: '123',
+      selectedOrgName: 'Acme',
+      selectedProjectName: 'Amplitude',
+      selectedEnvName: 'Production',
+      projectHasData: false,
+      activationLevel: 'none',
+      runPhase: RunPhase.Completed,
+      mcpComplete: true,
+      dataIngestionConfirmed: true,
+      slackComplete: true,
+      outroData: {
+        kind: OutroKind.Success,
+      },
+    });
+    const out = frameOf(<JourneyStepper store={store} width={120} />);
+    expect(out).not.toContain('✗');
+    expect(out).toContain('✓ Welcome');
+    expect(out).toContain('✓ Auth');
+    expect(out).toContain('✓ Setup');
+    expect(out).toContain('✓ Verify');
   });
 
   it('keeps the active cursor on Setup throughout the agent run phase', () => {

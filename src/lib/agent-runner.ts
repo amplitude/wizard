@@ -1294,16 +1294,29 @@ async function runAgentWizardBody(
       'Agent Authentication',
       'Session expired or invalid during agent run',
       'agent-runner',
-      { integration: config.metadata.integration },
+      {
+        integration: config.metadata.integration,
+        'auth subkind': agentResult.authSubkind ?? 'amplitude',
+      },
     );
+    // Two distinct AUTH_ERROR sources need distinct copy. The original
+    // message ("account just created, isn't fully provisioned") was
+    // written for the new-user signup failure mode and was being shown
+    // verbatim when an existing user's LLM-gateway bearer expired mid-run
+    // — actively misleading and the most enraging copy for that specific
+    // failure. See AuthErrorSubkind for the source distinction.
+    const isLlmGateway = agentResult.authSubkind === 'llm-gateway';
     const signupUrl = `${OUTBOUND_URLS.overview[cloudRegion]}/signup`;
-    const authMessage =
-      `Authentication failed\n\n` +
-      `We couldn't authenticate your Amplitude session with our service. ` +
-      `This can happen if your account was just created and isn't fully provisioned yet.\n\n` +
-      `Try one of the following:\n` +
-      `  • Re-run the wizard in a minute and log in again\n` +
-      `  • Sign up manually at ${signupUrl}, then re-run the wizard`;
+    const authMessage = isLlmGateway
+      ? `Authentication failed\n\n` +
+        `Your wizard session token expired during a long-running task.\n\n` +
+        `Re-run the wizard to refresh and resume — your in-progress files are preserved.`
+      : `Authentication failed\n\n` +
+        `We couldn't authenticate your Amplitude session with our service. ` +
+        `This can happen if your account was just created and isn't fully provisioned yet.\n\n` +
+        `Try one of the following:\n` +
+        `  • Re-run the wizard in a minute and log in again\n` +
+        `  • Sign up manually at ${signupUrl}, then re-run the wizard`;
     // Set outroData via the UI so the OutroScreen reliably re-renders before
     // wizardAbort awaits user dismissal. Direct mutation of session.outroData
     // doesn't notify nanostore subscribers and would make the outro miss the
@@ -1312,7 +1325,10 @@ async function runAgentWizardBody(
     getUI().setOutroData({
       kind: OutroKind.Error,
       message: authMessage,
-      promptLogin: true,
+      // Only steer the user back through the OAuth login wall when the
+      // failure was on the Amplitude side. An LLM-gateway 401 is solved
+      // by simply re-running — forcing /login here would just add friction.
+      promptLogin: !isLlmGateway,
       canRestart: true,
       // The bearer token expired on the very last gateway call. The
       // event plan was approved, `track()` calls landed, validation
@@ -1325,12 +1341,18 @@ async function runAgentWizardBody(
     // Also push a status so the failure is visibly announced even if the
     // OutroScreen hasn't taken focus yet (e.g. mid-Run-screen render).
     getUI().pushStatus('Authentication failed — see details below.');
-    session.credentials = null;
+    // Only clear credentials when Amplitude OAuth itself failed. LLM-gateway
+    // expiry doesn't invalidate the user's Amplitude session, so wiping
+    // credentials would force a needless re-login on the next run.
+    if (!isLlmGateway) {
+      session.credentials = null;
+    }
     await wizardAbort({
       message: authMessage,
       error: new WizardError('Authentication failed during agent run', {
         integration: config.metadata.integration,
         'error type': AgentErrorType.AUTH_ERROR,
+        'auth subkind': agentResult.authSubkind ?? 'amplitude',
       }),
       exitCode: ExitCode.AUTH_REQUIRED,
     });
