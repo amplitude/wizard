@@ -516,9 +516,7 @@ export class AgentUI implements WizardUI {
           return {
             recoverable: 'reinvoke_with_flag',
             suggestedAction: {
-              command: [
-                ...normalizeCliCommand(['--app-name', '<your-name>']),
-              ],
+              command: [...normalizeCliCommand(['--app-name', '<your-name>'])],
             },
           };
         case 'MISSING_ORG':
