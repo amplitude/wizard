@@ -1,5 +1,37 @@
 /**
- * WizardSession — single source of truth for every decision the wizard needs.
+ * WizardSession — transient TUI display state for a single wizard run.
+ *
+ * **Boundary (introduced in v2 PR 4):**
+ *
+ *   `WizardSession`           = transient TUI display state (this file).
+ *                                In-memory, per-process, rebuilt every run.
+ *   `OrchestrationStore`      = durable orchestration state.
+ *                                File-backed, per-install-dir, survives crashes.
+ *
+ *   Never duplicate fields between the two. If a field needs to survive
+ *   a crash or be readable by an outer agent, it belongs in
+ *   `src/lib/orchestration/`. If it's purely "what is the current screen
+ *   showing right now", it belongs here.
+ *
+ * **What lives here (and stays):**
+ *
+ *   - CLI args + env-var-derived flags (debug, ci, agent, mode, region…)
+ *   - OAuth in-flight state (loginUrl, authPhase, pendingOrgs,
+ *     credentials, signupAuth)
+ *   - Framework detection results (framework, frameworkContext,
+ *     typescript, detectedFrameworkLabel)
+ *   - Phase / lifecycle (runPhase, runStartedAt, retryState,
+ *     currentActivity)
+ *   - Per-screen UX flags (mcpComplete, slackComplete, introConcluded,
+ *     dataIngestionConfirmed, etc.) — these drive flow predicates in
+ *     `src/ui/tui/flows.ts` and are NOT durable
+ *   - Discovery feed + post-agent step list — cosmetic / display-only
+ *
+ * **What lives in `OrchestrationStore` (and is NOT mirrored here):**
+ *
+ *   - Sessions / tasks / subagents / ownership (orchestration store)
+ *   - User-choice + manual-verification + MCP-app capability records
+ *   - Last-stopping-point snapshot
  *
  * Populated in layers:
  *   CLI args / env vars  →  populate fields directly
@@ -8,6 +40,10 @@
  *   OAuth                →  credentials
  *
  * Business logic reads from the session. Never calls a prompt.
+ *
+ * The PR 5 TUI screen-tree redesign will collapse / rename many of
+ * these fields; PR 4 deliberately leaves the shape intact so the
+ * AI-SDK migration in flight does not have to re-target.
  */
 
 import { randomUUID } from 'node:crypto';

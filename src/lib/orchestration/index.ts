@@ -110,6 +110,39 @@ export {
 } from './mcp-app-lifecycle';
 export { newChoiceId, newVerificationId, newMcpCapabilityId } from './store';
 
+// PR 4 — wiring helpers (centralized record* / answer* facade).
+export {
+  recordAppConfirmationChoice,
+  recordMcpInstallChoice,
+  recordSlackSetupChoice,
+  recordDashboardSetupChoice,
+  recordEventPlanRevisionChoice,
+  recordRegionSelectionChoice,
+  recordProjectCreationChoice,
+  recordAuthRetryChoice,
+  recordDataIngestionVerification,
+  recordDashboardCorrectnessVerification,
+  recordOauthBrowserLoginVerification,
+  recordExcalidrawFlowVerification,
+  recordManualPrTestVerification,
+  answerChoice,
+  answerChoiceByPromptId,
+} from './wiring';
+
+// PR 4 — file-watch + supervisor.
+export {
+  watchOrchestrationStore,
+  type OrchestrationWatcher,
+  type WatchOrchestrationStoreOptions,
+} from './watcher';
+export {
+  Supervisor,
+  getSupervisor,
+  _resetSupervisor,
+  type SupervisedProcess,
+  type SupervisorOptions,
+} from './supervisor';
+
 // PR 3 — shared envelope builders consumed by both CLI commands and the
 // external MCP server. Centralizing them guarantees byte-for-byte output
 // parity between the two surfaces.

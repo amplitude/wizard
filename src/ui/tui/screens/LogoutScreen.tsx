@@ -14,6 +14,10 @@ import { clearApiKey } from '../../../utils/api-key-store.js';
 import { clearCheckpoint } from '../../../lib/session-checkpoint.js';
 import { clearAuthFieldsInAmpliConfig } from '../../../lib/ampli-config.js';
 import { wizardSuccessExit } from '../../../utils/wizard-abort.js';
+import {
+  recordAuthRetryChoice,
+  answerChoiceByPromptId,
+} from '../../../lib/orchestration/wiring.js';
 
 interface LogoutScreenProps {
   onComplete: () => void;
@@ -53,7 +57,20 @@ export const LogoutScreen = ({
     };
   }, []);
 
+  // PR 4 wiring: record an `auth_retry:logout` Choice on first render
+  // so outer agents see "user is being asked to confirm log-out".
+  // Best-effort.
+  useEffect(() => {
+    recordAuthRetryChoice({ installDir, reason: 'logout' });
+  }, [installDir]);
+
   const handleConfirm = () => {
+    answerChoiceByPromptId(
+      installDir,
+      'auth_retry:logout',
+      'confirm',
+      'human',
+    );
     clearStoredCredentials();
     clearApiKey(installDir);
     clearCheckpoint(installDir, 'logout');
@@ -92,7 +109,15 @@ export const LogoutScreen = ({
             confirmLabel="Log out"
             cancelLabel="Cancel"
             onConfirm={handleConfirm}
-            onCancel={onComplete}
+            onCancel={() => {
+              answerChoiceByPromptId(
+                installDir,
+                'auth_retry:logout',
+                'cancel',
+                'human',
+              );
+              onComplete();
+            }}
           />
         )}
 

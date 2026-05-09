@@ -65,7 +65,7 @@ Machine-consumable execution mode for CI pipelines and agent orchestrators. Uses
 
 | File | Role |
 |------|------|
-| `wizard-session.ts` | `WizardSession` — single source of truth for all wizard state. Includes `RunPhase`, `McpOutcome`, `OutroKind`, etc. |
+| `wizard-session.ts` | `WizardSession` — **transient TUI display state** (RunPhase, McpOutcome, OutroKind, etc.). PR 4 introduces a docblock-level boundary: `WizardSession` = transient/in-memory; `OrchestrationStore` (`src/lib/orchestration/`) = durable orchestration state. Never duplicate fields between them. PR 5's screen-tree redesign will collapse some of these flags. |
 | `agent-interface.ts` | Creates and runs the Claude agent via `@anthropic-ai/claude-agent-sdk`. Configures MCP servers, hooks, model, permissions |
 | `agent-runner.ts` | Universal agent-powered wizard runner. Orchestrates the full flow for any framework |
 | `agent-hooks.ts` | Hook callbacks for agent lifecycle events (stop, tool use, etc.) |
@@ -87,6 +87,9 @@ Machine-consumable execution mode for CI pipelines and agent orchestrators. Uses
 | `orchestration/` | **v2 foundation** — durable orchestration store (sessions, tasks, subagents, ownership, last-stopping-point). Source of truth for `wizard tasks / task / sessions / session / resume / orchestration status` and the new MCP-server read tools (deferred to PR 3). See `docs/orchestration.md` |
 | `orchestration/checkpoints/` | **v2 PR 2** — `Choice` and `Verification` typed records with status transitions, de-dup-by-promptId, and a `requiresHuman` automation gate enforced by `wizard choice answer --confirm-human`. Surfaced via `wizard choice list/show/answer` and `wizard verification list/show/mark`. |
 | `orchestration/mcp-app-lifecycle.ts` | **v2 PR 2** — typed lifecycle for every MCP-app capability (`claude_code_install`, `slack_app`, …). Enforces an anti-nag invariant: once a capability is `install_skipped`, the validator REQUIRES a non-empty `lastStateChangeReason` on the `→ needs_user_choice` arc so the user is never re-prompted without justification. |
+| `orchestration/wiring.ts` | **v2 PR 4** — centralized `record*Choice` / `record*Verification` / `answerChoiceByPromptId` helpers. Every wizard prompt surface (MCP install, Slack, region select, project create, dashboard, OAuth browser login, event-plan revision, logout) calls these to mirror the user's interaction into the durable store as a typed `Choice` / `Verification` record. Mirror failures swallow + log so they NEVER break the user-facing flow. |
+| `orchestration/supervisor.ts` | **v2 PR 4** — `Supervisor` class for orchestrated subagent subprocesses. Tracks PIDs, writes `<runDir>/heartbeats/<pid>.txt` every 5s, SIGTERMs on SIGINT/SIGTERM (with 5s grace before SIGKILL), reaps stale heartbeats (> 30s), and on startup transitions orphaned-but-running tasks to `failed: 'process gone'`. |
+| `orchestration/watcher.ts` | **v2 PR 4** — file-watch wrapper around the orchestration store. Watches the parent directory (atomicWriteJSON's rename invalidates a file-only fs.watch) and debounces a burst of writes into one `onChange`. Powers the `/status` overlay's live-refresh hook (`src/ui/tui/hooks/useOrchestrationStore.ts`). |
 
 ### Framework integrations (`src/frameworks/`)
 
