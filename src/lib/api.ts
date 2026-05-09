@@ -1,4 +1,4 @@
-import type { AxiosError, AxiosInstance, AxiosStatic } from 'axios';
+import axios, { AxiosError } from 'axios';
 import https from 'node:https';
 import { z } from 'zod';
 import { analytics } from '../utils/analytics.js';
@@ -29,52 +29,7 @@ import { getHostFromRegion, getLlmGatewayUrlFromHost } from '../utils/urls.js';
 // (e.g. `src/lib/planned-events.ts`, `src/utils/direct-signup.ts`) keep
 // their existing axios usage and are out of scope for this change.
 const httpsAgent = new https.Agent({ keepAlive: true });
-
-// Defer axios import + client construction until the first HTTP call. This
-// file sits in the static graph from `setup-utils.ts` (which `bin.ts` pulls
-// transitively via every command module), so eagerly loading axios here
-// would tax cold-start by ~33 ms even on read-only paths like `--version`
-// or `status --json`. The first GraphQL call pays the import once;
-// subsequent calls reuse the cached promise.
-//
-// On rejection we clear the cached promise so a transient failure (broken
-// install, partial filesystem, transient I/O error) doesn't poison every
-// subsequent caller in the process with the same stale rejection. Mirrors
-// the pattern in `loadDefaultDriver` (`agent-driver.ts`).
-let axiosModulePromise: Promise<AxiosStatic> | null = null;
-const loadAxios = (): Promise<AxiosStatic> => {
-  if (!axiosModulePromise) {
-    axiosModulePromise = import('axios')
-      .then((m) => m.default)
-      .catch((err) => {
-        axiosModulePromise = null;
-        throw err;
-      });
-  }
-  return axiosModulePromise;
-};
-
-let apiClientPromise: Promise<AxiosInstance> | null = null;
-const getApiClient = (): Promise<AxiosInstance> => {
-  if (!apiClientPromise) {
-    apiClientPromise = loadAxios()
-      .then((axios) => axios.create({ timeout: 15_000, httpsAgent }))
-      .catch((err) => {
-        apiClientPromise = null;
-        throw err;
-      });
-  }
-  return apiClientPromise;
-};
-
-// Synchronous predicate for catch blocks that just need to narrow `unknown`
-// to `AxiosError` without paying the full module-load cost up front.
-// Mirrors `isAxiosError` semantics — checks the standard
-// `error.isAxiosError` flag axios stamps on every thrown response.
-const isAxiosError = (err: unknown): err is AxiosError =>
-  typeof err === 'object' &&
-  err !== null &&
-  (err as { isAxiosError?: boolean }).isAxiosError === true;
+const apiClient = axios.create({ timeout: 15_000, httpsAgent });
 
 // ── App API URL helper ────────────────────────────────────────────────
 
@@ -235,9 +190,7 @@ export async function fetchAmplitudeUser(
 ): Promise<AmplitudeUserInfo> {
   const { dataApiUrl } = AMPLITUDE_ZONE_SETTINGS[zone];
   try {
-    const response = await (
-      await getApiClient()
-    ).post(
+    const response = await apiClient.post(
       dataApiUrl,
       { query: ORGS_QUERY },
       {
@@ -619,9 +572,7 @@ export async function createAmplitudeApp(
   let authAttempt = 0;
   for (;;) {
     try {
-      const response = await (
-        await getApiClient()
-      ).post(
+      const response = await apiClient.post(
         url,
         {
           orgId: input.orgId,
@@ -666,7 +617,7 @@ export async function createAmplitudeApp(
       }
 
       // Axios errors include non-2xx responses and network failures.
-      if (isAxiosError(error)) {
+      if (axios.isAxiosError(error)) {
         const status = error.response?.status;
         // One-shot retry on 401 — see comment on `MAX_AUTH_RETRIES`.
         if (status === 401 && authAttempt < MAX_AUTH_RETRIES) {
@@ -818,9 +769,7 @@ export async function fetchBranches(
 ): Promise<AmplitudeBranch[]> {
   const { dataApiUrl } = AMPLITUDE_ZONE_SETTINGS[zone];
   try {
-    const response = await (
-      await getApiClient()
-    ).post(
+    const response = await apiClient.post(
       dataApiUrl,
       { query: BRANCHES_QUERY, variables: { orgId, projectId } },
       {
@@ -897,9 +846,7 @@ export async function fetchProjectEventTypes(
     if (!defaultBranch) return [];
 
     // Step 2: fetch events for that version
-    const response = await (
-      await getApiClient()
-    ).post(
+    const response = await apiClient.post(
       dataApiUrl,
       {
         query: PROJECT_EVENTS_QUERY,
@@ -967,9 +914,7 @@ export async function fetchOwnedDashboards(
 ): Promise<{ hasCharts: boolean; hasDashboards: boolean }> {
   const url = appApiUrl(zone, orgId, 'OwnedDashboards');
   try {
-    const response = await (
-      await getApiClient()
-    ).post(
+    const response = await apiClient.post(
       url,
       { query: OWNED_DASHBOARDS_QUERY },
       {
@@ -1082,9 +1027,7 @@ export async function fetchSources(
 ): Promise<AmplitudeSource[]> {
   const { dataApiUrl } = AMPLITUDE_ZONE_SETTINGS[zone];
   try {
-    const response = await (
-      await getApiClient()
-    ).post(
+    const response = await apiClient.post(
       dataApiUrl,
       {
         query: SOURCES_QUERY,
@@ -1339,9 +1282,7 @@ export async function fetchProjectActivationStatus(opts: {
     'hasAnyDefaultEventTrackingSourceAndEvents',
   );
   try {
-    const response = await (
-      await getApiClient()
-    ).post(
+    const response = await apiClient.post(
       url,
       { query: ACTIVATION_STATUS_QUERY, variables: { appId: String(appId) } },
       {
@@ -1398,9 +1339,7 @@ export async function fetchSlackInstallUrl(
 ): Promise<string | null> {
   const url = appApiUrl(zone, orgId, 'SlackInstallUrl');
   try {
-    const response = await (
-      await getApiClient()
-    ).post(
+    const response = await apiClient.post(
       url,
       {
         query: SLACK_INSTALL_URL_QUERY,
@@ -1423,7 +1362,7 @@ export async function fetchSlackInstallUrl(
     const parsed = SlackInstallUrlSchema.parse(response.data);
     return parsed.data.slackInstallUrl.installUrl;
   } catch (err) {
-    const detail = isAxiosError(err)
+    const detail = axios.isAxiosError(err)
       ? `status=${err.response?.status} data=${JSON.stringify(
           err.response?.data,
         )}`
@@ -1463,9 +1402,7 @@ export async function fetchSlackConnectionStatus(
 ): Promise<boolean | null> {
   const url = appApiUrl(zone, orgId, 'SlackConnectionStatus');
   try {
-    const response = await (
-      await getApiClient()
-    ).post(
+    const response = await apiClient.post(
       url,
       { query: SLACK_CONNECTION_STATUS_QUERY },
       {
@@ -1485,7 +1422,7 @@ export async function fetchSlackConnectionStatus(
 }
 
 function handleApiError(error: unknown, operation: string): ApiError {
-  if (isAxiosError(error)) {
+  if (axios.isAxiosError(error)) {
     const axiosError = error as AxiosError<{
       errors?: Array<{ message: string }>;
     }>;
