@@ -205,10 +205,18 @@ export const StatusOverlayScreen = ({ store }: StatusOverlayScreenProps) => {
           <Text bold color={Colors.accent}>
             {Icons.diamond} Operator overview
           </Text>
-          <Text color={Colors.subtle}> {Icons.dot} </Text>
-          <Text color={mode.color} bold>
-            [{mode.label}]
-          </Text>
+          {/* Mirror HeaderBar: in plain interactive mode the badge would
+              just print `[interactive]` on every status overlay, which
+              is noise. Suppress it there and surface only when the run
+              is in a non-default mode (ci, agent, etc.). */}
+          {mode.key !== 'interactive' && (
+            <>
+              <Text color={Colors.subtle}> {Icons.dot} </Text>
+              <Text color={mode.color} bold>
+                [{mode.label}]
+              </Text>
+            </>
+          )}
         </Box>
         <Text color={Colors.body}>{summary}</Text>
         <Text color={Colors.muted}>

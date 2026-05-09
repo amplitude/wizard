@@ -171,4 +171,54 @@ describe('StatusOverlayScreen', () => {
     );
     expect(frame).toMatch(/resume command:/i);
   });
+
+  describe('mode badge', () => {
+    // Default test env has no agent/ci/mcp env vars set, so resolveMode()
+    // falls through to `interactive`. Mirror HeaderBar: in plain
+    // interactive mode the `[interactive]` badge is suppressed (would
+    // just be noise on every overlay). Non-interactive modes still
+    // surface the badge so operators see at a glance which mode the
+    // wizard is running in.
+    const ENV_KEYS = [
+      'AMPLITUDE_WIZARD_AGENT_MODE',
+      'AMPLITUDE_WIZARD_CI',
+      'AMPLITUDE_WIZARD_MCP_SERVE',
+      'CI',
+      'CLAUDECODE',
+      'CLAUDE_CODE_ENTRYPOINT',
+    ] as const;
+    let saved: Record<string, string | undefined>;
+    beforeEach(() => {
+      saved = Object.fromEntries(
+        ENV_KEYS.map((k) => [k, process.env[k]]),
+      );
+      for (const k of ENV_KEYS) delete process.env[k];
+    });
+    afterEach(() => {
+      for (const k of ENV_KEYS) {
+        if (saved[k] === undefined) delete process.env[k];
+        else process.env[k] = saved[k];
+      }
+    });
+
+    it('suppresses the badge in plain interactive mode', () => {
+      const store = makeStoreForSnapshot({ installDir: tmpDir });
+      const { frame } = renderSnapshot(
+        <StatusOverlayScreen store={store} />,
+        store,
+      );
+      expect(frame).toContain('Operator overview');
+      expect(frame).not.toContain('[interactive]');
+    });
+
+    it('shows the badge when running in agent mode', () => {
+      process.env.AMPLITUDE_WIZARD_AGENT_MODE = '1';
+      const store = makeStoreForSnapshot({ installDir: tmpDir });
+      const { frame } = renderSnapshot(
+        <StatusOverlayScreen store={store} />,
+        store,
+      );
+      expect(frame).toContain('[agent]');
+    });
+  });
 });
