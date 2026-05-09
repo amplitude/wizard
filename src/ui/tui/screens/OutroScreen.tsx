@@ -501,7 +501,21 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
             What the wizard added to your project
           </Text>
         </Box>
-        <ReportViewer filePath={reportPath} />
+        {/* Tell the viewer how many rows of sibling chrome it has to
+            share the content area with so the scroll area doesn't push
+            the CTA / key-hint footer off the bottom of the viewport.
+            Breakdown:
+              - paddingY={1} on this Box: 2 rows
+              - Header column (title + subtitle + marginBottom=1): 3 rows
+              - CTA box (marginTop=1 + 1 line): 2 rows when shown
+              - Key-hints box (marginTop adjusts; +1 line content): 1-2 rows
+            Without this, ReportViewer used a fixed `rows - 10` which
+            pre-dated the new sibling content this PR adds and would
+            clip the CTA off-screen on shorter terminals. */}
+        <ReportViewer
+          filePath={reportPath}
+          siblingRows={dashboardOpenUrl ? 8 : 7}
+        />
         {/* Primary next-action — the report is read-only chrome; the
             forward path is "open Amplitude". Surface it as the loudest
             line on the screen so users don't bounce out of the terminal

@@ -138,11 +138,32 @@ function buildTerminalMarked(width: number): Marked {
   // we hand cli-table3 a generous max and let `wordWrap` reflow within
   // each cell. cli-table3 ignores `colWidths` entries past the column
   // count, so over-specifying is safe.
-  const eventCol = Math.max(14, Math.floor(renderWidth * 0.18));
-  const fileCol = Math.max(20, Math.floor(renderWidth * 0.32));
-  // Description gets whatever's left after borders (3 vertical bars +
-  // 6 cell paddings = ~9 cols of chrome).
-  const descCol = Math.max(20, renderWidth - eventCol - fileCol - 9);
+  //
+  // ── Narrow-terminal floor handling ─────────────────────────────────
+  // Naive `Math.max(MIN, percent)` floors on every column blow past
+  // `renderWidth` once the floors sum to more than the viewport (14 +
+  // 20 + 20 + 9 chrome = 63 cols, which overflows any terminal under
+  // ~67 columns). Compute the unfloored proportional widths first; if
+  // their sum already fits, we apply the comfortable floors. If it
+  // would overflow, we fall back to splitting `renderWidth - chrome`
+  // proportionally with NO floors so the rendered table never exceeds
+  // the available width — narrow terminals show a cramped-but-fitting
+  // table instead of one that bleeds past the right edge.
+  const TABLE_CHROME_COLS = 9; // 4 vertical bars + 6 cell paddings
+  const usableWidth = Math.max(0, renderWidth - TABLE_CHROME_COLS);
+  const idealEvent = Math.floor(renderWidth * 0.18);
+  const idealFile = Math.floor(renderWidth * 0.32);
+  const idealDesc = usableWidth - idealEvent - idealFile;
+  const flooredSum =
+    Math.max(14, idealEvent) + Math.max(20, idealFile) + Math.max(20, idealDesc);
+  const fitsWithFloors = flooredSum <= usableWidth;
+  const eventCol = fitsWithFloors ? Math.max(14, idealEvent) : idealEvent;
+  const fileCol = fitsWithFloors ? Math.max(20, idealFile) : idealFile;
+  // Description column absorbs any rounding remainder so the three
+  // columns add up to exactly `usableWidth`.
+  const descCol = fitsWithFloors
+    ? Math.max(20, usableWidth - eventCol - fileCol)
+    : Math.max(1, usableWidth - eventCol - fileCol);
 
   const m = new Marked();
   m.use(

@@ -142,4 +142,20 @@ describe('renderMarkdown — Setup Report polish', () => {
     expect(out).toContain('38;2;64;131;255');
     expect(out).not.toMatch(RED_SGR_RE);
   });
+
+  it('fits the rendered table inside narrow terminal widths (≤67 cols)', () => {
+    // Regression guard for the column-floor overflow: previously, a
+    // 50-col render width hit Math.max floors that summed to 63 (14 +
+    // 20 + 20 + 9 chrome) and produced a table wider than the
+    // viewport. With the proportional fallback the table stays within
+    // the requested width even when the floors would otherwise blow
+    // past it.
+    for (const width of [50, 56, 60, 66]) {
+      const out = renderMarkdown(SAMPLE_TABLE, width);
+      const widest = Math.max(
+        ...out.split('\n').map((line) => stripAnsi(line).length),
+      );
+      expect(widest, `width=${width}`).toBeLessThanOrEqual(width);
+    }
+  });
 });
