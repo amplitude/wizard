@@ -69,14 +69,16 @@ import { computeLastStoppingPoint } from './last-stopping-point';
 import { getOrchestrationStore } from './store';
 
 // ── Per-invocation read-cache ────────────────────────────────────────
+//
+// Keyed by the actual Symbol *instance* via a Map<symbol, ...> so that
+// two concurrent (or nested) `withReadCache` calls don't collide.
+// Symbol.prototype.toString returns the description string and is NOT
+// unique per instance, so a string-keyed cache scoped on
+// `Symbol(<desc>).toString()` would alias every scope to the same key
+// and the inner scope's `finally` cleanup would evict the outer scope's
+// entries. Map-with-symbol-key sidesteps that entirely.
 
-const readCache = new Map<string, OrchestrationStoreFile>();
-
-function symKey(key: symbol): string {
-  // Symbol.prototype.toString returns 'Symbol(<description>)' which is
-  // unique per Symbol instance — exactly what we want for cache scoping.
-  return Symbol.prototype.toString.call(key) as string;
-}
+const readCache = new Map<symbol, Map<string, OrchestrationStoreFile>>();
 
 /** Read the store, caching the parsed result for the lifetime of `key`. */
 export function readStoreCached(
@@ -86,11 +88,15 @@ export function readStoreCached(
   if (key === undefined) {
     return getOrchestrationStore(installDir).read();
   }
-  const cacheKey = `${symKey(key)}::${installDir}`;
-  let cached = readCache.get(cacheKey);
+  let scope = readCache.get(key);
+  if (!scope) {
+    scope = new Map();
+    readCache.set(key, scope);
+  }
+  let cached = scope.get(installDir);
   if (!cached) {
     cached = getOrchestrationStore(installDir).read();
-    readCache.set(cacheKey, cached);
+    scope.set(installDir, cached);
   }
   return cached;
 }
@@ -104,17 +110,14 @@ export function readStoreCached(
  */
 export function withReadCache<T>(fn: (key: symbol) => T): T {
   const key = Symbol('orch-read-cache');
-  const prefix = symKey(key);
   try {
     return fn(key);
   } finally {
     // Drop every entry created under this key so a long-lived process
-    // (e.g. the MCP server) doesn't accumulate stale snapshots.
-    for (const cacheKey of [...readCache.keys()]) {
-      if (cacheKey.startsWith(prefix + '::')) {
-        readCache.delete(cacheKey);
-      }
-    }
+    // (e.g. the MCP server) doesn't accumulate stale snapshots. Since
+    // the cache is now scoped by the unique Symbol instance, a single
+    // delete is enough — no string-prefix walk needed.
+    readCache.delete(key);
   }
 }
 
@@ -188,7 +191,14 @@ export function buildStatusEnvelope(
   opts: BuilderOpts,
 ): z.infer<typeof StatusEnvelopeSchema> {
   const store = getOrchestrationStore(opts.installDir);
-  const lsp = computeLastStoppingPoint(opts.installDir);
+  // Forward the per-invocation cache key (when present) into LSP via
+  // `storeFile` so the status envelope shares one snapshot with the
+  // other section builders inside `withReadCache`. Without this, the
+  // status path triggered an independent `store.read()` per render and
+  // the cache stated purpose ("one snapshot per render, shared across
+  // every section") was defeated.
+  const file = readStoreCached(opts.installDir, opts.cacheKey);
+  const lsp = computeLastStoppingPoint(opts.installDir, { storeFile: file });
   return StatusEnvelopeSchema.parse({
     v: 1,
     type: 'orchestration_status',

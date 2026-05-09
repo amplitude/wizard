@@ -80,15 +80,25 @@ function simulateAuthErrorMirror(installDir: string): void {
       linkedSessionId: orchSession.id,
     });
   }
-  orch.addVerification({
+  // Mirror the production guard: skip if a pending manual_pr_test
+  // verification already exists for this session so duplicate AUTH_ERROR
+  // fires don't produce duplicate ribbon rows.
+  const existingPrTest = orch.listVerifications({
+    sessionId: orchSession.id,
     kind: 'manual_pr_test',
-    whatToVerify:
-      'Confirm the instrumentation the wizard wrote behaves as expected.',
-    expectedBehavior:
-      'Events show up in Amplitude after a fresh deploy / dev-server restart.',
-    blockingSessionId: orchSession.id,
-    resumeCommand: ['npx', '@amplitude/wizard'],
+    status: 'pending',
   });
+  if (existingPrTest.length === 0) {
+    orch.addVerification({
+      kind: 'manual_pr_test',
+      whatToVerify:
+        'Confirm the instrumentation the wizard wrote behaves as expected.',
+      expectedBehavior:
+        'Events show up in Amplitude after a fresh deploy / dev-server restart.',
+      blockingSessionId: orchSession.id,
+      resumeCommand: ['npx', '@amplitude/wizard'],
+    });
+  }
 }
 
 describe('auth-error resilience mirror', () => {
@@ -127,6 +137,19 @@ describe('auth-error resilience mirror', () => {
 
     const choices = orch.listChoices({ status: ChoiceStatus.Pending });
     expect(choices).toHaveLength(1);
+  });
+
+  it('is idempotent across duplicate AUTH_ERROR fires (no double-Verification)', () => {
+    const orch = getOrchestrationStore(installDir);
+    orch.createSession({ goal: 'Set up Amplitude' });
+    simulateAuthErrorMirror(installDir);
+    simulateAuthErrorMirror(installDir);
+
+    const verifications = orch.listVerifications({
+      status: VerificationStatus.Pending,
+      kind: 'manual_pr_test',
+    });
+    expect(verifications).toHaveLength(1);
   });
 
   it('wizard status envelope reports the pending choice in lastStoppingPoint', () => {
