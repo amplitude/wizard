@@ -14,6 +14,8 @@
     "emitDecoratorMetadata": true,
     "sourceMap": false,
     "esModuleInterop": true,
-    "jsx": "react-jsx"
+    "jsx": "react-jsx",
+    "incremental": true,
+    "tsBuildInfoFile": "./dist/.tsbuildinfo"
   }
 }
