@@ -358,6 +358,12 @@ describe('resolveRunStatusPill — priority interactions', () => {
     expect(resolveRunStatusPill(store, T0)).toBe('Editing src/lib/foo.ts');
 
     // Make tier 4 stale → tier 5 wins (within its window).
+    // Re-record tool activity at T0+5000 so it's fresh when file write is stale.
+    vi.setSystemTime(new Date(T0 + 5000));
+    store.recordToolActivity('Reading package.json');
+    expect(resolveRunStatusPill(store, T0 + 5000)).toBe('Reading package.json');
+
+    // Make tier 5 stale → tier 6 wins.
     expect(resolveRunStatusPill(store, T0 + 10_000)).toBe(
       'Wiring up event tracking',
     );
