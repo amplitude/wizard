@@ -99,7 +99,7 @@ describe('DiscoveryFeed', () => {
       fact(`f${i}`, `Label ${i}`, `value-${i}`, i),
     );
     const { lastFrame } = render(
-      <DiscoveryFeed facts={facts} tick={0} cols={WIDE} now={t0 + 1000} />,
+      <DiscoveryFeed facts={facts} tick={0} cols={WIDE} now={t0 + 3000} />,
     );
     const out = stripAnsi(lastFrame() ?? '');
     expect(out).toContain('value-11');
@@ -116,7 +116,7 @@ describe('DiscoveryFeed', () => {
       fact('typescript', 'TypeScript', 'yes', 1),
       fact('region', 'Region', 'US', 5_000), // 5s in the future
     ];
-    expect(resolveVisibleCount(facts, t0 + 100)).toBe(2);
+    expect(resolveVisibleCount(facts, t0 + 300)).toBe(2);
     expect(resolveVisibleCount(facts, t0 + 6_000)).toBe(3);
   });
 });

@@ -76,7 +76,7 @@ export function resolveVisibleCount(
     // Each fact gets one REVEAL_STEP_MS of "settle" so a burst trickles
     // in instead of all-at-once. Already-discovered facts (>= one step
     // old) show immediately on first render.
-    if (now - fact.discoveredAt >= 0) {
+    if (now - fact.discoveredAt >= count * REVEAL_STEP_MS) {
       count += 1;
     } else {
       break;
