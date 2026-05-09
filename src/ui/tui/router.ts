@@ -31,6 +31,14 @@ export enum Overlay {
   Slack = 'slack-overlay',
   Logout = 'logout-overlay',
   Login = 'login-overlay',
+  /**
+   * PR 3 — "What's happening?" overlay invoked by `/status` (and from
+   * `/diagnostics` when the orchestration store has content). Renders the
+   * same data as `wizard orchestration status --json`: active session,
+   * pending choices, pending verifications, MCP-app capabilities,
+   * blockers, and the recommended next action.
+   */
+  Status = 'status-overlay',
 }
 
 /** Union of all screen names */

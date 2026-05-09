@@ -63,8 +63,8 @@ const choiceListCommand: CommandModule = {
         const { getOrchestrationStore } = await import(
           '../lib/orchestration/store.js'
         );
-        const { ChoicesEnvelopeSchema } = await import(
-          '../lib/orchestration/schemas.js'
+        const { buildChoicesEnvelope } = await import(
+          '../lib/orchestration/envelopes.js'
         );
         const store = getOrchestrationStore(opts.installDir);
         const statusRaw = argv.status as string | undefined;
@@ -112,12 +112,10 @@ const choiceListCommand: CommandModule = {
         });
 
         if (opts.jsonOutput) {
-          const envelope = ChoicesEnvelopeSchema.parse({
-            v: 1,
-            type: 'orchestration_choices',
-            generatedAt: new Date().toISOString(),
+          const envelope = buildChoicesEnvelope({
             installDir: opts.installDir,
-            choices,
+            status: effectiveStatus,
+            sessionId: sessionFilter,
           });
           emitJson(envelope);
         } else {
@@ -179,8 +177,8 @@ const choiceShowCommand: CommandModule = {
         const { getOrchestrationStore } = await import(
           '../lib/orchestration/store.js'
         );
-        const { ChoiceEnvelopeSchema } = await import(
-          '../lib/orchestration/schemas.js'
+        const { buildChoiceEnvelope } = await import(
+          '../lib/orchestration/envelopes.js'
         );
         const { asChoiceId } = await import(
           '../lib/orchestration/checkpoints/choices.js'
@@ -203,14 +201,12 @@ const choiceShowCommand: CommandModule = {
           process.exit(ExtendedExitCode.CHOICE_NOT_FOUND);
         }
         if (opts.jsonOutput) {
-          const envelope = ChoiceEnvelopeSchema.parse({
-            v: 1,
-            type: 'orchestration_choice',
-            generatedAt: new Date().toISOString(),
+          const envelope = buildChoiceEnvelope({
             installDir: opts.installDir,
-            choice,
+            choiceId: asChoiceId(choice.id),
           });
-          emitJson(envelope);
+          if (envelope) emitJson(envelope);
+          else emitJsonError(`Choice ${idRaw} not found`, 'CHOICE_NOT_FOUND');
         } else {
           const ui = getUI();
           ui.log.info(`${chalk.bold(choice.id)}  ${chalk.cyan(choice.kind)}`);

@@ -1364,6 +1364,92 @@ async function runAgentWizardBody(
       // the user owns the decision instead of the cleanup hook.
       preserveFiles: true,
     });
+
+    // PR 3 (resilience): record the same K/R question as a durable
+    // Choice in the orchestration store, plus a manual_pr_test
+    // Verification when files were written. Outer agents inspecting
+    // `wizard status --json` after a mid-stream auth expiry now see
+    // `waitingForUser: true` with a typed `choiceKind`, instead of the
+    // OutroScreen-only transient state. The original `[K] Keep / [R]
+    // Revert` UI continues to drive the existing outroData flow — this
+    // is purely additive durable state.
+    try {
+      const { getOrchestrationStore } = await import(
+        './orchestration/store.js'
+      );
+      const orch = getOrchestrationStore(session.installDir);
+      const orchSession = orch.currentSession();
+      if (orchSession) {
+        // Idempotency: if AUTH_ERROR fires twice (rare; agent harness
+        // retried) we don't want a second pending choice. The promptId
+        // pins on the session id.
+        const promptId = `keep_or_revert_files:${orchSession.id}`;
+        if (!orch.findPendingChoice(promptId)) {
+          orch.addChoice({
+            kind: 'keep_or_revert_files',
+            promptId,
+            message:
+              'Authentication expired during the run. Keep the changes the wizard wrote, or revert?',
+            options: [
+              {
+                id: 'keep',
+                label: 'Keep changes (default)',
+                description:
+                  'Files stay on disk. Re-run the wizard once your session is refreshed.',
+              },
+              {
+                id: 'revert',
+                label: 'Revert every file the wizard touched',
+                description:
+                  'Run the ledger rollback. Useful if you want a fully clean working tree.',
+              },
+            ],
+            recommendedOptionId: 'keep',
+            safeDefaultOptionId: 'keep',
+            requiresHuman: true,
+            automationAllowed: false,
+            consequenceIfSkipped:
+              'Default = keep. The cleanup hook is suppressed until the user picks.',
+            reversible: true,
+            whyAsking:
+              'Auth expired mid-stream. Files written before the failure are demonstrably consistent — the user owns the keep/revert decision instead of the auto-rollback.',
+            resumeCommand: [
+              'npx',
+              '@amplitude/wizard',
+              '--install-dir',
+              session.installDir,
+            ],
+            linkedSessionId: orchSession.id,
+          });
+        }
+        // Manual PR-test verification — only if there's a written PR /
+        // file artifact to test. We don't have the file count here, but
+        // the OutroScreen's `preserveFiles` path implies at least the
+        // event-plan apply landed, so a verification is appropriate.
+        orch.addVerification({
+          kind: 'manual_pr_test',
+          whatToVerify:
+            'Confirm the instrumentation the wizard wrote behaves as expected.',
+          expectedBehavior:
+            'Events show up in Amplitude after a fresh deploy / dev-server restart.',
+          blockingSessionId: orchSession.id,
+          unblockerHint:
+            'After re-running and confirming events ingest, run `wizard verification mark <id> --status passed`.',
+          resumeCommand: [
+            'npx',
+            '@amplitude/wizard',
+            '--install-dir',
+            session.installDir,
+          ],
+        });
+      }
+    } catch (orchErr) {
+      logToFile(
+        `[orchestration] auth-error mirror failed: ${
+          orchErr instanceof Error ? orchErr.message : String(orchErr)
+        }`,
+      );
+    }
     // Also push a status so the failure is visibly announced even if the
     // OutroScreen hasn't taken focus yet (e.g. mid-Run-screen render).
     getUI().pushStatus('Authentication failed — see details below.');

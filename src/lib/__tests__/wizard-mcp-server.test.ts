@@ -85,15 +85,28 @@ describe('registerWizardTools', () => {
     registerWizardTools(fake);
   });
 
-  it('registers exactly the nine expected tools by name', () => {
+  it('registers every expected tool by name (PR 3 added orchestration mirrors)', () => {
     const names = fake.tools.map((t) => t.name).sort();
     expect(names).toEqual([
+      // Original tools
       'detect_framework',
       'get_auth_status',
       'get_auth_token',
+      'get_choice',
       'get_dashboard_plan',
       'get_event_plan',
+      'get_last_stopping_point',
+      'get_manual_verification',
+      'get_mcp_capability',
+      'get_orchestration_status',
       'get_project_status',
+      'get_session',
+      'get_task',
+      'list_choices',
+      'list_manual_verifications',
+      'list_mcp_capabilities',
+      'list_sessions',
+      'list_tasks',
       'plan_setup',
       'record_dashboard_plan',
       'verify_setup',
@@ -438,5 +451,241 @@ describe('registerWizardTools', () => {
     const tool = fake.tools.find((t) => t.name === 'get_event_plan')!;
     tool.handler({});
     expect(mockedRunGetEventPlan).toHaveBeenCalledWith(process.cwd());
+  });
+
+  // ── Orchestration tool parity (PR 3) ─────────────────────────────────
+  // Smoke-test the new orchestration tools: each wraps the same envelope
+  // builder the matching CLI command uses, so we just need to confirm
+  // the registered tools (a) accept an installDir input, (b) return a
+  // text-content response, and (c) the parsed JSON validates against the
+  // shared schema.
+
+  describe('orchestration tools (PR 3)', () => {
+    let tmpDir: string;
+    let originalCacheDir: string | undefined;
+
+    beforeEach(() => {
+      tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'wizard-mcp-orch-'));
+      originalCacheDir = process.env.AMPLITUDE_WIZARD_CACHE_DIR;
+      process.env.AMPLITUDE_WIZARD_CACHE_DIR = path.join(tmpDir, '.cache');
+    });
+    afterEach(() => {
+      if (originalCacheDir === undefined) {
+        delete process.env.AMPLITUDE_WIZARD_CACHE_DIR;
+      } else {
+        process.env.AMPLITUDE_WIZARD_CACHE_DIR = originalCacheDir;
+      }
+      fs.rmSync(tmpDir, { recursive: true, force: true });
+    });
+
+    it('get_orchestration_status returns a schema-valid envelope', async () => {
+      const tool = fake.tools.find(
+        (t) => t.name === 'get_orchestration_status',
+      )!;
+      const parsed = parseToolResult(tool.handler({ installDir: tmpDir })) as {
+        v: number;
+        type: string;
+      };
+      expect(parsed.v).toBe(1);
+      expect(parsed.type).toBe('orchestration_status');
+      const { ENVELOPE_SCHEMAS } = await import(
+        '../orchestration/envelopes.js'
+      );
+      expect(() => ENVELOPE_SCHEMAS.status.parse(parsed)).not.toThrow();
+    });
+
+    it('get_last_stopping_point returns a schema-valid envelope', async () => {
+      const tool = fake.tools.find(
+        (t) => t.name === 'get_last_stopping_point',
+      )!;
+      const parsed = parseToolResult(tool.handler({ installDir: tmpDir })) as {
+        type: string;
+      };
+      expect(parsed.type).toBe('orchestration_last_stopping_point');
+      const { ENVELOPE_SCHEMAS } = await import(
+        '../orchestration/envelopes.js'
+      );
+      expect(() =>
+        ENVELOPE_SCHEMAS.lastStoppingPoint.parse(parsed),
+      ).not.toThrow();
+    });
+
+    it('list_tasks returns an empty array for a fresh project', () => {
+      const tool = fake.tools.find((t) => t.name === 'list_tasks')!;
+      const parsed = parseToolResult(tool.handler({ installDir: tmpDir })) as {
+        tasks: unknown[];
+      };
+      expect(Array.isArray(parsed.tasks)).toBe(true);
+      expect(parsed.tasks).toEqual([]);
+    });
+
+    it('get_task returns { error: "not_found" } for an unknown task id', () => {
+      const tool = fake.tools.find((t) => t.name === 'get_task')!;
+      const parsed = parseToolResult(
+        tool.handler({ installDir: tmpDir, id: 'task_unknown' }),
+      ) as { error: string; id?: string };
+      expect(parsed.error).toBe('not_found');
+    });
+
+    it('get_task returns { error: "invalid_id" } for a non-task-shaped id', () => {
+      const tool = fake.tools.find((t) => t.name === 'get_task')!;
+      const parsed = parseToolResult(
+        tool.handler({ installDir: tmpDir, id: 'not-a-task' }),
+      ) as { error: string };
+      expect(parsed.error).toBe('invalid_id');
+    });
+
+    it('list_choices defaults to status="pending"', async () => {
+      // Seed a pending + an answered choice; the default filter should
+      // surface only the pending one.
+      const { getOrchestrationStore, _resetOrchestrationStoreCache } =
+        await import('../orchestration/store.js');
+      const { ChoiceKind, ChoiceStatus } = await import(
+        '../orchestration/checkpoints/choices.js'
+      );
+      _resetOrchestrationStoreCache();
+      const store = getOrchestrationStore(tmpDir);
+      const session = store.createSession({ goal: 'test' });
+      const c1 = store.addChoice({
+        kind: ChoiceKind.EnvironmentSelection,
+        promptId: 'p1',
+        message: 'pick',
+        options: [{ id: 'a', label: 'A' }],
+        recommendedOptionId: 'a',
+        safeDefaultOptionId: 'a',
+        requiresHuman: true,
+        automationAllowed: false,
+        consequenceIfSkipped: 'no',
+        reversible: true,
+        whyAsking: 'why',
+        resumeCommand: ['x'],
+        linkedSessionId: session.id,
+      });
+      // Answer it, then add another pending choice with a different
+      // promptId.
+      store.answerChoice(c1.id, 'a', 'human');
+      store.addChoice({
+        kind: ChoiceKind.EnvironmentSelection,
+        promptId: 'p2',
+        message: 'pick again',
+        options: [{ id: 'a', label: 'A' }],
+        recommendedOptionId: 'a',
+        safeDefaultOptionId: 'a',
+        requiresHuman: true,
+        automationAllowed: false,
+        consequenceIfSkipped: 'no',
+        reversible: true,
+        whyAsking: 'why',
+        resumeCommand: ['x'],
+        linkedSessionId: session.id,
+      });
+
+      const tool = fake.tools.find((t) => t.name === 'list_choices')!;
+      const parsed = parseToolResult(tool.handler({ installDir: tmpDir })) as {
+        choices: Array<{ status: string }>;
+      };
+      expect(parsed.choices).toHaveLength(1);
+      expect(parsed.choices[0].status).toBe(ChoiceStatus.Pending);
+
+      // Asking for status='all' surfaces both.
+      const all = parseToolResult(
+        tool.handler({ installDir: tmpDir, status: 'all' }),
+      ) as { choices: unknown[] };
+      expect(all.choices).toHaveLength(2);
+    });
+
+    it('list_mcp_capabilities surfaces install_skipped capabilities (anti-nag visibility)', async () => {
+      const { getOrchestrationStore, _resetOrchestrationStoreCache } =
+        await import('../orchestration/store.js');
+      const { McpAppCapabilityKind, McpAppCapabilityState } = await import(
+        '../orchestration/mcp-app-lifecycle.js'
+      );
+      _resetOrchestrationStoreCache();
+      const store = getOrchestrationStore(tmpDir);
+      const session = store.createSession({ goal: 'test' });
+      const cap = store.addMcpCapability({
+        kind: McpAppCapabilityKind.AmplitudeMcpHttp,
+        whyNeeded: 'For chart Q&A',
+        whatItEnables: 'Ask charts in chat',
+        required: false,
+        consequenceIfSkipped: 'No chat charts',
+        safeToSkip: true,
+        reversible: true,
+        userDecisionResumeCommand: ['x'],
+        linkedSessionId: session.id,
+      });
+      // available → needs_user_choice → install_skipped is the legal
+      // path; transitioning straight from available trips the lifecycle
+      // matrix.
+      store.transitionMcpCapability(
+        cap.id,
+        McpAppCapabilityState.NeedsUserChoice,
+        null,
+      );
+      store.transitionMcpCapability(
+        cap.id,
+        McpAppCapabilityState.InstallSkipped,
+        'user said no',
+      );
+
+      const tool = fake.tools.find((t) => t.name === 'list_mcp_capabilities')!;
+      const parsed = parseToolResult(tool.handler({ installDir: tmpDir })) as {
+        capabilities: Array<{ state: string; userDecision: string | null }>;
+      };
+      expect(parsed.capabilities).toHaveLength(1);
+      expect(parsed.capabilities[0].state).toBe(
+        McpAppCapabilityState.InstallSkipped,
+      );
+      expect(parsed.capabilities[0].userDecision).toBe('skipped');
+    });
+
+    it('every orchestration tool description is non-empty', () => {
+      const orchTools = [
+        'get_orchestration_status',
+        'get_last_stopping_point',
+        'list_tasks',
+        'get_task',
+        'list_sessions',
+        'get_session',
+        'list_choices',
+        'get_choice',
+        'list_manual_verifications',
+        'get_manual_verification',
+        'list_mcp_capabilities',
+        'get_mcp_capability',
+      ];
+      for (const name of orchTools) {
+        const tool = fake.tools.find((t) => t.name === name);
+        expect(tool, `tool ${name} should be registered`).toBeDefined();
+        expect(tool!.config.description).toBeTruthy();
+        expect((tool!.config.description ?? '').length).toBeGreaterThan(20);
+      }
+    });
+
+    it('orchestration tools do NOT include any mutation surface (read-only contract)', () => {
+      // Sanity-check that PR 3 didn't accidentally introduce a write tool.
+      // Anything that mutates orchestration state belongs on the CLI.
+      const writeIndicators = [
+        'answer',
+        'mark',
+        'transition',
+        'install',
+        'skip',
+        'create_choice',
+        'create_verification',
+      ];
+      for (const tool of fake.tools) {
+        // Skip the existing record_dashboard_plan — that's NOT
+        // orchestration; it's a separate writable surface that
+        // pre-dated PR 3 and is intentional.
+        if (tool.name === 'record_dashboard_plan') continue;
+        for (const ind of writeIndicators) {
+          expect(
+            tool.name.toLowerCase().includes(ind),
+            `tool ${tool.name} smells like a mutation; PR 3 must stay read-only`,
+          ).toBe(false);
+        }
+      }
+    });
   });
 });

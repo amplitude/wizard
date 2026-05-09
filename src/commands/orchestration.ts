@@ -105,9 +105,6 @@ export const tasksCommand: CommandModule = {
         const { getOrchestrationStore } = await import(
           '../lib/orchestration/store.js'
         );
-        const { TasksEnvelopeSchema } = await import(
-          '../lib/orchestration/schemas.js'
-        );
         const store = getOrchestrationStore(opts.installDir);
         const stateFilterRaw = argv.state as string | undefined;
         let stateFilter: TaskLifecycle | undefined;
@@ -144,13 +141,19 @@ export const tasksCommand: CommandModule = {
         });
 
         if (opts.jsonOutput) {
-          const envelope = TasksEnvelopeSchema.parse({
-            v: 1,
-            type: 'orchestration_tasks',
-            generatedAt: new Date().toISOString(),
+          // PR 3: shared envelope builder — same code path the
+          // `list_tasks` MCP tool calls, so the two surfaces are
+          // byte-for-byte identical (modulo `generatedAt`).
+          const { buildTasksEnvelope } = await import(
+            '../lib/orchestration/envelopes.js'
+          );
+          const envelope = buildTasksEnvelope({
             installDir: opts.installDir,
-            tasks,
+            state: stateFilter,
+            sessionId: sessionFilter,
           });
+          // Pre-built envelope is already Zod-validated by the builder;
+          // skip the redundant `.parse()` we used to do here.
           emitJson(envelope);
         } else {
           const ui = getUI();
@@ -206,8 +209,8 @@ export const taskCommand: CommandModule = {
         const { getOrchestrationStore } = await import(
           '../lib/orchestration/store.js'
         );
-        const { TaskEnvelopeSchema } = await import(
-          '../lib/orchestration/schemas.js'
+        const { buildTaskEnvelope } = await import(
+          '../lib/orchestration/envelopes.js'
         );
         let id: TaskId;
         try {
@@ -226,14 +229,12 @@ export const taskCommand: CommandModule = {
           process.exit(ExitCode.INVALID_ARGS);
         }
         if (opts.jsonOutput) {
-          const envelope = TaskEnvelopeSchema.parse({
-            v: 1,
-            type: 'orchestration_task',
-            generatedAt: new Date().toISOString(),
+          const envelope = buildTaskEnvelope({
             installDir: opts.installDir,
-            task,
+            taskId: task.id,
           });
-          emitJson(envelope);
+          if (envelope) emitJson(envelope);
+          else emitJsonError(`Task ${idRaw} not found`);
         } else {
           const ui = getUI();
           ui.log.info(`${chalk.bold(task.id)}  ${task.label}`);
@@ -312,19 +313,15 @@ export const sessionsCommand: CommandModule = {
         const { getOrchestrationStore } = await import(
           '../lib/orchestration/store.js'
         );
-        const { SessionsEnvelopeSchema } = await import(
-          '../lib/orchestration/schemas.js'
+        const { buildSessionsEnvelope } = await import(
+          '../lib/orchestration/envelopes.js'
         );
         const store = getOrchestrationStore(opts.installDir);
         const sessions = store.listSessions();
 
         if (opts.jsonOutput) {
-          const envelope = SessionsEnvelopeSchema.parse({
-            v: 1,
-            type: 'orchestration_sessions',
-            generatedAt: new Date().toISOString(),
+          const envelope = buildSessionsEnvelope({
             installDir: opts.installDir,
-            sessions,
           });
           emitJson(envelope);
         } else {
@@ -403,8 +400,8 @@ export const sessionCommand: CommandModule = {
         const { getOrchestrationStore } = await import(
           '../lib/orchestration/store.js'
         );
-        const { SessionEnvelopeSchema } = await import(
-          '../lib/orchestration/schemas.js'
+        const { buildSessionEnvelope } = await import(
+          '../lib/orchestration/envelopes.js'
         );
         let id: SessionId;
         try {
@@ -427,15 +424,12 @@ export const sessionCommand: CommandModule = {
         });
 
         if (opts.jsonOutput) {
-          const envelope = SessionEnvelopeSchema.parse({
-            v: 1,
-            type: 'orchestration_session',
-            generatedAt: new Date().toISOString(),
+          const envelope = buildSessionEnvelope({
             installDir: opts.installDir,
-            session,
-            tasks,
+            sessionId: session.id,
           });
-          emitJson(envelope);
+          if (envelope) emitJson(envelope);
+          else emitJsonError(`Session ${idRaw} not found`);
         } else {
           const ui = getUI();
           ui.log.info(`${chalk.bold(session.id)}`);
@@ -506,8 +500,8 @@ export const resumeCommand: CommandModule = {
         const { computeLastStoppingPoint } = await import(
           '../lib/orchestration/last-stopping-point.js'
         );
-        const { ResumeEnvelopeSchema } = await import(
-          '../lib/orchestration/schemas.js'
+        const { buildResumeEnvelope } = await import(
+          '../lib/orchestration/envelopes.js'
         );
         let sessionId: SessionId;
         try {
@@ -536,14 +530,9 @@ export const resumeCommand: CommandModule = {
         const description = lsp.nextAction.description;
 
         if (opts.jsonOutput) {
-          const envelope = ResumeEnvelopeSchema.parse({
-            v: 1,
-            type: 'orchestration_resume',
-            generatedAt: new Date().toISOString(),
+          const envelope = buildResumeEnvelope({
             installDir: opts.installDir,
             sessionId: session.id,
-            command,
-            description,
             executed: execute,
           });
           emitJson(envelope);
@@ -639,21 +628,15 @@ export const orchestrationCommand: CommandModule = {
               const { computeLastStoppingPoint } = await import(
                 '../lib/orchestration/last-stopping-point.js'
               );
-              const { StatusEnvelopeSchema } = await import(
-                '../lib/orchestration/schemas.js'
+              const { buildStatusEnvelope } = await import(
+                '../lib/orchestration/envelopes.js'
               );
               const store = getOrchestrationStore(opts.installDir);
               const lsp = computeLastStoppingPoint(opts.installDir);
 
               if (opts.jsonOutput) {
-                const envelope = StatusEnvelopeSchema.parse({
-                  v: 1,
-                  type: 'orchestration_status',
-                  generatedAt: new Date().toISOString(),
+                const envelope = buildStatusEnvelope({
                   installDir: opts.installDir,
-                  storePath: store.path,
-                  storeExists: store.exists(),
-                  lastStoppingPoint: lsp,
                 });
                 emitJson(envelope);
               } else {

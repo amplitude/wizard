@@ -41,6 +41,29 @@ import {
   type DashboardPlanInput,
 } from './dashboard-plan.js';
 import { wrapMcpServerWithSentry } from './observability/index.js';
+import {
+  buildStatusEnvelope,
+  buildLastStoppingPointEnvelope,
+  buildTasksEnvelope,
+  buildTaskEnvelope,
+  buildSessionsEnvelope,
+  buildSessionEnvelope,
+  buildChoicesEnvelope,
+  buildChoiceEnvelope,
+  buildVerificationsEnvelope,
+  buildVerificationEnvelope,
+  buildMcpCapabilitiesEnvelope,
+  buildMcpCapabilityEnvelope,
+  asTaskId,
+  asSessionId,
+  asChoiceId,
+  asVerificationId,
+  asMcpAppCapabilityId,
+} from './orchestration/envelopes.js';
+import { TaskLifecycle } from './orchestration/lifecycle.js';
+import { ChoiceStatus } from './orchestration/checkpoints/choices.js';
+import { VerificationStatus } from './orchestration/checkpoints/verifications.js';
+import { McpAppCapabilityState } from './orchestration/mcp-app-lifecycle.js';
 
 const SERVER_NAME = 'amplitude-wizard';
 const SERVER_VERSION = '1.0.0';
@@ -320,6 +343,473 @@ export function registerWizardTools(server: WizardMcpToolRegistrar): void {
       const { installDir } = (args ?? {}) as { installDir?: string };
       const plan = readDashboardPlan(installDir ?? process.cwd());
       return jsonContent({ plan });
+    },
+  );
+
+  // ── Orchestration tools (PR 3) ──────────────────────────────────────
+  //
+  // Read-only mirror of the orchestration CLI surface. Every tool here
+  // returns the SAME Zod-validated envelope the matching `wizard …
+  // --json` command emits, so a host AI agent can choose either surface
+  // without re-shaping the response.
+  //
+  // Strictly read-only by construction: every handler delegates to
+  // builders in `orchestration/envelopes.ts`. The mutators that exist on
+  // `OrchestrationStore` (answerChoice, markVerificationStatus,
+  // transitionMcpCapability) are deliberately NOT registered — the MCP
+  // server's read-only contract (declared in this file's header) stays
+  // intact. Hosts that need to mutate orchestration state spawn the CLI
+  // (`wizard choice answer …`, `wizard verification mark …`).
+
+  const installDirSchema = z
+    .string()
+    .optional()
+    .describe(
+      'Absolute path to the project to inspect. Defaults to the current working directory.',
+    );
+
+  // -- get_orchestration_status ------------------------------------------
+  server.registerTool(
+    'get_orchestration_status',
+    {
+      title: 'Get orchestration status',
+      description:
+        'Returns the same envelope `wizard orchestration status --json` ' +
+        'emits: store path, store-existence flag, and the full ' +
+        'last-stopping-point snapshot (active session, active tasks, ' +
+        'pending choices/verifications/MCP actions, recommended next ' +
+        'action, resume command). Read-only.',
+      inputSchema: { installDir: installDirSchema },
+    },
+    (args: unknown) => {
+      const { installDir } = (args ?? {}) as { installDir?: string };
+      const envelope = buildStatusEnvelope({
+        installDir: installDir ?? process.cwd(),
+      });
+      return jsonContent(envelope);
+    },
+  );
+
+  // -- get_last_stopping_point -------------------------------------------
+  server.registerTool(
+    'get_last_stopping_point',
+    {
+      title: 'Get last stopping point',
+      description:
+        'Returns just the `lastStoppingPoint` snapshot — same data as ' +
+        'inside `get_orchestration_status` but without the store-path ' +
+        'wrapper. Useful when the agent only needs the next-action / ' +
+        'resume command and not the full status payload.',
+      inputSchema: { installDir: installDirSchema },
+    },
+    (args: unknown) => {
+      const { installDir } = (args ?? {}) as { installDir?: string };
+      const envelope = buildLastStoppingPointEnvelope({
+        installDir: installDir ?? process.cwd(),
+      });
+      return jsonContent(envelope);
+    },
+  );
+
+  // -- list_tasks --------------------------------------------------------
+  server.registerTool(
+    'list_tasks',
+    {
+      title: 'List orchestration tasks',
+      description:
+        'Returns the same envelope `wizard tasks --json` emits. Optional ' +
+        'filters: `state` (queued/running/waiting_for_user/blocked/' +
+        'completed/failed/cancelled/superseded), `sessionId`. Read-only.',
+      inputSchema: {
+        installDir: installDirSchema,
+        state: z
+          .enum([
+            'queued',
+            'running',
+            'waiting_for_user',
+            'blocked',
+            'completed',
+            'failed',
+            'cancelled',
+            'superseded',
+          ])
+          .optional()
+          .describe('Filter by lifecycle state.'),
+        sessionId: z
+          .string()
+          .optional()
+          .describe('Restrict to tasks owned by this session id.'),
+      },
+    },
+    (args: unknown) => {
+      const {
+        installDir,
+        state,
+        sessionId: sessionIdRaw,
+      } = (args ?? {}) as {
+        installDir?: string;
+        state?: TaskLifecycle;
+        sessionId?: string;
+      };
+      const envelope = buildTasksEnvelope({
+        installDir: installDir ?? process.cwd(),
+        state,
+        sessionId: sessionIdRaw ? asSessionId(sessionIdRaw) : undefined,
+      });
+      return jsonContent(envelope);
+    },
+  );
+
+  // -- get_task ---------------------------------------------------------
+  server.registerTool(
+    'get_task',
+    {
+      title: 'Get orchestration task',
+      description:
+        'Returns the same envelope `wizard task <id> --json` emits, or ' +
+        '{ error: "not_found", id } when the task id is unknown. ' +
+        'Read-only.',
+      inputSchema: {
+        installDir: installDirSchema,
+        id: z.string().describe('Task id (e.g. task_<uid>).'),
+      },
+    },
+    (args: unknown) => {
+      const { installDir, id } = (args ?? {}) as {
+        installDir?: string;
+        id: string;
+      };
+      let taskId;
+      try {
+        taskId = asTaskId(id);
+      } catch (err) {
+        return jsonContent({
+          error: 'invalid_id',
+          message: err instanceof Error ? err.message : String(err),
+        });
+      }
+      const envelope = buildTaskEnvelope({
+        installDir: installDir ?? process.cwd(),
+        taskId,
+      });
+      if (!envelope) {
+        return jsonContent({ error: 'not_found', id });
+      }
+      return jsonContent(envelope);
+    },
+  );
+
+  // -- list_sessions ----------------------------------------------------
+  server.registerTool(
+    'list_sessions',
+    {
+      title: 'List wizard sessions',
+      description:
+        'Returns the same envelope `wizard sessions --json` emits. ' +
+        'Read-only.',
+      inputSchema: { installDir: installDirSchema },
+    },
+    (args: unknown) => {
+      const { installDir } = (args ?? {}) as { installDir?: string };
+      const envelope = buildSessionsEnvelope({
+        installDir: installDir ?? process.cwd(),
+      });
+      return jsonContent(envelope);
+    },
+  );
+
+  // -- get_session ------------------------------------------------------
+  server.registerTool(
+    'get_session',
+    {
+      title: 'Get wizard session',
+      description:
+        'Returns the same envelope `wizard session <id> --json` emits. ' +
+        'Includes the session metadata + every task that belongs to it. ' +
+        'Read-only.',
+      inputSchema: {
+        installDir: installDirSchema,
+        id: z.string().describe('Session id (e.g. session_<uid>).'),
+      },
+    },
+    (args: unknown) => {
+      const { installDir, id } = (args ?? {}) as {
+        installDir?: string;
+        id: string;
+      };
+      let sessionId;
+      try {
+        sessionId = asSessionId(id);
+      } catch (err) {
+        return jsonContent({
+          error: 'invalid_id',
+          message: err instanceof Error ? err.message : String(err),
+        });
+      }
+      const envelope = buildSessionEnvelope({
+        installDir: installDir ?? process.cwd(),
+        sessionId,
+      });
+      if (!envelope) {
+        return jsonContent({ error: 'not_found', id });
+      }
+      return jsonContent(envelope);
+    },
+  );
+
+  // -- list_choices -----------------------------------------------------
+  server.registerTool(
+    'list_choices',
+    {
+      title: 'List user-choice checkpoints',
+      description:
+        'Returns the same envelope `wizard choice list --json` emits. ' +
+        "Default filter is `status='pending'`; pass `status='all'` to " +
+        'see the full history. Read-only.',
+      inputSchema: {
+        installDir: installDirSchema,
+        status: z
+          .enum([
+            'pending',
+            'answered',
+            'expired',
+            'cancelled',
+            'superseded',
+            'all',
+          ])
+          .optional()
+          .describe(
+            "Filter by choice status. Defaults to 'pending'. " +
+              "Pass 'all' to disable the filter.",
+          ),
+        sessionId: z.string().optional(),
+      },
+    },
+    (args: unknown) => {
+      const {
+        installDir,
+        status,
+        sessionId: sessionIdRaw,
+      } = (args ?? {}) as {
+        installDir?: string;
+        status?: ChoiceStatus | 'all';
+        sessionId?: string;
+      };
+      const effectiveStatus =
+        status === 'all' ? undefined : status ?? ChoiceStatus.Pending;
+      const envelope = buildChoicesEnvelope({
+        installDir: installDir ?? process.cwd(),
+        status: effectiveStatus,
+        sessionId: sessionIdRaw ? asSessionId(sessionIdRaw) : undefined,
+      });
+      return jsonContent(envelope);
+    },
+  );
+
+  // -- get_choice -------------------------------------------------------
+  server.registerTool(
+    'get_choice',
+    {
+      title: 'Get a user-choice checkpoint',
+      description:
+        'Returns the same envelope `wizard choice show <id> --json` ' +
+        'emits, or { error: "not_found", id } when unknown. Read-only.',
+      inputSchema: {
+        installDir: installDirSchema,
+        id: z.string().describe('Choice id (e.g. choice_<uid>).'),
+      },
+    },
+    (args: unknown) => {
+      const { installDir, id } = (args ?? {}) as {
+        installDir?: string;
+        id: string;
+      };
+      let choiceId;
+      try {
+        choiceId = asChoiceId(id);
+      } catch (err) {
+        return jsonContent({
+          error: 'invalid_id',
+          message: err instanceof Error ? err.message : String(err),
+        });
+      }
+      const envelope = buildChoiceEnvelope({
+        installDir: installDir ?? process.cwd(),
+        choiceId,
+      });
+      if (!envelope) {
+        return jsonContent({ error: 'not_found', id });
+      }
+      return jsonContent(envelope);
+    },
+  );
+
+  // -- list_manual_verifications ----------------------------------------
+  server.registerTool(
+    'list_manual_verifications',
+    {
+      title: 'List manual-verification checkpoints',
+      description:
+        'Returns the same envelope `wizard verification list --json` ' +
+        'emits. Default filter is `pending` + `failed` (the actionable ' +
+        "ones); pass `status='all'` for the full history. Read-only.",
+      inputSchema: {
+        installDir: installDirSchema,
+        status: z
+          .enum(['pending', 'passed', 'failed', 'skipped', 'superseded', 'all'])
+          .optional(),
+        sessionId: z.string().optional(),
+      },
+    },
+    (args: unknown) => {
+      const {
+        installDir,
+        status,
+        sessionId: sessionIdRaw,
+      } = (args ?? {}) as {
+        installDir?: string;
+        status?: VerificationStatus | 'all';
+        sessionId?: string;
+      };
+      const effectiveStatus =
+        status === 'all'
+          ? undefined
+          : status
+          ? [status]
+          : [VerificationStatus.Pending, VerificationStatus.Failed];
+      const envelope = buildVerificationsEnvelope({
+        installDir: installDir ?? process.cwd(),
+        status: effectiveStatus,
+        sessionId: sessionIdRaw ? asSessionId(sessionIdRaw) : undefined,
+      });
+      return jsonContent(envelope);
+    },
+  );
+
+  // -- get_manual_verification ------------------------------------------
+  server.registerTool(
+    'get_manual_verification',
+    {
+      title: 'Get a manual-verification checkpoint',
+      description:
+        'Returns the same envelope `wizard verification show <id> ' +
+        '--json` emits, or { error: "not_found", id } when unknown. ' +
+        'Read-only.',
+      inputSchema: {
+        installDir: installDirSchema,
+        id: z.string().describe('Verification id (e.g. verif_<uid>).'),
+      },
+    },
+    (args: unknown) => {
+      const { installDir, id } = (args ?? {}) as {
+        installDir?: string;
+        id: string;
+      };
+      let verifId;
+      try {
+        verifId = asVerificationId(id);
+      } catch (err) {
+        return jsonContent({
+          error: 'invalid_id',
+          message: err instanceof Error ? err.message : String(err),
+        });
+      }
+      const envelope = buildVerificationEnvelope({
+        installDir: installDir ?? process.cwd(),
+        verificationId: verifId,
+      });
+      if (!envelope) {
+        return jsonContent({ error: 'not_found', id });
+      }
+      return jsonContent(envelope);
+    },
+  );
+
+  // -- list_mcp_capabilities --------------------------------------------
+  server.registerTool(
+    'list_mcp_capabilities',
+    {
+      title: 'List MCP-app capabilities',
+      description:
+        "Returns the orchestration store's record of every MCP capability " +
+        '(amplitude / linear / github / sentry / etc.) and its lifecycle ' +
+        'state — `available`, `needs_user_choice`, `needs_install`, ' +
+        '`installed`, `install_skipped`, etc. Honours the anti-nag ' +
+        'invariant — `install_skipped` capabilities surface here for ' +
+        'inspection but are NOT meant to be re-prompted. Read-only.',
+      inputSchema: {
+        installDir: installDirSchema,
+        state: z
+          .enum([
+            'available',
+            'needs_user_choice',
+            'needs_install',
+            'needs_auth',
+            'installed',
+            'install_skipped',
+            'install_failed',
+            'auth_failed',
+            'superseded',
+          ])
+          .optional(),
+        sessionId: z.string().optional(),
+      },
+    },
+    (args: unknown) => {
+      const {
+        installDir,
+        state,
+        sessionId: sessionIdRaw,
+      } = (args ?? {}) as {
+        installDir?: string;
+        state?: McpAppCapabilityState;
+        sessionId?: string;
+      };
+      const envelope = buildMcpCapabilitiesEnvelope({
+        installDir: installDir ?? process.cwd(),
+        state,
+        sessionId: sessionIdRaw ? asSessionId(sessionIdRaw) : undefined,
+      });
+      return jsonContent(envelope);
+    },
+  );
+
+  // -- get_mcp_capability -----------------------------------------------
+  server.registerTool(
+    'get_mcp_capability',
+    {
+      title: 'Get an MCP-app capability',
+      description:
+        'Inspect a single MCP capability by id. Returns the typed record ' +
+        'including `whyNeeded`, `whatItEnables`, current state, last ' +
+        'state-change reason, and user decision (if any). Read-only.',
+      inputSchema: {
+        installDir: installDirSchema,
+        id: z.string().describe('MCP capability id (e.g. mcp_<kind>_<uid>).'),
+      },
+    },
+    (args: unknown) => {
+      const { installDir, id } = (args ?? {}) as {
+        installDir?: string;
+        id: string;
+      };
+      let capId;
+      try {
+        capId = asMcpAppCapabilityId(id);
+      } catch (err) {
+        return jsonContent({
+          error: 'invalid_id',
+          message: err instanceof Error ? err.message : String(err),
+        });
+      }
+      const envelope = buildMcpCapabilityEnvelope({
+        installDir: installDir ?? process.cwd(),
+        capabilityId: capId,
+      });
+      if (!envelope) {
+        return jsonContent({ error: 'not_found', id });
+      }
+      return jsonContent(envelope);
     },
   );
 }

@@ -56,8 +56,8 @@ const verificationListCommand: CommandModule = {
         const { getOrchestrationStore } = await import(
           '../lib/orchestration/store.js'
         );
-        const { VerificationsEnvelopeSchema } = await import(
-          '../lib/orchestration/schemas.js'
+        const { buildVerificationsEnvelope } = await import(
+          '../lib/orchestration/envelopes.js'
         );
         const store = getOrchestrationStore(opts.installDir);
         const statusRaw = argv.status as string | undefined;
@@ -92,12 +92,12 @@ const verificationListCommand: CommandModule = {
         });
 
         if (opts.jsonOutput) {
-          const envelope = VerificationsEnvelopeSchema.parse({
-            v: 1,
-            type: 'orchestration_verifications',
-            generatedAt: new Date().toISOString(),
+          const envelope = buildVerificationsEnvelope({
             installDir: opts.installDir,
-            verifications,
+            status: filter as
+              | import('../lib/orchestration/checkpoints/verifications').VerificationStatus[]
+              | undefined,
+            sessionId: sessionFilter,
           });
           emitJson(envelope);
         } else {
@@ -156,8 +156,8 @@ const verificationShowCommand: CommandModule = {
         const { getOrchestrationStore } = await import(
           '../lib/orchestration/store.js'
         );
-        const { VerificationEnvelopeSchema } = await import(
-          '../lib/orchestration/schemas.js'
+        const { buildVerificationEnvelope } = await import(
+          '../lib/orchestration/envelopes.js'
         );
         const { asVerificationId } = await import(
           '../lib/orchestration/checkpoints/verifications.js'
@@ -180,14 +180,16 @@ const verificationShowCommand: CommandModule = {
           process.exit(ExtendedExitCode.VERIFICATION_NOT_FOUND);
         }
         if (opts.jsonOutput) {
-          const envelope = VerificationEnvelopeSchema.parse({
-            v: 1,
-            type: 'orchestration_verification',
-            generatedAt: new Date().toISOString(),
+          const envelope = buildVerificationEnvelope({
             installDir: opts.installDir,
-            verification,
+            verificationId: asVerificationId(verification.id),
           });
-          emitJson(envelope);
+          if (envelope) emitJson(envelope);
+          else
+            emitJsonError(
+              `Verification ${idRaw} not found`,
+              'VERIFICATION_NOT_FOUND',
+            );
         } else {
           const ui = getUI();
           ui.log.info(

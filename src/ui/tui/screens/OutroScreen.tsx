@@ -40,6 +40,7 @@ import {
 } from '../../../utils/wizard-abort.js';
 import { getLogFilePath } from '../../../lib/observability/index.js';
 import { writeBugReport } from '../../../lib/bug-report.js';
+import { ManualVerificationRibbon } from '../components/ManualVerificationRibbon.js';
 import { toWizardDashboardOpenUrl } from '../../../utils/dashboard-open-url.js';
 import {
   getDashboardFile,
@@ -851,6 +852,13 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
           )}
         </Box>
       )}
+
+      {/* PR 3 — Manual-verification ribbon. Renders only when the
+          orchestration store has at least one pending verification.
+          Prevents "success-looking UI while blocked" by reminding the
+          user there's still a manual step to take, with the resume
+          command inline. */}
+      <ManualVerificationRibbon store={store} />
 
       {/* ── Actions ───────────────────────────────────────────────────── */}
       <Box marginTop={1}>

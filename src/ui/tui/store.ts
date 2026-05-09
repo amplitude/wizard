@@ -1191,6 +1191,22 @@ export class WizardStore {
     this.popOverlay();
   }
 
+  /**
+   * PR 3 — show the "What's happening?" orchestration overlay. Mounted by
+   * the `/status` slash command and rendered by `StatusOverlayScreen`.
+   * The overlay is read-only — it derives its content directly from the
+   * durable orchestration store on render, so any in-flight mutation
+   * (an agent answering a Choice, a task transitioning state) is reflected
+   * the next time emitChange triggers a rerender.
+   */
+  showStatusOverlay(): void {
+    this.pushOverlay(Overlay.Status);
+  }
+
+  hideStatusOverlay(): void {
+    this.popOverlay();
+  }
+
   /** Update just the access token in credentials without triggering auth analytics. */
   updateAccessToken(accessToken: string): void {
     const creds = this.$session.get().credentials;

@@ -62,6 +62,10 @@ export const COMMANDS: CommandDef[] = [
     cmd: '/diagnostics',
     desc: 'Show wizard storage paths (log file, cache, project meta dir)',
   },
+  {
+    cmd: '/status',
+    desc: 'Show orchestration status: pending choices, verifications, MCP capabilities, next action',
+  },
   { cmd: '/snake', desc: 'Play Snake' },
   { cmd: '/exit', desc: 'Exit the wizard' },
 ];
