@@ -212,9 +212,7 @@ This repo enforces **conventional commit** PR titles and commit messages. The ty
 pnpm try           # run the wizard locally (from source, no build needed)
 pnpm try --agent   # run in agent mode (NDJSON output, auto-approve)
 pnpm try --yes     # run in CI mode (alias for --ci, non-interactive)
-pnpm build         # bundle bin.ts via tsup + emit .d.ts via tsc (see docs/build.md)
-pnpm build:bundle  # tsup-only (skip declaration emit)
-pnpm build:types   # tsc --emitDeclarationOnly (skip bundling)
+pnpm build         # compile TypeScript
 pnpm test          # run unit tests (vitest)
 pnpm test:watch    # run unit tests in watch mode
 pnpm test:bdd      # run BDD/Cucumber tests (features/*.feature)
@@ -260,4 +258,3 @@ GitHub Actions workflows in `.github/workflows/`:
 - [`docs/external-services.md`](./docs/external-services.md) — third-party services the wizard talks to
 - [`docs/ux-improvements.md`](./docs/ux-improvements.md) — UX backlog and recently-shipped polish
 - [`docs/releasing.md`](./docs/releasing.md) — release process and versioning
-- [`docs/build.md`](./docs/build.md) — tsup bundle pipeline, externals, lazy-load conventions
