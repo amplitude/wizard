@@ -32,13 +32,6 @@
  *      modally awaiting Y/N), the pill says "N events approved · awaiting
  *      your sign-off" — concrete and actionable.
  *
- *   3b. **Revising the plan with user feedback.** The user picked
- *      "give feedback" and submitted text; the LLM is now revising. Pill
- *      says "Revising plan with your feedback…" until the next
- *      `confirm_event_plan` lands. Without this beat the user thinks
- *      their feedback was dropped on the floor — the EventPlanScreen
- *      vanishes and RunScreen reads identical to a normal run.
- *
  *   4. **Recent file write** (planned/applied) — within the last few
  *      seconds, render "Editing src/foo.ts" or "✓ Wrote src/bar.ts".
  *      Specific to the file the agent has its hands on RIGHT NOW. Falls
@@ -168,16 +161,6 @@ export function resolveRunStatusPill(
   if (prompt?.kind === 'event-plan') {
     const n = prompt.events.length;
     return `${n} event${n === 1 ? '' : 's'} planned · awaiting your sign-off`;
-  }
-
-  // Tier 3b — revising plan with user feedback. Set by `resolveEventPlan`
-  // when the user picked "give feedback" and cleared by the next
-  // `promptEventPlan`. Without this beat, the EventPlanFullScreen
-  // disappears on Enter and the RunScreen reads as if nothing happened
-  // — the user reports feedback "isn't being applied" because there's no
-  // visible signal that the LLM is actively re-planning.
-  if (store.revisingEventPlan) {
-    return 'Revising plan with your feedback…';
   }
 
   // Tier 4 — recent file write. The most-specific "what file are we

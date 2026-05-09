@@ -4,13 +4,10 @@ After installing the SDK and adding init code, but **BEFORE** writing any `track
 
 ## CRITICAL — name format
 
-Default to Title Case, [Noun] [Past-Tense Verb], 2-5 words. The name passed here is the **EXACT** string the agent passes as the first argument to `track()` — do not translate or reformat it between this call and the implementation.
+Title Case, [Noun] [Past-Tense Verb], 2-5 words. The name passed here is the **EXACT** string the agent passes as the first argument to `track()` — do not translate or reformat it between this call and the implementation.
 
-- DEFAULT (preferred): "User Signed Up", "Product Added To Cart", "Search Performed", "Checkout Started", "Property Extracted"
-- AUTO-REPAIRED to Title Case (don't emit these — the wizard fixes them but the round-trip is wasted): `user_signed_up` (snake_case), `userSignedUp` (camelCase), `checkout-started` (kebab-case), `user.signed.up` (dotted)
-- INVALID: "Fires when user submits the signup form" (description in name field)
-
-**Honoring user casing feedback:** when the user gives feedback that explicitly asks for a different casing convention — "lowercase the event names", "use UPPERCASE for these events", "stylize them as Sentence case" — emit the names exactly in the case they asked for. The wizard's name-normalizer preserves any space-separated multi-word string verbatim regardless of case, so `"user signed up"` (lowercase) and `"USER SIGNED UP"` (uppercase) and `"User signed up"` (sentence case) all round-trip unchanged. This is load-bearing: the user must see the same casing in the plan-approval screen that ends up in the eventual `track()` call.
+- WRONG: `user_signed_up` (snake_case), `userSignedUp` (camelCase), `user signed up` (lowercase), "Fires when user submits the signup form" (description in name field)
+- RIGHT: "User Signed Up", "Product Added To Cart", "Search Performed", "Checkout Started", "Property Extracted"
 
 **description:** ONE short sentence (≤20 words) stating when the event fires. No file paths, property lists, or autocapture rationale.
 

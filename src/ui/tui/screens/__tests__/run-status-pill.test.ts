@@ -145,63 +145,6 @@ describe('resolveRunStatusPill — tier 3: pending event-plan prompt', () => {
   });
 });
 
-describe('resolveRunStatusPill — tier 3b: revising plan with user feedback', () => {
-  // Without this beat, the EventPlanFullScreen disappears the moment
-  // Enter is pressed and the user has no signal that the LLM is
-  // actively re-planning. The user filed a bug saying "feedback isn't
-  // being applied" — the actual UX gap was "feedback was applied but
-  // nothing on screen indicated it".
-  it('shows the revising message after the user submits feedback', () => {
-    const store = makeStoreForSnapshot();
-    store.setTasks(makeCanonicalTasks({ inProgressIndex: 2 }));
-    store.promptEventPlan([
-      { name: 'User Signed Up', description: 'a' },
-      { name: 'Item Added', description: 'b' },
-    ]);
-    store.resolveEventPlan({
-      decision: 'revised',
-      feedback: 'lowercase the event names',
-    });
-
-    expect(resolveRunStatusPill(store, T0)).toBe(
-      'Revising plan with your feedback…',
-    );
-  });
-
-  it('clears the revising message when the next event-plan prompt arrives', () => {
-    const store = makeStoreForSnapshot();
-    store.setTasks(makeCanonicalTasks({ inProgressIndex: 2 }));
-    store.promptEventPlan([{ name: 'User Signed Up', description: 'a' }]);
-    store.resolveEventPlan({
-      decision: 'revised',
-      feedback: 'lowercase the event names',
-    });
-    // Sanity — we're in the revising state.
-    expect(resolveRunStatusPill(store, T0)).toBe(
-      'Revising plan with your feedback…',
-    );
-    // The LLM lands a revised plan — that triggers a fresh prompt and
-    // tier 3 takes over again.
-    store.promptEventPlan([{ name: 'user signed up', description: 'a' }]);
-    expect(resolveRunStatusPill(store, T0)).toBe(
-      '1 event planned · awaiting your sign-off',
-    );
-  });
-
-  it('does not light up after approve or skip', () => {
-    const store = makeStoreForSnapshot();
-    store.setTasks(makeCanonicalTasks({ inProgressIndex: 2 }));
-    store.promptEventPlan([{ name: 'User Signed Up', description: 'a' }]);
-    store.resolveEventPlan({ decision: 'approved' });
-    // Falls through to lower tiers — pill is empty or echoes task,
-    // crucially NOT the revising message which is gated on the
-    // 'revised' decision.
-    expect(resolveRunStatusPill(store, T0)).not.toBe(
-      'Revising plan with your feedback…',
-    );
-  });
-});
-
 describe('resolveRunStatusPill — tier 4: recent file write', () => {
   it('renders "Editing <path>" while a modify is planned (in-flight)', () => {
     const store = makeStoreForSnapshot({
