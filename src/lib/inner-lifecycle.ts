@@ -45,6 +45,7 @@ import {
 import type { HookCallback } from './agent-hooks.js';
 import { getFileChangeLedger } from './file-change-ledger.js';
 import { formatToolCallLabel } from './tool-call-label.js';
+import { logToFile } from '../utils/debug.js';
 
 /**
  * Type guard: returns the UI cast to AgentUI if we're in agent mode,
@@ -243,7 +244,7 @@ export function createInnerLifecycleHooks(config: InnerLifecycleConfig): {
       // Surface the written content to the UI for per-event wiring
       // status. `Write` carries `obj.content`; `Edit` carries
       // `obj.new_string`; `MultiEdit` carries `obj.edits[].new_string`.
-      // Concatenate whichever is available — TUI scans for `track('…')`
+      // Concatenate whichever is available — TUI scans for tracking
       // calls and advances the per-event status list as each event's
       // wiring lands. Non-TUI UIs no-op (`noteWrittenContent` is
       // optional in the WizardUI contract).
@@ -266,6 +267,22 @@ export function createInnerLifecycleHooks(config: InnerLifecycleConfig): {
         }
         if (fragments.length > 0) {
           const merged = fragments.join('\n');
+          // Diagnostic breadcrumb — when the per-event status list
+          // doesn't advance during a real run we need a visible signal
+          // that PostToolUse fired AND what shape the content arrived
+          // in. We only emit a fingerprint (length + tracking-call
+          // count) so file content never lands in the log; the
+          // structured logger redacts user code by policy.
+          const trackHits = (
+            merged.match(/\b(?:track\w*|logEvent)\s*\(/g) ?? []
+          ).length;
+          logToFile(
+            `[inner-lifecycle] noteWrittenContent dispatched ` +
+              `(tool=${toolName}, bytes=${Buffer.byteLength(
+                merged,
+                'utf8',
+              )}, trackCallShapes=${trackHits})`,
+          );
           getUI().noteWrittenContent?.(merged);
         }
       } catch {

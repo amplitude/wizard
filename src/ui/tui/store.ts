@@ -2260,41 +2260,55 @@ export class WizardStore {
   }
 
   /**
-   * Scan a written / edited file's content for `track('Event Name', …)`
-   * (or `"Event Name"`) calls and mark every matching planned event as
-   * `done`. Called from the inner-agent's PostToolUse hook with the
-   * Write/Edit content, so the per-event status list in RunScreen
-   * advances row-by-row as the agent commits each track() call.
+   * Scan a written / edited file's content for tracking-call shapes
+   * containing a string literal that matches a planned event name and
+   * mark every match as `done`. Called from the inner-agent's
+   * PostToolUse hook with the Write/Edit content, so the per-event
+   * status list in RunScreen advances row-by-row as the agent commits
+   * each track call.
    *
-   * Match rules:
-   *   - The token before the parenthesis must end in `track` (so
-   *     `amplitude.track`, `analytics.track`, `track`, etc. all match)
-   *     and be followed by a string literal whose contents equal one
-   *     of the planned event names (case-insensitive, whitespace
-   *     trimmed).
-   *   - Both single and double quotes match. Backticks (template
-   *     literals) match only when there's no `${…}` interpolation in
-   *     the captured string.
+   * Match rules — the function name must START at a word boundary with
+   * one of:
+   *   - `track` followed by zero or more word characters
+   *     (e.g. `track`, `trackServer`, `trackEvent`, `amplitude.track`,
+   *     `client.track`). The wizard's server-side skill prompts the
+   *     agent to wrap `client.track({ event_type: name, … })` in a
+   *     `trackServer(name, props)` helper and call THAT at every event
+   *     site — so `trackServer(` is the dominant shape on real Next.js
+   *     / FastAPI / Django runs and absolutely must match. The earlier
+   *     `\btrack\s*\(` regex required `track(` literally, so wrapper
+   *     calls slipped past the scanner and the per-event status sat at
+   *     "(0 done · N to go)" for the entire wire phase.
+   *   - `logEvent` (Amplitude legacy / mobile SDK pattern, e.g.
+   *     `Amplitude.getInstance().logEvent('User Signed Up')`).
    *
-   * No-op when the event plan is empty or the content has no track
-   * calls — callers don't need to pre-check.
+   * The identifier is followed by `(` then a string literal whose
+   * contents equal one of the planned event names (case-insensitive,
+   * whitespace trimmed). Single, double, and backtick quotes all
+   * match. Backticks (template literals) match only when there's no
+   * `${…}` interpolation in the captured string.
+   *
+   * No-op when the event plan is empty or the content has no
+   * tracking-call shapes — callers don't need to pre-check.
    */
   noteWrittenContent(content: string): void {
     if (!content) return;
     const events = this.$eventPlan.get();
     if (events.length === 0) return;
-    // `track` must be a word-suffix so `untracked` doesn't match. We
-    // run three separate patterns so that `$` is only forbidden inside
-    // backtick-quoted strings (where it would signal a `${…}`
-    // interpolation we can't safely flatten). Single- and double-quoted
-    // event names like `track("$100 Purchase")` are valid literals and
-    // must match — earlier we used a single tempered class
-    // `[^'"`$\n]+?` which incorrectly excluded `$` from every quote
-    // style.
+    // The `\b` anchor before `track`/`logEvent` is critical so neither
+    // `untracked(` (different word) nor `my_track(` (`_` is a word
+    // character → no boundary) match. Allowing `\w*` AFTER the prefix
+    // is what lets `trackServer(` and `trackEvent(` match — they were
+    // the production miss that caused #698 to silently lie. Three
+    // separate patterns isolate `$` inside backtick-quoted strings
+    // (where it could start a `${…}` interpolation we can't safely
+    // flatten); single- and double-quoted names like `track("$100
+    // Purchase")` are valid string literals and must still match.
+    const TRACK_FN = String.raw`\b(?:track\w*|logEvent)\s*\(\s*`;
     const patterns = [
-      /\btrack\s*\(\s*'([^'\n]+?)'/g,
-      /\btrack\s*\(\s*"([^"\n]+?)"/g,
-      /\btrack\s*\(\s*`([^`$\n]+?)`/g,
+      new RegExp(TRACK_FN + String.raw`'([^'\n]+?)'`, 'g'),
+      new RegExp(TRACK_FN + String.raw`"([^"\n]+?)"`, 'g'),
+      new RegExp(TRACK_FN + String.raw`\x60([^\x60$\n]+?)\x60`, 'g'),
     ];
     const found = new Set<string>();
     for (const pattern of patterns) {

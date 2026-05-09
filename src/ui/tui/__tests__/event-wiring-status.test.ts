@@ -189,6 +189,61 @@ describe('WizardStore — per-event wiring status', () => {
       expect(store.eventPlan[0].status).toBe('done');
     });
 
+    // Regression for the bug that made #698 silently lie for the entire
+    // wire phase: server-side Next.js / FastAPI / Django runs hit a
+    // `trackServer(name, props)` wrapper around `client.track({
+    // event_type: name, … })`. The earlier `\btrack\(` regex required
+    // `track(` literally so wrapper-call sites slipped past the scanner
+    // and the per-event counter sat at "(0 done · N to go)" for ~10
+    // minutes while the agent was clearly editing files.
+    it('matches `trackServer(…)` wrapper shape used by server-side skills', () => {
+      const store = createStore();
+      store.setEventPlan([
+        { name: 'User Signed Up', description: '' },
+        { name: 'User Signed In', description: '' },
+        { name: 'Product Added To Cart', description: '' },
+      ]);
+      store.noteWrittenContent(
+        `await setSession(createdUser);
+trackServer("User Signed Up", { username: createdUser.username });
+trackServer("User Signed In", { username });
+trackServer("Product Added To Cart", { sku });`,
+      );
+      expect(store.eventPlan.map((e) => e.status)).toEqual([
+        'done',
+        'done',
+        'done',
+      ]);
+    });
+
+    it('matches `trackEvent(…)` wrapper shape', () => {
+      const store = createStore();
+      store.setEventPlan([{ name: 'User Signed Up', description: '' }]);
+      store.noteWrittenContent(`trackEvent("User Signed Up", {});`);
+      expect(store.eventPlan[0].status).toBe('done');
+    });
+
+    it('matches `logEvent(…)` Amplitude legacy / mobile SDK shape', () => {
+      const store = createStore();
+      store.setEventPlan([{ name: 'User Signed Up', description: '' }]);
+      store.noteWrittenContent(
+        `Amplitude.getInstance().logEvent('User Signed Up')`,
+      );
+      expect(store.eventPlan[0].status).toBe('done');
+    });
+
+    it('does NOT match `my_track(`, `untrack(`, or `subtract(` (false-positive ceiling)', () => {
+      const store = createStore();
+      store.setEventPlan([{ name: 'User Signed Up', description: '' }]);
+      // `_` is a word character so `my_track` has no word boundary
+      // before `track`; `untrack` starts with `un`, not `track`;
+      // `subtract` doesn't contain a word-boundary `track`.
+      store.noteWrittenContent(
+        `my_track('User Signed Up'); untrack('User Signed Up'); subtract('User Signed Up')`,
+      );
+      expect(store.eventPlan[0].status).toBe('pending');
+    });
+
     it('is a no-op when the event plan is empty', () => {
       const store = createStore();
       // No planned events — should not throw or panic on a track() call.
