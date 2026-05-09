@@ -135,15 +135,11 @@ export const tasksCommand: CommandModule = {
             process.exit(ExitCode.INVALID_ARGS);
           }
         }
-        const tasks = store.listTasks({
-          state: stateFilter,
-          sessionId: sessionFilter,
-        });
-
         if (opts.jsonOutput) {
           // PR 3: shared envelope builder — same code path the
           // `list_tasks` MCP tool calls, so the two surfaces are
-          // byte-for-byte identical (modulo `generatedAt`).
+          // byte-for-byte identical (modulo `generatedAt`). The builder
+          // reads the store internally; no need to pre-compute `tasks` here.
           const { buildTasksEnvelope } = await import(
             '../lib/orchestration/envelopes.js'
           );
@@ -156,6 +152,10 @@ export const tasksCommand: CommandModule = {
           // skip the redundant `.parse()` we used to do here.
           emitJson(envelope);
         } else {
+          const tasks = store.listTasks({
+            state: stateFilter,
+            sessionId: sessionFilter,
+          });
           const ui = getUI();
           if (tasks.length === 0) {
             ui.log.info(chalk.dim('No tasks recorded for this project.'));
@@ -625,21 +625,25 @@ export const orchestrationCommand: CommandModule = {
               const { getOrchestrationStore } = await import(
                 '../lib/orchestration/store.js'
               );
-              const { computeLastStoppingPoint } = await import(
-                '../lib/orchestration/last-stopping-point.js'
-              );
               const { buildStatusEnvelope } = await import(
                 '../lib/orchestration/envelopes.js'
               );
               const store = getOrchestrationStore(opts.installDir);
-              const lsp = computeLastStoppingPoint(opts.installDir);
 
               if (opts.jsonOutput) {
+                // JSON hot path: `buildStatusEnvelope` calls
+                // `computeLastStoppingPoint` internally — no need to
+                // pre-compute it here.
                 const envelope = buildStatusEnvelope({
                   installDir: opts.installDir,
                 });
                 emitJson(envelope);
               } else {
+                // Human-readable path: compute the snapshot once, render it.
+                const { computeLastStoppingPoint } = await import(
+                  '../lib/orchestration/last-stopping-point.js'
+                );
+                const lsp = computeLastStoppingPoint(opts.installDir);
                 const ui = getUI();
                 if (!store.exists()) {
                   ui.log.info(
