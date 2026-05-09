@@ -14,6 +14,7 @@ import {
   IllegalVerificationTransitionError,
   canTransitionVerification,
   asVerificationId,
+  isTerminalVerificationStatus,
 } from '../verifications';
 
 let cacheRoot: string;
@@ -113,6 +114,44 @@ describe('Verification status transitions', () => {
         VerificationStatus.Failed,
       ),
     ).toBe(false);
+  });
+});
+
+describe('isTerminalVerificationStatus', () => {
+  it('marks only Passed and Superseded as terminal', () => {
+    // Passed has no actionable forward transitions other than Superseded.
+    expect(isTerminalVerificationStatus(VerificationStatus.Passed)).toBe(true);
+    // Superseded is the absorbing state.
+    expect(isTerminalVerificationStatus(VerificationStatus.Superseded)).toBe(
+      true,
+    );
+  });
+
+  it('does not mark Failed or Skipped as terminal — they have actionable forward transitions', () => {
+    // Failed → Passed (operator re-ran and it now passes).
+    expect(
+      canTransitionVerification(
+        VerificationStatus.Failed,
+        VerificationStatus.Passed,
+      ),
+    ).toBe(true);
+    expect(isTerminalVerificationStatus(VerificationStatus.Failed)).toBe(false);
+
+    // Skipped → Passed | Failed (operator decided to come back to it).
+    expect(
+      canTransitionVerification(
+        VerificationStatus.Skipped,
+        VerificationStatus.Passed,
+      ),
+    ).toBe(true);
+    expect(isTerminalVerificationStatus(VerificationStatus.Skipped)).toBe(
+      false,
+    );
+
+    // Pending is not terminal either.
+    expect(isTerminalVerificationStatus(VerificationStatus.Pending)).toBe(
+      false,
+    );
   });
 });
 

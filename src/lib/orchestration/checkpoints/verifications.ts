@@ -48,10 +48,17 @@ export const VerificationStatus = {
 export type VerificationStatus =
   (typeof VerificationStatus)[keyof typeof VerificationStatus];
 
+/**
+ * "Terminal" mirrors the meaning used by `isTerminalChoiceStatus`: a status
+ * with no actionable forward transitions other than re-supersede. `Failed`
+ * and `Skipped` are NOT terminal here — `ALLOWED_VERIFICATION_TRANSITIONS`
+ * permits `Failed → Passed` (operator re-ran and it now passes) and
+ * `Skipped → Passed | Failed` (operator decided to come back to it), and
+ * `last-stopping-point.ts` already treats `Failed` as actionable by
+ * surfacing it in `pendingManualVerifications`.
+ */
 const TERMINAL_VERIFICATION_STATUSES = new Set<VerificationStatus>([
   VerificationStatus.Passed,
-  VerificationStatus.Failed,
-  VerificationStatus.Skipped,
   VerificationStatus.Superseded,
 ]);
 
