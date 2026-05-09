@@ -562,9 +562,9 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
               ) {
                 // value shape: `workspace:<abs>::wild` | `workspace:<abs>::lit`
                 const rest = choice.slice('workspace:'.length);
-                const sep = rest.lastIndexOf('::');
-                const absolutePath = rest.slice(0, sep);
-                const kind = rest.slice(sep + 2);
+                const separatorIdx = rest.lastIndexOf('::');
+                const absolutePath = rest.slice(0, separatorIdx);
+                const kind = rest.slice(separatorIdx + 2);
                 analytics.wizardCapture('intro action', {
                   ...analyticsBase,
                   action: 'workspace pick',
