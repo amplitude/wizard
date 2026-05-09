@@ -77,12 +77,12 @@ export const TabContainer = ({
     // active tab is short (Progress during cold-start), letting the
     // outer Box `flexGrow` would re-introduce the empty band between
     // content and the chrome that this PR set out to remove.
-    <Box flexDirection="column" flexGrow={fillHeight ? 1 : 0}>
+    <Box flexDirection="column" flexGrow={fillHeight ? 1 : 0} flexShrink={1}>
       {/* Active tab content — overflow hidden so it never pushes the bar off */}
       <Box
         flexDirection="column"
         flexGrow={fillHeight ? 1 : 0}
-        flexShrink={fillHeight ? 1 : 0}
+        flexShrink={1}
         overflow="hidden"
       >
         {current?.component}
