@@ -9,12 +9,22 @@ import { IS_DEV } from '../lib/constants';
 // `--version`, `status --json`, or any other fast path. Defer the import.
 type FgFn = typeof import('fast-glob');
 let fgPromise: Promise<FgFn> | null = null;
-const loadFg = (): Promise<FgFn> =>
+const loadFg = (): Promise<FgFn> => {
   // The CJS export of fast-glob is the function itself (assigned to
   // `module.exports`), so we read the same ref through both entry shapes.
-  (fgPromise ??= import('fast-glob').then(
-    (m) => (m as { default?: FgFn }).default ?? (m as unknown as FgFn),
-  ));
+  // Clear the cache on rejection so a transient import failure (broken
+  // install, missing transitive dep) can be retried instead of replaying
+  // the stale error on every subsequent call.
+  if (!fgPromise) {
+    fgPromise = import('fast-glob')
+      .then((m) => (m as { default?: FgFn }).default ?? (m as unknown as FgFn))
+      .catch((err) => {
+        fgPromise = null;
+        throw err;
+      });
+  }
+  return fgPromise;
+};
 
 export function isNonInteractiveEnvironment(): boolean {
   if (IS_DEV) {

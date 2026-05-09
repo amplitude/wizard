@@ -9,10 +9,21 @@ import type { CloudRegion } from './types';
 // in ~20 form-data / proxy / cookie modules transitively.
 type AxiosStatic = import('axios').AxiosStatic;
 let axiosPromise: Promise<AxiosStatic> | null = null;
-const loadAxios = (): Promise<AxiosStatic> =>
+const loadAxios = (): Promise<AxiosStatic> => {
   // axios is exported as `module.exports = axios` (callable + namespaced),
   // so the ESM/CJS interop bridge surfaces the static object as `.default`.
-  (axiosPromise ??= import('axios').then((m) => m.default));
+  // Clear the cache on rejection so a transient import failure can be
+  // retried — otherwise every subsequent call would replay the stale error.
+  if (!axiosPromise) {
+    axiosPromise = import('axios')
+      .then((m) => m.default)
+      .catch((err) => {
+        axiosPromise = null;
+        throw err;
+      });
+  }
+  return axiosPromise;
+};
 
 /**
  * Resolve the Amplitude data ingestion host for a given region.

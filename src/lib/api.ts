@@ -36,15 +36,36 @@ const httpsAgent = new https.Agent({ keepAlive: true });
 // would tax cold-start by ~33 ms even on read-only paths like `--version`
 // or `status --json`. The first GraphQL call pays the import once;
 // subsequent calls reuse the cached promise.
+//
+// On rejection we clear the cached promise so a transient failure (broken
+// install, partial filesystem, transient I/O error) doesn't poison every
+// subsequent caller in the process with the same stale rejection. Mirrors
+// the pattern in `loadDefaultDriver` (`agent-driver.ts`).
 let axiosModulePromise: Promise<AxiosStatic> | null = null;
-const loadAxios = (): Promise<AxiosStatic> =>
-  (axiosModulePromise ??= import('axios').then((m) => m.default));
+const loadAxios = (): Promise<AxiosStatic> => {
+  if (!axiosModulePromise) {
+    axiosModulePromise = import('axios')
+      .then((m) => m.default)
+      .catch((err) => {
+        axiosModulePromise = null;
+        throw err;
+      });
+  }
+  return axiosModulePromise;
+};
 
 let apiClientPromise: Promise<AxiosInstance> | null = null;
-const getApiClient = (): Promise<AxiosInstance> =>
-  (apiClientPromise ??= loadAxios().then((axios) =>
-    axios.create({ timeout: 15_000, httpsAgent }),
-  ));
+const getApiClient = (): Promise<AxiosInstance> => {
+  if (!apiClientPromise) {
+    apiClientPromise = loadAxios()
+      .then((axios) => axios.create({ timeout: 15_000, httpsAgent }))
+      .catch((err) => {
+        apiClientPromise = null;
+        throw err;
+      });
+  }
+  return apiClientPromise;
+};
 
 // Synchronous predicate for catch blocks that just need to narrow `unknown`
 // to `AxiosError` without paying the full module-load cost up front.
