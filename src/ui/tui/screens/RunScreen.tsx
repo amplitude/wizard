@@ -35,8 +35,7 @@ import { FileWritesPanel } from '../components/FileWritesPanel.js';
 import { FinalizingPanel } from '../components/FinalizingPanel.js';
 import { ActiveTaskSubsteps } from '../components/ActiveTaskSubsteps.js';
 import { DiscoveryFeed } from '../components/DiscoveryFeed.js';
-import { PostAgentStepStatus } from '../session-constants.js';
-import { TaskStatus } from '../../wizard-ui.js';
+import { resolveRunStatusPill } from './run-status-pill.js';
 import { useStdoutDimensions } from '../hooks/useStdoutDimensions.js';
 import { useResolvedZone } from '../hooks/useResolvedZone.js';
 import { DiscoveredFeature } from '../../../lib/wizard-session.js';
@@ -124,52 +123,20 @@ interface RunScreenProps {
  * Resolve the bottom-pill / footer-pill status text shown by the agent's
  * Progress tab.
  *
- * Priority (highest wins):
- *   1. Active post-agent step's `activeForm` — single source of truth
- *      during the FinalizingPanel phase (charts / dashboard / commit).
- *   2. Active **canonical** journey task's `activeForm` — pinned to the
- *      deterministic 4-step state derived by `journey-state.ts`. Once
- *      e.g. Plan flips to ✓ and Wire is in_progress, the pill shows
- *      "Wiring up event tracking" instead of whatever the agent's last
- *      free-form text delta happened to say.
- *   3. The most recent free-form `pushStatus` line — fallback for the
- *      cold-start gap (before the first journey transition lands) and
- *      between canonical steps.
+ * The active resolver lives in `./run-status-pill.ts` and surfaces the
+ * most-specific live signal the wizard already has — file writes the
+ * agent is currently performing, the recent tool call (Reading X /
+ * Running Y), retry / compaction stalls, and event-plan sign-off — in
+ * that priority order. The original behavior (canonical task activeForm,
+ * then trailing pushStatus) is preserved as the bottom two tiers.
  *
- * Why prefer the task `activeForm` over the trailing `pushStatus`:
- *
- *   `pushStatus` is append-only and accumulates raw streaming text
- *   deltas (`enqueueStreamDelta` in `agent-interface.ts`) — the model's
- *   voice during long tool calls. The latest entry can therefore be
- *   stale narration from a previous phase: the user reported seeing
- *   "Now let me plan the events" *while the Plan task was already
- *   marked ✓ and Wire was in_progress*. That contradicts the
- *   user-visible task list (#646 / state-narration mismatch).
- *
- *   The canonical journey state is deterministic — flipped by tool-call
- *   classification, not by free-form text — so anchoring the pill to
- *   it eliminates the contradiction. The pre-existing post-agent path
- *   (#1) already follows the same pattern; this extends it to the
- *   in-loop journey steps.
+ * This thin wrapper exists for backwards-compatibility: the
+ * `resolveRunScreenStatus` symbol is still imported by the existing
+ * status-pill tests. New tests should import from
+ * `./run-status-pill.ts` directly so they can pin `now`.
  */
 export function resolveRunScreenStatus(store: WizardStore): string | undefined {
-  const activePostAgentStep = store.session.postAgentSteps.find(
-    (s) => s.status === PostAgentStepStatus.InProgress,
-  );
-  if (activePostAgentStep?.activeForm) return activePostAgentStep.activeForm;
-
-  // Prefer the canonical in-progress task's activeForm over the trailing
-  // free-form `pushStatus` line. The journey classifier owns task state;
-  // the pill should mirror it, not lag it.
-  const inProgressTask = store.tasks.find(
-    (t) => t.status === TaskStatus.InProgress,
-  );
-  if (inProgressTask?.activeForm) return inProgressTask.activeForm;
-
-  if (store.statusMessages.length > 0) {
-    return store.statusMessages[store.statusMessages.length - 1];
-  }
-  return undefined;
+  return resolveRunStatusPill(store);
 }
 
 /** Compact inline display of planned event names. */
