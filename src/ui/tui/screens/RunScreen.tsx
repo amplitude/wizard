@@ -34,6 +34,7 @@ import { RetryStatusChip } from '../components/RetryBanner.js';
 import { FileWritesPanel } from '../components/FileWritesPanel.js';
 import { FinalizingPanel } from '../components/FinalizingPanel.js';
 import { ActiveTaskSubsteps } from '../components/ActiveTaskSubsteps.js';
+import { DiscoveryFeed } from '../components/DiscoveryFeed.js';
 import { PostAgentStepStatus } from '../session-constants.js';
 import { TaskStatus } from '../../wizard-ui.js';
 import { useStdoutDimensions } from '../hooks/useStdoutDimensions.js';
@@ -443,6 +444,19 @@ const ProgressTab = ({ store }: { store: WizardStore }) => {
               width={cols}
             />
           )}
+        />
+
+        {/* Cold-start "discovery feed". Fades in one chip per fact the
+            wizard has learned about the user's project (framework,
+            package manager, TypeScript, region, …) so the empty middle
+            of RunScreen has *something* to show during the 30-60s
+            agent-boot window. Hidden on terminals < 60 cols so it
+            doesn't fight FileWritesPanel for a tiny vertical budget.
+            See `DiscoveryFeed.tsx` for the reveal cadence. */}
+        <DiscoveryFeed
+          facts={store.session.discoveryFacts}
+          tick={tick}
+          cols={cols}
         />
 
         {/* Live per-file activity from the inner agent's write hooks.
