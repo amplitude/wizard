@@ -184,7 +184,13 @@ const ConditionalTips = ({ store }: { store: WizardStore }) => {
 };
 
 /** The main Progress tab content. */
-const MIN_COLS_FOR_LOGO = 90;
+// The animated logo is visually heavy (10-row gradient + dissolve sweep)
+// and pushes the task list into a narrow left lane. On wide terminals
+// (>= 110 cols) there's plenty of room for both; below that the lane
+// gets cramped and the logo wins more attention than it deserves
+// relative to the actual task list. The previous threshold (90) put
+// terminals in the 90-110 range into that cramped state.
+const MIN_COLS_FOR_LOGO = 110;
 const MIN_ROWS_FOR_LOGO = 22;
 
 const ProgressTab = ({ store }: { store: WizardStore }) => {
@@ -412,6 +418,13 @@ const ProgressTab = ({ store }: { store: WizardStore }) => {
         <ProgressList
           items={progressItems}
           title="Tasks"
+          // The "0 done · N to go · 55s" header above the task list
+          // already shows the same X/Y completion + an elapsed timer +
+          // a cold-start hint. The default ProgressList footer
+          // ("spinner Progress: 0/4 completed") was just a duplicate of
+          // that header without the elapsed information — drop it here
+          // so the Progress tab doesn't show the same number twice.
+          showFooter={false}
           renderActiveSubsteps={() => (
             <ActiveTaskSubsteps
               activities={store.toolActivities}
@@ -522,6 +535,13 @@ export const RunScreen = ({ store }: RunScreenProps) => {
       id: 'progress',
       label: 'Progress',
       component: <ProgressTab store={store} />,
+      // Progress is short during cold-start (4 pending tasks + a couple
+      // of discovery rows). Don't force it to fill the viewport — let
+      // the bottom chrome rise to meet the last content row instead of
+      // floating ~10 rows below it. LogViewer / SnakeGame keep the
+      // default (`fillHeight: true`) because they DO want the full
+      // height for their scroll buffers.
+      fillHeight: false,
     },
     ...(hasEvents
       ? [

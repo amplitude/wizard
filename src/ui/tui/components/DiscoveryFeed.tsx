@@ -112,7 +112,12 @@ export const DiscoveryFeed = ({
   if (slice.length === 0) return null;
 
   return (
-    <Box flexDirection="column">
+    // marginTop={1} reserves a blank row above the header so the
+    // "Discovered · N facts" line reads as a NEW section rather than a
+    // continuation of the task list / activity rows above it. Without
+    // the gap a faint trailing row (e.g. ⋮ Progress) and the bold
+    // "Discovered" header sit side-by-side and visually merge.
+    <Box flexDirection="column" marginTop={1}>
       <Box>
         <Text color={Colors.heading} bold>
           Discovered
