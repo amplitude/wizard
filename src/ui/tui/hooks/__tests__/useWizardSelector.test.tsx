@@ -34,6 +34,18 @@ describe('useWizardSelector primitives', () => {
     expect(shallowObjectEqual({}, {})).toBe(true);
   });
 
+  it('shallowObjectEqual rejects disjoint key sets even when key counts match', () => {
+    // Regression: previously the loop only iterated keys of `a` and
+    // compared values via property access, so `b.x` resolving to
+    // `undefined` would falsely match `a.x === undefined` even when
+    // `b` did not actually have key `x`. With a `hasOwnProperty` check
+    // on `b`, disjoint key sets correctly compare unequal.
+    expect(
+      shallowObjectEqual({ x: undefined, y: 1 }, { z: undefined, y: 1 }),
+    ).toBe(false);
+    expect(shallowObjectEqual({ a: undefined }, { b: undefined })).toBe(false);
+  });
+
   it('store subscribe fires once per emitChange', () => {
     const store = new WizardStore();
     let calls = 0;

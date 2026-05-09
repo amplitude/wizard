@@ -107,6 +107,11 @@ export function shallowObjectEqual(
   const bk = Object.keys(b);
   if (ak.length !== bk.length) return false;
   for (const k of ak) {
+    // Length parity alone is not enough: `{x: undefined, y: 1}` vs
+    // `{z: undefined, y: 1}` both have 2 keys, and reading `b.x` would
+    // yield `undefined === undefined`. Verify `b` actually has each key
+    // before comparing values so disjoint key sets don't pass.
+    if (!Object.prototype.hasOwnProperty.call(b, k)) return false;
     if (!Object.is(a[k], b[k])) return false;
   }
   return true;
