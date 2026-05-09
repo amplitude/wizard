@@ -784,7 +784,6 @@ export function collapseSdkStreamClosedNoise(data: string): {
   // signal somewhere in the chunk. Avoids walking lines for every
   // unrelated stderr write.
   if (!SDK_STREAM_CLOSED_RE.test(data)) return null;
-  if (data.length === 0) return null;
 
   const hadTrailingNewline = data.endsWith('\n');
   const lines = data.split('\n');
