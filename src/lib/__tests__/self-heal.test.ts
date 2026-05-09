@@ -7,6 +7,7 @@ import { selfHealStaleProjectState } from '../self-heal.js';
 import { writeAmpliConfig } from '../ampli-config.js';
 import {
   CACHE_ROOT_OVERRIDE_ENV,
+  getCheckpointFile,
   getProjectBindingFile,
   getProjectMetaDir,
 } from '../../utils/storage-paths.js';
@@ -274,6 +275,112 @@ describe('selfHealStaleProjectState', () => {
     expect(result.healed).toBe(true);
     expect(result.reason).toContain('orphan credential');
     expect(readApiKey(installDir)).toBeNull();
+  });
+
+  // ── "Start fresh" signal: wipe stale checkpoint when user nukes .amplitude/ ──
+  // Regression case for the Excalidraw run where deleting `<installDir>/.amplitude/`
+  // still auto-picked the prior org/project on next launch because the per-user
+  // checkpoint at `~/.amplitude/wizard/runs/<hash>/checkpoint.json` survived.
+  describe('"start fresh" signal — .amplitude/ wiped + checkpoint pointing at prior project', () => {
+    it('wipes the checkpoint when .amplitude/ is missing and checkpoint has a selectedProjectId', () => {
+      // No `.amplitude/` dir at all, but a checkpoint records a prior selection.
+      saveCheckpoint(STUB_SESSION(installDir), 'test');
+      expect(fs.existsSync(getCheckpointFile(installDir))).toBe(true);
+
+      const result = selfHealStaleProjectState(installDir);
+
+      expect(result.healed).toBe(true);
+      expect(result.reason).toContain('start fresh');
+      expect(fs.existsSync(getCheckpointFile(installDir))).toBe(false);
+      expect(result.artifactsRemoved).toEqual(
+        expect.arrayContaining([getCheckpointFile(installDir)]),
+      );
+    });
+
+    it('no-ops on a fresh project with no checkpoint at all', () => {
+      // Truly cold start — no `.amplitude/`, no checkpoint, no API key.
+      const result = selfHealStaleProjectState(installDir);
+
+      expect(result.healed).toBe(false);
+      expect(result.artifactsRemoved).toEqual([]);
+    });
+
+    it('no-ops when .amplitude/ is missing but the checkpoint is empty / default', () => {
+      // Don't churn benign state. Manually write a checkpoint that has no
+      // selected project / org, no detection, intro not concluded — the
+      // shape `saveCheckpoint` would produce on a brand-new run that
+      // saved before the user picked anything.
+      const cp = {
+        savedAt: new Date().toISOString(),
+        installDir,
+        region: null,
+        selectedOrgId: null,
+        selectedOrgName: null,
+        selectedProjectId: null,
+        selectedProjectName: null,
+        selectedEnvName: null,
+        integration: null,
+        detectedFrameworkLabel: null,
+        detectionComplete: false,
+        frameworkContext: {},
+        frameworkContextAnswerOrder: [],
+        introConcluded: false,
+      };
+      fs.mkdirSync(path.dirname(getCheckpointFile(installDir)), {
+        recursive: true,
+      });
+      fs.writeFileSync(getCheckpointFile(installDir), JSON.stringify(cp));
+
+      const result = selfHealStaleProjectState(installDir);
+
+      expect(result.healed).toBe(false);
+      // The empty checkpoint is preserved.
+      expect(fs.existsSync(getCheckpointFile(installDir))).toBe(true);
+    });
+
+    it('does NOT wipe the checkpoint when .amplitude/ exists (state is consistent)', () => {
+      // User did NOT wipe `.amplitude/` — leave the checkpoint alone. This
+      // is the resume path that PR #615 is specifically protecting.
+      fs.mkdirSync(path.join(installDir, '.amplitude'), { recursive: true });
+      fs.writeFileSync(
+        path.join(installDir, '.amplitude', 'events.json'),
+        '[]',
+      );
+      saveCheckpoint(STUB_SESSION(installDir), 'test');
+      expect(fs.existsSync(getCheckpointFile(installDir))).toBe(true);
+
+      const result = selfHealStaleProjectState(installDir);
+
+      // Whatever else self-heal decides, the checkpoint stays put.
+      expect(fs.existsSync(getCheckpointFile(installDir))).toBe(true);
+      // Some prior tests' invariants — events.json must also survive.
+      expect(
+        fs.existsSync(path.join(installDir, '.amplitude', 'events.json')),
+      ).toBe(true);
+      // The reason should NOT be the "start fresh" wipe path.
+      expect(result.reason).not.toContain('start fresh');
+    });
+
+    it('clears checkpoint AND credential when .amplitude/ wiped and a stale API key exists', () => {
+      // Both the checkpoint signal AND the orphan-credential signal fire.
+      // Heal both — credentials.json entry + checkpoint go away.
+      saveCheckpoint(STUB_SESSION(installDir), 'test');
+      persistApiKey('stale-api-key', installDir);
+
+      const result = selfHealStaleProjectState(installDir);
+
+      expect(result.healed).toBe(true);
+      expect(readApiKey(installDir)).toBeNull();
+      expect(fs.existsSync(getCheckpointFile(installDir))).toBe(false);
+      expect(
+        result.artifactsRemoved.some((p) => p.includes('checkpoint.json')),
+      ).toBe(true);
+      expect(
+        result.artifactsRemoved.some((p) =>
+          p.includes('credentials.json[this install dir]'),
+        ),
+      ).toBe(true);
+    });
   });
 
   it('does not touch ~/.ampli.json (user-level OAuth tokens)', () => {

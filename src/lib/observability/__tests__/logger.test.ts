@@ -1,5 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, readFileSync, rmSync } from 'fs';
+import {
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+  writeFileSync,
+} from 'fs';
 import { join } from 'path';
 import { tmpdir } from 'os';
 import {
@@ -201,6 +207,55 @@ describe('logger', () => {
     expect(readFileSync(expectedNdjson, 'utf-8')).toContain('"msg":"event"');
     // The previous implementation would have written here:
     expect(() => readFileSync(txtPath + 'l', 'utf-8')).toThrow();
+  });
+
+  // Regression: bugbot caught that `initLogger`'s size-based rotation
+  // renamed `log.txt` → `log.txt.1` but did not close the cached fds.
+  // The next `writeToFile()` would keep writing through the stale fd,
+  // landing in the rotated backup instead of the fresh target file.
+  it('rotates the log on init and writes new lines to the fresh file, not the .1 backup', () => {
+    // Pre-fill the human + structured logs past LOG_MAX_BYTES (5 MB).
+    const oversized = 'x'.repeat(6 * 1024 * 1024);
+    writeFileSync(logFile, oversized);
+    writeFileSync(structuredLogFile, oversized);
+
+    // Warm the fd cache by writing one line through the existing logger
+    // so the cached fd points at the about-to-be-rotated file. Without
+    // this, the test wouldn't actually exercise the cache-invalidation
+    // path — it would coincidentally pass because the fd was opened
+    // lazily after rotation.
+    const warmup = createLogger('warmup');
+    warmup.info('warm the fd cache');
+
+    // Re-init: triggers rotation since both files now exceed 5 MB.
+    initLogger({
+      mode: 'ci',
+      debug: false,
+      verbose: false,
+      version: '1.0.0-test',
+      logFile,
+      logFileEnabled: true,
+    });
+
+    // Sanity check: rotation happened.
+    expect(existsSync(logFile + '.1')).toBe(true);
+    expect(existsSync(structuredLogFile + '.1')).toBe(true);
+
+    const log = createLogger('post-rotation');
+    log.info('after rotation marker');
+
+    // The new line must land in the fresh log, NOT the rotated backup.
+    const freshContent = readFileSync(logFile, 'utf-8');
+    expect(freshContent).toContain('after rotation marker');
+
+    const rotatedContent = readFileSync(logFile + '.1', 'utf-8');
+    expect(rotatedContent).not.toContain('after rotation marker');
+
+    // Same invariant for the structured (NDJSON) sibling.
+    const freshStructured = readFileSync(structuredLogFile, 'utf-8');
+    expect(freshStructured).toContain('after rotation marker');
+    const rotatedStructured = readFileSync(structuredLogFile + '.1', 'utf-8');
+    expect(rotatedStructured).not.toContain('after rotation marker');
   });
 
   it('configureLogFile auto-derives the structured path when only `path` is passed', () => {
