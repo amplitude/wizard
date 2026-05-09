@@ -59,13 +59,17 @@ if (process.env.NODE_ENV === undefined) {
 }
 
 import { red } from './src/utils/logging';
-import { config as loadDotenv } from 'dotenv';
 // Skip dotenv when there's no .env to load. dotenv parses the file even
 // when it's missing, which is wasted work for `--help`, `manifest`,
 // `auth token`, and the agent-orchestrated subcommands that never
 // expect a project .env. Keeps cold start lean for those paths.
+//
+// Use require() instead of `await import()` so we can keep this guard
+// synchronous at the top of bin.ts (top-level await would force every
+// downstream import below to wait). The cost is paid only when an .env
+// file actually exists in cwd.
 if (existsSync(resolvePath(process.cwd(), '.env'))) {
-  loadDotenv();
+  (require('dotenv') as typeof import('dotenv')).config();
 }
 
 import yargs from 'yargs';
