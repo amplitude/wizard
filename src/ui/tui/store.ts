@@ -56,6 +56,7 @@ import {
 } from '../../lib/canonical-tasks.js';
 import type { JourneyStepId, JourneyStatus } from '../../lib/journey-state.js';
 import { triggerRerender } from './rerender-bridge.js';
+import { setProjectLogFile } from '../../lib/observability/index.js';
 // Inlined to avoid tsx ESM resolution bug with dynamic import().
 const FLAG_LLM_ANALYTICS = 'wizard-llm-analytics';
 
@@ -586,6 +587,22 @@ export class WizardStore {
     // we've reset state for the new directory.
     if (this._activeDetectionAbort) {
       this._activeDetectionAbort.abort();
+    }
+
+    // Re-route the structured logger to the new project's per-project run
+    // dir BEFORE we mutate session state. Without this, the logger keeps
+    // writing to the previous installDir's `runs/<hash>/log.txt` while
+    // every other path-derived consumer (LogViewer in RunScreen, the
+    // session checkpoint, /diagnostics, debug-snapshot) follows
+    // `session.installDir` — so the TUI's "Logs" tab tails an empty
+    // file while logs accumulate in a sibling directory the user can't
+    // see. `setProjectLogFile` is idempotent and a no-op when the path
+    // hasn't changed (e.g. picker selecting the same dir).
+    try {
+      setProjectLogFile(newInstallDir);
+    } catch {
+      // Non-critical: a logging-path failure (permission denied, read-only
+      // FS, etc.) must not prevent the primary directory-switch operation.
     }
 
     this.$session.setKey('installDir', newInstallDir);
