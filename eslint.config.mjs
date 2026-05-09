@@ -12,6 +12,9 @@ export default tseslint.config(
       'babel.config.js',
       'cucumber.mjs',
       'vitest.config.ts',
+      // Build configs live at the repo root and aren't covered by the
+      // tsconfig project list (tseslint then errors on parse). Skip.
+      'tsup.config.ts',
       'experiment.mts',
       'build/**',
       'dist/**',

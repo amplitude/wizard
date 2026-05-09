@@ -1,8 +1,30 @@
 import readEnv from 'read-env';
 import { tryGetPackageJson } from './setup-utils';
 import type { WizardOptions } from './types';
-import fg from 'fast-glob';
 import { IS_DEV } from '../lib/constants';
+
+// `fast-glob` is ~13 ms of cold-start parse cost (its sync transitive graph
+// loads ~30 modules). It's only needed inside `detectEnvVarPrefix`, which
+// runs once per wizard run and only after framework detection — never on
+// `--version`, `status --json`, or any other fast path. Defer the import.
+type FgFn = typeof import('fast-glob');
+let fgPromise: Promise<FgFn> | null = null;
+const loadFg = (): Promise<FgFn> => {
+  // The CJS export of fast-glob is the function itself (assigned to
+  // `module.exports`), so we read the same ref through both entry shapes.
+  // Clear the cache on rejection so a transient import failure (broken
+  // install, missing transitive dep) can be retried instead of replaying
+  // the stale error on every subsequent call.
+  if (!fgPromise) {
+    fgPromise = import('fast-glob')
+      .then((m) => (m as { default?: FgFn }).default ?? (m as unknown as FgFn))
+      .catch((err) => {
+        fgPromise = null;
+        throw err;
+      });
+  }
+  return fgPromise;
+};
 
 export function isNonInteractiveEnvironment(): boolean {
   if (IS_DEV) {
@@ -31,6 +53,7 @@ export async function detectEnvVarPrefix(
   const deps = { ...packageJson.dependencies, ...packageJson.devDependencies };
   const has = (name: string) => name in deps;
   const hasAnyFile = async (patterns: string[]) => {
+    const fg = await loadFg();
     const matches = await fg(patterns, {
       cwd: options.installDir,
       absolute: false,
