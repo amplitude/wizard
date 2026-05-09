@@ -21,6 +21,7 @@ import {
   extractApiErrorHttpStatusFromPattern,
   extractHttpStatusLooseFromMessage,
   findTransientSdkOutputPattern,
+  formatUnsupportedModelMessage,
   isPayloadShapeRejection,
   isThrownErrorCountedAsUpstreamGatewayFailure,
   isTransientThrownSdkErrorMessage,
@@ -1906,6 +1907,16 @@ export async function runAgent(
   // classifier reads this so the catch branch's thrown-error case is
   // classified consistently with the post-stream collected-output case.
   let gatewayInvalidRequestDetected = false;
+  // When the structured error envelope (post-#114037 wizard-proxy)
+  // carries `received_model` + `supported_models`, capture it here so the
+  // post-loop classifier can render an actionable
+  // `"Model 'X' is not supported. Try one of: ..."` line instead of
+  // surfacing Vertex's verbatim — and often opaque — rejection reason.
+  // First-write-wins so a later attempt's noisier message doesn't
+  // overwrite a clean structured one we already captured.
+  let lastStructuredUpstreamError:
+    | import('./agent/transient-llm-retry.js').StructuredUpstreamError
+    | undefined;
 
   // Captures the terminal outcome of this run for the consolidated
   // `agent run summary` analytics event emitted in the outer finally.
@@ -2176,13 +2187,17 @@ export async function runAgent(
     // Retry loop: if the agent stalls (no message for the configured timeout), abort
     // and re-run with a fresh AbortController and prompt stream. Up to MAX_RETRIES.
     //
-    // Raised from 3 → 5 (6 total attempts). Production logs from gateway
-    // incidents show transient 400-terminated bursts that clear in 30–60s
-    // — 4 attempts in 14s of backoff was too aggressive and exited the
-    // wizard during recoverable blips. With jittered exponential backoff
-    // (cap 30s) the total recovery budget is now ~90s, which rides through
-    // typical Vertex/gateway restarts without giving up.
-    const MAX_RETRIES = 5;
+    // Lowered 5 → 3 (4 total attempts) to match the proxy-side resilience
+    // upgrade: the wizard-proxy now retries Vertex once internally on
+    // transient 5xx (see proxy PRs #114055, #114120). With proxy-side
+    // retries the wizard's effective retry budget is doubled — keeping
+    // MAX_RETRIES at 5 burned 6 wizard attempts × 2 proxy attempts = up to
+    // 12 upstream calls per stall, which both wasted user time and made
+    // sustained outages take ~5 minutes to surface a clean GATEWAY_DOWN
+    // classification. With proxy retries: 4 wizard × 2 proxy = up to 8
+    // upstream calls, ~40s total backoff, and the user sees actionable
+    // remediation copy faster.
+    const MAX_RETRIES = 3;
     // Cold-start timeout: subprocess spawn + MCP server connections + first LLM response
     const INITIAL_STALL_TIMEOUT_MS = 60_000;
     // Mid-run timeout: between consecutive messages during active work.
@@ -3529,8 +3544,14 @@ export async function runAgent(
             // the proxy started passing structured errors through.
             'upstream message': structuredErr?.message?.slice(0, 2048) ?? null,
             'upstream status': structuredErr?.status ?? null,
+            'received model': structuredErr?.receivedModel ?? null,
+            'supported models':
+              structuredErr?.supportedModels?.join(',') ?? null,
           });
           gatewayInvalidRequestDetected = true;
+          if (structuredErr && !lastStructuredUpstreamError) {
+            lastStructuredUpstreamError = structuredErr;
+          }
           break;
         }
 
@@ -3677,8 +3698,14 @@ export async function runAgent(
             'upstream message':
               structuredThrownErr?.message?.slice(0, 2048) ?? null,
             'upstream status': structuredThrownErr?.status ?? null,
+            'received model': structuredThrownErr?.receivedModel ?? null,
+            'supported models':
+              structuredThrownErr?.supportedModels?.join(',') ?? null,
           });
           gatewayInvalidRequestDetected = true;
+          if (structuredThrownErr && !lastStructuredUpstreamError) {
+            lastStructuredUpstreamError = structuredThrownErr;
+          }
           break;
         }
 
@@ -3829,11 +3856,20 @@ export async function runAgent(
     ) {
       logToFile('Agent error: GATEWAY_INVALID_REQUEST');
       spinner.stop('Wizard request rejected by gateway');
+      // Prefer the structured "Model 'X' is not supported. Try one of: …"
+      // line when the proxy returned `received_model` + `supported_models`
+      // — it's the only message in this branch the user can act on
+      // without a wizard upgrade. Fall back to the proxy's verbatim
+      // rejection reason, then to the legacy marker for old proxy builds.
+      const unsupportedModelMessage = lastStructuredUpstreamError
+        ? formatUnsupportedModelMessage(lastStructuredUpstreamError)
+        : null;
       return exitWithError(
         AgentErrorType.GATEWAY_INVALID_REQUEST,
-        apiErrorMessage.includes('Unknown')
-          ? GATEWAY_INVALID_REQUEST_MARKER
-          : apiErrorMessage,
+        unsupportedModelMessage ??
+          (apiErrorMessage.includes('Unknown')
+            ? GATEWAY_INVALID_REQUEST_MARKER
+            : apiErrorMessage),
       );
     }
 
@@ -3908,11 +3944,17 @@ export async function runAgent(
     ) {
       logToFile('Agent error (caught): GATEWAY_INVALID_REQUEST');
       spinner.stop('Wizard request rejected by gateway');
+      // Mirror the post-stream branch: prefer the structured
+      // unsupported-model remediation when the proxy supplied it.
+      const unsupportedModelMessage = lastStructuredUpstreamError
+        ? formatUnsupportedModelMessage(lastStructuredUpstreamError)
+        : null;
       return exitWithError(
         AgentErrorType.GATEWAY_INVALID_REQUEST,
-        apiErrorMessage.includes('Unknown')
-          ? GATEWAY_INVALID_REQUEST_MARKER
-          : apiErrorMessage,
+        unsupportedModelMessage ??
+          (apiErrorMessage.includes('Unknown')
+            ? GATEWAY_INVALID_REQUEST_MARKER
+            : apiErrorMessage),
       );
     }
 

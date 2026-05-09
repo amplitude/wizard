@@ -82,7 +82,17 @@ export const ActiveTaskSubsteps = ({
         const dim = !isCurrent;
 
         return (
-          <Box key={`${activity.startedAt}-${i}`} flexDirection="row">
+          // height={1} pins each row to a single terminal line. Without it,
+          // Ink/Yoga gives the row two lines of vertical space whenever a
+          // child has flexGrow={1} + truncated text, which produced a blank
+          // row between every substep ("the spacing here just looks bad").
+          // Substep rows must sit directly under each other so the eye
+          // tracks straight down the live narration.
+          <Box
+            key={`${activity.startedAt}-${i}`}
+            flexDirection="row"
+            height={1}
+          >
             {/* Indent under the parent task's icon column (2 cells in
                 ProgressList) plus a 3-cell tree-branch gutter so the
                 substeps visually nest beneath the chevron. */}
