@@ -3,6 +3,8 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import {
   findTransientSdkOutputPattern,
   extractApiErrorHttpStatusFromPattern,
+  extractUpstreamModelFields,
+  formatUnsupportedModelMessage,
   GATEWAY_INVALID_REQUEST_MARKER,
   isPayloadShapeRejection,
   isThrownErrorCountedAsUpstreamGatewayFailure,
@@ -167,6 +169,118 @@ describe('parseStructuredUpstreamError', () => {
     // payload-shape rejection" — the legacy substring match in the caller
     // is what catches this case. Tested in agent-interface integration.
     expect(isPayloadShapeRejection(parsed!)).toBe(false);
+  });
+
+  it('populates receivedModel + supportedModels from the upstream envelope', () => {
+    // The proxy now passes the model's actual rejection reason through:
+    // `error.upstream.received_model` + `error.upstream.supported_models`.
+    // When present, the parser surfaces them as flat string / string[]
+    // fields so the caller renders an actionable
+    // `"Model 'X' is not supported. Try one of: …"` line.
+    const text =
+      'API Error: 400 {"type":"error","error":{"type":"api_error","message":"Model not supported","upstream":{"received_model":"claude-opus-fictional","supported_models":["claude-sonnet-4-5","claude-opus-4-5"]}}}';
+    const parsed = parseStructuredUpstreamError(text);
+    expect(parsed?.receivedModel).toBe('claude-opus-fictional');
+    expect(parsed?.supportedModels).toEqual([
+      'claude-sonnet-4-5',
+      'claude-opus-4-5',
+    ]);
+  });
+
+  it('omits receivedModel / supportedModels when absent', () => {
+    // Schema rejections (additionalProperties etc.) carry upstream but
+    // not the model fields — parser must not invent values.
+    const text =
+      'API Error: 400 {"type":"error","error":{"type":"api_error","message":"x","upstream":{"error":{"code":400}}}}';
+    const parsed = parseStructuredUpstreamError(text);
+    expect(parsed?.upstream).toBeDefined();
+    expect(parsed?.receivedModel).toBeUndefined();
+    expect(parsed?.supportedModels).toBeUndefined();
+  });
+});
+
+describe('extractUpstreamModelFields', () => {
+  it('returns empty object for non-object inputs', () => {
+    expect(extractUpstreamModelFields(null)).toEqual({});
+    expect(extractUpstreamModelFields(undefined)).toEqual({});
+    expect(extractUpstreamModelFields('hello')).toEqual({});
+    expect(extractUpstreamModelFields(42)).toEqual({});
+  });
+
+  it('drops empty / non-string entries from supported_models', () => {
+    // Defensive against a sloppy proxy build emitting nulls or stray
+    // objects in the array — we filter to non-empty strings.
+    const out = extractUpstreamModelFields({
+      received_model: 'm',
+      supported_models: ['a', '', null, 42, 'b'],
+    });
+    expect(out.receivedModel).toBe('m');
+    expect(out.supportedModels).toEqual(['a', 'b']);
+  });
+
+  it('omits supportedModels entirely when no valid entries remain', () => {
+    const out = extractUpstreamModelFields({
+      received_model: 'm',
+      supported_models: ['', null],
+    });
+    expect(out.supportedModels).toBeUndefined();
+  });
+});
+
+describe('formatUnsupportedModelMessage', () => {
+  it('renders the canonical line when both fields are present', () => {
+    expect(
+      formatUnsupportedModelMessage({
+        receivedModel: 'claude-opus-fictional',
+        supportedModels: ['claude-sonnet-4-5', 'claude-opus-4-5'],
+      }),
+    ).toBe(
+      "Model 'claude-opus-fictional' is not supported. Try one of: claude-sonnet-4-5, claude-opus-4-5",
+    );
+  });
+
+  it('returns null when either field is missing', () => {
+    // Missing the list — fall back to the verbatim Vertex message.
+    expect(
+      formatUnsupportedModelMessage({
+        receivedModel: 'm',
+        supportedModels: [],
+      }),
+    ).toBeNull();
+    expect(
+      formatUnsupportedModelMessage({ supportedModels: ['a'] }),
+    ).toBeNull();
+    expect(formatUnsupportedModelMessage({})).toBeNull();
+  });
+});
+
+describe('per-chunk stream timeout matchers', () => {
+  // Per-chunk deadline errors come back from `wizard-proxy/streaming.ts`
+  // and were previously NOT in either matcher set, so a chunk-deadline
+  // storm exited as generic API_ERROR with no outer-loop retry. Pin both
+  // the post-stream pattern and the thrown-error matcher so a future
+  // refactor can't silently regress.
+  it('classifies chunk_deadline_exceeded as a transient SDK output pattern', () => {
+    const m = findTransientSdkOutputPattern(
+      'foo\nchunk_deadline_exceeded after 30s',
+    );
+    expect(m?.label).toBe('chunk_deadline_exceeded');
+  });
+
+  it('classifies the human-readable "stream chunk timeout" alias too', () => {
+    const m = findTransientSdkOutputPattern(
+      'foo\nstream chunk timeout (no SSE for 45s)',
+    );
+    expect(m?.label).toBe('chunk_deadline_exceeded');
+  });
+
+  it('flags chunk timeout in the thrown-error branch as transient', () => {
+    expect(
+      isTransientThrownSdkErrorMessage('chunk_deadline_exceeded after 30s'),
+    ).toBe(true);
+    expect(
+      isTransientThrownSdkErrorMessage('stream chunk timeout (no SSE for 45s)'),
+    ).toBe(true);
   });
 });
 

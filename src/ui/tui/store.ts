@@ -112,6 +112,24 @@ export interface FileWriteEntry {
   bytes?: number;
 }
 
+/**
+ * Single substep activity row rendered under the active task in
+ * RunScreen. Populated from inner-agent PreToolUse hooks via
+ * `recordToolActivity` — the label is already verb-formed
+ * ("Reading package.json", "Running pnpm add …") and capped for
+ * display. `status: 'in_progress'` until a follow-up event marks the
+ * row done; the renderer ages the trailing entry to ✓ as a newer one
+ * arrives so the buffer reads top-to-bottom as oldest-completed →
+ * newest-active.
+ */
+export interface ToolActivity {
+  /** Human-readable label, already formatted by `formatToolCallLabel`. */
+  label: string;
+  /** Wall-clock ms when the tool call started (PreToolUse). */
+  startedAt: number;
+  status: 'in_progress' | 'completed';
+}
+
 export type PendingPrompt =
   | { kind: 'confirm'; message: string; resolve: (value: boolean) => void }
   | {
@@ -148,6 +166,20 @@ export class WizardStore {
    * don't stall after the 50th write.
    */
   private $fileWritesTotal = atom(0);
+  /**
+   * Rolling buffer of recent tool-call activity rendered as live substeps
+   * under the active task in the RunScreen tasks list. Each entry is the
+   * pre-formatted human-readable label (e.g. "Reading package.json",
+   * "Running pnpm add @amplitude/…"). FIFO eviction at MAX_TOOL_ACTIVITIES
+   * keeps the buffer bounded; the panel renders only the trailing N
+   * entries (default 3) under whichever task is currently in_progress.
+   *
+   * Distinct from `$fileWrites` (which is structured + scoped to write
+   * tools) and `$statusMessages` (which is unbounded and includes raw
+   * model-text deltas). This buffer is "what tools the agent just ran"
+   * — verb-form, capped, safe to render under the active task.
+   */
+  private $toolActivities = atom<ToolActivity[]>([]);
   /**
    * Per-step journey status derived from deterministic tool-call signals
    * (see `src/lib/journey-state.ts`). This is the source of truth for the
@@ -273,6 +305,10 @@ export class WizardStore {
 
   get fileWritesTotal(): number {
     return this.$fileWritesTotal.get();
+  }
+
+  get toolActivities(): ToolActivity[] {
+    return this.$toolActivities.get();
   }
 
   get pendingPrompt(): PendingPrompt | null {
@@ -2178,6 +2214,50 @@ export class WizardStore {
         : appended;
     this.$fileWrites.set(bounded);
     this.$fileWritesTotal.set(this.$fileWritesTotal.get() + 1);
+    this.emitChange();
+  }
+
+  /**
+   * Cap on retained tool-activity rows. The renderer only shows the
+   * trailing 2-3, but we keep a slightly larger window so the user-
+   * visible substeps don't churn between renders when a flurry of
+   * tool calls fires in quick succession (skill installs, file scans).
+   */
+  static readonly MAX_TOOL_ACTIVITIES = 8;
+
+  /**
+   * Append a single tool-call activity to the rolling substep buffer.
+   * Pre-formatted by `formatToolCallLabel` at the call site so the store
+   * doesn't need to know about tool-name conventions. Older rows are
+   * marked `completed` as a new in-progress arrives so the panel reads
+   * top-to-bottom as past → present.
+   *
+   * `null` labels are dropped at the call site (TodoWrite, sub-agent
+   * Task, wizard-tools MCP) — those tools intentionally don't surface as
+   * substeps. The store doesn't filter; it trusts callers.
+   */
+  recordToolActivity(label: string): void {
+    const now = Date.now();
+    const existing = this.$toolActivities.get();
+    // Mark every prior in-progress entry as completed — there's only ever
+    // one "current" tool call from the user's perspective, so older rows
+    // age to ✓ as a newer call lands. The classifier-driven file-write
+    // panel uses Pre/Post pairs for proper transitions; this rolling
+    // buffer is best-effort narration that doesn't need that fidelity.
+    const aged = existing.map((a) =>
+      a.status === 'in_progress' ? { ...a, status: 'completed' as const } : a,
+    );
+    const next: ToolActivity = {
+      label,
+      startedAt: now,
+      status: 'in_progress',
+    };
+    const appended = [...aged, next];
+    const bounded =
+      appended.length > WizardStore.MAX_TOOL_ACTIVITIES
+        ? appended.slice(appended.length - WizardStore.MAX_TOOL_ACTIVITIES)
+        : appended;
+    this.$toolActivities.set(bounded);
     this.emitChange();
   }
 

@@ -41,6 +41,11 @@
  *     dir is still in `credentials.json`, that's an orphaned credential —
  *     a real `git reset` symptom. Clear the credential entry only;
  *     `.amplitude/events.json` is preserved so the user can resume.
+ *     Disk presence of `project-binding.json` is re-checked immediately
+ *     before the destructive `clearApiKey` call — this guarantees the
+ *     cred-clear is gated on a *current* missing file, never on a stale
+ *     read or on a polled signal like `hasAnyEvents=false` from an
+ *     activation check.
  *
  *   - When neither binding exists AND legacy `.amplitude-events.json` /
  *     `.amplitude-dashboard.json` dotfiles exist AND a stored API key is
@@ -133,6 +138,32 @@ export function selfHealStaleProjectState(installDir: string): SelfHealResult {
   // / the user's checkpoint — preserving them lets the user resume an
   // aborted run after a transient crash, and they're harmless without a
   // matching credential.
+  //
+  // Defense-in-depth: re-check the canonical binding file on disk
+  // IMMEDIATELY before the destructive `clearApiKey` call. The early
+  // `hasBinding` gate above could in principle observe a transient
+  // false-negative (e.g. a concurrent atomic-write rename racing with
+  // `existsSync`, or a bug in a future caller that lands here with the
+  // binding file genuinely present). A polling activation check that
+  // returns `hasAnyEvents=false` should NEVER cause us to nuke a valid
+  // credential — disk presence of `project-binding.json` is the only
+  // signal that authorizes the cred-clear. Mirroring this check at the
+  // mutation site keeps the invariant local to the line that actually
+  // deletes the credential, so any reviewer can verify it without tracing
+  // back ~70 lines.
+  if (fs.existsSync(bindingFile)) {
+    logToFile(
+      '[self-heal] project-binding.json reappeared on disk between gate ' +
+        'and mutation — aborting orphan-credential clear (cred preserved)',
+    );
+    return {
+      healed: false,
+      reason:
+        'project-binding.json present on second-look — preserving stored credential',
+      artifactsRemoved: [],
+    };
+  }
+
   const removed: string[] = [];
 
   // Legacy dotfile mirrors only get cleared when paired with a stale
