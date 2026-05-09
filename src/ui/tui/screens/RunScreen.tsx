@@ -135,9 +135,7 @@ interface RunScreenProps {
  * status-pill tests. New tests should import from
  * `./run-status-pill.ts` directly so they can pin `now`.
  */
-export function resolveRunScreenStatus(
-  store: WizardStore,
-): string | undefined {
+export function resolveRunScreenStatus(store: WizardStore): string | undefined {
   return resolveRunStatusPill(store);
 }
 
