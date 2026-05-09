@@ -296,18 +296,29 @@ describe('RunScreen — Progress tab dead-vertical-space invariant', () => {
     expect(lastNonEmpty - tabBarRow).toBeLessThanOrEqual(3);
   });
 
-  it('chrome pinning: bottom status pill is flush with content (no big gap above the pill)', () => {
-    // The pill ("◇ Detecting your project setup") used to live in
-    // TabContainer's chrome row. After the post-#688 fix it renders
-    // as the LAST row of the Progress tab content area so it sits
-    // flush with the active task list. Pin: between the pill and the
-    // last task / discovery row above it, no run of >3 blank rows.
+  it('chrome pinning: bottom status pill is flush with content when it surfaces (no big gap above)', () => {
+    // The pill ("◇ <status>") used to live in TabContainer's chrome
+    // row. After the post-#688 fix it renders as the LAST row of the
+    // Progress tab content area so it sits flush with the active task
+    // list. Pin: between the pill and the last task / discovery row
+    // above it, no run of >3 blank rows.
+    //
+    // Tier-6 suppression (this PR) means a plain canonical-task state
+    // does NOT render a pill at all — the Tasks list above already
+    // shows that text and a duplicated pill would echo it. To exercise
+    // the flush-with-content invariant we surface a tier-2 pill via
+    // `currentActivity`, which is NOT shown in the Tasks list and so
+    // is not suppressed.
     mockedDims = [120, 40];
     const store = seedColdStartProgressStore();
-    // Force a status pill to surface — cold start with InProgress
-    // task should already produce one via resolveRunScreenStatus, but
-    // double-stamp via pushStatus to be deterministic.
-    store.pushStatus('Reading package.json');
+    store.session = {
+      ...store.session,
+      currentActivity: {
+        kind: 'compaction',
+        message: 'Compacting context (typically ~60s)',
+        startedAt: Date.now(),
+      },
+    };
 
     const { lastFrame, unmount } = render(
       <Box width={120} height={30} flexDirection="column">
@@ -319,11 +330,8 @@ describe('RunScreen — Progress tab dead-vertical-space invariant', () => {
 
     const lines = frame.split('\n');
     // The pill row contains the diamondOpen icon (◇) followed by the
-    // status text. resolveRunScreenStatus prefers canonical task
-    // activeForm over pushed status, so we look for either form.
-    const pillRow = lines.findIndex((l) =>
-      /◇\s+(Detecting your project setup|Reading package.json)/.test(l),
-    );
+    // status text from currentActivity (tier 2).
+    const pillRow = lines.findIndex((l) => /◇\s+Compacting context/.test(l));
     expect(pillRow).toBeGreaterThan(0);
 
     // Find the last non-whitespace row strictly above the pill.
@@ -340,6 +348,28 @@ describe('RunScreen — Progress tab dead-vertical-space invariant', () => {
     // pill. The pill semantically belongs WITH the task list, not
     // floating across a gap.
     expect(pillRow - lastContentAbove - 1).toBeLessThanOrEqual(3);
+  });
+
+  it('tier-6 suppression: canonical-task-only state renders NO pill (does not duplicate Tasks list)', () => {
+    // Reproduces the bug from the task description: the Tasks list
+    // shows `› Detecting project setup`, and the prior pill repeated
+    // `◇ Detecting project setup` directly below it. The suppression
+    // rule means no pill renders for that scenario.
+    mockedDims = [120, 40];
+    const store = seedColdStartProgressStore(); // detect is in_progress
+
+    const { lastFrame, unmount } = render(
+      <Box width={120} height={30} flexDirection="column">
+        <RunScreen store={store} />
+      </Box>,
+    );
+    const frame = stripAnsi(lastFrame() ?? '');
+    unmount();
+
+    // No pill row matching the canonical activeForm should appear.
+    expect(frame).not.toMatch(/◇\s+Detecting your project setup/);
+    // And the Tasks list still shows the in-progress row.
+    expect(frame).toMatch(/Detecting your project setup/);
   });
 
   // ─────────────────────────────────────────────────────────────────
