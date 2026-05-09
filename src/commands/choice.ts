@@ -109,16 +109,21 @@ const choiceListCommand: CommandModule = {
             'cancelled',
             'superseded',
           ];
-          if (!valid.includes(statusRaw)) {
+          // `--status all` is documented below as the way to opt out of
+          // the default `pending` filter, so let it bypass enum validation
+          // (mirrors `verification list`'s guard).
+          if (statusRaw !== 'all' && !valid.includes(statusRaw)) {
             const m = `Invalid --status value: '${statusRaw}'. Allowed: ${valid.join(
               ', ',
-            )}.`;
+            )}, all.`;
             if (opts.jsonOutput) emitJsonError(m, 'INVALID_ARGS');
             else getUI().log.error(m);
             process.exit(ExitCode.INVALID_ARGS);
           }
-          status =
-            statusRaw as import('../lib/orchestration/checkpoints/choices').ChoiceStatus;
+          if (statusRaw !== 'all') {
+            status =
+              statusRaw as import('../lib/orchestration/checkpoints/choices').ChoiceStatus;
+          }
         }
         const sessionFilter = sessionRaw as
           | import('../lib/orchestration/state').SessionId
