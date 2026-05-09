@@ -64,10 +64,18 @@ export const TabContainer = ({
         {current?.component}
       </Box>
 
-      {/* Bottom chrome — fixed height so it always stays visible */}
+      {/* Bottom chrome — fixed height so it always stays visible.
+          Spacing rule: when a status message is rendered, its top border
+          is the visual separator from content above, and we let the tab
+          bar sit directly underneath (no extra spacer). When there's no
+          status, we reserve a single 1-row spacer so the tab bar isn't
+          smushed into the content tail. The previous layout always
+          inserted both the spacer AND a top-bordered status bar, which
+          produced the awkwardly-wide gap users called out when content
+          was short. */}
       <Box flexDirection="column" flexShrink={0}>
-        {/* Status bar */}
-        {statusMessage && (
+        {/* Status bar (with top border that doubles as content separator) */}
+        {statusMessage ? (
           <Box
             borderStyle="single"
             borderTop
@@ -82,10 +90,11 @@ export const TabContainer = ({
               {Icons.diamondOpen} {linkify(statusMessage)}
             </Text>
           </Box>
+        ) : (
+          <Box height={1} />
         )}
 
         {/* Tab bar */}
-        <Box height={1} />
         <Box gap={1} paddingX={1} justifyContent="space-between">
           <Box gap={1}>
             {tabs.map((tab, i) => (
