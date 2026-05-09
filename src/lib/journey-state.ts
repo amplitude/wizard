@@ -190,3 +190,62 @@ export function classifyToolEvent(
 
   return null;
 }
+
+/**
+ * Canonical journey order. Earlier steps must complete before later ones
+ * advance — used by {@link classifyToolEventTransitions} to cascade
+ * preceding steps to `completed` when a downstream step transitions.
+ */
+const JOURNEY_ORDER: readonly JourneyStepId[] = [
+  'detect',
+  'install',
+  'plan',
+  'wire',
+];
+
+/**
+ * Wrap {@link classifyToolEvent} with a transitive-completion rule:
+ * when a downstream step transitions to `in_progress` or `completed`,
+ * emit `completed` transitions for every PRECEDING step that hasn't
+ * already reached `completed`.
+ *
+ * Why this exists: PR #600 inlines pre-flight context (package manager,
+ * project layout) into the agent's prompt, so the agent now skips
+ * `detect_package_manager` on most runs and jumps straight to
+ * `Bash(yarn add ...)`. Pre-PR-600 the explicit detect tool call drove
+ * Detect → completed, and the journey looked sane. Post-PR-600 Detect
+ * stayed `pending` while Install lit up — the user perceives this as a
+ * regression even though the store-side render-time cascade ALSO rolls
+ * up earlier rows. Emitting the cascade from the classifier itself
+ * makes the on-disk derived state match the on-screen state, so
+ * agent-mode NDJSON consumers and any future telemetry on
+ * `applyJourneyTransition` see the rollup too.
+ *
+ * Idempotency / monotonicity: a step that's already `completed` is
+ * never re-emitted (matches the store's monotonic guard). A step
+ * already `in_progress` is upgraded to `completed` on the cascade,
+ * never demoted.
+ *
+ * Returns transitions in journey order (precedents first, then the
+ * triggering transition) so a sequential dispatcher applies them in
+ * the order the user would intuitively expect.
+ */
+export function classifyToolEventTransitions(
+  input: ClassifyToolEventInput,
+): JourneyTransition[] {
+  const transition = classifyToolEvent(input);
+  if (!transition) return [];
+
+  const transitions: JourneyTransition[] = [];
+  const triggeringIdx = JOURNEY_ORDER.indexOf(transition.stepId);
+  if (triggeringIdx > 0) {
+    for (let i = 0; i < triggeringIdx; i++) {
+      const stepId = JOURNEY_ORDER[i];
+      const prev = input.prevDerived?.[stepId];
+      if (prev === 'completed') continue;
+      transitions.push({ stepId, status: 'completed' });
+    }
+  }
+  transitions.push(transition);
+  return transitions;
+}

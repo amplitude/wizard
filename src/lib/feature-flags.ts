@@ -5,7 +5,10 @@
  * synchronously thereafter — no per-check network calls.
  */
 
-import { Experiment } from '@amplitude/experiment-node-server';
+// `@amplitude/experiment-node-server` is heavy (~53 ms cold-start cost on
+// import). It's only needed inside `initFeatureFlags()` — and that runs
+// after auth, well past first-paint. Keep it out of the bin.ts boot path
+// by deferring to a dynamic import below.
 import type { LocalEvaluationClient } from '@amplitude/experiment-node-server';
 import { debug } from '../utils/debug';
 
@@ -55,6 +58,7 @@ export async function initFeatureFlags(
   }
 
   try {
+    const { Experiment } = await import('@amplitude/experiment-node-server');
     client = Experiment.initializeLocal(deploymentKey);
     await client.start();
 

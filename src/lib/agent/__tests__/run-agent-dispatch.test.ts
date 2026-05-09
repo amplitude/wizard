@@ -16,9 +16,12 @@
  */
 import { describe, expect, it, vi } from 'vitest';
 
-import { systemModelMessageSchema } from 'ai';
+import { systemModelMessageSchema, userModelMessageSchema } from 'ai';
 
-import { systemMessageWithCacheControl } from '../run-agent.js';
+import {
+  systemMessageWithCacheControl,
+  userMessageWithCacheControl,
+} from '../run-agent.js';
 import {
   buildAiSdkProviderHeaders,
   type RunAgentDispatchMiddleware,
@@ -43,6 +46,23 @@ describe('systemMessageWithCacheControl', () => {
     const msg = systemMessageWithCacheControl('static prefix');
     expect(msg.role).toBe('system');
     expect(msg.content).toBe('static prefix');
+    expect(msg.providerOptions).toEqual({
+      anthropic: { cacheControl: { type: 'ephemeral' } },
+    });
+  });
+});
+
+describe('userMessageWithCacheControl', () => {
+  it('produces a value that validates as a UserModelMessage (AI SDK v6 schema)', () => {
+    const msg = userMessageWithCacheControl('integration prompt body');
+    const parsed = userModelMessageSchema.safeParse(msg);
+    expect(parsed.success).toBe(true);
+  });
+
+  it('attaches the Anthropic `cacheControl: ephemeral` provider option', () => {
+    const msg = userMessageWithCacheControl('user prefix');
+    expect(msg.role).toBe('user');
+    expect(msg.content).toBe('user prefix');
     expect(msg.providerOptions).toEqual({
       anthropic: { cacheControl: { type: 'ephemeral' } },
     });
