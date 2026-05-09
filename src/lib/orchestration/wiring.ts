@@ -142,6 +142,19 @@ export interface McpInstallPromptOptions {
 }
 
 /**
+ * Canonical `promptId` for an MCP-install Choice for the given client
+ * label. Exported so call sites (TUI screens, MCP wiring) that need to
+ * answer or look up the same Choice can derive the id off the same
+ * normalization. Drift between this and any inline reconstruction was
+ * a silent failure — `answerChoiceByPromptId` returns null, which is
+ * swallowed by design, so a mismatched id leaves the choice pending
+ * forever with no error.
+ */
+export function mcpInstallPromptId(client: string): string {
+  return `mcp_install:${client.toLowerCase().replace(/\s+/g, '_')}`;
+}
+
+/**
  * MCP-server install prompt — recorded once per detected client per
  * session. Outer agents see "user is being asked to install Claude
  * Code MCP" with full context.
@@ -151,7 +164,7 @@ export function recordMcpInstallChoice(
 ): ChoiceId | null {
   const { installDir, client, detectedCount } = opts;
   return withMirror(installDir, 'mcp_install', (store, sessionId) => {
-    const promptId = `mcp_install:${client.toLowerCase().replace(/\s+/g, '_')}`;
+    const promptId = mcpInstallPromptId(client);
     const existing = store.findPendingChoice(promptId);
     if (existing) return asChoiceId(existing.id);
     const created = store.addChoice({
