@@ -198,6 +198,11 @@ export class LoggingUI implements WizardUI {
     console.error(`▶  ${activity.message}${eta}`);
   }
 
+  pushDiscoveryFact(): void {
+    // CI logs already record framework / package-manager detection through
+    // their own log lines; the discovery feed is a TUI-only cosmetic feed.
+  }
+
   startRun(): void {
     // No-op in CI mode
   }
