@@ -1480,6 +1480,24 @@ describe('WizardStore', () => {
       expect(store.tasks[2].status).toBe(TaskStatus.Pending); // plan
     });
 
+    it('optimistic detect transition surfaces in_progress immediately on RunScreen mount', () => {
+      // S1 — When RunScreen mounts the wizard fires
+      // applyJourneyTransition('detect', 'in_progress') so the canonical
+      // task list shows movement (active glyph on row 0) from frame 1
+      // instead of sitting at "0 done · 4 to go" with every row dim until
+      // the agent's first TodoWrite (~30s into cold start). This test
+      // pins the rendered shape so a regression in the renderer cascade
+      // can't silently break the optimistic-mount UX.
+      const store = createStore();
+      store.applyJourneyTransition('detect', 'in_progress');
+
+      expect(store.tasks).toHaveLength(4);
+      expect(store.tasks[0].status).toBe(TaskStatus.InProgress); // detect
+      expect(store.tasks[1].status).toBe(TaskStatus.Pending); // install
+      expect(store.tasks[2].status).toBe(TaskStatus.Pending); // plan
+      expect(store.tasks[3].status).toBe(TaskStatus.Pending); // wire
+    });
+
     it('cascades earlier steps to completed when a later step advances', () => {
       // Same invariant as PR-A's "skips ahead" case, now derived from
       // a deterministic tool call rather than a TodoWrite string.
