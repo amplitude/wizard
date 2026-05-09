@@ -251,5 +251,50 @@ describe('WizardStore — per-event wiring status', () => {
       store.applyJourneyTransition('wire', 'in_progress');
       expect(store.eventPlan[0].status).toBe('pending');
     });
+
+    // Regression: when the agent's TodoWrite (`syncTodos`) flips wire
+    // to `completed` first, the later
+    // `applyJourneyTransition('wire', 'completed')` from agent-runner
+    // hits the monotonic guard and returns early. The cascade must
+    // still run via the syncTodos path so pending events don't get
+    // stranded in the UI.
+    it('cascades when syncTodos drives wire→completed first', () => {
+      const store = createStore();
+      store.setEventPlan([
+        { name: 'User Signed Up', description: '' },
+        { name: 'User Signed In', description: '' },
+      ]);
+      store.syncTodos([
+        {
+          content: 'Wire up event tracking',
+          status: 'completed',
+          activeForm: 'Wiring up event tracking',
+        },
+      ]);
+      expect(store.eventPlan.map((e) => e.status)).toEqual(['done', 'done']);
+
+      // The redundant follow-up call from agent-runner is a no-op —
+      // both pathways are idempotent.
+      store.applyJourneyTransition('wire', 'completed');
+      expect(store.eventPlan.map((e) => e.status)).toEqual(['done', 'done']);
+    });
+
+    it('preserves `failed` even when syncTodos drives the cascade', () => {
+      const store = createStore();
+      store.setEventPlan([
+        { name: 'User Signed Up', description: '' },
+        { name: 'User Signed In', description: '' },
+      ]);
+      store.markEventStatus('User Signed Up', 'failed');
+      store.syncTodos([
+        {
+          content: 'Wire up event tracking',
+          status: 'completed',
+          activeForm: 'Wiring up event tracking',
+        },
+      ]);
+      expect(store.eventPlan[0].status).toBe('failed');
+      expect(store.eventPlan[1].status).toBe('done');
+    });
   });
 });

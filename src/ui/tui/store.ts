@@ -2468,31 +2468,44 @@ export class WizardStore {
     if (current === status) return;
     this.$derivedJourney.set({ ...prev, [stepId]: status });
 
-    // Cascade to per-event statuses on the wire step. The content-scan
-    // path (`noteWrittenContent`) catches events as the agent writes
-    // their track() calls, but a few cases still leave events stuck on
-    // pending — single-line MultiEdits with the name in `old_string`,
-    // edits the user accepted but the hook missed, or the agent
-    // wrapping the wire phase early. When the canonical wire step
-    // flips to `completed`, treat any still-pending events as done by
-    // inference so the UI doesn't lie ("3 / 8 done" while the wizard
-    // moves on to the next screen). Failed events are preserved.
+    // Cascade to per-event statuses on the wire step. See
+    // `cascadeWireCompleted` for the rationale.
     if (stepId === 'wire' && status === 'completed') {
-      const events = this.$eventPlan.get();
-      if (events.length > 0) {
-        let changed = false;
-        const updated = events.map((e) => {
-          const cur = e.status ?? 'pending';
-          if (cur === 'done' || cur === 'failed') return e;
-          changed = true;
-          return { ...e, status: 'done' as PlannedEventStatus };
-        });
-        if (changed) this.$eventPlan.set(updated);
-      }
+      this.cascadeWireCompleted();
     }
 
     this.renderJourneyTasks();
     this.emitChange();
+  }
+
+  /**
+   * Mark any still-pending planned events as `done` when the wire step
+   * has completed. The content-scan path (`noteWrittenContent`) catches
+   * events as the agent writes their track() calls, but a few cases
+   * still leave events stuck on pending — single-line MultiEdits with
+   * the name in `old_string`, edits the user accepted but the hook
+   * missed, or the agent wrapping the wire phase early. When the
+   * canonical wire step flips to `completed`, treat any still-pending
+   * events as done by inference so the UI doesn't lie ("3 / 8 done"
+   * while the wizard moves on to the next screen). Failed events are
+   * preserved.
+   *
+   * Extracted so both `applyJourneyTransition` and the inlined
+   * journey-status path in `syncTodos` can run the cascade — whichever
+   * path drives `wire → completed` first must trigger it, because the
+   * later caller's monotonic guard will short-circuit.
+   */
+  private cascadeWireCompleted(): void {
+    const events = this.$eventPlan.get();
+    if (events.length === 0) return;
+    let changed = false;
+    const updated = events.map((e) => {
+      const cur = e.status ?? 'pending';
+      if (cur === 'done' || cur === 'failed') return e;
+      changed = true;
+      return { ...e, status: 'done' as PlannedEventStatus };
+    });
+    if (changed) this.$eventPlan.set(updated);
   }
 
   /**
@@ -2531,6 +2544,7 @@ export class WizardStore {
     const journeyPrev = this.$derivedJourney.get();
     type JourneySnapshot = typeof journeyPrev;
     let journeyDraft: JourneySnapshot | null = null;
+    let wireJustCompleted = false;
     for (const todo of todos) {
       const idx = matchCanonicalStep(todo.content);
       if (idx < 0) continue;
@@ -2547,9 +2561,18 @@ export class WizardStore {
       if (current === 'completed' && todo.status !== 'completed') continue;
       if (current === todo.status) continue;
       journeyDraft = { ...snapshot, [stepId]: todo.status };
+      // Track the wire→completed edge so we can run the per-event
+      // cascade after the loop. We can't rely on the later
+      // `applyJourneyTransition('wire', 'completed')` from the agent
+      // runner — its monotonic guard short-circuits when this path
+      // already set wire to completed, and the cascade lives there.
+      if (stepId === 'wire' && todo.status === 'completed') {
+        wireJustCompleted = true;
+      }
     }
     this.$journeyActiveForms.set(next);
     if (journeyDraft) this.$derivedJourney.set(journeyDraft);
+    if (wireJustCompleted) this.cascadeWireCompleted();
     this.renderJourneyTasks();
     this.emitChange();
   }
