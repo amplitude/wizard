@@ -244,6 +244,39 @@ describe('envelope builders — schema parity', () => {
     expect(reads).toEqual([1, 1]);
   });
 
+  it('buildLastStoppingPointEnvelope and buildResumeEnvelope honor cacheKey', () => {
+    seed();
+    // Spy on the store read so we can count physical reads.
+    const store = getOrchestrationStore(installDir);
+    const realRead = store.read.bind(store);
+    let reads = 0;
+    store.read = ((...args: unknown[]) => {
+      reads += 1;
+      return realRead(...(args as []));
+    }) as typeof store.read;
+    try {
+      withReadCache((key) => {
+        // Status pre-warms the cache — count from after the first builder.
+        buildStatusEnvelope({ installDir, cacheKey: key });
+        const before = reads;
+        buildLastStoppingPointEnvelope({ installDir, cacheKey: key });
+        const session = buildSessionsEnvelope({
+          installDir,
+          cacheKey: key,
+        }).sessions[0]!;
+        buildResumeEnvelope({
+          installDir,
+          cacheKey: key,
+          sessionId: session.id,
+        });
+        // Both builders should have hit the cache, not the disk.
+        expect(reads - before).toBe(0);
+      });
+    } finally {
+      store.read = realRead;
+    }
+  });
+
   it('void CLI_INVOCATION import — keeps build-time module side effects deterministic', () => {
     // Exists purely to make sure the test suite touches the module that
     // computeLastStoppingPoint depends on; otherwise tsc could dead-strip

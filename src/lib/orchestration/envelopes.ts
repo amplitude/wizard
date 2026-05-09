@@ -213,7 +213,12 @@ export function buildStatusEnvelope(
 export function buildLastStoppingPointEnvelope(
   opts: BuilderOpts,
 ): LastStoppingPointEnvelope {
-  const lsp = computeLastStoppingPoint(opts.installDir);
+  // Honor `cacheKey` — when called inside `withReadCache`, reuse the
+  // already-parsed snapshot instead of re-reading from disk. Without
+  // this, callers that pass `cacheKey` expecting shared-snapshot
+  // semantics silently triggered an independent read.
+  const file = readStoreCached(opts.installDir, opts.cacheKey);
+  const lsp = computeLastStoppingPoint(opts.installDir, { storeFile: file });
   return LastStoppingPointEnvelopeSchema.parse({
     v: 1,
     type: 'orchestration_last_stopping_point',
@@ -226,7 +231,9 @@ export function buildLastStoppingPointEnvelope(
 export function buildResumeEnvelope(
   opts: BuilderOpts & { sessionId: SessionId; executed?: boolean },
 ): z.infer<typeof ResumeEnvelopeSchema> {
-  const lsp = computeLastStoppingPoint(opts.installDir);
+  // Same shared-snapshot contract as `buildLastStoppingPointEnvelope`.
+  const file = readStoreCached(opts.installDir, opts.cacheKey);
+  const lsp = computeLastStoppingPoint(opts.installDir, { storeFile: file });
   return ResumeEnvelopeSchema.parse({
     v: 1,
     type: 'orchestration_resume',
