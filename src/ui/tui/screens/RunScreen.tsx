@@ -36,6 +36,7 @@ import { FinalizingPanel } from '../components/FinalizingPanel.js';
 import { ActiveTaskSubsteps } from '../components/ActiveTaskSubsteps.js';
 import { PostAgentStepStatus } from '../session-constants.js';
 import { TaskStatus } from '../../wizard-ui.js';
+import { CANONICAL_STEPS } from '../../../lib/canonical-tasks.js';
 import { useStdoutDimensions } from '../hooks/useStdoutDimensions.js';
 import { useResolvedZone } from '../hooks/useResolvedZone.js';
 import { DiscoveredFeature } from '../../../lib/wizard-session.js';
@@ -126,11 +127,15 @@ interface RunScreenProps {
  * Priority (highest wins):
  *   1. Active post-agent step's `activeForm` — single source of truth
  *      during the FinalizingPanel phase (charts / dashboard / commit).
- *   2. Active **canonical** journey task's `activeForm` — pinned to the
- *      deterministic 4-step state derived by `journey-state.ts`. Once
- *      e.g. Plan flips to ✓ and Wire is in_progress, the pill shows
- *      "Wiring up event tracking" instead of whatever the agent's last
- *      free-form text delta happened to say.
+ *   2. The CURRENT in-progress canonical journey task — anchored by
+ *      walking `CANONICAL_STEPS` in order and picking the first row in
+ *      `store.tasks` whose status is `in_progress`. Crucially, the
+ *      lookup is keyed by canonical step **id**, so when only `plan`
+ *      is in_progress the pill MUST resolve to plan's text, never to
+ *      `detect`'s default `activeForm` ("Detecting your project setup").
+ *      Falls back to the step's canonical label if the in-progress
+ *      task somehow has no `activeForm` set — never to a different
+ *      step's text.
  *   3. The most recent free-form `pushStatus` line — fallback for the
  *      cold-start gap (before the first journey transition lands) and
  *      between canonical steps.
@@ -140,32 +145,54 @@ interface RunScreenProps {
  *   `pushStatus` is append-only and accumulates raw streaming text
  *   deltas (`enqueueStreamDelta` in `agent-interface.ts`) — the model's
  *   voice during long tool calls. The latest entry can therefore be
- *   stale narration from a previous phase: the user reported seeing
+ *   stale narration from a previous phase: users have reported seeing
  *   "Now let me plan the events" *while the Plan task was already
  *   marked ✓ and Wire was in_progress*. That contradicts the
- *   user-visible task list (#646 / state-narration mismatch).
+ *   user-visible task list.
  *
  *   The canonical journey state is deterministic — flipped by tool-call
  *   classification, not by free-form text — so anchoring the pill to
- *   it eliminates the contradiction. The pre-existing post-agent path
- *   (#1) already follows the same pattern; this extends it to the
- *   in-loop journey steps.
+ *   it eliminates the contradiction.
+ *
+ * Why iterate `CANONICAL_STEPS` instead of `store.tasks.find`:
+ *
+ *   The previous implementation called `store.tasks.find(t => t.status
+ *   === InProgress)`. If two rows ever share the in_progress state
+ *   (e.g. mid-batch render between `applyJourneyTransition` calls, or
+ *   any future setter that bypasses `renderJourneyTasks`'s frontier
+ *   cascade) `find` returns the FIRST match — which would be `detect`,
+ *   silently mislabelling the pill with detect's text while the user
+ *   visibly watched a later step run. Iterating canonical steps in
+ *   order and short-circuiting on the FIRST in-progress row keeps the
+ *   contract tight; the canonical-label fallback below makes sure that
+ *   even if the agent never set an activeForm we surface the SAME
+ *   step's text, never a different step's.
  */
-export function resolveRunScreenStatus(
-  store: WizardStore,
-): string | undefined {
+export function resolveRunScreenStatus(store: WizardStore): string | undefined {
   const activePostAgentStep = store.session.postAgentSteps.find(
     (s) => s.status === PostAgentStepStatus.InProgress,
   );
   if (activePostAgentStep?.activeForm) return activePostAgentStep.activeForm;
 
-  // Prefer the canonical in-progress task's activeForm over the trailing
-  // free-form `pushStatus` line. The journey classifier owns task state;
-  // the pill should mirror it, not lag it.
-  const inProgressTask = store.tasks.find(
-    (t) => t.status === TaskStatus.InProgress,
-  );
-  if (inProgressTask?.activeForm) return inProgressTask.activeForm;
+  // Walk canonical steps in order. The first in_progress row is the
+  // current step; its `activeForm` (or canonical label as a defensive
+  // fallback) is what the pill should show. Lookup is keyed by the
+  // step's index in CANONICAL_STEPS — store.tasks is rendered from the
+  // same list in the same order, so tasks[i] always corresponds to
+  // CANONICAL_STEPS[i]. This guarantees the pill text is always for
+  // the current step, never accidentally for an earlier one.
+  const tasks = store.tasks;
+  for (let i = 0; i < CANONICAL_STEPS.length; i++) {
+    const task = tasks[i];
+    if (!task) continue;
+    if (task.status !== TaskStatus.InProgress) continue;
+    // Prefer the agent-supplied activeForm (e.g. "Reading the event plan"
+    // mid-step). Fall back to the SAME step's canonical label rather than
+    // a different step's defaultActiveForm — never let detect's text
+    // surface while plan is the in-progress step.
+    if (task.activeForm && task.activeForm.trim()) return task.activeForm;
+    return CANONICAL_STEPS[i].label;
+  }
 
   if (store.statusMessages.length > 0) {
     return store.statusMessages[store.statusMessages.length - 1];
@@ -471,7 +498,7 @@ const ProgressTab = ({ store }: { store: WizardStore }) => {
               {Icons.dash}
               {coachingTier >= 2
                 ? " This is unusually slow. Press ← / → to switch to the Logs tab and see what's stuck — or Ctrl+C to cancel."
-                : ' Still working — press ← / → to switch to the Logs tab and see what\'s happening, or Ctrl+C to cancel.'}
+                : " Still working — press ← / → to switch to the Logs tab and see what's happening, or Ctrl+C to cancel."}
             </Text>
           </Box>
         )}
@@ -517,9 +544,7 @@ export const RunScreen = ({ store }: RunScreenProps) => {
   // `overflow="hidden"` handles wide terminals, but a JS cap is the
   // belt-and-braces guard against unbounded strings.
   const rawLastStatus = resolveRunScreenStatus(store);
-  const lastStatus = rawLastStatus
-    ? truncateStatus(rawLastStatus)
-    : undefined;
+  const lastStatus = rawLastStatus ? truncateStatus(rawLastStatus) : undefined;
 
   const hasEvents = store.eventPlan.length > 0;
 
