@@ -435,10 +435,7 @@ export const CreateProjectScreen = ({ store }: CreateProjectScreenProps) => {
                   Press R to retry, Esc to cancel.
                 </Text>
               </Box>
-              <FallbackKeyHandler
-                onOpen={handleOpenFallback}
-                onRetry={handleRetry}
-              />
+              <FallbackKeyHandler onRetry={handleRetry} />
             </Box>
           )}
           {phase.code === 'INTERNAL' && (
@@ -468,13 +465,13 @@ const FallbackKeyHandler = ({
   onOpen,
   onRetry,
 }: {
-  onOpen: () => void;
+  onOpen?: () => void;
   onRetry?: () => void;
 }) => {
   useInput((input) => {
     if (!input) return;
     const ch = input.toLowerCase();
-    if (ch === 'o') onOpen();
+    if (ch === 'o' && onOpen) onOpen();
     if (ch === 'r' && onRetry) onRetry();
   });
   return null;
