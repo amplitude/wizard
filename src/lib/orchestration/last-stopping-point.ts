@@ -431,7 +431,7 @@ function shellQuote(arg: string): string {
   if (arg === '') return "''";
   // If the token is entirely "safe" (alnum + a small punctuation set we
   // know the shell won't interpret) leave it bare for readability.
-  if (/^[A-Za-z0-9_\-\/.:=@+,]+$/.test(arg)) return arg;
+  if (/^[A-Za-z0-9_\-/.:=@+,]+$/.test(arg)) return arg;
   // Otherwise wrap in single quotes; embedded single quotes get the
   // standard `'\''` close/escape/reopen dance.
   return "'" + arg.replace(/'/g, "'\\''") + "'";
