@@ -165,9 +165,16 @@ function deriveNextAction(args: {
 
   if (args.stoppedTasks.length > 0) {
     const recent = args.stoppedTasks[0];
+    // Use the configurable `cliPrefix` (sourced from
+    // `options.cliInvocation`) for both the inline shell hint in
+    // `description` and the structured `command`. Hardcoding
+    // `CLI_INVOCATION` here meant a custom invocation (e.g. test harness,
+    // alternate `wizard` symlink) would print the wrong command name in
+    // the human-readable hint while emitting the correct one in JSON.
+    const cliInline = cliPrefix.join(' ');
     return {
       kind: 'inspect_failure',
-      description: `Most recent stop: ${recent.label} (${recent.state}). Inspect with \`${CLI_INVOCATION} task ${recent.id}\`.`,
+      description: `Most recent stop: ${recent.label} (${recent.state}). Inspect with \`${cliInline} task ${recent.id}\`.`,
       command: [...cliPrefix, 'task', recent.id, ...installDirArgs],
     };
   }
