@@ -804,7 +804,7 @@ describe('runAgent', () => {
       await vi.advanceTimersByTimeAsync(1_500_000);
 
       await rejectCheck;
-      expect(queryCallCount).toBe(6); // MAX_RETRIES=5 → 6 total attempts
+      expect(queryCallCount).toBe(4); // MAX_RETRIES=3 → 4 total attempts
     });
 
     // Regression: P0 follow-on to PR #594. The 60s stall heartbeat used to
@@ -997,8 +997,8 @@ describe('runAgent', () => {
 
       const result = await runPromise;
 
-      // All 6 attempts hit 400 terminated → GATEWAY_DOWN
-      expect(queryCallCount).toBe(6);
+      // All 4 attempts hit 400 terminated → GATEWAY_DOWN
+      expect(queryCallCount).toBe(4);
       expect(result.error).toBe(AgentErrorType.GATEWAY_DOWN);
       expect(result.message).toContain('400 terminated');
     });
@@ -1036,7 +1036,7 @@ describe('runAgent', () => {
       await vi.advanceTimersByTimeAsync(200_000);
       const result = await runPromise;
 
-      expect(queryCallCount).toBe(6);
+      expect(queryCallCount).toBe(4);
       expect(result.error).toBe(AgentErrorType.GATEWAY_DOWN);
     });
 
