@@ -32,10 +32,12 @@ import {
   checkCommandBlockedByRun,
   getWhoamiText,
   getDiagnosticsText,
+  getHelpText,
   isKnownCommand,
   parseFeedbackSlashInput,
   parseCreateProjectSlashInput,
 } from '../console-commands.js';
+import { RunPhase as RunPhaseEnum } from '../session-constants.js';
 import { analytics } from '../../../utils/analytics.js';
 import { logToFile } from '../../../utils/debug.js';
 import { trackWizardFeedback } from '../../../utils/track-wizard-feedback.js';
@@ -292,6 +294,15 @@ function executeCommand(raw: string, store: WizardStore): string | void {
       // emits, but as a TUI-friendly view.
       store.showStatusOverlay();
       break;
+    case '/help': {
+      // PR 5 — print every registered slash command + one-line description.
+      // The runActive flag splits the list into "always safe" vs.
+      // "paused while a setup run is active" so the user always knows
+      // which commands they can use right now.
+      const runActive = store.session.runPhase === RunPhaseEnum.Running;
+      store.setCommandFeedback(getHelpText(runActive), 60_000);
+      break;
+    }
     case '/exit':
       store.setOutroData({ kind: OutroKind.Cancel, message: 'Exited.' });
       break;
@@ -710,11 +721,24 @@ export const ConsoleView = ({
         <Text color={Colors.border}>{separator}</Text>
       </Box>
 
-      {/* Feedback line */}
+      {/* Feedback line.
+          Multi-line feedback (e.g. /help, /diagnostics) renders without
+          the prompt glyph in front of every line — the prefix is on the
+          first row only and continuation lines use a hanging indent so
+          the layout reads as "one block of feedback" rather than "many
+          tiny separate lines". */}
       {showFeedback && (
-        <Box paddingX={Layout.paddingX}>
-          <Text color={Colors.accent}>{Icons.prompt} </Text>
-          <Text color={Colors.secondary}>{feedback}</Text>
+        <Box paddingX={Layout.paddingX} flexDirection="column">
+          {feedback.split('\n').map((line, i) => (
+            <Box key={i}>
+              <Text color={Colors.accent}>
+                {i === 0 ? `${Icons.prompt} ` : '  '}
+              </Text>
+              <Text color={Colors.secondary} wrap="truncate-end">
+                {line}
+              </Text>
+            </Box>
+          ))}
         </Box>
       )}
 

@@ -66,6 +66,10 @@ export const COMMANDS: CommandDef[] = [
     cmd: '/status',
     desc: 'Show orchestration status: pending choices, verifications, MCP capabilities, next action',
   },
+  {
+    cmd: '/help',
+    desc: 'List slash commands with one-line descriptions',
+  },
   { cmd: '/snake', desc: 'Play Snake' },
   { cmd: '/exit', desc: 'Exit the wizard' },
 ];
@@ -228,6 +232,44 @@ export function getDiagnosticsText(installDir: string): string {
     'Tip: tar up the run dir to share with support:',
     `  tar -czf wizard-logs.tar.gz ${getRunDir(installDir)}`,
   ];
+  return lines.join('\n');
+}
+
+/**
+ * Build the human-readable text for the `/help` slash command.
+ *
+ * Lists every registered slash command with its one-line description,
+ * grouping mutating commands ("paused while a setup run is active")
+ * separately so the user knows which ones are safe mid-run.
+ *
+ * Pure (no I/O, no React) so it can be unit-tested without filesystem
+ * mocks or Ink renderers.
+ */
+export function getHelpText(runActive: boolean): string {
+  const idleSafe = COMMANDS.filter((c) => !c.requiresIdle);
+  const requiresIdle = COMMANDS.filter((c) => c.requiresIdle);
+
+  const longest = Math.max(...COMMANDS.map((c) => c.cmd.length));
+  const pad = (cmd: string) => cmd.padEnd(longest, ' ');
+
+  const renderRow = (c: CommandDef): string => `  ${pad(c.cmd)}  ${c.desc}`;
+
+  const lines: string[] = ['Slash commands:', ''];
+  if (idleSafe.length > 0) {
+    lines.push('Available anytime:');
+    for (const c of idleSafe) lines.push(renderRow(c));
+  }
+  if (requiresIdle.length > 0) {
+    lines.push('');
+    lines.push(
+      runActive
+        ? 'Paused while a setup run is active (Ctrl+C to cancel, then retry):'
+        : 'Available before/after a setup run:',
+    );
+    for (const c of requiresIdle) lines.push(renderRow(c));
+  }
+  lines.push('');
+  lines.push('Tip: type `/` for inline autocomplete, `Tab` to ask a question.');
   return lines.join('\n');
 }
 

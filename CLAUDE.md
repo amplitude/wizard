@@ -262,6 +262,7 @@ GitHub Actions workflows in `.github/workflows/`:
 - [`docs/mcp-installation.md`](./docs/mcp-installation.md) — how MCP server installation works across editors
 - [`docs/critical-files.md`](./docs/critical-files.md) — files ranked by blast radius
 - [`docs/engineering-patterns.md`](./docs/engineering-patterns.md) — async safety, retry, error classification patterns
+- [`docs/tui-v2.md`](./docs/tui-v2.md) — TUI v2 IA, glyph palette, operator overview, mode badge, prompt UX contract, slash command coherence (delivered in v2 PR 5)
 - [`docs/external-services.md`](./docs/external-services.md) — third-party services the wizard talks to
 - [`docs/ux-improvements.md`](./docs/ux-improvements.md) — UX backlog and recently-shipped polish
 - [`docs/releasing.md`](./docs/releasing.md) — release process and versioning

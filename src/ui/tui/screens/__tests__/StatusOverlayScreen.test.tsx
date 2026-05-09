@@ -49,10 +49,10 @@ describe('StatusOverlayScreen', () => {
       <StatusOverlayScreen store={store} />,
       store,
     );
-    // All expected section headers present.
-    expect(frame).toContain("What's happening");
+    // All expected section headers present (PR 5 Operator Overview).
+    expect(frame).toContain('Operator overview');
     expect(frame).toContain('Session');
-    expect(frame).toContain('Active tasks');
+    expect(frame).toContain('Primary work');
     expect(frame).toContain('Pending choices');
     expect(frame).toContain('Pending verifications');
     expect(frame).toContain('Next:');

@@ -1,28 +1,41 @@
 /**
  * StatusOverlayScreen — TUI rendering of the orchestration store.
  *
- * PR 3 — invoked via the `/status` slash command. Renders the same data
- * the `wizard orchestration status --json` envelope carries, sectioned
- * into:
+ * Invoked via the `/status` slash command. v2 PR 5 reframes this as
+ * the "Operator Overview" — the accessible "what's happening?" surface
+ * the brief calls for.
  *
- *   - Active session (id, goal, branch, worktree)
- *   - Current mode (interactive / agent / nested-agent)
- *   - Active tasks (state-coloured)
- *   - Pending choices (with why-asking, recommended option, reversibility)
- *   - Pending verifications (with the resume command)
- *   - MCP-app capabilities (state + whyNeeded)
- *   - Owned branches / worktrees / PRs
- *   - Last stopping point + recommended next action
+ * Layout (top to bottom):
+ *
+ *   ◆ Operator overview                              [mode badge]
+ *   <one-line summary of where the wizard is>
+ *
+ *   Session — id / goal / branch / worktree (when active)
+ *
+ *   Primary work       <user-directed work the wizard is on right now>
+ *     <one row per active task with shared lifecycle glyph>
+ *
+ *   Background work    <scheduled / autofix / supervisor-tracked>
+ *     <ditto, sourced from store.completedTasks + active>
+ *
+ *   Pending choices    <waiting on user — actionable, full UX contract>
+ *   Pending verifications <ditto>
+ *   MCP capabilities   <wizard-installed AI-tool integrations>
+ *
+ *   Owned artifacts    <branches/worktrees/PRs the wizard owns>
+ *
+ *   ⮕ Next: <recommended next action>  ·  resume: <command>
+ *
+ * Every primary surface uses the shared glyph palette from
+ * `src/ui/tui/utils/lifecycle-display.ts`, so the user only has to
+ * learn ○ ⏸ › … ✓ ✗ ⊘ ⮕ once.
  *
  * The component does NOT subscribe to a separate stream. Every render
  * pulls a fresh snapshot from `OrchestrationStore` (cheap; the file is
  * small) wrapped in a single `withReadCache` block — so all sections
- * see a consistent slice. A `useWizardStore(store)` subscription
- * triggers a rerender whenever the wizard's in-memory state changes,
- * but the orchestration store itself doesn't push events; PR 3 keeps
- * the cadence "rerender when something else in the wizard moves". The
- * brief's "stable transitions / no resize-required redraws" item is
- * covered by the existing `triggerRerender()` bridge in the store.
+ * see a consistent slice. PR 4's `useOrchestrationStore` hook plus the
+ * file-watch wrapper push fresh versions when sibling shells call
+ * `wizard choice answer …`.
  *
  * Esc dismisses the overlay.
  */
@@ -42,30 +55,46 @@ import {
 } from '../../../lib/orchestration/envelopes.js';
 import { ChoiceStatus } from '../../../lib/orchestration/checkpoints/choices.js';
 import { VerificationStatus } from '../../../lib/orchestration/checkpoints/verifications.js';
-import { detectNestedAgent } from '../../../lib/detect-nested-agent.js';
+import { resolveMode } from '../utils/mode-badge.js';
+import {
+  lifecycleDisplay,
+  type LifecycleDisplay,
+} from '../utils/lifecycle-display.js';
 import { TaskLifecycle } from '../../../lib/orchestration/lifecycle.js';
 
 interface StatusOverlayScreenProps {
   store: WizardStore;
 }
 
-function lifecycleColor(state: TaskLifecycle): string {
-  switch (state) {
-    case TaskLifecycle.Completed:
-      return Colors.success;
-    case TaskLifecycle.Failed:
-    case TaskLifecycle.Blocked:
-      return Colors.error;
-    case TaskLifecycle.Cancelled:
-      return Colors.warning;
-    case TaskLifecycle.Running:
-      return Colors.active;
-    case TaskLifecycle.WaitingForUser:
-      return Colors.accent;
-    default:
-      return Colors.muted;
-  }
-}
+/** Compact "glyph + label" badge used in every section. */
+const StateBadge = ({ display }: { display: LifecycleDisplay }) => (
+  <Text color={display.color} bold>
+    {display.glyph}{' '}
+    <Text color={display.color}>{display.label}</Text>
+  </Text>
+);
+
+/**
+ * Section header — bold, secondary color, with a count badge.
+ * Pulled out so the operator overview's many sections share the same
+ * tight visual rhythm without us re-typing the same JSX seven times.
+ */
+const SectionHeader = ({
+  title,
+  count,
+  emptyHint,
+}: {
+  title: string;
+  count: number;
+  emptyHint?: string;
+}) => (
+  <Text color={Colors.secondary} bold>
+    {title} ({count})
+    {count === 0 && emptyHint ? (
+      <Text color={Colors.muted}>{`  ${Icons.dot} ${emptyHint}`}</Text>
+    ) : null}
+  </Text>
+);
 
 export const StatusOverlayScreen = ({ store }: StatusOverlayScreenProps) => {
   // Subscribe so the overlay rerenders if anything else changes session
@@ -127,30 +156,73 @@ export const StatusOverlayScreen = ({ store }: StatusOverlayScreenProps) => {
   );
 
   const lsp = data.status.lastStoppingPoint;
-  const nestedAgent = detectNestedAgent();
-  const currentMode = nestedAgent
-    ? `nested-agent (${nestedAgent.envVar}=${nestedAgent.envValue})`
-    : process.env.AMPLITUDE_WIZARD_AGENT_MODE === '1'
-    ? 'agent'
-    : 'interactive';
+  const mode = resolveMode();
+
+  // Split active tasks into "primary" (running/waiting/blocked) and
+  // "background" (everything else among the active set — supervisor's
+  // heartbeat-tracked tasks etc.). Today the orchestration store
+  // doesn't yet tag tasks with a primary/background flag, so the
+  // surface uses lifecycle as a heuristic: anything currently running
+  // or waiting-for-user is primary; blocked tasks are surfaced as
+  // primary too because they need user attention; queued tasks are
+  // background (about to start, not actionable).
+  const primaryStates = new Set<TaskLifecycle>([
+    TaskLifecycle.Running,
+    TaskLifecycle.WaitingForUser,
+    TaskLifecycle.Blocked,
+  ]);
+  const primaryTasks = lsp.activeTasks.filter((t) => primaryStates.has(t.state));
+  const backgroundTasks = lsp.activeTasks.filter(
+    (t) => !primaryStates.has(t.state),
+  );
+
+  const summary =
+    data.pendingChoices.length > 0
+      ? `Waiting on ${data.pendingChoices.length} choice${
+          data.pendingChoices.length === 1 ? '' : 's'
+        } from you.`
+      : data.pendingVerifications.length > 0
+      ? `Waiting on ${data.pendingVerifications.length} manual verification${
+          data.pendingVerifications.length === 1 ? '' : 's'
+        }.`
+      : primaryTasks.length > 0
+      ? `${primaryTasks.length} primary task${
+          primaryTasks.length === 1 ? '' : 's'
+        } in flight.`
+      : lsp.currentSessionId
+      ? 'Session active — no pending action.'
+      : 'No active session.';
 
   return (
     <Box flexDirection="column" flexGrow={1} paddingX={2} paddingY={1}>
+      {/* Header — title + mode badge, then a one-line summary so the
+          user always has the answer to "what's the wizard doing?" up
+          top. Pinning the summary to the header (rather than burying
+          it in the next-action footer) means even on a 24-row terminal
+          where lower sections clip, the headline answer is visible. */}
       <Box flexDirection="column" marginBottom={1}>
-        <Text bold color={Colors.accent}>
-          {Icons.diamond} What's happening
-        </Text>
+        <Box>
+          <Text bold color={Colors.accent}>
+            {Icons.diamond} Operator overview
+          </Text>
+          <Text color={Colors.subtle}> {Icons.dot} </Text>
+          <Text color={mode.color} bold>
+            [{mode.label}]
+          </Text>
+        </Box>
+        <Text color={Colors.body}>{summary}</Text>
         <Text color={Colors.muted}>
-          Live snapshot of the orchestration store. Press{' '}
-          <Text bold>Esc</Text> to close.
+          Live snapshot — press <Text bold>Esc</Text> to close.
         </Text>
       </Box>
 
       {/* Session + mode */}
       <Box flexDirection="column" marginBottom={1}>
-        <Text color={Colors.secondary} bold>
-          Session
-        </Text>
+        <SectionHeader
+          title="Session"
+          count={lsp.currentSessionId ? 1 : 0}
+          emptyHint="No active session"
+        />
         {lsp.currentSessionId ? (
           <>
             <Text color={Colors.body}>
@@ -172,127 +244,138 @@ export const StatusOverlayScreen = ({ store }: StatusOverlayScreenProps) => {
               </Text>
             )}
           </>
-        ) : (
-          <Text color={Colors.muted}>{Icons.dot} No active session.</Text>
-        )}
-        <Text color={Colors.body}>
-          {Icons.bullet} mode: <Text bold>{currentMode}</Text>
-        </Text>
+        ) : null}
       </Box>
 
-      {/* Active tasks */}
+      {/* Primary work — what's directly in front of the user. */}
       <Box flexDirection="column" marginBottom={1}>
-        <Text color={Colors.secondary} bold>
-          Active tasks ({lsp.activeTasks.length})
-        </Text>
-        {lsp.activeTasks.length === 0 ? (
-          <Text color={Colors.muted}>{Icons.dot} None.</Text>
-        ) : (
-          lsp.activeTasks.slice(0, 8).map((t) => (
-            <Text key={t.id} color={Colors.body}>
-              {Icons.bullet}{' '}
-              <Text bold color={lifecycleColor(t.state)}>
-                {t.state}
-              </Text>{' '}
-              — {t.label}
-            </Text>
-          ))
-        )}
+        <SectionHeader
+          title="Primary work"
+          count={primaryTasks.length}
+          emptyHint="Idle"
+        />
+        {primaryTasks.slice(0, 8).map((t) => {
+          const display = lifecycleDisplay(t.state);
+          return (
+            <Box key={t.id}>
+              <Text color={display.color} bold>
+                {display.glyph}{' '}
+              </Text>
+              <Text color={Colors.body}>
+                <StateBadge display={display} /> — {t.label}
+              </Text>
+            </Box>
+          );
+        })}
       </Box>
 
-      {/* Pending choices — the actionable rows */}
-      <Box flexDirection="column" marginBottom={1}>
-        <Text color={Colors.secondary} bold>
-          Pending choices ({data.pendingChoices.length})
-        </Text>
-        {data.pendingChoices.length === 0 ? (
-          <Text color={Colors.muted}>{Icons.dot} None.</Text>
-        ) : (
-          data.pendingChoices.slice(0, 5).map((c) => {
-            const recommended = c.options.find(
-              (o) => o.id === c.recommendedOptionId,
-            );
+      {/* Background work — scheduled / autofix / supervisor-tracked.
+          Hidden when there's nothing to show so the operator overview
+          collapses to the rows with content. */}
+      {backgroundTasks.length > 0 && (
+        <Box flexDirection="column" marginBottom={1}>
+          <SectionHeader title="Background" count={backgroundTasks.length} />
+          {backgroundTasks.slice(0, 6).map((t) => {
+            const display = lifecycleDisplay(t.state);
             return (
-              <Box key={c.id} flexDirection="column" marginBottom={1}>
-                <Text color={Colors.accent} bold>
-                  {Icons.diamond} {c.message}
-                </Text>
+              <Box key={t.id}>
+                <Text color={display.color}>{display.glyph} </Text>
                 <Text color={Colors.muted}>
-                  {' '}
-                  why: {c.whyAsking}
-                </Text>
-                {recommended && (
-                  <Text color={Colors.muted}>
-                    {' '}
-                    recommended:{' '}
-                    <Text bold color={Colors.success}>
-                      {recommended.label}
-                    </Text>
-                  </Text>
-                )}
-                <Text color={Colors.muted}>
-                  {' '}
-                  if skipped: {c.consequenceIfSkipped}
-                </Text>
-                <Text color={Colors.muted}>
-                  {' '}
-                  reversible: {c.reversible ? 'yes' : 'no'} ·{' '}
-                  requires_human: {c.requiresHuman ? 'yes' : 'no'}
-                </Text>
-                <Text color={Colors.muted}>
-                  {' '}
-                  resume:{' '}
-                  <Text bold>
-                    {c.resumeCommand.join(' ')}
-                  </Text>
+                  <Text color={display.color}>{display.label}</Text> — {t.label}
                 </Text>
               </Box>
             );
-          })
-        )}
-      </Box>
+          })}
+        </Box>
+      )}
 
-      {/* Pending manual verifications */}
+      {/* Pending choices — the actionable rows.
+          Use the full UX contract from ChoiceCheckpointBanner: why-asking,
+          recommended option, safe-default, "skipping is/isn't safe",
+          consequence, reversibility, resume command. We render an inline
+          condensed version here (the overlay can't host the full banner
+          for every choice without scrolling) but keep every required
+          field so the user can act without leaving the overview. */}
       <Box flexDirection="column" marginBottom={1}>
-        <Text color={Colors.secondary} bold>
-          Pending verifications ({data.pendingVerifications.length})
-        </Text>
-        {data.pendingVerifications.length === 0 ? (
-          <Text color={Colors.muted}>{Icons.dot} None.</Text>
-        ) : (
-          data.pendingVerifications.slice(0, 5).map((v) => (
-            <Box key={v.id} flexDirection="column" marginBottom={1}>
-              <Text color={Colors.warning} bold>
-                {Icons.bullet} {v.whatToVerify}
+        <SectionHeader
+          title="Pending choices"
+          count={data.pendingChoices.length}
+          emptyHint="None"
+        />
+        {data.pendingChoices.slice(0, 5).map((c) => {
+          const recommended = c.options.find(
+            (o) => o.id === c.recommendedOptionId,
+          );
+          const isSafeToSkip =
+            c.safeDefaultOptionId !== null && !c.requiresHuman && c.reversible;
+          return (
+            <Box key={c.id} flexDirection="column" marginBottom={1}>
+              <Text color={Colors.accent} bold>
+                {Icons.diamond} {c.message}
               </Text>
-              <Text color={Colors.muted}>
-                {' '}
-                expected: {v.expectedBehavior}
-              </Text>
-              {v.unblockerHint && (
+              <Text color={Colors.muted}> why: {c.whyAsking}</Text>
+              {recommended && (
                 <Text color={Colors.muted}>
                   {' '}
-                  hint: {v.unblockerHint}
+                  recommended:{' '}
+                  <Text bold color={Colors.success}>
+                    {recommended.label}
+                  </Text>
                 </Text>
               )}
               <Text color={Colors.muted}>
                 {' '}
-                resume: <Text bold>{v.resumeCommand.join(' ')}</Text>
+                if skipped: {c.consequenceIfSkipped}
+              </Text>
+              <Text color={Colors.muted}>
+                {' '}
+                reversible: {c.reversible ? 'yes' : 'no'} {Icons.dot}{' '}
+                requires_human: {c.requiresHuman ? 'yes' : 'no'} {Icons.dot}{' '}
+                {isSafeToSkip ? 'safe to skip' : 'skipping not safe'}
+              </Text>
+              <Text color={Colors.muted}>
+                {' '}
+                resume: <Text bold>{c.resumeCommand.join(' ')}</Text>
               </Text>
             </Box>
-          ))
-        )}
+          );
+        })}
+      </Box>
+
+      {/* Pending manual verifications */}
+      <Box flexDirection="column" marginBottom={1}>
+        <SectionHeader
+          title="Pending verifications"
+          count={data.pendingVerifications.length}
+          emptyHint="None"
+        />
+        {data.pendingVerifications.slice(0, 5).map((v) => (
+          <Box key={v.id} flexDirection="column" marginBottom={1}>
+            <Text color={Colors.warning} bold>
+              {Icons.bullet} {v.whatToVerify}
+            </Text>
+            <Text color={Colors.muted}> expected: {v.expectedBehavior}</Text>
+            {v.unblockerHint && (
+              <Text color={Colors.muted}> hint: {v.unblockerHint}</Text>
+            )}
+            <Text color={Colors.muted}>
+              {' '}
+              resume: <Text bold>{v.resumeCommand.join(' ')}</Text>
+            </Text>
+          </Box>
+        ))}
       </Box>
 
       {/* MCP capabilities */}
       {data.capabilities.length > 0 && (
         <Box flexDirection="column" marginBottom={1}>
-          <Text color={Colors.secondary} bold>
-            MCP capabilities ({data.capabilities.length})
-          </Text>
+          <SectionHeader
+            title="MCP capabilities"
+            count={data.capabilities.length}
+          />
           {data.capabilities.slice(0, 6).map((c) => (
             <Text key={c.id} color={Colors.body}>
-              {Icons.bullet} <Text bold>{c.kind}</Text> ·{' '}
+              {Icons.bullet} <Text bold>{c.kind}</Text> {Icons.dot}{' '}
               <Text color={Colors.muted}>{c.state}</Text>
               {c.lastStateChangeReason
                 ? `  — ${c.lastStateChangeReason}`
@@ -305,9 +388,10 @@ export const StatusOverlayScreen = ({ store }: StatusOverlayScreenProps) => {
       {/* Ownership */}
       {lsp.relevantOwnership.length > 0 && (
         <Box flexDirection="column" marginBottom={1}>
-          <Text color={Colors.secondary} bold>
-            Owned artifacts
-          </Text>
+          <SectionHeader
+            title="Owned artifacts"
+            count={lsp.relevantOwnership.length}
+          />
           {lsp.relevantOwnership.slice(0, 5).map((o, i) => (
             <Text key={i} color={Colors.body}>
               {Icons.bullet} {o.kind}:{' '}

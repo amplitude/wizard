@@ -96,6 +96,7 @@ export const Icons = {
   // Navigation
   chevronRight: '›',
   arrowRight: '→',
+  arrowReturn: '⮕',
   triangleRight: '▶',
   triangleSmallRight: '▸',
 
@@ -105,12 +106,72 @@ export const Icons = {
   bar: '│',
   dash: '─',
   warning: '⚠',
+  pause: '⏸',
+  cancelled: '⊘',
 
   // Indicators
   prompt: '❯',
   dot: '·',
   ellipsis: '…',
 } as const;
+
+// ── State glyph palette ────────────────────────────────────────────────
+//
+// PR 5 (TUI v2) — the screen-tree redesign establishes a single shared
+// visual vocabulary for every primary surface that exposes state to the
+// user. JourneyStepper, ProgressList, the operator overview, choice
+// banners, verification ribbon, and MCP-capability rows all draw from
+// the same palette so the user learns it once and never has to relearn.
+//
+// `LifecycleGlyph` covers durable orchestration task states (the
+// `TaskLifecycle` enum in `src/lib/orchestration/lifecycle.ts`). The
+// surface mapping fns return `{ glyph, color, label }` so callers don't
+// have to keep their own switch statements in sync.
+
+export const LifecycleGlyph = {
+  queued: Icons.bulletOpen,
+  running: Icons.chevronRight,
+  waiting: Icons.ellipsis,
+  blocked: Icons.pause,
+  completed: Icons.checkmark,
+  failed: Icons.cross,
+  cancelled: Icons.cancelled,
+  superseded: Icons.arrowReturn,
+} as const;
+export type LifecycleStateKey = keyof typeof LifecycleGlyph;
+
+/**
+ * Long-form labels paired with each lifecycle glyph. Used in the
+ * operator overview, manual-verification ribbon, and choice banners
+ * so users see "Waiting for user" rather than the raw enum string.
+ */
+export const LifecycleLabel: Record<LifecycleStateKey, string> = {
+  queued: 'Queued',
+  running: 'Running',
+  waiting: 'Waiting',
+  blocked: 'Blocked',
+  completed: 'Completed',
+  failed: 'Failed',
+  cancelled: 'Cancelled',
+  superseded: 'Superseded',
+};
+
+// ── Mode badges ─────────────────────────────────────────────────────────
+
+/**
+ * Badge label + color for the current execution mode. Surfaced in the
+ * header so the user can see at a glance whether the wizard is running
+ * interactively, in agent/JSON mode, in CI (auto-approve), or nested
+ * inside another Claude Agent session.
+ */
+export const ModeBadge = {
+  interactive: { label: 'interactive', color: Brand.lilac },
+  agent: { label: 'agent', color: Brand.blueOnDark },
+  ci: { label: 'ci', color: Brand.amber },
+  'nested-agent': { label: 'nested', color: Brand.violet },
+  'mcp-server': { label: 'mcp-server', color: Brand.success },
+} as const;
+export type ModeBadgeKey = keyof typeof ModeBadge;
 
 // ── Braille spinner frames ──────────────────────────────────────────
 

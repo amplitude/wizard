@@ -59,8 +59,11 @@ For browser-based SDK projects (Next.js, Vue, React Router, JavaScript
 web), the wizard auto-enables Autocapture, Session Replay, and Guides &
 Surveys when the project is using Amplitude's unified Browser SDK — no
 extra opt-in screens. Type any slash command (e.g. `/whoami`,
-`/diagnostics`) at any time; the prompt accepts them throughout the
-session.
+`/diagnostics`, `/help`, `/status`) at any time; the prompt accepts
+them throughout the session. The TUI uses a shared glyph palette
+(`○ › … ⏸ ✓ ✗ ⊘ ⮕`) and a mode badge (`[agent]`, `[ci]`, `[nested]`)
+so you can see at a glance what the wizard is doing — see
+[`docs/tui-v2.md`](./docs/tui-v2.md) for the full IA spec.
 
 ## Running modes
 
