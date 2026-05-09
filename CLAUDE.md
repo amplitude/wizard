@@ -84,6 +84,8 @@ Machine-consumable execution mode for CI pipelines and agent orchestrators. Uses
 | `exit-codes.ts` | `ExitCode` enum — structured exit codes (0 success, 2 invalid args, 3 auth, 4 network, 10 agent failed, 130 cancelled) |
 | `session-checkpoint.ts` | Session checkpointing — saves/loads sanitized wizard state to a temp file for crash recovery. Zod-validated, 24-hour TTL, scoped per install directory |
 | `orchestration/` | **v2 foundation** — durable orchestration store (sessions, tasks, subagents, ownership, last-stopping-point). Source of truth for `wizard tasks / task / sessions / session / resume / orchestration status` and the new MCP-server read tools (deferred to PR 3). See `docs/orchestration.md` |
+| `orchestration/checkpoints/` | **v2 PR 2** — `Choice` and `Verification` typed records with status transitions, de-dup-by-promptId, and a `requiresHuman` automation gate enforced by `wizard choice answer --confirm-human`. Surfaced via `wizard choice list/show/answer` and `wizard verification list/show/mark`. |
+| `orchestration/mcp-app-lifecycle.ts` | **v2 PR 2** — typed lifecycle for every MCP-app capability (`claude_code_install`, `slack_app`, …). Enforces an anti-nag invariant: once a capability is `install_skipped`, the validator REQUIRES a non-empty `lastStateChangeReason` on the `→ needs_user_choice` arc so the user is never re-prompted without justification. |
 
 ### Framework integrations (`src/frameworks/`)
 

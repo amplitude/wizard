@@ -36,6 +36,25 @@ These commands are **read-only**. They never trigger auth flows, network
 calls, or write the orchestration store, so codes 3 / 4 / 10 / 11 / 12 /
 13 / 20 are not reachable.
 
+## PR 2: choice + verification commands
+
+The `wizard choice` and `wizard verification` subcommands extend the
+namespace with a small set of operation-specific codes that live in
+`src/commands/orchestration-exit-codes.ts`. Kept separate from the
+top-level `ExitCode` enum so the global stable contract isn't broadened
+for codes only the new sub-commands return.
+
+| Code | Symbol | When |
+|-----:|--------|------|
+| 0 | `SUCCESS` | command succeeded |
+| 1 | `GENERAL_ERROR` | unexpected error |
+| 2 | `INVALID_ARGS` | bad id prefix, bad `--status` value, missing positional |
+| 30 | `CHOICE_NOT_FOUND` | `wizard choice <show\|answer>` could not find the requested id |
+| 31 | `CHOICE_NOT_PENDING` | `wizard choice answer` targeted a choice in `answered`/`expired`/`cancelled`/`superseded` |
+| 32 | `CHOICE_REQUIRES_HUMAN` | choice has `requiresHuman === true` and operator did not pass `--confirm-human` (the brief's automation-gate) |
+| 33 | `VERIFICATION_NOT_FOUND` | `wizard verification <show\|mark>` could not find the requested id |
+| 34 | `VERIFICATION_INVALID_TRANSITION` | `wizard verification mark` targeted a status that's not legal from the current one (e.g. `passed → failed`) |
+
 ## Adding a new code
 
 - Pick a value that doesn't collide with anything in `ExitCode`.

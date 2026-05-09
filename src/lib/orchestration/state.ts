@@ -337,6 +337,11 @@ export const ORCHESTRATION_STORE_VERSION = 1;
 
 /**
  * Top-level on-disk shape. Single JSON file per install dir.
+ *
+ * PR 2 additions (`choices`, `verifications`, `mcpCapabilities`) live
+ * alongside `sessions` / `tasks` / `subagents`. They were added without
+ * a version bump because the schema treats them as optional with empty
+ * defaults — a PR 1 file still parses cleanly under the PR 2 reader.
  */
 export interface OrchestrationStoreFile {
   version: typeof ORCHESTRATION_STORE_VERSION;
@@ -347,4 +352,10 @@ export interface OrchestrationStoreFile {
   sessions: Session[];
   tasks: Task[];
   subagents: Subagent[];
+  /** PR 2: typed user-choice records. */
+  choices: import('./checkpoints/choices').Choice[];
+  /** PR 2: manual-verification records. */
+  verifications: import('./checkpoints/verifications').Verification[];
+  /** PR 2: MCP-app capability lifecycle records. */
+  mcpCapabilities: import('./mcp-app-lifecycle').McpAppCapability[];
 }

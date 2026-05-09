@@ -23,7 +23,15 @@ import {
   SessionEnvelopeSchema,
   ResumeEnvelopeSchema,
   StatusEnvelopeSchema,
+  ChoicesEnvelopeSchema,
+  ChoiceEnvelopeSchema,
+  ChoiceAnswerEnvelopeSchema,
+  VerificationsEnvelopeSchema,
+  VerificationEnvelopeSchema,
+  VerificationMarkEnvelopeSchema,
 } from '../../lib/orchestration/schemas';
+import { ChoiceKind } from '../../lib/orchestration/checkpoints/choices';
+import { VerificationKind } from '../../lib/orchestration/checkpoints/verifications';
 
 const REPO_ROOT = resolve(__dirname, '..', '..', '..');
 const BIN = resolve(REPO_ROOT, 'bin.ts');
@@ -58,6 +66,56 @@ beforeAll(() => {
     label: 'pending task',
   });
   void t2;
+
+  // PR 2: seed a Choice (one human-required, one automation-allowed)
+  // and a Verification so the new commands have data to surface.
+  const humanChoice = store.addChoice({
+    kind: ChoiceKind.EnvironmentSelection,
+    promptId: 'env_selection:cli-smoke',
+    message: 'Pick an environment',
+    options: [
+      { id: 'opt-prod', label: 'Production' },
+      { id: 'opt-staging', label: 'Staging' },
+    ],
+    recommendedOptionId: 'opt-prod',
+    safeDefaultOptionId: 'opt-prod',
+    requiresHuman: true,
+    automationAllowed: false,
+    timeoutBehavior: null,
+    consequenceIfSkipped: 'no env, no events',
+    reversible: true,
+    whyAsking: 'multiple envs',
+    resumeCommand: ['wizard', '--agent'],
+    linkedSessionId: session.id,
+  });
+  process.env.__ORCH_TEST_CHOICE_HUMAN_ID = humanChoice.id;
+
+  const autoChoice = store.addChoice({
+    kind: ChoiceKind.Other,
+    promptId: 'other:cli-smoke',
+    message: 'pick something',
+    options: [{ id: 'a', label: 'A' }],
+    recommendedOptionId: 'a',
+    safeDefaultOptionId: 'a',
+    requiresHuman: false,
+    automationAllowed: true,
+    timeoutBehavior: null,
+    consequenceIfSkipped: 'meh',
+    reversible: true,
+    whyAsking: 'because',
+    resumeCommand: ['wizard'],
+    linkedSessionId: session.id,
+  });
+  process.env.__ORCH_TEST_CHOICE_AUTO_ID = autoChoice.id;
+
+  const verif = store.addVerification({
+    kind: VerificationKind.EventsArrivingInAmplitude,
+    whatToVerify: 'events arrive',
+    expectedBehavior: 'events appear in live stream',
+    blockingSessionId: session.id,
+    resumeCommand: ['wizard', 'verification', 'mark'],
+  });
+  process.env.__ORCH_TEST_VERIF_ID = verif.id;
 });
 
 afterAll(() => {
@@ -67,6 +125,9 @@ afterAll(() => {
   delete process.env.AMPLITUDE_WIZARD_SKIP_BOOTSTRAP;
   delete process.env.__ORCH_TEST_SESSION_ID;
   delete process.env.__ORCH_TEST_TASK_ID;
+  delete process.env.__ORCH_TEST_CHOICE_HUMAN_ID;
+  delete process.env.__ORCH_TEST_CHOICE_AUTO_ID;
+  delete process.env.__ORCH_TEST_VERIF_ID;
 });
 
 function runCli(args: string[]): {
@@ -181,6 +242,92 @@ describe('wizard resume <session-id> (CLI smoke)', () => {
     const envelope = ResumeEnvelopeSchema.parse(parseFirstJsonLine(r.stdout));
     expect(envelope.executed).toBe(false);
     expect(envelope.command.length).toBeGreaterThan(0);
+  });
+});
+
+describe('wizard choice list/show/answer (CLI smoke)', () => {
+  it('choice list returns a valid ChoicesEnvelope with the seeded pending choices', () => {
+    const r = runCli(['choice', 'list']);
+    expect(r.status).toBe(0);
+    const envelope = ChoicesEnvelopeSchema.parse(parseFirstJsonLine(r.stdout));
+    expect(envelope.choices.length).toBeGreaterThanOrEqual(2);
+  });
+
+  it('choice show returns a valid ChoiceEnvelope', () => {
+    const id = process.env.__ORCH_TEST_CHOICE_HUMAN_ID!;
+    const r = runCli(['choice', 'show', id]);
+    expect(r.status).toBe(0);
+    const envelope = ChoiceEnvelopeSchema.parse(parseFirstJsonLine(r.stdout));
+    expect(envelope.choice.id).toBe(id);
+  });
+
+  it('choice show on bogus id exits with INVALID_ARGS=2', () => {
+    const r = runCli(['choice', 'show', 'not_a_choice']);
+    expect(r.status).toBe(2);
+  });
+
+  it('choice answer on a missing choice id exits with CHOICE_NOT_FOUND=30', () => {
+    const r = runCli([
+      'choice',
+      'answer',
+      'choice_does_not_exist',
+      '--option',
+      'a',
+    ]);
+    expect(r.status).toBe(30);
+  });
+
+  it('choice answer rejects requiresHuman=true without --confirm-human (exit 32)', () => {
+    const id = process.env.__ORCH_TEST_CHOICE_HUMAN_ID!;
+    const r = runCli(['choice', 'answer', id, '--option', 'opt-prod']);
+    expect(r.status).toBe(32);
+  });
+
+  it('choice answer succeeds for an automation-allowed choice without --confirm-human', () => {
+    const id = process.env.__ORCH_TEST_CHOICE_AUTO_ID!;
+    const r = runCli(['choice', 'answer', id, '--option', 'a']);
+    expect(r.status).toBe(0);
+    const envelope = ChoiceAnswerEnvelopeSchema.parse(
+      parseFirstJsonLine(r.stdout),
+    );
+    expect(envelope.choice.status).toBe('answered');
+    expect(envelope.choice.answeredOptionId).toBe('a');
+  });
+});
+
+describe('wizard verification list/show/mark (CLI smoke)', () => {
+  it('verification list returns a valid VerificationsEnvelope', () => {
+    const r = runCli(['verification', 'list']);
+    expect(r.status).toBe(0);
+    const envelope = VerificationsEnvelopeSchema.parse(
+      parseFirstJsonLine(r.stdout),
+    );
+    expect(envelope.verifications.length).toBeGreaterThanOrEqual(1);
+  });
+
+  it('verification show on missing id exits with VERIFICATION_NOT_FOUND=33', () => {
+    const r = runCli(['verification', 'show', 'verif_does_not_exist']);
+    expect(r.status).toBe(33);
+  });
+
+  it('verification show returns a valid VerificationEnvelope', () => {
+    const id = process.env.__ORCH_TEST_VERIF_ID!;
+    const r = runCli(['verification', 'show', id]);
+    expect(r.status).toBe(0);
+    const envelope = VerificationEnvelopeSchema.parse(
+      parseFirstJsonLine(r.stdout),
+    );
+    expect(envelope.verification.id).toBe(id);
+  });
+
+  it('verification mark transitions to passed', () => {
+    const id = process.env.__ORCH_TEST_VERIF_ID!;
+    const r = runCli(['verification', 'mark', id, '--status', 'passed']);
+    expect(r.status).toBe(0);
+    const envelope = VerificationMarkEnvelopeSchema.parse(
+      parseFirstJsonLine(r.stdout),
+    );
+    expect(envelope.verification.status).toBe('passed');
   });
 });
 

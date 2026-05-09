@@ -20,11 +20,21 @@ import type {
   LastStoppingPoint,
   NextAction,
   Ownership,
+  PendingCheckpoint,
   SessionId,
   Task,
 } from './state';
 import { getOrchestrationStore } from './store';
 import { CLI_INVOCATION } from '../../commands/context';
+import { ChoiceStatus, type Choice } from './checkpoints/choices';
+import {
+  VerificationStatus,
+  type Verification,
+} from './checkpoints/verifications';
+import {
+  McpAppCapabilityState,
+  type McpAppCapability,
+} from './mcp-app-lifecycle';
 
 /** Look-back window for "stopped" / "recently completed" task buckets. */
 const TWENTY_FOUR_HOURS_MS = 24 * 60 * 60 * 1000;
@@ -66,6 +76,49 @@ function tryDetectWorktree(installDir: string): string | null {
   }
 }
 
+/**
+ * Project a typed Choice / Verification / McpAppCapability record into
+ * the legacy `PendingCheckpoint` shape so PR 1-era consumers of the
+ * `LastStoppingPoint.pending*` arrays keep working. PR 3 will read the
+ * full typed records directly via the store APIs.
+ *
+ * `enteredAt` is rendered as a wall-clock ms timestamp to match the
+ * PendingCheckpoint contract; when the underlying ISO string is
+ * unparseable (rare, since we stamp these ourselves) we fall back to 0
+ * rather than throw — the snapshot is best-effort by design.
+ */
+function isoToMillis(iso: string): number {
+  const ms = Date.parse(iso);
+  return Number.isFinite(ms) ? ms : 0;
+}
+
+function choiceToCheckpoint(c: Choice): PendingCheckpoint {
+  return {
+    id: c.id,
+    kind: c.kind,
+    summary: c.message,
+    enteredAt: isoToMillis(c.createdAt),
+  };
+}
+
+function mcpCapabilityToCheckpoint(c: McpAppCapability): PendingCheckpoint {
+  return {
+    id: c.id,
+    kind: `mcp_${c.kind}`,
+    summary: `${c.kind} (${c.state}): ${c.whyNeeded}`,
+    enteredAt: isoToMillis(c.lastStateChangeAt),
+  };
+}
+
+function verificationToCheckpoint(v: Verification): PendingCheckpoint {
+  return {
+    id: v.id,
+    kind: `verify_${v.kind}`,
+    summary: v.whatToVerify,
+    enteredAt: isoToMillis(v.createdAt),
+  };
+}
+
 function dedupeOwnership(ownership: Ownership[]): Ownership[] {
   const seen = new Set<string>();
   const out: Ownership[] = [];
@@ -91,6 +144,9 @@ function deriveNextAction(args: {
   installDir: string;
   activeTasks: Task[];
   stoppedTasks: Task[];
+  pendingChoices: PendingCheckpoint[];
+  pendingMcpActions: PendingCheckpoint[];
+  pendingManualVerifications: PendingCheckpoint[];
   hasActiveSession: boolean;
   invocation: string[];
 }): NextAction {
@@ -110,6 +166,40 @@ function deriveNextAction(args: {
     return {
       kind: 'await_user_choice',
       description: `A task is waiting for user input: ${summary}.`,
+      command: fullCommand(),
+    };
+  }
+
+  // No `waiting` task surfaced, but the store may still have free-floating
+  // pending checkpoints (a Choice / Verification / MCP capability
+  // recorded by PR 2 wiring before PR 3 hooks tasks to them). Surface
+  // those so `wizard status` doesn't claim "nothing to resume" while
+  // the user has a real pending decision sitting in the store.
+  if (args.pendingChoices.length > 0) {
+    return {
+      kind: 'await_user_choice',
+      description: `A user choice is pending: ${
+        args.pendingChoices[0].summary ?? args.pendingChoices[0].kind
+      }.`,
+      command: fullCommand(),
+    };
+  }
+  if (args.pendingMcpActions.length > 0) {
+    return {
+      kind: 'await_mcp_action',
+      description: `An MCP-app action is pending: ${
+        args.pendingMcpActions[0].summary ?? args.pendingMcpActions[0].kind
+      }.`,
+      command: fullCommand(),
+    };
+  }
+  if (args.pendingManualVerifications.length > 0) {
+    return {
+      kind: 'await_verification',
+      description: `Manual verification pending: ${
+        args.pendingManualVerifications[0].summary ??
+        args.pendingManualVerifications[0].kind
+      }.`,
       command: fullCommand(),
     };
   }
@@ -243,34 +333,39 @@ export function computeLastStoppingPoint(
     ...recentlyCompletedTasks.flatMap((t) => t.ownership),
   ]);
 
-  // PR 1 stub arrays — populated in PR 2. See module header.
-  const pendingChoices = activeTasks
+  // PR 2: read real Choice / Verification / McpAppCapability records
+  // from the store. We project them into the legacy `PendingCheckpoint`
+  // shape so `LastStoppingPoint` stays back-compat with PR 1 consumers
+  // — outer agents that already coded against the stub array shape see
+  // the same fields populated from real data. PR 3's TUI will read the
+  // typed records directly via the new store APIs.
+  const pendingChoices: PendingCheckpoint[] = file.choices
+    .filter((c: Choice) => c.status === ChoiceStatus.Pending)
+    .map(choiceToCheckpoint);
+  const pendingMcpActions: PendingCheckpoint[] = file.mcpCapabilities
     .filter(
-      (t) =>
-        t.state === TaskLifecycle.WaitingForUser && t.waitingFor !== undefined,
+      (c: McpAppCapability) =>
+        c.state === McpAppCapabilityState.NeedsUserChoice ||
+        c.state === McpAppCapabilityState.NeedsAuth ||
+        c.state === McpAppCapabilityState.NeedsInstall,
     )
-    .map((t) => t.waitingFor!)
-    .filter((c) => c.kind === 'user_choice' || c.kind === 'event_plan_confirm');
-  const pendingMcpActions = activeTasks
+    .map(mcpCapabilityToCheckpoint);
+  const pendingManualVerifications: PendingCheckpoint[] = file.verifications
     .filter(
-      (t) =>
-        t.state === TaskLifecycle.WaitingForUser && t.waitingFor !== undefined,
+      (v: Verification) =>
+        v.status === VerificationStatus.Pending ||
+        v.status === VerificationStatus.Failed,
     )
-    .map((t) => t.waitingFor!)
-    .filter((c) => c.kind === 'mcp_install' || c.kind === 'mcp_action');
-  const pendingManualVerifications = activeTasks
-    .filter(
-      (t) =>
-        t.state === TaskLifecycle.WaitingForUser && t.waitingFor !== undefined,
-    )
-    .map((t) => t.waitingFor!)
-    .filter((c) => c.kind === 'manual_verification');
+    .map(verificationToCheckpoint);
 
   const cliInvocation = options?.cliInvocation ?? CLI_INVOCATION.split(/\s+/);
   const nextAction = deriveNextAction({
     installDir,
     activeTasks,
     stoppedTasks,
+    pendingChoices,
+    pendingMcpActions,
+    pendingManualVerifications,
     hasActiveSession: session !== null && session.status === 'active',
     invocation: cliInvocation,
   });

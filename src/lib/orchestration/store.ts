@@ -45,6 +45,34 @@ import { TaskLifecycle, assertTransition, isTerminal } from './lifecycle';
 import { getOrchestrationStoreFile } from './storage-paths';
 import { getRunDir } from '../../utils/storage-paths';
 import { dirname } from 'node:path';
+import {
+  type AddChoiceInput,
+  type Choice,
+  type ChoiceId,
+  ChoiceStatus,
+  ChoiceSchema,
+  assertChoiceTransition,
+  asChoiceId,
+} from './checkpoints/choices';
+import {
+  type AddVerificationInput,
+  type Verification,
+  type VerificationId,
+  VerificationStatus,
+  VerificationSchema,
+  assertVerificationTransition,
+  asVerificationId,
+} from './checkpoints/verifications';
+import {
+  type AddMcpCapabilityInput,
+  type McpAppCapability,
+  type McpAppCapabilityId,
+  type McpAppCapabilityState,
+  McpAppCapabilityState as McpStateEnum,
+  McpAppCapabilitySchema,
+  assertMcpTransition,
+  asMcpAppCapabilityId,
+} from './mcp-app-lifecycle';
 
 // ── Id helpers ────────────────────────────────────────────────────────
 
@@ -65,6 +93,20 @@ export function newSubagentId(): SubagentId {
   return `subagent_${randomIdSegment()}`;
 }
 
+export function newChoiceId(): ChoiceId {
+  return `choice_${randomIdSegment()}`;
+}
+
+export function newVerificationId(): VerificationId {
+  return `verif_${randomIdSegment()}`;
+}
+
+export function newMcpCapabilityId(
+  kind: McpAppCapability['kind'],
+): McpAppCapabilityId {
+  return `mcp_${kind}_${randomIdSegment()}`;
+}
+
 // ── Store ─────────────────────────────────────────────────────────────
 
 /**
@@ -79,6 +121,9 @@ export function emptyStore(installDir: string): OrchestrationStoreFile {
     sessions: [],
     tasks: [],
     subagents: [],
+    choices: [],
+    verifications: [],
+    mcpCapabilities: [],
   };
 }
 
@@ -432,7 +477,347 @@ export class OrchestrationStore {
     }
     return subagents;
   }
+
+  // ── Choices (PR 2) ────────────────────────────────────────────────
+
+  /**
+   * Add a new pending choice. De-dup helper: pass the same `promptId`
+   * twice and the second call returns the existing record without
+   * adding a duplicate. Callers that want a fresh prompt should mark
+   * the prior one `superseded` first.
+   */
+  addChoice(input: AddChoiceInput): Choice {
+    const store = this.read();
+    const existing = store.choices.find(
+      (c) => c.promptId === input.promptId && c.status === ChoiceStatus.Pending,
+    );
+    if (existing) return existing;
+
+    const nowIso = new Date().toISOString();
+    const choice: Choice = ChoiceSchema.parse({
+      id: newChoiceId(),
+      kind: input.kind,
+      promptId: input.promptId,
+      message: input.message,
+      options: input.options,
+      recommendedOptionId: input.recommendedOptionId ?? null,
+      safeDefaultOptionId: input.safeDefaultOptionId ?? null,
+      requiresHuman: input.requiresHuman,
+      automationAllowed: input.automationAllowed,
+      timeoutBehavior: input.timeoutBehavior ?? null,
+      consequenceIfSkipped: input.consequenceIfSkipped,
+      reversible: input.reversible,
+      whyAsking: input.whyAsking,
+      status: ChoiceStatus.Pending,
+      answeredOptionId: null,
+      answeredBy: null,
+      createdAt: nowIso,
+      answeredAt: null,
+      expiresAt: input.expiresAt ?? null,
+      resumeCommand: input.resumeCommand,
+      linkedTaskId: input.linkedTaskId ?? null,
+      linkedSessionId: input.linkedSessionId,
+    });
+    store.choices.push(choice);
+    saveStore(store);
+    return choice;
+  }
+
+  getChoice(id: ChoiceId): Choice | undefined {
+    return this.read().choices.find((c) => c.id === id);
+  }
+
+  listChoices(filter?: {
+    sessionId?: SessionId;
+    status?: Choice['status'] | Choice['status'][];
+    kind?: Choice['kind'] | Choice['kind'][];
+  }): Choice[] {
+    let choices = this.read().choices;
+    if (filter?.sessionId) {
+      choices = choices.filter((c) => c.linkedSessionId === filter.sessionId);
+    }
+    if (filter?.status) {
+      const set = new Set(
+        Array.isArray(filter.status) ? filter.status : [filter.status],
+      );
+      choices = choices.filter((c) => set.has(c.status));
+    }
+    if (filter?.kind) {
+      const set = new Set(
+        Array.isArray(filter.kind) ? filter.kind : [filter.kind],
+      );
+      choices = choices.filter((c) => set.has(c.kind));
+    }
+    return choices;
+  }
+
+  /**
+   * Lookup a pending choice by its stable `promptId`. Used by producers
+   * to avoid creating a duplicate when the same prompt fires twice
+   * (typical for retries).
+   */
+  findPendingChoice(promptId: string): Choice | undefined {
+    return this.read().choices.find(
+      (c) => c.promptId === promptId && c.status === ChoiceStatus.Pending,
+    );
+  }
+
+  /**
+   * Mark a pending choice as `answered`. Throws when the choice is
+   * already terminal or when the option id is unknown.
+   */
+  answerChoice(
+    id: ChoiceId,
+    optionId: string,
+    by: 'human' | 'automation',
+  ): Choice {
+    const store = this.read();
+    const choice = store.choices.find((c) => c.id === id);
+    if (!choice) throw new Error(`Choice ${id} not found`);
+    if (!choice.options.some((o) => o.id === optionId)) {
+      throw new Error(
+        `Choice ${id}: option '${optionId}' not in choice.options.`,
+      );
+    }
+    assertChoiceTransition(choice.id, choice.status, ChoiceStatus.Answered);
+    choice.status = ChoiceStatus.Answered;
+    choice.answeredOptionId = optionId;
+    choice.answeredBy = by;
+    choice.answeredAt = new Date().toISOString();
+    saveStore(store);
+    return choice;
+  }
+
+  /** Generic update hook — re-validates the row before write. */
+  updateChoice(id: ChoiceId, patch: Partial<Choice>): Choice {
+    const store = this.read();
+    const idx = store.choices.findIndex((c) => c.id === id);
+    if (idx < 0) throw new Error(`Choice ${id} not found`);
+    const merged = { ...store.choices[idx], ...patch };
+    if (patch.status && patch.status !== store.choices[idx].status) {
+      assertChoiceTransition(id, store.choices[idx].status, patch.status);
+    }
+    const validated = ChoiceSchema.parse(merged);
+    store.choices[idx] = validated;
+    saveStore(store);
+    return validated;
+  }
+
+  // ── Verifications (PR 2) ──────────────────────────────────────────
+
+  addVerification(input: AddVerificationInput): Verification {
+    const nowIso = new Date().toISOString();
+    const verification: Verification = VerificationSchema.parse({
+      id: newVerificationId(),
+      kind: input.kind,
+      whatToVerify: input.whatToVerify,
+      commandToRun: input.commandToRun ?? [],
+      expectedBehavior: input.expectedBehavior,
+      status: VerificationStatus.Pending,
+      blockingTaskId: input.blockingTaskId ?? null,
+      blockingPRNumber: input.blockingPRNumber ?? null,
+      blockingSessionId: input.blockingSessionId,
+      unblockerHint: input.unblockerHint ?? null,
+      createdAt: nowIso,
+      completedAt: null,
+      resumeCommand: input.resumeCommand,
+    });
+    const store = this.read();
+    store.verifications.push(verification);
+    saveStore(store);
+    return verification;
+  }
+
+  getVerification(id: VerificationId): Verification | undefined {
+    return this.read().verifications.find((v) => v.id === id);
+  }
+
+  listVerifications(filter?: {
+    sessionId?: SessionId;
+    status?: Verification['status'] | Verification['status'][];
+    kind?: Verification['kind'] | Verification['kind'][];
+  }): Verification[] {
+    let verifications = this.read().verifications;
+    if (filter?.sessionId) {
+      verifications = verifications.filter(
+        (v) => v.blockingSessionId === filter.sessionId,
+      );
+    }
+    if (filter?.status) {
+      const set = new Set(
+        Array.isArray(filter.status) ? filter.status : [filter.status],
+      );
+      verifications = verifications.filter((v) => set.has(v.status));
+    }
+    if (filter?.kind) {
+      const set = new Set(
+        Array.isArray(filter.kind) ? filter.kind : [filter.kind],
+      );
+      verifications = verifications.filter((v) => set.has(v.kind));
+    }
+    return verifications;
+  }
+
+  markVerificationStatus(
+    id: VerificationId,
+    status: Verification['status'],
+  ): Verification {
+    const store = this.read();
+    const verification = store.verifications.find((v) => v.id === id);
+    if (!verification) throw new Error(`Verification ${id} not found`);
+    assertVerificationTransition(id, verification.status, status);
+    verification.status = status;
+    if (
+      status === VerificationStatus.Passed ||
+      status === VerificationStatus.Failed ||
+      status === VerificationStatus.Skipped ||
+      status === VerificationStatus.Superseded
+    ) {
+      verification.completedAt = new Date().toISOString();
+    }
+    saveStore(store);
+    return verification;
+  }
+
+  updateVerification(
+    id: VerificationId,
+    patch: Partial<Verification>,
+  ): Verification {
+    const store = this.read();
+    const idx = store.verifications.findIndex((v) => v.id === id);
+    if (idx < 0) throw new Error(`Verification ${id} not found`);
+    const merged = { ...store.verifications[idx], ...patch };
+    if (patch.status && patch.status !== store.verifications[idx].status) {
+      assertVerificationTransition(
+        id,
+        store.verifications[idx].status,
+        patch.status,
+      );
+    }
+    const validated = VerificationSchema.parse(merged);
+    store.verifications[idx] = validated;
+    saveStore(store);
+    return validated;
+  }
+
+  // ── MCP-app capabilities (PR 2) ───────────────────────────────────
+
+  addMcpCapability(input: AddMcpCapabilityInput): McpAppCapability {
+    const nowIso = new Date().toISOString();
+    const capability: McpAppCapability = McpAppCapabilitySchema.parse({
+      id: newMcpCapabilityId(input.kind),
+      kind: input.kind,
+      whyNeeded: input.whyNeeded,
+      whatItEnables: input.whatItEnables,
+      required: input.required,
+      consequenceIfSkipped: input.consequenceIfSkipped,
+      safeToSkip: input.safeToSkip,
+      state: input.initialState ?? McpStateEnum.Available,
+      userDecision: null,
+      userDecisionAt: null,
+      userDecisionResumeCommand: input.userDecisionResumeCommand,
+      reversible: input.reversible,
+      lastStateChangeAt: nowIso,
+      lastStateChangeReason: input.lastStateChangeReason ?? null,
+      linkedTaskId: input.linkedTaskId ?? null,
+      linkedSessionId: input.linkedSessionId,
+    });
+    const store = this.read();
+    store.mcpCapabilities.push(capability);
+    saveStore(store);
+    return capability;
+  }
+
+  getMcpCapability(id: McpAppCapabilityId): McpAppCapability | undefined {
+    return this.read().mcpCapabilities.find((c) => c.id === id);
+  }
+
+  listMcpCapabilities(filter?: {
+    sessionId?: SessionId;
+    state?: McpAppCapabilityState | McpAppCapabilityState[];
+    kind?: McpAppCapability['kind'] | McpAppCapability['kind'][];
+  }): McpAppCapability[] {
+    let capabilities = this.read().mcpCapabilities;
+    if (filter?.sessionId) {
+      capabilities = capabilities.filter(
+        (c) => c.linkedSessionId === filter.sessionId,
+      );
+    }
+    if (filter?.state) {
+      const set = new Set(
+        Array.isArray(filter.state) ? filter.state : [filter.state],
+      );
+      capabilities = capabilities.filter((c) => set.has(c.state));
+    }
+    if (filter?.kind) {
+      const set = new Set(
+        Array.isArray(filter.kind) ? filter.kind : [filter.kind],
+      );
+      capabilities = capabilities.filter((c) => set.has(c.kind));
+    }
+    return capabilities;
+  }
+
+  /**
+   * Transition an MCP capability to a new state. Enforces the
+   * legal-transition matrix AND the anti-nag invariant: re-asking a
+   * previously-skipped capability requires an explicit `reason`.
+   *
+   * `userDecision` and `userDecisionAt` are stamped automatically when
+   * the new state is `installed` or `install_skipped`.
+   */
+  transitionMcpCapability(
+    id: McpAppCapabilityId,
+    newState: McpAppCapabilityState,
+    reason: string | null,
+  ): McpAppCapability {
+    const store = this.read();
+    const capability = store.mcpCapabilities.find((c) => c.id === id);
+    if (!capability) throw new Error(`MCP capability ${id} not found`);
+    assertMcpTransition(id, capability.state, newState, reason);
+    const nowIso = new Date().toISOString();
+    capability.state = newState;
+    capability.lastStateChangeAt = nowIso;
+    capability.lastStateChangeReason = reason;
+    if (newState === McpStateEnum.Installed) {
+      capability.userDecision = 'installed';
+      capability.userDecisionAt = nowIso;
+    } else if (newState === McpStateEnum.InstallSkipped) {
+      capability.userDecision = 'skipped';
+      capability.userDecisionAt = nowIso;
+    } else if (newState === McpStateEnum.NeedsUserChoice) {
+      capability.userDecision = 'pending';
+    }
+    saveStore(store);
+    return capability;
+  }
+
+  updateMcpCapability(
+    id: McpAppCapabilityId,
+    patch: Partial<McpAppCapability>,
+  ): McpAppCapability {
+    const store = this.read();
+    const idx = store.mcpCapabilities.findIndex((c) => c.id === id);
+    if (idx < 0) throw new Error(`MCP capability ${id} not found`);
+    const merged = { ...store.mcpCapabilities[idx], ...patch };
+    if (patch.state && patch.state !== store.mcpCapabilities[idx].state) {
+      assertMcpTransition(
+        id,
+        store.mcpCapabilities[idx].state,
+        patch.state,
+        patch.lastStateChangeReason ?? merged.lastStateChangeReason ?? null,
+      );
+    }
+    const validated = McpAppCapabilitySchema.parse(merged);
+    store.mcpCapabilities[idx] = validated;
+    saveStore(store);
+    return validated;
+  }
 }
+
+// Re-export the typed id constructors so callers can get them from a
+// single place (`OrchestrationStore` is the canonical entry point).
+export { asChoiceId, asVerificationId, asMcpAppCapabilityId };
 
 // ── Singleton accessor ───────────────────────────────────────────────
 
