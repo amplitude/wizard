@@ -281,7 +281,9 @@ function deriveNextAction(args: {
  * snapshot and groups tasks by recency + state.
  *
  * `now` is injectable for testing — tests can pin `Date.now()` so the 24-hour
- * window is deterministic.
+ * window is deterministic. `storeFile` lets a render that already holds a
+ * cached snapshot (e.g. inside `withReadCache`) reuse it instead of triggering
+ * a duplicate disk read.
  *
  * `sessionId`, when provided, scopes the computation to that specific session:
  * the snapshot's session metadata and task buckets are restricted to that
@@ -291,12 +293,17 @@ function deriveNextAction(args: {
  */
 export function computeLastStoppingPoint(
   installDir: string,
-  options?: { now?: number; cliInvocation?: string[]; sessionId?: SessionId },
+  options?: {
+    now?: number;
+    cliInvocation?: string[];
+    storeFile?: import('./state').OrchestrationStoreFile;
+    sessionId?: SessionId;
+  },
 ): LastStoppingPoint {
   const now = options?.now ?? Date.now();
   const cutoff = now - TWENTY_FOUR_HOURS_MS;
   const store = getOrchestrationStore(installDir);
-  const file = store.read();
+  const file = options?.storeFile ?? store.read();
 
   const session = options?.sessionId
     ? file.sessions.find((s) => s.id === options.sessionId) ?? null

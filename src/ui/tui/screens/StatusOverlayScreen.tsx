@@ -89,7 +89,7 @@ export const StatusOverlayScreen = ({ store }: StatusOverlayScreenProps) => {
   const data = useMemo(
     () =>
       withReadCache((cacheKey) => {
-        const status = buildStatusEnvelope({ installDir });
+        const status = buildStatusEnvelope({ installDir, cacheKey });
         const pendingChoices = buildChoicesEnvelope({
           installDir,
           cacheKey,

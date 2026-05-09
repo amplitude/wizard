@@ -1439,22 +1439,33 @@ async function runAgentWizardBody(
         // file artifact to test. We don't have the file count here, but
         // the OutroScreen's `preserveFiles` path implies at least the
         // event-plan apply landed, so a verification is appropriate.
-        orch.addVerification({
+        // Idempotent like the choice above: if AUTH_ERROR fires twice we
+        // don't want a second pending manual_pr_test verification on the
+        // same session — that would surface as a duplicate row in the
+        // ManualVerificationRibbon and `/status` overlay.
+        const existingPrTest = orch.listVerifications({
+          sessionId: orchSession.id,
           kind: 'manual_pr_test',
-          whatToVerify:
-            'Confirm the instrumentation the wizard wrote behaves as expected.',
-          expectedBehavior:
-            'Events show up in Amplitude after a fresh deploy / dev-server restart.',
-          blockingSessionId: orchSession.id,
-          unblockerHint:
-            'After re-running and confirming events ingest, run `wizard verification mark <id> --status passed`.',
-          resumeCommand: [
-            'npx',
-            '@amplitude/wizard',
-            '--install-dir',
-            session.installDir,
-          ],
+          status: 'pending',
         });
+        if (existingPrTest.length === 0) {
+          orch.addVerification({
+            kind: 'manual_pr_test',
+            whatToVerify:
+              'Confirm the instrumentation the wizard wrote behaves as expected.',
+            expectedBehavior:
+              'Events show up in Amplitude after a fresh deploy / dev-server restart.',
+            blockingSessionId: orchSession.id,
+            unblockerHint:
+              'After re-running and confirming events ingest, run `wizard verification mark <id> --status passed`.',
+            resumeCommand: [
+              'npx',
+              '@amplitude/wizard',
+              '--install-dir',
+              session.installDir,
+            ],
+          });
+        }
       }
     } catch (orchErr) {
       logToFile(
