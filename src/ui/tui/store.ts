@@ -701,8 +701,9 @@ export class WizardStore {
     const typedZone = region as 'us' | 'eu';
     void (async () => {
       try {
-        const { readAmpliConfig, writeAmpliConfig } =
-          await import('../../lib/ampli-config.js');
+        const { readAmpliConfig, writeAmpliConfig } = await import(
+          '../../lib/ampli-config.js'
+        );
         const prior = readAmpliConfig(session.installDir);
         if (!prior.ok) return; // no existing binding — nothing to update
         const next = { ...prior.config, Zone: typedZone };
