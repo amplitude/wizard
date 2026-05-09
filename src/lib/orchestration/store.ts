@@ -659,6 +659,29 @@ export class OrchestrationStore {
     return verifications;
   }
 
+  /**
+   * Lookup a pending verification matching `(kind, sessionId)`. Used by
+   * producers that want to supersede a stale pending record before
+   * recording a fresh one — e.g. `confirm_event_plan` re-firing after a
+   * user revised their event plan, where each call previously left a
+   * separate `events_arriving_in_amplitude` row in the outro ribbon.
+   *
+   * Returns `undefined` when no match exists. Callers that find a hit
+   * are expected to mark it `superseded` via `markVerificationStatus`
+   * before calling `addVerification` for the replacement.
+   */
+  findPendingVerification(
+    kind: Verification['kind'],
+    sessionId: SessionId,
+  ): Verification | undefined {
+    return this.read().verifications.find(
+      (v) =>
+        v.kind === kind &&
+        v.blockingSessionId === sessionId &&
+        v.status === VerificationStatus.Pending,
+    );
+  }
+
   markVerificationStatus(
     id: VerificationId,
     status: Verification['status'],

@@ -39,6 +39,10 @@ import { getOrchestrationStore } from './store';
 import type { Choice, ChoiceId, ChoiceKind } from './checkpoints/choices';
 import { asChoiceId } from './checkpoints/choices';
 import type { VerificationKind } from './checkpoints/verifications';
+import {
+  VerificationStatus,
+  asVerificationId,
+} from './checkpoints/verifications';
 
 /**
  * Default resume command stamped on every wired record. Tests override
@@ -530,6 +534,21 @@ export function recordDataIngestionVerification(
 ): string | null {
   const { installDir, approvedEventCount } = opts;
   return withMirror(installDir, 'data_ingestion', (store, sessionId) => {
+    // Supersede any prior pending `events_arriving_in_amplitude`
+    // verification for this session before recording the fresh one.
+    // Without this, a user revising their event plan (e.g. 13 → 10
+    // events) leaves both records pending and the outro ribbon shows
+    // two manual-verification rows for the same session.
+    const prior = store.findPendingVerification(
+      'events_arriving_in_amplitude',
+      sessionId as `session_${string}`,
+    );
+    if (prior) {
+      store.markVerificationStatus(
+        asVerificationId(prior.id),
+        VerificationStatus.Superseded,
+      );
+    }
     const verification = store.addVerification({
       kind: 'events_arriving_in_amplitude',
       whatToVerify: `Confirm Amplitude is receiving the ${approvedEventCount} approved event(s).`,

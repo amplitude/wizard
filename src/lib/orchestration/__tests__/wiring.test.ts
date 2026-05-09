@@ -337,3 +337,68 @@ describe('verification mark-passed wiring contract', () => {
     expect(after!.status).toBe(VerificationStatus.Passed);
   });
 });
+
+describe('events_arriving_in_amplitude dedup on re-confirmation', () => {
+  it('supersedes the prior pending verification when re-recorded for the same session', () => {
+    seed();
+    // Initial 13-event plan.
+    const firstId = recordDataIngestionVerification({
+      installDir,
+      approvedEventCount: 13,
+    });
+    // User revised to a 10-event plan and `confirm_event_plan` fired
+    // again. Only the latest should remain pending.
+    const secondId = recordDataIngestionVerification({
+      installDir,
+      approvedEventCount: 10,
+    });
+    expect(firstId).not.toBeNull();
+    expect(secondId).not.toBeNull();
+    expect(secondId).not.toBe(firstId);
+
+    const store = getOrchestrationStore(installDir);
+    const all = store.listVerifications({
+      kind: 'events_arriving_in_amplitude',
+    });
+    expect(all).toHaveLength(2);
+
+    const first = all.find((v) => v.id === firstId)!;
+    const second = all.find((v) => v.id === secondId)!;
+    expect(first.status).toBe(VerificationStatus.Superseded);
+    expect(second.status).toBe(VerificationStatus.Pending);
+    expect(second.whatToVerify).toContain('10 approved event');
+
+    const pending = store.listVerifications({
+      kind: 'events_arriving_in_amplitude',
+      status: VerificationStatus.Pending,
+    });
+    expect(pending).toHaveLength(1);
+    expect(pending[0].id).toBe(secondId);
+  });
+
+  it('findPendingVerification returns the active row and ignores superseded ones', () => {
+    seed();
+    const store = getOrchestrationStore(installDir);
+    const session = store.currentSession()!;
+
+    recordDataIngestionVerification({ installDir, approvedEventCount: 5 });
+    recordDataIngestionVerification({ installDir, approvedEventCount: 7 });
+
+    const found = store.findPendingVerification(
+      'events_arriving_in_amplitude',
+      session.id,
+    );
+    expect(found).toBeDefined();
+    expect(found!.status).toBe(VerificationStatus.Pending);
+    expect(found!.whatToVerify).toContain('7 approved event');
+  });
+
+  it('returns undefined from findPendingVerification when no match exists', () => {
+    seed();
+    const store = getOrchestrationStore(installDir);
+    const session = store.currentSession()!;
+    expect(
+      store.findPendingVerification('events_arriving_in_amplitude', session.id),
+    ).toBeUndefined();
+  });
+});

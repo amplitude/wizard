@@ -2040,44 +2040,21 @@ Returns: "approved", "skipped", or "feedback: <user message>"`,
           `confirm_event_plan: persist=${persisted} events=${events.length}`,
         );
 
-        // PR 2 wiring beachhead: record a manual `events_arriving_in_amplitude`
-        // verification on approval so `wizard verification list` and the
+        // Record a manual `events_arriving_in_amplitude` verification on
+        // approval so `wizard verification list` and the
         // `LastStoppingPoint.pendingManualVerifications` array carry a
-        // real record once the user okays the plan. The actual ingestion
-        // check (and the verification's eventual `mark passed`) lives in
-        // PR 3 — for now PR 2 just proves the state machine reaches real
-        // code from the existing confirm-flow without changing the flow.
+        // real record once the user okays the plan. Routed through the
+        // wiring helper so a re-confirmation (e.g. user revised the plan
+        // from 13 → 10 events) supersedes the prior pending row instead
+        // of stacking a duplicate in the outro ribbon.
         try {
-          const { getOrchestrationStore } = await import(
-            './orchestration/store.js'
+          const { recordDataIngestionVerification } = await import(
+            './orchestration/wiring.js'
           );
-          const store = getOrchestrationStore(workingDirectory);
-          const session = store.currentSession();
-          if (session) {
-            store.addVerification({
-              kind: 'events_arriving_in_amplitude',
-              whatToVerify:
-                `Confirm Amplitude is receiving the ${events.length} approved ` +
-                `event(s) once the app emits them.`,
-              expectedBehavior:
-                'In Amplitude, the events show up in the Live Event Stream within ' +
-                'a minute of being fired client-side. None are blocked by ingestion ' +
-                'filters.',
-              commandToRun: [],
-              blockingSessionId: session.id,
-              unblockerHint:
-                'If events do not arrive: re-check the API key, run `wizard verify`, ' +
-                'and inspect the Live Event Stream filter chips for unintended drops.',
-              resumeCommand: [
-                'wizard',
-                'verification',
-                'mark',
-                '<id>',
-                '--status',
-                'passed',
-              ],
-            });
-          }
+          recordDataIngestionVerification({
+            installDir: workingDirectory,
+            approvedEventCount: events.length,
+          });
         } catch (err) {
           // Non-fatal: orchestration mirroring must never break the
           // user-visible event-plan flow.

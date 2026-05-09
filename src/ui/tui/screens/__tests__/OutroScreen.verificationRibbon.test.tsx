@@ -24,7 +24,10 @@ import {
   getOrchestrationStore,
   _resetOrchestrationStoreCache,
 } from '../../../../lib/orchestration/store.js';
-import { VerificationKind } from '../../../../lib/orchestration/checkpoints/verifications.js';
+import {
+  VerificationKind,
+  VerificationStatus,
+} from '../../../../lib/orchestration/checkpoints/verifications.js';
 
 let tmpDir: string;
 
@@ -60,7 +63,9 @@ describe('OutroScreen — pending manual verification ribbon', () => {
     const { frame } = renderSnapshot(<OutroScreen store={store} />, store);
 
     expect(frame).toContain('Manual verification pending');
-    expect(frame).toContain('Open the PR and verify the wizard charts populate');
+    expect(frame).toContain(
+      'Open the PR and verify the wizard charts populate',
+    );
   });
 
   it('renders nothing extra when the store has no pending verifications', () => {
@@ -74,6 +79,44 @@ describe('OutroScreen — pending manual verification ribbon', () => {
     const { frame } = renderSnapshot(<OutroScreen store={store} />, store);
 
     expect(frame).not.toContain('Manual verification pending');
+  });
+
+  it('renders only the pending verification when a superseded one exists for the same kind', () => {
+    // Regression for the events_arriving_in_amplitude dedup bug — a user
+    // revising the event plan re-fires `confirm_event_plan`, which used
+    // to leave both verifications pending and surface two ribbon rows.
+    // After the fix the prior is superseded and only the latest renders.
+    const orch = getOrchestrationStore(tmpDir);
+    const session = orch.createSession({ goal: 'Test' });
+    const stale = orch.addVerification({
+      kind: VerificationKind.EventsArrivingInAmplitude,
+      whatToVerify: 'Confirm Amplitude is receiving the 13 approved event(s).',
+      expectedBehavior: 'Events arrive in the Live Event Stream.',
+      blockingSessionId: session.id,
+      resumeCommand: ['x'],
+    });
+    orch.markVerificationStatus(
+      stale.id as `verif_${string}`,
+      VerificationStatus.Superseded,
+    );
+    orch.addVerification({
+      kind: VerificationKind.EventsArrivingInAmplitude,
+      whatToVerify: 'Confirm Amplitude is receiving the 10 approved event(s).',
+      expectedBehavior: 'Events arrive in the Live Event Stream.',
+      blockingSessionId: session.id,
+      resumeCommand: ['x'],
+    });
+
+    const store = makeStoreForSnapshot({
+      installDir: tmpDir,
+      outroData: { kind: OutroKind.Success, changes: [] },
+    });
+    const { frame } = renderSnapshot(<OutroScreen store={store} />, store);
+
+    expect(frame).toContain('Manual verification pending');
+    expect(frame).toContain('10 approved event');
+    // The superseded 13-event row must not appear.
+    expect(frame).not.toContain('13 approved event');
   });
 
   it('truncates with "+N more" when there are many pending verifications', () => {
