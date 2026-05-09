@@ -35,6 +35,12 @@ import * as fs from 'node:fs';
 import * as path from 'node:path';
 
 import { parseEnvKeys } from '../wizard-tools.js';
+import {
+  detectProjectSize,
+  resolveThresholds,
+  shouldUseJitMode,
+  type ProjectSizeReport,
+} from './project-size.js';
 
 import type { Integration } from '../constants.js';
 import type { PackageManagerInfo } from '../package-manager-detection-types.js';
@@ -97,6 +103,25 @@ export interface PreflightContextInput {
   projectBound: boolean;
   /** Raw arbitrary k/v from per-framework setup screens. Stringified verbatim. */
   frameworkContext?: Record<string, unknown>;
+  /**
+   * Optional pre-computed project-size report. When present, it gates the
+   * pre-flight block: large projects (file count > threshold OR event count
+   * > threshold) get a short JIT-exploration prompt instead of the full
+   * Markdown summary, which would otherwise burn attention budget the
+   * agent should be spending on `read_file` / `grep` exploration.
+   *
+   * When absent, `buildPreflightContext` runs the detection itself under
+   * the default 5s wall-clock cap. Tests and the agent-runner wiring both
+   * pre-compute the report so the call site can log the numbers.
+   */
+  projectSize?: ProjectSizeReport;
+  /**
+   * Optional override for `process.env`. Tests pass a synthetic env so
+   * threshold tuning via `AMPLITUDE_WIZARD_PREFLIGHT_FILE_THRESHOLD` /
+   * `AMPLITUDE_WIZARD_PREFLIGHT_EVENT_THRESHOLD` can be exercised without
+   * mutating real-world environment.
+   */
+  env?: NodeJS.ProcessEnv;
 }
 
 interface EnvFileSnapshot {
@@ -278,15 +303,104 @@ function renderEnvironment(installDir: string): string {
 }
 
 /**
+ * Render the just-in-time exploration block used for medium-and-up
+ * codebases. The structured pre-flight summary is intentionally suppressed
+ * here — Anthropic's guidance is that the model spends attention better
+ * on `read_file` / `grep` / discovery tools as it actually needs the
+ * information. We still emit a stable H1 header and a short "you are in
+ * a large project" preamble so the agent has something concrete to anchor
+ * on instead of silently falling back to its own probing pattern.
+ */
+function buildJitContextBlock(
+  input: PreflightContextInput,
+  size: ProjectSizeReport,
+): string {
+  const header = '# Pre-flight context (large project — load on demand)';
+  const counts = describeProjectSize(size);
+  const project = renderProject(input);
+  const amplitude = renderAmplitude(input);
+  const guidance =
+    `> This project is large (${counts}). Use \`read_file\`, \`grep\`, ` +
+    "and the wizard's discovery tools (`detect_package_manager`, " +
+    '`check_env_keys`, `Glob`) **just-in-time** as you need information — ' +
+    "don't try to load everything upfront. Loading the full project map " +
+    "into the prompt would burn attention budget that's better spent on " +
+    'the specific files you actually have to edit. The Project / Amplitude ' +
+    'blocks above cover the values the wizard has cached; the rest of the ' +
+    'codebase is yours to explore on demand.';
+  return [header, project, amplitude, guidance].join('\n\n') + '\n';
+}
+
+function describeProjectSize(size: ProjectSizeReport): string {
+  const parts: string[] = [];
+  // `timedOut` (wall-clock cap) and `capHit` (file-count cap) both yield
+  // a partial count — annotate accordingly so the LLM knows the number is
+  // a lower bound. `capHit` is the more common case in practice.
+  if (size.timedOut || size.capHit) {
+    parts.push(`${size.fileCount}+ files (scan capped)`);
+  } else {
+    parts.push(`${size.fileCount} files`);
+  }
+  if (size.eventCount > 0) {
+    parts.push(`${size.eventCount} confirmed events`);
+  }
+  return parts.join(' / ');
+}
+
+/**
+ * Result of `buildPreflightContext`. Returns the rendered Markdown plus
+ * the gate decision so callers (most notably `agent-runner.ts`) can log
+ * the authoritative mode without recomputing thresholds — that previously
+ * created a divergence risk between the gate and the diagnostic line.
+ */
+export interface PreflightContextResult {
+  /** Markdown block to prepend to the integration prompt. */
+  prompt: string;
+  /** True when the JIT mode block was rendered (large project). */
+  jitMode: boolean;
+  /** Project-size report used to make the gate decision. */
+  projectSize: ProjectSizeReport;
+  /** Resolved thresholds from env vars (or defaults). */
+  thresholds: { fileThreshold: number; eventThreshold: number };
+}
+
+/**
  * Build the pre-flight context block. Always returns a non-empty Markdown
- * string with a stable header; callers can prepend it to the integration
+ * string with a stable H1 header; callers can prepend it to the integration
  * prompt unconditionally.
  *
- * The block is wrapped in a `# Pre-flight context (...)` H1 the agent can
- * recognize from the matching commandment, and ends with a one-line
- * reminder that the discovery tools are still available for verification.
+ * Two modes:
+ *
+ *  1. **Full pre-flight** (default for small / unknown-size projects).
+ *     Renders Project / Amplitude state / Environment sections so the
+ *     agent skips the cold-start probe entirely. This is the PR #600
+ *     behavior.
+ *
+ *  2. **JIT mode** (medium-and-up projects, gated on file/event count).
+ *     Renders the Project / Amplitude blocks but replaces the Environment
+ *     dump and the "do not probe" footer with a short instruction telling
+ *     the agent to load context on demand. Trades the cold-start probe
+ *     win for attention-budget headroom on large codebases.
+ *
+ * The mode decision uses `input.projectSize` if supplied; otherwise the
+ * helper runs `detectProjectSize` itself with the default 5s cap.
  */
-export function buildPreflightContext(input: PreflightContextInput): string {
+export async function buildPreflightContext(
+  input: PreflightContextInput,
+): Promise<PreflightContextResult> {
+  const size = input.projectSize ?? (await detectProjectSize(input.installDir));
+  const thresholds = resolveThresholds(input.env ?? process.env);
+  const jitMode = shouldUseJitMode(size, thresholds);
+
+  if (jitMode) {
+    return {
+      prompt: buildJitContextBlock(input, size),
+      jitMode: true,
+      projectSize: size,
+      thresholds,
+    };
+  }
+
   const sections = [
     renderProject(input),
     renderAmplitude(input),
@@ -299,5 +413,10 @@ export function buildPreflightContext(input: PreflightContextInput): string {
     '`detect_package_manager`, `check_env_keys`, or other discovery tools ' +
     'on the very first turn just to re-derive them. Those tools remain ' +
     'available later if you need to verify a value the user just changed.';
-  return [header, ...sections, footer].join('\n\n') + '\n';
+  return {
+    prompt: [header, ...sections, footer].join('\n\n') + '\n',
+    jitMode: false,
+    projectSize: size,
+    thresholds,
+  };
 }
