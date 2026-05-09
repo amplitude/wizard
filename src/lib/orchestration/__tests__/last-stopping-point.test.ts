@@ -172,6 +172,76 @@ describe('computeLastStoppingPoint — populated store', () => {
     expect(lsp.nextAction.description).toContain('review A plan');
   });
 
+  it('surfaces a pending Choice into pendingChoices and nextAction', async () => {
+    const { ChoiceKind } = await import('../checkpoints/choices');
+    const store = new OrchestrationStore(installDir);
+    const session = store.createSession({});
+    store.addChoice({
+      kind: ChoiceKind.EnvironmentSelection,
+      promptId: 'env_selection:case1',
+      message: 'Pick an environment',
+      options: [{ id: 'prod', label: 'Production' }],
+      recommendedOptionId: 'prod',
+      safeDefaultOptionId: 'prod',
+      requiresHuman: true,
+      automationAllowed: false,
+      timeoutBehavior: null,
+      consequenceIfSkipped: 'no env',
+      reversible: true,
+      whyAsking: 'multiple envs',
+      resumeCommand: ['wizard'],
+      linkedSessionId: session.id,
+    });
+    const lsp = computeLastStoppingPoint(installDir, { now: NOW });
+    expect(lsp.pendingChoices).toHaveLength(1);
+    expect(lsp.pendingChoices[0]!.kind).toBe('environment_selection');
+    expect(lsp.nextAction.kind).toBe('await_user_choice');
+  });
+
+  it('surfaces pending Verifications into pendingManualVerifications', async () => {
+    const { VerificationKind } = await import('../checkpoints/verifications');
+    const store = new OrchestrationStore(installDir);
+    const session = store.createSession({});
+    store.addVerification({
+      kind: VerificationKind.EventsArrivingInAmplitude,
+      whatToVerify: 'events arrive',
+      expectedBehavior: 'live stream shows them',
+      blockingSessionId: session.id,
+      resumeCommand: [],
+    });
+    const lsp = computeLastStoppingPoint(installDir, { now: NOW });
+    expect(lsp.pendingManualVerifications).toHaveLength(1);
+    expect(lsp.nextAction.kind).toBe('await_verification');
+  });
+
+  it('surfaces NeedsUserChoice mcp capabilities into pendingMcpActions', async () => {
+    const { McpAppCapabilityKind, McpAppCapabilityState } = await import(
+      '../mcp-app-lifecycle'
+    );
+    const store = new OrchestrationStore(installDir);
+    const session = store.createSession({});
+    const cap = store.addMcpCapability({
+      kind: McpAppCapabilityKind.ClaudeCodeInstall,
+      whyNeeded: 'editor MCP',
+      whatItEnables: 'editor calls wizard',
+      required: false,
+      consequenceIfSkipped: 'editor cannot call wizard',
+      safeToSkip: true,
+      reversible: true,
+      userDecisionResumeCommand: ['wizard'],
+      linkedSessionId: session.id,
+    });
+    const { asMcpAppCapabilityId } = await import('../mcp-app-lifecycle');
+    store.transitionMcpCapability(
+      asMcpAppCapabilityId(cap.id),
+      McpAppCapabilityState.NeedsUserChoice,
+      'reached install screen',
+    );
+    const lsp = computeLastStoppingPoint(installDir, { now: NOW });
+    expect(lsp.pendingMcpActions).toHaveLength(1);
+    expect(lsp.nextAction.kind).toBe('await_mcp_action');
+  });
+
   it('aggregates ownership across active + recently-stopped tasks', () => {
     const store = new OrchestrationStore(installDir);
     const session = store.createSession({});

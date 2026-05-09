@@ -17,16 +17,14 @@ import { TaskLifecycle } from './lifecycle';
 import { ORCHESTRATION_STORE_VERSION } from './state';
 
 // ── ID schemas ───────────────────────────────────────────────────────
+//
+// The id regexes live in `./id-schemas` so the `checkpoints/*` and
+// `mcp-app-lifecycle.ts` modules can import them without forming a
+// cycle through this file. Re-exported here so callers that go through
+// the schemas barrel keep working.
 
-export const SessionIdSchema = z
-  .string()
-  .regex(/^session_[A-Za-z0-9_-]+$/, 'expected session_<id>');
-export const TaskIdSchema = z
-  .string()
-  .regex(/^task_[A-Za-z0-9_-]+$/, 'expected task_<id>');
-export const SubagentIdSchema = z
-  .string()
-  .regex(/^subagent_[A-Za-z0-9_-]+$/, 'expected subagent_<id>');
+export { SessionIdSchema, TaskIdSchema, SubagentIdSchema } from './id-schemas';
+import { SessionIdSchema, TaskIdSchema, SubagentIdSchema } from './id-schemas';
 
 // ── Lifecycle ────────────────────────────────────────────────────────
 
@@ -191,6 +189,54 @@ export const LastStoppingPointSchema = z.object({
   resumeCommand: z.string(),
 });
 
+// ── Checkpoint + MCP-app lifecycle re-exports ────────────────────────
+//
+// Re-exported from this module so consumers can import the full
+// orchestration I/O surface from a single place. The transition
+// validators (`assertChoiceTransition`, `assertVerificationTransition`,
+// `assertMcpTransition`) live in their respective modules and are
+// re-exported through `index.ts`.
+
+import {
+  ChoiceSchema,
+  ChoiceKindSchema,
+  ChoiceStatusSchema,
+  ChoiceOptionSchema,
+  TimeoutBehaviorSchema,
+  ChoiceIdSchema,
+} from './checkpoints/choices';
+import {
+  VerificationSchema,
+  VerificationKindSchema,
+  VerificationStatusSchema,
+  VerificationIdSchema,
+} from './checkpoints/verifications';
+import {
+  McpAppCapabilitySchema,
+  McpAppCapabilityKindSchema,
+  McpAppCapabilityStateSchema,
+  McpUserDecisionSchema,
+  McpAppCapabilityIdSchema,
+} from './mcp-app-lifecycle';
+
+export {
+  ChoiceSchema,
+  ChoiceKindSchema,
+  ChoiceStatusSchema,
+  ChoiceOptionSchema,
+  TimeoutBehaviorSchema,
+  ChoiceIdSchema,
+  VerificationSchema,
+  VerificationKindSchema,
+  VerificationStatusSchema,
+  VerificationIdSchema,
+  McpAppCapabilitySchema,
+  McpAppCapabilityKindSchema,
+  McpAppCapabilityStateSchema,
+  McpUserDecisionSchema,
+  McpAppCapabilityIdSchema,
+};
+
 // ── Store envelope ────────────────────────────────────────────────────
 
 export const OrchestrationStoreFileSchema = z.object({
@@ -200,6 +246,15 @@ export const OrchestrationStoreFileSchema = z.object({
   sessions: z.array(SessionSchema),
   tasks: z.array(TaskSchema),
   subagents: z.array(SubagentSchema),
+  /**
+   * PR 2 additions. Optional in the schema (default to empty array on
+   * read) so an on-disk file written by the PR 1 binary still parses
+   * cleanly — the version literal stays at 1 because the additions are
+   * read-time backwards-compatible (older readers ignore the fields).
+   */
+  choices: z.array(ChoiceSchema).default([]),
+  verifications: z.array(VerificationSchema).default([]),
+  mcpCapabilities: z.array(McpAppCapabilitySchema).default([]),
 });
 
 // ── CLI envelope schemas ─────────────────────────────────────────────
@@ -267,6 +322,56 @@ export const ResumeEnvelopeSchema = z.object({
   executed: z.boolean(),
 });
 
+// ── PR 2: choice / verification / mcp-capability envelopes ──────────
+
+export const ChoicesEnvelopeSchema = z.object({
+  v: z.literal(1),
+  type: z.literal('orchestration_choices'),
+  generatedAt: z.string(),
+  installDir: z.string(),
+  choices: z.array(ChoiceSchema),
+});
+
+export const ChoiceEnvelopeSchema = z.object({
+  v: z.literal(1),
+  type: z.literal('orchestration_choice'),
+  generatedAt: z.string(),
+  installDir: z.string(),
+  choice: ChoiceSchema,
+});
+
+export const ChoiceAnswerEnvelopeSchema = z.object({
+  v: z.literal(1),
+  type: z.literal('orchestration_choice_answer'),
+  generatedAt: z.string(),
+  installDir: z.string(),
+  choice: ChoiceSchema,
+});
+
+export const VerificationsEnvelopeSchema = z.object({
+  v: z.literal(1),
+  type: z.literal('orchestration_verifications'),
+  generatedAt: z.string(),
+  installDir: z.string(),
+  verifications: z.array(VerificationSchema),
+});
+
+export const VerificationEnvelopeSchema = z.object({
+  v: z.literal(1),
+  type: z.literal('orchestration_verification'),
+  generatedAt: z.string(),
+  installDir: z.string(),
+  verification: VerificationSchema,
+});
+
+export const VerificationMarkEnvelopeSchema = z.object({
+  v: z.literal(1),
+  type: z.literal('orchestration_verification_mark'),
+  generatedAt: z.string(),
+  installDir: z.string(),
+  verification: VerificationSchema,
+});
+
 // ── Inferred types — runtime checks should use `.parse()` ─────────────
 
 export type ZodTask = z.infer<typeof TaskSchema>;
@@ -283,3 +388,17 @@ export type ZodTaskEnvelope = z.infer<typeof TaskEnvelopeSchema>;
 export type ZodSessionsEnvelope = z.infer<typeof SessionsEnvelopeSchema>;
 export type ZodSessionEnvelope = z.infer<typeof SessionEnvelopeSchema>;
 export type ZodResumeEnvelope = z.infer<typeof ResumeEnvelopeSchema>;
+export type ZodChoicesEnvelope = z.infer<typeof ChoicesEnvelopeSchema>;
+export type ZodChoiceEnvelope = z.infer<typeof ChoiceEnvelopeSchema>;
+export type ZodChoiceAnswerEnvelope = z.infer<
+  typeof ChoiceAnswerEnvelopeSchema
+>;
+export type ZodVerificationsEnvelope = z.infer<
+  typeof VerificationsEnvelopeSchema
+>;
+export type ZodVerificationEnvelope = z.infer<
+  typeof VerificationEnvelopeSchema
+>;
+export type ZodVerificationMarkEnvelope = z.infer<
+  typeof VerificationMarkEnvelopeSchema
+>;

@@ -459,6 +459,66 @@ export const resolveNonInteractiveCredentials = async (
       // If the orchestrator provides an unknown appId, promptEnvironmentSelection
       // THROWS rather than silently picking a random env — we route that to
       // env_selection_failed with the mismatch message in the instruction.
+      //
+      // PR 2 wiring beachhead: also record an `environment_selection`
+      // Choice in the orchestration store so `wizard choice list` and
+      // the `LastStoppingPoint.pendingChoices` array carry a real record
+      // tied to the same prompt the agent emits. The Choice is marked
+      // `answered` immediately after `promptEnvironmentSelection`
+      // returns so the lifecycle is end-to-end visible. Failures in the
+      // mirror MUST NOT break the existing env-selection flow.
+      const allChoiceOptions = session.pendingOrgs.flatMap((org) =>
+        org.projects.flatMap((proj) =>
+          (proj.environments ?? [])
+            .filter((e) => e.app?.apiKey)
+            .map((e) => ({
+              id: String(e.app?.id ?? `${org.id}:${proj.id}:${e.name}`),
+              label: `${org.name} / ${proj.name} / ${e.name}`,
+              description: `Send events to ${org.name} > ${proj.name} > ${e.name}`,
+            })),
+        ),
+      );
+      const recommendedOptionId = allChoiceOptions[0]?.id ?? null;
+      const promptId = `environment_selection:${session.installDir}`;
+      let mirroredChoiceId: string | null = null;
+      try {
+        const { getOrchestrationStore } = await import(
+          '../lib/orchestration/store.js'
+        );
+        const store = getOrchestrationStore(session.installDir);
+        const sess = store.currentSession();
+        if (sess && allChoiceOptions.length > 0) {
+          const recorded = store.addChoice({
+            kind: 'environment_selection',
+            promptId,
+            message: `Select an Amplitude environment to send events to.`,
+            options: allChoiceOptions,
+            recommendedOptionId,
+            safeDefaultOptionId: recommendedOptionId,
+            requiresHuman: true,
+            automationAllowed: false,
+            timeoutBehavior: null,
+            consequenceIfSkipped:
+              'Without an environment, the wizard cannot persist an API key or ' +
+              'instrument any events.',
+            reversible: true,
+            whyAsking:
+              'Multiple environments are available — wizard cannot infer which ' +
+              'project the user wants to write to.',
+            resumeCommand: [...CLI_INVOCATION.split(' '), '--agent'],
+            linkedTaskId: null,
+            linkedSessionId: sess.id,
+          });
+          mirroredChoiceId = recorded.id;
+        }
+      } catch (err) {
+        getUI().log.warn(
+          `[orchestration] env-selection mirror failed: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+      }
+
       let selection: Awaited<
         ReturnType<(typeof agentUI)['promptEnvironmentSelection']>
       >;
@@ -466,6 +526,31 @@ export const resolveNonInteractiveCredentials = async (
         selection = await agentUI.promptEnvironmentSelection(
           session.pendingOrgs,
         );
+        // Mark the mirrored choice as answered with the picked appId.
+        if (mirroredChoiceId) {
+          try {
+            const { getOrchestrationStore } = await import(
+              '../lib/orchestration/store.js'
+            );
+            const { asChoiceId } = await import(
+              '../lib/orchestration/checkpoints/choices.js'
+            );
+            const store = getOrchestrationStore(session.installDir);
+            // Look up the picked option id by matching env triple.
+            const pickedOption = allChoiceOptions.find((o) =>
+              o.label.endsWith(`/ ${selection.env}`),
+            );
+            if (pickedOption) {
+              store.answerChoice(
+                asChoiceId(mirroredChoiceId),
+                pickedOption.id,
+                'human',
+              );
+            }
+          } catch {
+            // mirror-only — never break the flow.
+          }
+        }
       } catch (err) {
         const detail = err instanceof Error ? err.message : String(err);
         agentUI.emitAuthRequired({

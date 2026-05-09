@@ -29,3 +29,5 @@ export {
   resumeCommand,
   orchestrationCommand,
 } from './orchestration';
+export { choiceCommand } from './choice';
+export { verificationCommand } from './verification';

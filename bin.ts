@@ -163,6 +163,8 @@ import {
   sessionCommand,
   resumeCommand,
   orchestrationCommand,
+  choiceCommand,
+  verificationCommand,
 } from './src/commands';
 
 // ── Observability bootstrap ─────────────────────────────────────────
@@ -672,6 +674,8 @@ void yargs(hideBin(process.argv))
   .command(sessionCommand)
   .command(resumeCommand)
   .command(orchestrationCommand)
+  .command(choiceCommand)
+  .command(verificationCommand)
   .example('$0', 'Run the interactive setup wizard')
   .example('$0 --ci --install-dir .', 'Run in CI mode (OAuth + auto-select)')
   .example(

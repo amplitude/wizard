@@ -173,6 +173,8 @@ npx @amplitude/wizard auth token            # stdout: <access-token>
 | `session <id> [--json]` | JSON or human | Inspect a session and its tasks |
 | `resume <session-id> [--json]` | JSON or human | Print (or run with `--execute`) the resume command for a session |
 | `orchestration status [--json]` | JSON or human | Print the durable orchestration store's last-stopping-point snapshot. See [`docs/orchestration.md`](./docs/orchestration.md) |
+| `choice list/show/answer [--json]` | JSON or human | Inspect typed user-choice checkpoints and answer them; `answer` enforces the `requiresHuman` automation gate via `--confirm-human`. See [`docs/orchestration.md`](./docs/orchestration.md) |
+| `verification list/show/mark [--json]` | JSON or human | Inspect manual-verification checkpoints and mark them passed/failed/skipped. See [`docs/orchestration.md`](./docs/orchestration.md) |
 
 All commands auto-emit JSON when stdout is piped. Use `--human` to override
 and force human-readable output. `--json` enables JSON output without the
