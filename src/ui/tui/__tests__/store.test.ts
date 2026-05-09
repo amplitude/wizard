@@ -49,6 +49,29 @@ vi.mock('../../../utils/analytics.js', () => ({
   sessionPropertiesCompact: vi.fn(() => ({})),
 }));
 
+// `store.changeInstallDir` calls `setProjectLogFile` so the structured
+// logger follows the active project's run dir. The unit tests below
+// don't exercise the logger contract; mock the function so the test
+// suite doesn't ensureDir/touch real paths under `/tmp/...` while
+// asserting state-reset semantics. The dedicated logger test
+// (logger.test.ts) covers the path-routing contract end-to-end.
+//
+// `vi.hoisted` is required because `vi.mock` is hoisted to the top of
+// the file, so the mock factory cannot close over a `const` declared
+// in the test module's normal evaluation order.
+const { setProjectLogFileMock } = vi.hoisted(() => ({
+  setProjectLogFileMock: vi.fn(),
+}));
+vi.mock('../../../lib/observability/index.js', async () => {
+  const actual = await vi.importActual<
+    typeof import('../../../lib/observability/index.js')
+  >('../../../lib/observability/index.js');
+  return {
+    ...actual,
+    setProjectLogFile: setProjectLogFileMock,
+  };
+});
+
 vi.mock('../../../utils/api-key-store.js', () => ({
   clearApiKey: vi.fn(),
   persistApiKey: vi.fn(),
@@ -2543,6 +2566,21 @@ describe('WizardStore', () => {
       expect(initialController.signal.aborted).toBe(false);
       store.changeInstallDir('/tmp/swap-during-initial-scan');
       expect(initialController.signal.aborted).toBe(true);
+    });
+
+    // Regression: when the user changes installDir mid-session (via the
+    // IntroScreen DirectoryPicker), the structured logger must follow
+    // — otherwise `~/.amplitude/wizard/runs/<hash>/log.txt` resolves to
+    // a different path for every session.installDir-derived consumer
+    // (LogViewer in RunScreen, /diagnostics, debug-snapshot) than the
+    // logger writes to, and the TUI's "Logs" tab tails an empty file
+    // forever. The dedicated logger test pins the path-routing
+    // contract; this test pins the call-site contract.
+    it('reroutes the structured logger to the new installDir', () => {
+      const store = createStore();
+      setProjectLogFileMock.mockClear();
+      store.changeInstallDir('/tmp/new-project');
+      expect(setProjectLogFileMock).toHaveBeenCalledWith('/tmp/new-project');
     });
 
     // Regression: bugbot Issue #4.

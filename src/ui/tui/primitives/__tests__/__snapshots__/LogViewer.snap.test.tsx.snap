@@ -32,8 +32,6 @@ exports[`LogViewer snapshots > renders the missing-log fallback state 1`] = `
     2
     3 path: <TEMP>/missing.log
     4 (file is created the first time the agent flushes a log line)
-
-
  Selected: Waiting for the agent to start writing logs…
  ↑↓/jk scroll · h/l pan · ←→ tabs · f follow · g/G top/bottom · 0 reset
  New logs keep appending in inspect mode; \`f\` jumps back to the live tail."
