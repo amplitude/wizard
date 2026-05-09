@@ -5,7 +5,7 @@
  */
 
 import { Box, Text } from 'ink';
-import { Colors, Icons } from '../styles.js';
+import { Colors, Icons, Layout } from '../styles.js';
 import { brandGradient } from '../utils/terminal-rendering.js';
 
 const HEADER_TITLE = brandGradient('Amplitude Wizard');
@@ -30,7 +30,12 @@ export const HeaderBar = ({
   const context = contextParts.join(' / ');
 
   return (
-    <Box width={width} paddingX={1}>
+    // Use the shared `Layout.paddingX` token so the header aligns with
+    // the screen content area (also at `Layout.paddingX`). Hard-coding
+    // paddingX=1 here while content lived at Layout.paddingX=2 produced
+    // the visible "headers hug the edge, content shifted right" gap
+    // users called out.
+    <Box width={width} paddingX={Layout.paddingX}>
       <Box flexShrink={0}>
         <Text bold>{HEADER_TITLE}</Text>
       </Box>
