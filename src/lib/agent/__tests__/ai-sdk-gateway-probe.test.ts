@@ -130,20 +130,86 @@ describe('maybeRunAiSdkGatewayProbe memoization', () => {
     expect(mockStreamText).toHaveBeenCalledTimes(1);
   });
 
-  it('does not memoize failures — a transient error retries on the next call', async () => {
+  it('briefly caches failures to throttle retry storms during a flapping outage', async () => {
     vi.stubEnv('AMPLITUDE_WIZARD_AI_SDK_PROBE', '1');
     vi.stubEnv('ANTHROPIC_BASE_URL', 'https://core.amplitude.com/wizard');
     vi.stubEnv('ANTHROPIC_AUTH_TOKEN', 'oauth-token-xyz');
     vi.stubEnv('ANTHROPIC_API_KEY', '');
 
     const mockCreateWizardAiSdkAnthropic = vi.fn(() => () => 'fake-model');
+    const mockStreamText = vi.fn(() => {
+      const failingStream: AsyncIterable<string> = {
+        [Symbol.asyncIterator]() {
+          return {
+            next() {
+              return Promise.reject(new Error('gateway 503'));
+            },
+          };
+        },
+      };
+      return { textStream: failingStream };
+    });
+
+    vi.doMock('../wizard-ai-sdk-anthropic.js', () => ({
+      createWizardAiSdkAnthropic: mockCreateWizardAiSdkAnthropic,
+      ensureV1Suffix: (raw: string | undefined) => {
+        if (!raw) return raw;
+        const trimmed = raw.replace(/\/+$/, '');
+        return /\/v\d+$/.test(trimmed) ? trimmed : `${trimmed}/v1`;
+      },
+    }));
+    vi.doMock('ai', () => ({ streamText: mockStreamText }));
+
+    const { maybeRunAiSdkGatewayProbe, __resetGatewayProbeCacheForTesting } =
+      await import('../ai-sdk-gateway-probe.js');
+    __resetGatewayProbeCacheForTesting();
+
+    // Three rapid retries inside the failure-cache window — the wizard
+    // workflow that prompted this regression issued the probe on every
+    // initializeAgent call during a recovery loop. Without throttling the
+    // user pays 500-1500ms per attempt; with throttling only the first
+    // attempt actually hits the gateway and the rest return the cached
+    // error immediately.
+    const r1 = await maybeRunAiSdkGatewayProbe({
+      useLocalClaude: false,
+      useDirectApiKey: false,
+    });
+    const r2 = await maybeRunAiSdkGatewayProbe({
+      useLocalClaude: false,
+      useDirectApiKey: false,
+    });
+    const r3 = await maybeRunAiSdkGatewayProbe({
+      useLocalClaude: false,
+      useDirectApiKey: false,
+    });
+
+    expect(r1.status).toBe('error');
+    expect(r2.status).toBe('error');
+    expect(r3.status).toBe('error');
+    // Only ONE actual probe ran inside the cache window. The other two
+    // returned the cached error without re-paying the round-trip.
+    expect(mockStreamText).toHaveBeenCalledTimes(1);
+  });
+
+  it('re-probes after the failure-cache window expires so the wizard recovers when the gateway recovers', async () => {
+    vi.stubEnv('AMPLITUDE_WIZARD_AI_SDK_PROBE', '1');
+    vi.stubEnv('ANTHROPIC_BASE_URL', 'https://core.amplitude.com/wizard');
+    vi.stubEnv('ANTHROPIC_AUTH_TOKEN', 'oauth-token-xyz');
+    vi.stubEnv('ANTHROPIC_API_KEY', '');
+
+    // Drive `Date.now()` so the test can fast-forward past the failure TTL
+    // without an actual sleep. We can't use vi.useFakeTimers() here because
+    // the probe path also awaits real promises (`for await (... of stream)`)
+    // which lock up under fake timers.
+    const nowSpy = vi.spyOn(Date, 'now');
+    let virtualNow = 1_700_000_000_000;
+    nowSpy.mockImplementation(() => virtualNow);
+
+    const mockCreateWizardAiSdkAnthropic = vi.fn(() => () => 'fake-model');
     let callCount = 0;
     const mockStreamText = vi.fn(() => {
       callCount += 1;
       if (callCount === 1) {
-        // First call simulates a transient gateway hiccup. The probe's
-        // `for await (… of textStream)` catches the throw and returns
-        // `{ status: 'error', … }` rather than re-throwing.
         const failingStream: AsyncIterable<string> = {
           [Symbol.asyncIterator]() {
             return {
@@ -180,15 +246,20 @@ describe('maybeRunAiSdkGatewayProbe memoization', () => {
       useLocalClaude: false,
       useDirectApiKey: false,
     });
+    expect(r1.status).toBe('error');
+
+    // Advance virtual clock past the failure cache window (8s + slack).
+    virtualNow += 10_000;
+
     const r2 = await maybeRunAiSdkGatewayProbe({
       useLocalClaude: false,
       useDirectApiKey: false,
     });
-
-    expect(r1.status).toBe('error');
     expect(r2.status).toBe('ok');
-    // Both attempts hit streamText because the failure was not cached.
+    // After the TTL elapses the probe runs again — recovery is not blocked.
     expect(mockStreamText).toHaveBeenCalledTimes(2);
+
+    nowSpy.mockRestore();
   });
 
   it('treats different baseURLs as separate cache entries', async () => {
