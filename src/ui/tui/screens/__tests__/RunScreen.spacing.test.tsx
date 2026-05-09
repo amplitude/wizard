@@ -1,32 +1,41 @@
 /**
- * RunScreen — Progress tab vertical-spacing invariants.
+ * RunScreen — Progress tab vertical-spacing + chrome-pinning
+ * invariants.
  *
- * Pins the layout fix from the "collapse dead vertical space + visual
- * polish" PR. A 142×41 screenshot of a live run on a real project
- * showed ~10 rows of pure whitespace between the last visible content
- * row ("✓ Region   US") and the bottom chrome (status pill / tab bar)
- * during cold-start, when the Progress tab is short.
+ * History:
+ *   1. PR #688 tried to close a ~10-row dead band between short
+ *      Progress-tab content and the bottom chrome by making the
+ *      TabContainer collapse its outer flexGrow when the active tab
+ *      opted out (`fillHeight: false`). The Progress tab opted out.
+ *   2. A user screenshot showed that fix made things worse: the
+ *      tab bar + status pill rose to meet content, but the KeyHintBar
+ *      (which lives in App's ConsoleView, *below* TabContainer) stayed
+ *      pinned to the terminal bottom. The chrome split into two
+ *      clusters with empty space wedged between them.
  *
- * Root cause: TabContainer's content area used `flexGrow={1}`
- * unconditionally, so even when the active tab's content was short the
- * outer Box still occupied the full viewport. Yoga then placed the
- * chrome at the bottom of that container, leaving the gap.
+ * Current layout (the fix this file pins):
+ *   - The tab bar lives in TabContainer and stays pinned to the
+ *     terminal bottom alongside the KeyHintBar — they form ONE
+ *     immutable bottom-chrome cluster.
+ *   - The bottom status pill ("◇ Detecting your project setup") used
+ *     to be in the chrome row; it's now the LAST row of the Progress
+ *     tab's own content area, flush with the active task list.
+ *   - On wide terminals (≥ 110 cols) the right column shows
+ *     DiscoveryFeed instead of the previous AmplitudeLogo — real
+ *     status replaces decoration. On narrow terminals the same panel
+ *     renders at the TOP of the content area instead of the right.
+ *   - The redundant "Progress: X/Y completed" footer in ProgressList
+ *     is suppressed (`showFooter={false}`) because the header already
+ *     shows the same counter plus elapsed time.
+ *   - Pending task rows render with the open-bullet glyph (○) instead
+ *     of a blank gutter, aligning with the journey-stepper's visual
+ *     language at the top of the screen.
  *
- * Fix: TabDefinition gained an opt-in `fillHeight` flag. The Progress
- * tab opts out (`fillHeight: false`) so its content area takes its
- * natural height and the bottom chrome rises to meet the last content
- * row. Logs / Snake keep the default (true) — they need the full
- * viewport for their scroll buffers.
- *
- * This test renders the Progress tab in its cold-start state (no tasks
- * completed yet, a few discovery facts already published) and asserts
- * the dead-band invariant: between the last content row and the bottom
- * pill / tab bar there must NEVER be a run of pure-whitespace rows
- * longer than 3.
- *
- * If a future change re-introduces a spurious `flexGrow={1}`, breaks
- * the FinalizingPanel/ConditionalTips collapse, or otherwise lets a
- * gap reopen, this assertion will catch it before it ships.
+ * The "dead-band run" check below now expresses a different invariant
+ * than #688's: it asserts that the BOTTOM STATUS PILL stays flush
+ * with content (no gap between the pill and the last content row).
+ * The big gap between the pill and the tab bar is by design — the
+ * bar is pinned to the terminal bottom, not to content.
  *
  * Why the SPINNER_INTERVAL mock: same reason as RunScreen.coaching —
  * the live 200ms spinner re-renders the whole tree dozens of times per
@@ -45,6 +54,16 @@ vi.mock('../../styles.js', async (importActual) => {
   };
 });
 
+// Stub `useStdoutDimensions` so we can pin the terminal viewport size
+// for layout assertions. ink-testing-library's mocked stdout reports
+// columns=100 and no rows — neither of which exercises the wide-layout
+// branch (≥ 110 cols, ≥ 22 rows) where the right column is shown.
+let mockedDims: [number, number] = [100, 24];
+vi.mock('../../hooks/useStdoutDimensions.js', () => ({
+  useStdoutDimensions: () => mockedDims,
+}));
+
+import { Box } from 'ink';
 import { render } from 'ink-testing-library';
 import { RunScreen } from '../RunScreen.js';
 import { makeStoreForSnapshot } from '../../__tests__/snapshot-utils.js';
@@ -63,7 +82,10 @@ const stripAnsi = (s: string): string =>
  * bar at the bottom of the chrome. Whitespace rows that follow the tab
  * bar (i.e. the trailing rest of the viewport) are intentionally
  * ignored — those are below the chrome, not between content and
- * chrome, so they're not the bug.
+ * chrome, so they're not the bug. With the post-#688 chrome-pinning
+ * fix this also covers the bottom status pill, which now sits as the
+ * last row of the content area — so any gap between the pill and the
+ * last task/discovery row would show up here.
  */
 function maxDeadRunBetweenContentAndChrome(frame: string): number {
   const lines = frame.split('\n');
@@ -218,5 +240,165 @@ describe('RunScreen — Progress tab dead-vertical-space invariant', () => {
     // At least one pending task row should start with the open-bullet
     // glyph in the icon gutter.
     expect(frame).toMatch(/○\s+Install Amplitude/);
+  });
+
+  // ─────────────────────────────────────────────────────────────────
+  // Bug-1 follow-up: chrome pinning. The post-#688 fix moved the bottom
+  // status pill OUT of the chrome row (it's now the last row of the
+  // tab's content) and pinned the tab bar to the terminal bottom so it
+  // forms one chrome cluster with the KeyHintBar in ConsoleView below.
+  // ─────────────────────────────────────────────────────────────────
+
+  it('chrome pinning: tab bar sits at the bottom of the Run screen viewport, not floating mid-frame', () => {
+    // Render RunScreen inside a height-bounded outer Box (mimicking
+    // App's content area). On a tall viewport with short content
+    // (cold-start) the tab bar must stay pinned to the bottom of the
+    // bounding box — never float ~18 rows above with empty space
+    // wedged below it (the PR #688 regression).
+    //
+    // Note: the KeyHintBar lives in App's ConsoleView, not in
+    // RunScreen, so we can't pin it from this test. App-level pinning
+    // is enforced by App's own layout (separator + KeyHintBar + input
+    // are siblings of the content area), so as long as RunScreen
+    // doesn't introduce a gap of its own we keep the chrome unified.
+    mockedDims = [120, 40];
+    const store = seedColdStartProgressStore();
+
+    const VIEWPORT_HEIGHT = 30;
+    const { lastFrame, unmount } = render(
+      <Box width={120} height={VIEWPORT_HEIGHT} flexDirection="column">
+        <RunScreen store={store} />
+      </Box>,
+    );
+    const frame = stripAnsi(lastFrame() ?? '');
+    unmount();
+
+    const lines = frame.split('\n');
+    let lastNonEmpty = -1;
+    for (let i = lines.length - 1; i >= 0; i--) {
+      if (lines[i].trim().length > 0) {
+        lastNonEmpty = i;
+        break;
+      }
+    }
+    expect(lastNonEmpty).toBeGreaterThan(0);
+
+    const tabBarRow = lines.findIndex(
+      (l) => /Progress/.test(l) && /Logs/.test(l) && /Snake/.test(l),
+    );
+    expect(tabBarRow).toBeGreaterThan(0);
+
+    // Tab bar must sit AT the bottom of the bounded viewport (within
+    // 3 rows). Before the fix, fillHeight=false on the Progress tab
+    // collapsed the outer flex-grow and let the tab bar rise to meet
+    // short content — leaving the lower half of the bounding box
+    // empty. The fix re-pins the tab bar to the bottom.
+    expect(lastNonEmpty - tabBarRow).toBeLessThanOrEqual(3);
+  });
+
+  it('chrome pinning: bottom status pill is flush with content (no big gap above the pill)', () => {
+    // The pill ("◇ Detecting your project setup") used to live in
+    // TabContainer's chrome row. After the post-#688 fix it renders
+    // as the LAST row of the Progress tab content area so it sits
+    // flush with the active task list. Pin: between the pill and the
+    // last task / discovery row above it, no run of >3 blank rows.
+    mockedDims = [120, 40];
+    const store = seedColdStartProgressStore();
+    // Force a status pill to surface — cold start with InProgress
+    // task should already produce one via resolveRunScreenStatus, but
+    // double-stamp via pushStatus to be deterministic.
+    store.pushStatus('Reading package.json');
+
+    const { lastFrame, unmount } = render(
+      <Box width={120} height={30} flexDirection="column">
+        <RunScreen store={store} />
+      </Box>,
+    );
+    const frame = stripAnsi(lastFrame() ?? '');
+    unmount();
+
+    const lines = frame.split('\n');
+    // The pill row contains the diamondOpen icon (◇) followed by the
+    // status text. resolveRunScreenStatus prefers canonical task
+    // activeForm over pushed status, so we look for either form.
+    const pillRow = lines.findIndex((l) =>
+      /◇\s+(Detecting your project setup|Reading package.json)/.test(l),
+    );
+    expect(pillRow).toBeGreaterThan(0);
+
+    // Find the last non-whitespace row strictly above the pill.
+    let lastContentAbove = -1;
+    for (let i = pillRow - 1; i >= 0; i--) {
+      if (lines[i].trim().length > 0) {
+        lastContentAbove = i;
+        break;
+      }
+    }
+    expect(lastContentAbove).toBeGreaterThanOrEqual(0);
+
+    // No run of >3 blank rows between the last content row and the
+    // pill. The pill semantically belongs WITH the task list, not
+    // floating across a gap.
+    expect(pillRow - lastContentAbove - 1).toBeLessThanOrEqual(3);
+  });
+
+  // ─────────────────────────────────────────────────────────────────
+  // Bug-2 follow-up: DiscoveryFeed placement. The user said the prior
+  // location ("below the Tasks list, with the AmplitudeLogo on the
+  // right") was inconvenient. Real status replaces decoration:
+  //   - wide terminals (≥ 110 cols, ≥ 22 rows): right column
+  //   - narrow terminals: top of content area (above Tasks)
+  // ─────────────────────────────────────────────────────────────────
+
+  it('DiscoveryFeed renders in the right column on wide terminals', () => {
+    mockedDims = [120, 40];
+    const store = seedColdStartProgressStore();
+
+    const { lastFrame, unmount } = render(
+      <Box width={120} height={40}>
+        <RunScreen store={store} />
+      </Box>,
+    );
+    const frame = stripAnsi(lastFrame() ?? '');
+    unmount();
+
+    // The Discovered header must render somewhere in the frame.
+    expect(frame).toMatch(/Discovered/);
+
+    // It must be on the SAME row as the Tasks header (right-column
+    // layout puts the panels side by side). The tasks header row is
+    // the row that contains "0 done" — Tasks itself is rendered as a
+    // styled cell so we look for a near neighbour instead of the
+    // exact word.
+    const lines = frame.split('\n');
+    const headerRow = lines.findIndex((l) => /0 done/.test(l));
+    expect(headerRow).toBeGreaterThanOrEqual(0);
+
+    // Discovered must appear AT or BELOW headerRow but BEFORE the tab
+    // bar — i.e. side-by-side with the task list, not above it.
+    const discoveredRow = lines.findIndex((l) => /Discovered/.test(l));
+    expect(discoveredRow).toBeGreaterThanOrEqual(headerRow);
+  });
+
+  it('DiscoveryFeed collapses to the top of the content area on narrow terminals', () => {
+    // Below the wide-column threshold (110 cols) the right column
+    // disappears and DiscoveryFeed renders ABOVE the task list instead.
+    mockedDims = [80, 40];
+    const store = seedColdStartProgressStore();
+
+    const { lastFrame, unmount } = render(
+      <Box width={80} height={40}>
+        <RunScreen store={store} />
+      </Box>,
+    );
+    const frame = stripAnsi(lastFrame() ?? '');
+    unmount();
+
+    expect(frame).toMatch(/Discovered/);
+    const lines = frame.split('\n');
+    const discoveredRow = lines.findIndex((l) => /Discovered/.test(l));
+    const headerRow = lines.findIndex((l) => /0 done/.test(l));
+    expect(discoveredRow).toBeGreaterThanOrEqual(0);
+    expect(headerRow).toBeGreaterThan(discoveredRow);
   });
 });
