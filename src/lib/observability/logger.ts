@@ -17,6 +17,7 @@ import {
   openSync,
   closeSync,
   writeSync,
+  existsSync,
 } from 'fs';
 import { dirname, join } from 'path';
 import type { ExecutionMode } from '../mode-config';
@@ -401,6 +402,74 @@ function closeCachedFds(): void {
 // has already gone to the kernel, so this is purely fd cleanup.
 process.once('exit', closeCachedFds);
 
+/**
+ * Write `payload` to `path`, opening + caching the fd on first call.
+ *
+ * Resilience: if the file at `path` no longer exists on disk (the user
+ * wiped `~/.amplitude/wizard/runs/<hash>/` between runs, or `rm -rf`'d
+ * the project meta dir mid-run), the cached fd points at an orphan
+ * inode and `writeSync` would silently succeed against bytes that
+ * disappear when the fd closes. Detect that with a single `existsSync`
+ * before writing — when missing, recreate the dir, reopen, retry.
+ *
+ * Cost: 1 stat + 1 writeSync per log line — same syscall count as the
+ * pre-#637 `appendFileSync(O_APPEND|O_CREAT)` baseline, with the same
+ * "no missing log lines" guarantee. We chose stat-then-write rather
+ * than blind writeSync + ENOENT recovery because most POSIX
+ * filesystems do NOT surface ENOENT on writeSync against an unlinked
+ * fd — the bytes go to the orphan inode and vanish silently — making
+ * an error-driven recovery path untestable in practice.
+ *
+ * Caller-provided slots: a getter/setter pair for the cached fd + path,
+ * inlined here so both human + structured writes share the same logic.
+ */
+function appendThroughFd(
+  path: string,
+  payload: string,
+  getFd: () => { fd: number | null; cachedPath: string | null },
+  setFd: (fd: number | null, cachedPath: string | null) => void,
+): void {
+  const { fd: initialFd, cachedPath } = getFd();
+  let fd = initialFd;
+  const fileMissing = !existsSync(path);
+
+  // Path changed (setProjectLogFile / configureLogFile / rotation) OR
+  // the underlying file was deleted out from under our cached fd.
+  if (fd === null || cachedPath !== path || fileMissing) {
+    if (fd !== null) {
+      try {
+        closeSync(fd);
+      } catch {
+        // ignore
+      }
+    }
+    if (fileMissing) {
+      ensureDir(dirname(path));
+    }
+    fd = openAppendFd(path);
+    setFd(fd, path);
+  }
+  if (fd === null) {
+    // Open failed even after ensureDir — fall back so the
+    // "never throws even if file write fails" contract still holds.
+    appendFileSync(path, payload);
+    return;
+  }
+  try {
+    writeSync(fd, payload);
+  } catch {
+    // Last-chance recovery: drop the fd and append directly.
+    try {
+      closeSync(fd);
+    } catch {
+      // ignore
+    }
+    setFd(null, null);
+    ensureDir(dirname(path));
+    appendFileSync(path, payload);
+  }
+}
+
 function writeToFile(entry: LogEntry): void {
   if (!logFileEnabled) return;
   try {
@@ -422,49 +491,30 @@ function writeToFile(entry: LogEntry): void {
       redacted.namespace
     }] ${LEVEL_LABEL[redacted.level]} ${redacted.msg}${ctxStr}\n`;
 
-    if (cachedHumanFd === null || cachedHumanPath !== activePath) {
-      if (cachedHumanFd !== null) {
-        try {
-          closeSync(cachedHumanFd);
-        } catch {
-          // ignore
-        }
-      }
-      cachedHumanFd = openAppendFd(activePath);
-      cachedHumanPath = activePath;
-    }
-    if (cachedHumanFd !== null) {
-      writeSync(cachedHumanFd, line);
-    } else {
-      // Open failed (e.g. nonexistent dir in a test) — fall back so the
-      // "never throws even if file write fails" contract still holds.
-      appendFileSync(activePath, line);
-    }
+    appendThroughFd(
+      activePath,
+      line,
+      () => ({ fd: cachedHumanFd, cachedPath: cachedHumanPath }),
+      (fd, cachedPath) => {
+        cachedHumanFd = fd;
+        cachedHumanPath = cachedPath;
+      },
+    );
 
     // 2. Complete NDJSON to a companion file (for programmatic analysis).
     // The structured path is tracked independently from the human path so
     // it lands at `log.ndjson` next to `log.txt` (vs. the previous `+ 'l'`
     // string-concat which produced `log.txtl`).
     const structuredLine = JSON.stringify(redacted) + '\n';
-    if (
-      cachedStructuredFd === null ||
-      cachedStructuredPath !== activeStructuredPath
-    ) {
-      if (cachedStructuredFd !== null) {
-        try {
-          closeSync(cachedStructuredFd);
-        } catch {
-          // ignore
-        }
-      }
-      cachedStructuredFd = openAppendFd(activeStructuredPath);
-      cachedStructuredPath = activeStructuredPath;
-    }
-    if (cachedStructuredFd !== null) {
-      writeSync(cachedStructuredFd, structuredLine);
-    } else {
-      appendFileSync(activeStructuredPath, structuredLine);
-    }
+    appendThroughFd(
+      activeStructuredPath,
+      structuredLine,
+      () => ({ fd: cachedStructuredFd, cachedPath: cachedStructuredPath }),
+      (fd, cachedPath) => {
+        cachedStructuredFd = fd;
+        cachedStructuredPath = cachedPath;
+      },
+    );
   } catch {
     // Silently ignore — logging must never crash the wizard
   }

@@ -1,5 +1,85 @@
 # Changelog
 
+## [1.17.0](https://github.com/amplitude/wizard/compare/wizard-v1.16.0...wizard-v1.17.0) (2026-05-09)
+
+
+### Features
+
+* **agent:** AI-SDK inner-loop runner foundation (Phase D-3, opt-in via env) ([#596](https://github.com/amplitude/wizard/issues/596)) ([c5f3343](https://github.com/amplitude/wizard/commit/c5f334395a141a64a591f0a02097e8aaca89d079))
+* **agent:** bridge wizard-tools MCP into AI-SDK runner + append skill-tier prompt ([#649](https://github.com/amplitude/wizard/issues/649)) ([0a37b61](https://github.com/amplitude/wizard/commit/0a37b6104d4ac8bb9404ade509e1bbdbd0397ed9))
+* **agent:** gate pre-flight context on project size (JIT exploration for large codebases) ([#603](https://github.com/amplitude/wizard/issues/603)) ([7594bc4](https://github.com/amplitude/wizard/commit/7594bc4b9774302449165360ab1bc94627b5f29c))
+* **agent:** structured recovery guidance on wizard-tool errors ([#602](https://github.com/amplitude/wizard/issues/602)) ([97fbe32](https://github.com/amplitude/wizard/commit/97fbe32ae7afcd5b1fecc8213e8a928a6f5070f1))
+* **evals:** Layer 2 static scorers (criteria 2, 3, 7, 11, 12, 15) ([#566](https://github.com/amplitude/wizard/issues/566)) ([eb5afc0](https://github.com/amplitude/wizard/commit/eb5afc04cb355fbe8ccbfc3b50edb2959da8ad66))
+* **evals:** Layer 3 build runner + PR-gate CI workflow ([#570](https://github.com/amplitude/wizard/issues/570)) ([3b0eefd](https://github.com/amplitude/wizard/commit/3b0eefd97951b654a1a5554a0917d30d2f1f7916))
+* **evals:** per-call-site registry + 3 covered call sites ([#601](https://github.com/amplitude/wizard/issues/601)) ([eb461bc](https://github.com/amplitude/wizard/commit/eb461bc09adc691c0051454dcea1af88368d5d2d))
+* send Idempotency-Key on project create + handle 409 split ([#682](https://github.com/amplitude/wizard/issues/682)) ([eba3f84](https://github.com/amplitude/wizard/commit/eba3f842db5787a08da447d6ca8d1647c9c36fb8))
+* **signup:** server-driven field collection ([#539](https://github.com/amplitude/wizard/issues/539)) ([3d4818f](https://github.com/amplitude/wizard/commit/3d4818f106ad3b8cde88073b33a8a8ad386c4fb0))
+* styled update-available notification box ([#648](https://github.com/amplitude/wizard/issues/648)) ([7ac8fe2](https://github.com/amplitude/wizard/commit/7ac8fe2794cc86749815036229c33f8068e2c7e3))
+* surface structured proxy errors and tighten retry behavior ([#681](https://github.com/amplitude/wizard/issues/681)) ([2183344](https://github.com/amplitude/wizard/commit/218334465c57646995adb30689d82e38fdd85ae3))
+* **tui:** cleaner progress UI — text-aligned glyphs, inline status, tighter spacing ([#659](https://github.com/amplitude/wizard/issues/659)) ([f8170ee](https://github.com/amplitude/wizard/commit/f8170ee929a419cb0d6f8f853dfa20d03867bfd3))
+* **tui:** live discovery feed during cold start (and gentle logo pulse) ([#672](https://github.com/amplitude/wizard/issues/672)) ([273938d](https://github.com/amplitude/wizard/commit/273938d80ef2641ad882067955cf0e93aebe5460))
+* **tui:** live substep narration under active task — show what the wizard is doing now ([#674](https://github.com/amplitude/wizard/issues/674)) ([b833220](https://github.com/amplitude/wizard/commit/b833220986c4a856ab3367f5d4252a756555e98d))
+* **tui:** polish Welcome screen — tighter copy, inline workspace picks, smaller logo on returning runs ([#677](https://github.com/amplitude/wizard/issues/677)) ([27b7bf5](https://github.com/amplitude/wizard/commit/27b7bf5495a23ffe51de624d107efcd5df4c27e4))
+* **tui:** surface specific, useful content in the status pill — events, files, tool outcomes, retries ([#683](https://github.com/amplitude/wizard/issues/683)) ([db0c32c](https://github.com/amplitude/wizard/commit/db0c32c258d0a8b1362ac43a133cf472deae653c))
+* **ui:** show live activity for compaction, retries, polls, cold-start (stall visibility) ([#594](https://github.com/amplitude/wizard/issues/594)) ([555cab9](https://github.com/amplitude/wizard/commit/555cab94f1c1f2f5b70e7c6a91199b3999946d6a))
+
+
+### Bug Fixes
+
+* **agent:** cover 502 / 504 in transient retry + 408 in gateway-storm ([#607](https://github.com/amplitude/wizard/issues/607)) ([940b260](https://github.com/amplitude/wizard/commit/940b260a24d8f6cec87459c1bf433737c2383612))
+* **agent:** grant 120s grace window after compaction before stall detector re-arms ([#679](https://github.com/amplitude/wizard/issues/679)) ([848471b](https://github.com/amplitude/wizard/commit/848471b1d3592e5a3c0892e36a1a4b8195b80638))
+* **agent:** refresh OAuth token between runAgent retries ([#608](https://github.com/amplitude/wizard/issues/608)) ([b6492b7](https://github.com/amplitude/wizard/commit/b6492b7674c888934d075fd5bb7e5d6d7cea1ab7))
+* **ai-sdk:** apply ensureV1Suffix to console-query and gateway-probe baseURLs ([#616](https://github.com/amplitude/wizard/issues/616)) ([c1de589](https://github.com/amplitude/wizard/commit/c1de589ad81c13da7e7e77d0fdf8468a506119e1))
+* **auth:** proactively refresh LLM gateway bearer mid-run to prevent 35-min sessions from expiring at the finish line ([#669](https://github.com/amplitude/wizard/issues/669)) ([fd9d2c1](https://github.com/amplitude/wizard/commit/fd9d2c126d2d8624b3d60611ff23217549a35278))
+* **cli:** declare AI-SDK + compaction-window env-var passthrough flags ([#624](https://github.com/amplitude/wizard/issues/624)) ([8347f71](https://github.com/amplitude/wizard/commit/8347f71153e33a3b6b16f4e0ed2ac65e7c283369))
+* **commandments:** tell agent to use mcp__wizard-tools__load_skill, cap discovery Grep ([#629](https://github.com/amplitude/wizard/issues/629)) ([d842fdb](https://github.com/amplitude/wizard/commit/d842fdb10d83e76a5a64c7414f5f493c22542317))
+* **logger:** write log.txt to per-project runs dir again ([#686](https://github.com/amplitude/wizard/issues/686)) ([58ffaf7](https://github.com/amplitude/wizard/commit/58ffaf72b36197aaaeb79bae1b689cf02294bae3))
+* **p0:** confirm_event_plan feedback ends run instead of looping ([#610](https://github.com/amplitude/wizard/issues/610)) ([521a8fe](https://github.com/amplitude/wizard/commit/521a8fea85bb948b742b85e5b7b29a92e67cc7eb))
+* **p0:** post-Run screen transitions stuck until terminal resize ([#630](https://github.com/amplitude/wizard/issues/630)) ([779b82d](https://github.com/amplitude/wizard/commit/779b82d1f5daf5a45499eeb34e0dfc30147a4675))
+* **p0:** render event-plan as full-screen overlay ([#626](https://github.com/amplitude/wizard/issues/626)) ([eb653f3](https://github.com/amplitude/wizard/commit/eb653f30e79fa5d1f11d02c84fc4d169a9973c24))
+* **p0:** show "Verifying your session" copy on cached-token auth path ([#611](https://github.com/amplitude/wizard/issues/611)) ([59ab427](https://github.com/amplitude/wizard/commit/59ab42770766663d637431f8f4183d3ce7a7d382))
+* **p0:** three regressions surfaced by Excalidraw test runs ([#621](https://github.com/amplitude/wizard/issues/621)) ([c24989b](https://github.com/amplitude/wizard/commit/c24989be76119eaf0a5714b05dde3369a6ddca63))
+* **perf:** auto-upgrade stale autoCompactWindow values written by pre-[#634](https://github.com/amplitude/wizard/issues/634) wizard runs ([#673](https://github.com/amplitude/wizard/issues/673)) ([049d617](https://github.com/amplitude/wizard/commit/049d617aaeb2cc6560a2627d8ad6f8781e39550e))
+* **reliability:** preserve user work on AUTH_ERROR — don't auto-revert files when only the gateway bearer expired ([#666](https://github.com/amplitude/wizard/issues/666)) ([2941de8](https://github.com/amplitude/wizard/commit/2941de877de686bda5bbc5e91c79330aa1fde6be))
+* **self-heal:** only clear orphan credentials when binding file is actually missing on disk ([#678](https://github.com/amplitude/wizard/issues/678)) ([516257e](https://github.com/amplitude/wizard/commit/516257e63c91dc081e0cd9c797777d32240448fb))
+* **self-heal:** tighten heuristic post-G1 — bare ampli.json absence is no longer a signal ([#615](https://github.com/amplitude/wizard/issues/615)) ([3de8ee2](https://github.com/amplitude/wizard/commit/3de8ee2bffd0c24da67e68a1979a01318a3da66f))
+* **signup:** wall back-nav once direct signup commits (BA-114) ([#632](https://github.com/amplitude/wizard/issues/632)) ([0451dd8](https://github.com/amplitude/wizard/commit/0451dd8412113b5ac735549154a94fd9cfdb5791))
+* **test:** stabilize DataIngestionCheckScreen polling race on Node 22+ ([#650](https://github.com/amplitude/wizard/issues/650)) ([bf8557b](https://github.com/amplitude/wizard/commit/bf8557b3aa0c34426887484c6f45976eb6c4f061))
+* **tui:** apply Ink rerender bridge to overlay push/pop ([#657](https://github.com/amplitude/wizard/issues/657)) ([60a0d61](https://github.com/amplitude/wizard/commit/60a0d617d8f2fc851681aa8f56902fa14f616fbd))
+* **tui:** batch syncTodos render so subscribers don't see stale activeForm ([#658](https://github.com/amplitude/wizard/issues/658)) ([7608069](https://github.com/amplitude/wizard/commit/7608069bfa9798f3c9b9b4981345f183249eafb5))
+* **tui:** clear stale activity narration when journey step transitions to completed ([#663](https://github.com/amplitude/wizard/issues/663)) ([225c1a1](https://github.com/amplitude/wizard/commit/225c1a1b311b07305482148eec841b489eedc912))
+* **tui:** consolidate triple activity displays into one status line ([#661](https://github.com/amplitude/wizard/issues/661)) ([61ffec4](https://github.com/amplitude/wizard/commit/61ffec4ad32b665b7573d3247ef04e11085f22a1))
+* **tui:** dedupe FileWritesPanel rows — one row per path with edit count ([#676](https://github.com/amplitude/wizard/issues/676)) ([4010bc8](https://github.com/amplitude/wizard/commit/4010bc80cdff6b202e198d2fac82124205f37af0))
+* **tui:** defer + coalesce rerender bridge to prevent infinite update loop ([#664](https://github.com/amplitude/wizard/issues/664)) ([1883e14](https://github.com/amplitude/wizard/commit/1883e14f1fee7740b90c800bfdae52cc8fb65f56))
+* **tui:** disable Ink patchConsole so third-party stdout writes don't clear the frame ([#633](https://github.com/amplitude/wizard/issues/633)) ([db42bfc](https://github.com/amplitude/wizard/commit/db42bfc8165c83e4131762638834e49af8083f8e))
+* **tui:** file-writes rows pin keyword + metadata, head-truncate path — no more 2-line wraps ([#684](https://github.com/amplitude/wizard/issues/684)) ([3baf9d2](https://github.com/amplitude/wizard/commit/3baf9d2c4c6c6e9798033e9228a87378e9990c49))
+* **tui:** force Ink rerender on every store change to defeat log-update diff-skip ([#656](https://github.com/amplitude/wizard/issues/656)) ([1ae0cfb](https://github.com/amplitude/wizard/commit/1ae0cfb86e3071af6aad2b167d69e0b81e7cd9c0))
+* **tui:** honor TodoWrite status in syncTodos so task list updates deterministically ([#653](https://github.com/amplitude/wizard/issues/653)) ([3e9d67c](https://github.com/amplitude/wizard/commit/3e9d67cdeacafec98685cd67540121460142925a))
+* **tui:** make cold-start tempo feel productive (optimistic transitions + substeps + ETA) ([#662](https://github.com/amplitude/wizard/issues/662)) ([7fe48e8](https://github.com/amplitude/wizard/commit/7fe48e8e799e10e303567d85f93aee1c0ea7172e))
+* **tui:** offer New project option on returning-user account confirmation ([#529](https://github.com/amplitude/wizard/issues/529)) ([6def117](https://github.com/amplitude/wizard/commit/6def1177a2ff1ac7f0ccda225f077d8d7a5658a1))
+* **tui:** pin label-resolution rule + reserve icon column width ([#660](https://github.com/amplitude/wizard/issues/660)) ([e245de9](https://github.com/amplitude/wizard/commit/e245de9821dc1f80803096abc7c888aa5e2d9260))
+* **tui:** polish Setup Report — table header color, head-truncated file paths, tighter copy, next-action CTA ([#668](https://github.com/amplitude/wizard/issues/668)) ([3754336](https://github.com/amplitude/wizard/commit/375433657d77cccac272195447a7d46cad830c61))
+* **tui:** tighten ActiveTaskSubsteps spacing — drop blank rows between substep lines ([#680](https://github.com/amplitude/wizard/issues/680)) ([d8078ce](https://github.com/amplitude/wizard/commit/d8078ce264baf8b99f5f6bf0465a1a9e0f137416))
+* **tui:** tighten RunScreen spacing + responsive collapse ([#687](https://github.com/amplitude/wizard/issues/687)) ([0138dc9](https://github.com/amplitude/wizard/commit/0138dc92f4ba4e433c628eb78e1d67186465fd08))
+* **tui:** unify App root tree so event-plan prompt renders without terminal resize ([#631](https://github.com/amplitude/wizard/issues/631)) ([8d10d0d](https://github.com/amplitude/wizard/commit/8d10d0dccca1035f4e73c07fdc8acea2edf1a103))
+* **ux:** journey shows 0/4 forever during agent cold-start ([#617](https://github.com/amplitude/wizard/issues/617)) ([3dbd9b7](https://github.com/amplitude/wizard/commit/3dbd9b7e2ee44f0bcc9327d6ce984e768a2a4833))
+* **ux:** show "Verifying your session" on AuthPhase=idle (initial mount) ([#619](https://github.com/amplitude/wizard/issues/619)) ([de8a70e](https://github.com/amplitude/wizard/commit/de8a70eb63f3fae376ae26b660aa30fbe269c721))
+* **ux:** suppress stall heartbeat while confirm_event_plan awaits user decision ([#618](https://github.com/amplitude/wizard/issues/618)) ([c83b4be](https://github.com/amplitude/wizard/commit/c83b4be47a0138f3b3424f94ccbbefde301a912c))
+* **ux:** truthful error copy + ✗ stepper marker for failed phase ([#665](https://github.com/amplitude/wizard/issues/665)) ([20da479](https://github.com/amplitude/wizard/commit/20da479f3c659a953843e349bd0c6ee2a5c3b1dd))
+
+
+### Performance Improvements
+
+* **agent:** add Haiku tier for one-shot LLM calls (model tiering) ([#590](https://github.com/amplitude/wizard/issues/590)) ([286a825](https://github.com/amplitude/wizard/commit/286a8254a536256cb8090106e2a2648c54b48db6))
+* **agent:** raise autoCompactWindow 120K-&gt;750K to use Sonnet 4.6's 1M context ([#634](https://github.com/amplitude/wizard/issues/634)) ([fb9b9ad](https://github.com/amplitude/wizard/commit/fb9b9ad65d4ec520d06d128ba7b8f76b8a427a11))
+* **agent:** trim commandments and skill menu to reduce per-turn token cost ([#645](https://github.com/amplitude/wizard/issues/645)) ([09f613c](https://github.com/amplitude/wizard/commit/09f613c99ccb7efce108989d0a563e2b48767c01))
+* **api:** share axios instance with keep-alive and 15s default timeout ([#641](https://github.com/amplitude/wizard/issues/641)) ([43dfd1b](https://github.com/amplitude/wizard/commit/43dfd1bfe0bc1bc403d3015efbc0acc6338805cd))
+* **mcp:** retry transient direct-call failures before agent fallback ([#640](https://github.com/amplitude/wizard/issues/640)) ([fc37265](https://github.com/amplitude/wizard/commit/fc37265b4e204077b6ec25be71a070065bc7c014))
+* ship 5 cold-start, LLM, build, and logging fixes from multi-agent review ([#637](https://github.com/amplitude/wizard/issues/637)) ([2bb438d](https://github.com/amplitude/wizard/commit/2bb438d7eb3a9d9590edccc8189762398522f81c))
+* **skills:** build skill tree index once instead of re-walking on every lookup ([#643](https://github.com/amplitude/wizard/issues/643)) ([9f2d6e8](https://github.com/amplitude/wizard/commit/9f2d6e8e1379d9b21ff069e5fb5ec436a60e337b))
+* **tui:** drop DissolveTransition tick rate from ~83Hz to 30Hz ([#639](https://github.com/amplitude/wizard/issues/639)) ([65005ef](https://github.com/amplitude/wizard/commit/65005ef7793dd72f451ac778095ba2078b7c0043))
+* **tui:** share a single spinner-frame timer across all BrailleSpinner instances ([#646](https://github.com/amplitude/wizard/issues/646)) ([4a0e96b](https://github.com/amplitude/wizard/commit/4a0e96ba5801d962a13f1ffc0a97d0baed2977a0))
+
 ## [1.16.0](https://github.com/amplitude/wizard/compare/wizard-v1.15.0...wizard-v1.16.0) (2026-05-07)
 
 
