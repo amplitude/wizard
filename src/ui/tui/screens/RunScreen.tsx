@@ -29,7 +29,6 @@ import {
 } from '../primitives/index.js';
 import type { ProgressItem } from '../primitives/index.js';
 import { Colors, Icons, SPINNER_FRAMES, SPINNER_INTERVAL } from '../styles.js';
-import { AnimatedAmplitudeLogo } from '../components/AmplitudeLogo.js';
 import { RetryStatusChip } from '../components/RetryBanner.js';
 import { FileWritesPanel } from '../components/FileWritesPanel.js';
 import { FinalizingPanel } from '../components/FinalizingPanel.js';
@@ -44,6 +43,7 @@ import {
   TRAILING_FEATURES,
 } from '../session-constants.js';
 import { OUTBOUND_URLS } from '../../../lib/constants.js';
+import { linkify } from '../utils/terminal-rendering.js';
 import path from 'node:path';
 import { getLogFile } from '../../../utils/storage-paths.js';
 import { getSessionStartMs } from '../../../lib/observability/index.js';
@@ -184,12 +184,20 @@ const ConditionalTips = ({ store }: { store: WizardStore }) => {
 };
 
 /** The main Progress tab content. */
-const MIN_COLS_FOR_LOGO = 90;
-const MIN_ROWS_FOR_LOGO = 22;
+// The wide-terminal threshold below which we collapse the right column
+// entirely — Discovered facts move up to the TOP of the content area on
+// narrow terminals so the user still sees the established context
+// before the active task list. The animated AmplitudeLogo is decoration
+// and now hidden in the Progress tab on every viewport (it survives on
+// the Welcome screen); the right column belongs to the Discovered
+// facts panel, which is real status information.
+const MIN_COLS_FOR_RIGHT_COLUMN = 110;
+const MIN_ROWS_FOR_RIGHT_COLUMN = 22;
 
 const ProgressTab = ({ store }: { store: WizardStore }) => {
   const [cols, rows] = useStdoutDimensions();
-  const showLogo = cols >= MIN_COLS_FOR_LOGO && rows >= MIN_ROWS_FOR_LOGO;
+  const showRightColumn =
+    cols >= MIN_COLS_FOR_RIGHT_COLUMN && rows >= MIN_ROWS_FOR_RIGHT_COLUMN;
 
   // Single interval drives the spinner, logo animation, and elapsed timer.
   // All three re-render in the same batch — no extra render cycles.
@@ -355,18 +363,52 @@ const ProgressTab = ({ store }: { store: WizardStore }) => {
   const showColdStartHint =
     completedDisplay === 0 && total > 0 && elapsed >= 30;
   // Reference `tick` so React doesn't dead-code-eliminate the SPINNER
-  // interval that drives the AnimatedAmplitudeLogo + FileWritesPanel.
+  // interval that drives DiscoveryFeed + FileWritesPanel.
   void tick;
 
+  // Bottom-pill text — what the wizard is doing right now. This used to
+  // live in TabContainer's chrome row; it's now the last row of the
+  // Progress tab content area so it sits flush with the active work
+  // (semantically status content, not navigation chrome) and so that
+  // moving the tab bar to its terminal-bottom anchor doesn't strand the
+  // pill. Truncated to STATUS_MAX_LEN so streamed protocol fragments
+  // can't blow up the row.
+  const rawPillStatus = resolveRunScreenStatus(store);
+  const pillStatus = rawPillStatus ? truncateStatus(rawPillStatus) : undefined;
+
   return (
-    <Box flexDirection="row" flexGrow={1}>
-      {/* Left: tasks and status (takes all remaining width).
-          No paddingX here — the parent screen content area in App.tsx
-          already applies `Layout.paddingX`. Stacking an additional
-          paddingX=1 on top produced the "content sits one column
-          further right than the headers" misalignment users called
-          out. */}
-      <Box flexDirection="column" flexGrow={1} flexShrink={1}>
+    <Box flexDirection="column" flexGrow={1}>
+      {/* On narrow terminals (< MIN_COLS_FOR_RIGHT_COLUMN) the Discovered
+          facts panel renders at the TOP of the content area rather than
+          in a right column — established context first, active work
+          below. On wide terminals it lives in the right column instead
+          (see below). */}
+      {!showRightColumn && (
+        <Box flexShrink={0}>
+          <DiscoveryFeed
+            facts={store.session.discoveryFacts}
+            tick={tick}
+            cols={cols}
+          />
+        </Box>
+      )}
+
+      {/* Two-column row takes its NATURAL height (no flexGrow=1). The
+          surrounding tab content area still grows to fill the viewport
+          via its own outer Box, so the tab bar stays pinned to the
+          bottom — but the columns themselves only take as much
+          vertical space as the task list + DiscoveryFeed actually
+          need. That keeps the bottom status pill (rendered below this
+          row) flush with content instead of getting pushed to the
+          bottom of a stretched column. */}
+      <Box flexDirection="row" flexShrink={0}>
+        {/* Left: tasks and status (takes all remaining width).
+            No paddingX here — the parent screen content area in App.tsx
+            already applies `Layout.paddingX`. Stacking an additional
+            paddingX=1 on top produced the "content sits one column
+            further right than the headers" misalignment users called
+            out. */}
+        <Box flexDirection="column" flexGrow={1} flexShrink={1}>
         {/* Header: progress counter + elapsed + retry chip + current file. */}
         <Box marginBottom={1} flexDirection="column">
           <Box justifyContent="space-between">
@@ -412,25 +454,19 @@ const ProgressTab = ({ store }: { store: WizardStore }) => {
         <ProgressList
           items={progressItems}
           title="Tasks"
+          // The "0 done · N to go · 55s" header above the task list
+          // already shows the same X/Y completion + an elapsed timer +
+          // a cold-start hint. The default ProgressList footer
+          // ("spinner Progress: 0/4 completed") was just a duplicate of
+          // that header without the elapsed information — drop it here
+          // so the Progress tab doesn't show the same number twice.
+          showFooter={false}
           renderActiveSubsteps={() => (
             <ActiveTaskSubsteps
               activities={store.toolActivities}
               width={cols}
             />
           )}
-        />
-
-        {/* Cold-start "discovery feed". Fades in one chip per fact the
-            wizard has learned about the user's project (framework,
-            package manager, TypeScript, region, …) so the empty middle
-            of RunScreen has *something* to show during the 30-60s
-            agent-boot window. Hidden on terminals < 60 cols so it
-            doesn't fight FileWritesPanel for a tiny vertical budget.
-            See `DiscoveryFeed.tsx` for the reveal cadence. */}
-        <DiscoveryFeed
-          facts={store.session.discoveryFacts}
-          tick={tick}
-          cols={cols}
         />
 
         {/* Live per-file activity from the inner agent's write hooks.
@@ -485,12 +521,45 @@ const ProgressTab = ({ store }: { store: WizardStore }) => {
 
         {/* Compact conditional tips */}
         <ConditionalTips store={store} />
+        </Box>
+
+        {/* Right column: Discovered facts panel (real status), replacing
+            the previous decorative AmplitudeLogo. The animation was
+            visually heavy and pushed the actual context (framework,
+            package manager, TypeScript, region, project) into a
+            secondary slot below the task list — a screenshot from a
+            real run flagged that as "not in a very convenient
+            location". On wide terminals the right column has plenty of
+            room, so we put the established facts there. Narrower
+            terminals (< MIN_COLS_FOR_RIGHT_COLUMN) collapse this column
+            and show the same panel at the top of the content area
+            instead (see the early branch above). */}
+        {showRightColumn && (
+          <Box flexShrink={0} marginLeft={2}>
+            <DiscoveryFeed
+              facts={store.session.discoveryFacts}
+              tick={tick}
+              cols={cols}
+            />
+          </Box>
+        )}
       </Box>
 
-      {/* Right: animated logo, steps with spinner tick (hidden on small terminals) */}
-      {showLogo && (
-        <Box flexShrink={0} marginTop={1} marginRight={1}>
-          <AnimatedAmplitudeLogo tick={tick} />
+      {/* Bottom status pill — flush against the content above. Used to
+          live in TabContainer's chrome row, but the chrome cluster (tab
+          bar + KeyHintBar) must stay pinned to the terminal bottom as
+          one unit. The pill is content semantics ("what is the wizard
+          doing right now"), so it now sits as the last row of this
+          tab's content area instead. The single 1-row spacer above
+          mirrors the chrome's spacer below, keeping the pill visually
+          separated from both the panels and the tab bar. */}
+      {pillStatus && (
+        <Box flexShrink={0} flexDirection="column" marginTop={1}>
+          <Box paddingX={1} overflow="hidden">
+            <Text color={Colors.muted}>
+              {Icons.diamondOpen} {linkify(pillStatus)}
+            </Text>
+          </Box>
         </Box>
       )}
     </Box>
@@ -501,19 +570,16 @@ export const RunScreen = ({ store }: RunScreenProps) => {
   useWizardStore(store);
   useScreenHints(RUN_HINTS);
 
-  // Footer status — resolved through `resolveRunScreenStatus` which
-  // anchors the pill to canonical state (post-agent step, then
-  // in-progress journey task) before falling back to the trailing
-  // free-form `pushStatus` line. See the helper's docstring for why
-  // the trailing `pushStatus` cannot win on its own (state/narration
-  // mismatch — agent says "let me plan the events" after Plan ✓).
-  //
-  // Cap raw streamed content (rare protocol fragments from
-  // `runAgentLocally`) before it reaches the pill — Yoga's
-  // `overflow="hidden"` handles wide terminals, but a JS cap is the
-  // belt-and-braces guard against unbounded strings.
-  const rawLastStatus = resolveRunScreenStatus(store);
-  const lastStatus = rawLastStatus ? truncateStatus(rawLastStatus) : undefined;
+  // The bottom status pill ("what is the wizard doing right now") used
+  // to live in TabContainer's chrome row, but it's content semantics,
+  // not navigation — and a previous attempt to "rise" the chrome to
+  // meet short content split the chrome into two clusters with the
+  // KeyHintBar stranded at the terminal bottom. The pill now renders
+  // inside ProgressTab as its last content row instead, so:
+  //   - tab bar + KeyHintBar stay pinned together as one chrome unit
+  //   - the pill stays flush with the active task list
+  // See `resolveRunScreenStatus` and ProgressTab for the resolution
+  // and rendering details.
 
   const hasEvents = store.eventPlan.length > 0;
 
@@ -572,7 +638,6 @@ export const RunScreen = ({ store }: RunScreenProps) => {
   return (
     <TabContainer
       tabs={tabs}
-      statusMessage={lastStatus}
       requestedTab={store.requestedTab}
       onTabConsumed={() => store.clearRequestedTab()}
     />
