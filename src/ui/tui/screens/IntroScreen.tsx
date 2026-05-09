@@ -11,6 +11,7 @@
  * Calls store.concludeIntro() to advance past this screen.
  */
 
+import { sep } from 'node:path';
 import { Box, Text } from 'ink';
 import { useState, useEffect, useMemo } from 'react';
 import type { WizardStore } from '../store.js';
@@ -20,7 +21,12 @@ import { OutroKind } from '../session-constants.js';
 import { Integration } from '../../../lib/constants.js';
 import { AuthOnboardingPath } from '../../../lib/wizard-session.js';
 import { clearCheckpoint } from '../../../lib/session-checkpoint.js';
-import { analyzeWorkspace } from '../../../lib/workspace-analysis.js';
+import {
+  analyzeWorkspace,
+  resolveWorkspacePicks,
+  listWildcardChildren,
+  shortenHomePath,
+} from '../../../lib/workspace-analysis.js';
 import { ampliConfigExists } from '../../../lib/ampli-config.js';
 import { PickerMenu } from '../primitives/index.js';
 import { PathInput } from '../components/PathInput.js';
@@ -95,6 +101,21 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
     () => analyzeWorkspace(session.installDir),
     [session.installDir],
   );
+
+  // Resolve a tight (≤3) list of inline picks from the monorepo's
+  // declared workspace globs. When the user lands on a monorepo root,
+  // we surface these directly in the welcome menu instead of forcing
+  // them through "Change directory" → typed PathInput. Same memo
+  // dependency as `workspace` since the result is purely derived.
+  const workspacePicks = useMemo(
+    () => resolveWorkspacePicks(session.installDir, workspace.workspaceGlobs),
+    [session.installDir, workspace.workspaceGlobs],
+  );
+
+  // Sub-picker state for wildcard globs (e.g. `packages/*`). Holding
+  // the parent dir flips the screen into a child-list picker; null
+  // returns to the main welcome menu.
+  const [wildcardParent, setWildcardParent] = useState<string | null>(null);
 
   // "Welcome back" gate — true when the user is signed in AND this
   // directory has been instrumented before (ampli.json present). First-
@@ -388,12 +409,45 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
           />
         )}
 
+      {/* Wildcard sub-picker — shown when the user picked a workspace
+          glob like `packages/*` from the main menu. We list every
+          immediate child dir of the parent so they can drill down
+          without typing a path. */}
+      {showContinue && !changingDirectory && wildcardParent && (
+        <WildcardChildPicker
+          parentDir={wildcardParent}
+          installDir={session.installDir}
+          onPick={(absolutePath) => {
+            analytics.wizardCapture('install dir change submitted', {
+              'detected framework': session.detectedFrameworkLabel,
+              source: 'workspace pick',
+            });
+            setWildcardParent(null);
+            setManuallySelected(false);
+            store.changeInstallDir(absolutePath);
+          }}
+          onCancel={() => setWildcardParent(null)}
+        />
+      )}
+
       {/* Single picker: signed-in users only continue (create-account is
           hidden — use logout + cold start for a different Amplitude identity).
           Unsigned: sign-in vs create-account (`--auth-onboarding` in CI).
           One menu so we do not stack two PickerMenus (shared useInput). */}
-      {showContinue && !changingDirectory && (
-        <Box marginTop={compact ? 0 : 1}>
+      {showContinue && !changingDirectory && !wildcardParent && (
+        <Box
+          marginTop={compact ? 0 : 1}
+          flexDirection="column"
+          alignItems="center"
+        >
+          {!compact && session.userEmail && (
+            <Box marginBottom={1}>
+              <Text color={Colors.muted}>
+                Next: install the SDK and propose an event plan you'll review
+                before any code is written.
+              </Text>
+            </Box>
+          )}
           <PickerMenu
             message={
               session.userEmail
@@ -433,29 +487,46 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
                     },
                   ]
                 : []),
+              ...workspacePicks.map((pick) => ({
+                label: pick.isWildcard
+                  ? `${pick.label}${narrow ? '' : '  — pick a workspace'}`
+                  : pick.label,
+                value: `workspace:${pick.absolutePath}::${pick.isWildcard ? 'wild' : 'lit'}`,
+              })),
               {
                 label: 'Change framework',
                 value: 'framework',
-                ...(narrow ? {} : { hint: 'pick manually' }),
               },
               ...(session.region
                 ? [
                     {
                       label: 'Change region',
                       value: 'region',
-                      ...(narrow ? {} : { hint: 'pick US or EU' }),
                     },
                   ]
                 : []),
-              {
-                label: 'Change directory',
-                value: 'directory',
-                ...(narrow ? {} : { hint: 'point at another project' }),
-              },
+              // When monorepo workspace picks are inline, "Change
+              // directory" still has value as the "type a totally
+              // different path" escape hatch. We just demote it past
+              // the picks so the obvious choice is on top.
+              ...(workspacePicks.length > 0 && workspace.isMonorepo
+                ? [
+                    {
+                      label: narrow
+                        ? 'Other directory'
+                        : 'Use root anyway / type a path',
+                      value: 'directory',
+                    },
+                  ]
+                : [
+                    {
+                      label: 'Change directory',
+                      value: 'directory',
+                    },
+                  ]),
               {
                 label: 'Cancel',
                 value: 'cancel',
-                ...(narrow ? {} : { hint: 'exit wizard' }),
               },
             ]}
             onSelect={(value) => {
@@ -485,6 +556,29 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
                 return;
               }
 
+              if (
+                typeof choice === 'string' &&
+                choice.startsWith('workspace:')
+              ) {
+                // value shape: `workspace:<abs>::wild` | `workspace:<abs>::lit`
+                const rest = choice.slice('workspace:'.length);
+                const separatorIdx = rest.lastIndexOf('::');
+                const absolutePath = rest.slice(0, separatorIdx);
+                const kind = rest.slice(separatorIdx + 2);
+                analytics.wizardCapture('intro action', {
+                  ...analyticsBase,
+                  action: 'workspace pick',
+                  'pick kind': kind,
+                });
+                if (kind === 'wild') {
+                  setWildcardParent(absolutePath);
+                } else {
+                  setManuallySelected(false);
+                  store.changeInstallDir(absolutePath);
+                }
+                return;
+              }
+
               analytics.wizardCapture('intro action', {
                 ...analyticsBase,
                 action: choice,
@@ -509,6 +603,72 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
           />
         </Box>
       )}
+    </Box>
+  );
+};
+
+/**
+ * Inline sub-picker over the immediate children of a wildcard glob's
+ * parent dir (e.g. `packages/*` → every dir inside `packages/`). Esc
+ * pops back to the main welcome menu.
+ *
+ * Defensive on empty dirs: if `listWildcardChildren` returns nothing
+ * (parent missing, all dotfiles, permission denied) we render a single
+ * "no workspaces found" message and bounce back to the parent menu on
+ * Enter — better than a soft-locked empty picker.
+ */
+const WildcardChildPicker = ({
+  parentDir,
+  installDir,
+  onPick,
+  onCancel,
+}: {
+  parentDir: string;
+  installDir: string;
+  onPick: (absolutePath: string) => void;
+  onCancel: () => void;
+}) => {
+  const children = useMemo(() => listWildcardChildren(parentDir), [parentDir]);
+
+  useScreenInput((_input, key) => {
+    if (key.escape) onCancel();
+  });
+
+  if (children.length === 0) {
+    return (
+      <Box marginTop={1} flexDirection="column" alignItems="flex-start">
+        <Text color={Colors.warning}>
+          {Icons.warning} No workspaces found inside{' '}
+          {shortenHomePath(parentDir)}.
+        </Text>
+        <Text color={Colors.muted}>Press Esc to go back.</Text>
+      </Box>
+    );
+  }
+
+  // Display labels are relative to the original installDir so users
+  // see e.g. `packages/excalidraw-app` instead of an absolute path.
+  const relativePrefix = installDir.endsWith(sep)
+    ? installDir
+    : installDir + sep;
+  const options = children.map((abs) => ({
+    label: abs.startsWith(relativePrefix)
+      ? abs.slice(relativePrefix.length)
+      : abs,
+    value: abs,
+  }));
+
+  return (
+    <Box marginTop={1}>
+      <PickerMenu<string>
+        centered
+        message={`Pick a workspace in ${shortenHomePath(parentDir)} (Esc to go back)`}
+        options={options}
+        onSelect={(value) => {
+          const picked = Array.isArray(value) ? value[0] : value;
+          onPick(picked);
+        }}
+      />
     </Box>
   );
 };
@@ -554,8 +714,8 @@ const WelcomeBackPanel = ({
       ? `${projectName} · ${region.toUpperCase()}`
       : projectName
     : region
-    ? region.toUpperCase()
-    : null;
+      ? region.toUpperCase()
+      : null;
 
   // Events line: only show when we know something concrete. "0 events
   // instrumented" by itself is misleading — it usually means the events
@@ -642,8 +802,8 @@ const TargetSummary = ({
           <Text color={Colors.body}>
             {frameworkLabel}
             {frameworkSuffix}
-            {frameworkBeta && ' [BETA]'}
           </Text>
+          {frameworkBeta && <Text color={Colors.muted}> · beta</Text>}
         </Box>
       )}
 
