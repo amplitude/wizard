@@ -2098,26 +2098,17 @@ Returns: "approved", "skipped", or "feedback: <user message>"`,
   // When this tool fires, `createDashboardStep` finds the file on its next
   // pass and short-circuits to its reuse path — no 90s MCP+sub-agent fallback,
   // no "Creating charts and dashboard in Amplitude…" spinner hang.
+  // Tool description deliberately terse: the in-loop main run is told NOT
+  // to call this (see commandments + agent-runner integration prompt), and
+  // the wizard's `dashboard` fallback sub-agent uses Amplitude MCP directly.
+  // The full contract still lives in the comment above this `tool()` call;
+  // only sub-agents that genuinely persist a dashboard read this schema.
   const recordDashboard = tool(
     'record_dashboard',
-    `Record an Amplitude dashboard you just created via the Amplitude MCP server.
-Call this tool IMMEDIATELY after \`create_dashboard\` returns successfully — it persists the URL and chart metadata so the wizard's outro can link to it and the post-agent fallback step can short-circuit.
-Required: dashboardUrl. Optional but recommended: dashboardId, charts (id/title/type per chart).
-Returns: "ok" on successful persistence, an error string otherwise. Idempotent — safe to call again with updated values.`,
+    'Persist a dashboard URL after Amplitude MCP `create_dashboard` returns. Idempotent.',
     {
-      dashboardUrl: z
-        .string()
-        .url()
-        .describe(
-          'The full HTTPS URL to the created dashboard in Amplitude (e.g. https://app.amplitude.com/.../dashboard/abc123). Must be a valid URL — the outro renders this as a clickable link.',
-        ),
-      dashboardId: z
-        .string()
-        .min(1)
-        .optional()
-        .describe(
-          'The dashboard ID returned by the Amplitude MCP create_dashboard call. Optional but recommended for downstream tooling.',
-        ),
+      dashboardUrl: z.string().url().describe('Dashboard URL on Amplitude.'),
+      dashboardId: z.string().min(1).optional().describe('Dashboard ID.'),
       charts: z
         .array(
           z.object({
@@ -2127,9 +2118,7 @@ Returns: "ok" on successful persistence, an error string otherwise. Idempotent �
           }),
         )
         .optional()
-        .describe(
-          'Metadata for each chart on the dashboard. Used by the wizard outro and analytics. Pass at least the title and type per chart (e.g. funnel, line, retention).',
-        ),
+        .describe('Per-chart metadata: id, title, type.'),
       reason: reasonField,
     },
     (args: {

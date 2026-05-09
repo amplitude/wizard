@@ -10,7 +10,14 @@
  * - Automatic redaction at serialization boundary
  */
 
-import { appendFileSync, statSync, renameSync } from 'fs';
+import {
+  appendFileSync,
+  statSync,
+  renameSync,
+  openSync,
+  closeSync,
+  writeSync,
+} from 'fs';
 import { dirname, join } from 'path';
 import type { ExecutionMode } from '../mode-config';
 import { redact, redactString } from './redact';
@@ -168,12 +175,14 @@ export function initLogger(
   // logs. The two paths are tracked independently — `log.txt` and
   // `log.ndjson` — so we explicitly iterate both rather than deriving one
   // from the other with a string concatenation.
+  let rotated = false;
   for (const path of [activePath, activeStructuredPath]) {
     try {
       const stats = statSync(path);
       if (stats.size > LOG_MAX_BYTES) {
         try {
           renameSync(path, `${path}.1`);
+          rotated = true;
         } catch {
           // Rename failed — truncate will happen naturally
         }
@@ -181,6 +190,14 @@ export function initLogger(
     } catch {
       // File doesn't exist yet — fine
     }
+  }
+  // If we rotated, any cached fds from a previous `initLogger` call (or
+  // from pre-init writes through the bootstrap path) still point at the
+  // now-renamed `.1` file. Close them so the next `writeToFile` reopens
+  // against the fresh target path. Bugbot caught this — without it,
+  // post-rotation log lines silently land in the rotated backup.
+  if (rotated) {
+    closeCachedFds();
   }
 
   // Write run header
@@ -231,6 +248,9 @@ export function setProjectLogFile(installDir: string): void {
       // Non-critical
     }
   }
+  // Close cached fds for the old paths — the next writeToFile() call will
+  // lazily open fds for the new paths.
+  closeCachedFds();
   logFilePath = target;
   structuredLogFilePath = targetStructured;
   // The new dir was just ensured; reset the per-write cache so any
@@ -291,6 +311,10 @@ export function configureLogFile(opts: {
   structuredPath?: string;
   enabled?: boolean;
 }): void {
+  // Any path change invalidates the cached fds — the next write reopens.
+  if (opts.path !== undefined || opts.structuredPath !== undefined) {
+    closeCachedFds();
+  }
   if (opts.path !== undefined) {
     logFilePath = opts.path;
     structuredLogFilePath =
@@ -334,6 +358,49 @@ const LEVEL_LABEL: Record<LogLevel, string> = {
  */
 const ensuredDirs = new Set<string>();
 
+// Persistent fds for the human + structured log files. `appendFileSync`
+// opens-writes-closes per call (3 syscalls); with hundreds of log lines
+// per run × 142 callsites that adds up. Caching the fds drops each write
+// to a single `writeSync` syscall. Invalidated whenever the underlying
+// path changes — see `closeCachedFds()` below.
+let cachedHumanFd: number | null = null;
+let cachedHumanPath: string | null = null;
+let cachedStructuredFd: number | null = null;
+let cachedStructuredPath: string | null = null;
+
+function openAppendFd(path: string): number | null {
+  try {
+    return openSync(path, 'a');
+  } catch {
+    return null;
+  }
+}
+
+function closeCachedFds(): void {
+  if (cachedHumanFd !== null) {
+    try {
+      closeSync(cachedHumanFd);
+    } catch {
+      // ignore
+    }
+    cachedHumanFd = null;
+    cachedHumanPath = null;
+  }
+  if (cachedStructuredFd !== null) {
+    try {
+      closeSync(cachedStructuredFd);
+    } catch {
+      // ignore
+    }
+    cachedStructuredFd = null;
+    cachedStructuredPath = null;
+  }
+}
+
+// Best-effort: flush + release fds when the process exits. fs.writeSync
+// has already gone to the kernel, so this is purely fd cleanup.
+process.once('exit', closeCachedFds);
+
 function writeToFile(entry: LogEntry): void {
   if (!logFileEnabled) return;
   try {
@@ -354,13 +421,50 @@ function writeToFile(entry: LogEntry): void {
     const line = `[${redacted['@timestamp']}] [${redacted.run_id}] [${
       redacted.namespace
     }] ${LEVEL_LABEL[redacted.level]} ${redacted.msg}${ctxStr}\n`;
-    appendFileSync(activePath, line);
+
+    if (cachedHumanFd === null || cachedHumanPath !== activePath) {
+      if (cachedHumanFd !== null) {
+        try {
+          closeSync(cachedHumanFd);
+        } catch {
+          // ignore
+        }
+      }
+      cachedHumanFd = openAppendFd(activePath);
+      cachedHumanPath = activePath;
+    }
+    if (cachedHumanFd !== null) {
+      writeSync(cachedHumanFd, line);
+    } else {
+      // Open failed (e.g. nonexistent dir in a test) — fall back so the
+      // "never throws even if file write fails" contract still holds.
+      appendFileSync(activePath, line);
+    }
 
     // 2. Complete NDJSON to a companion file (for programmatic analysis).
     // The structured path is tracked independently from the human path so
     // it lands at `log.ndjson` next to `log.txt` (vs. the previous `+ 'l'`
     // string-concat which produced `log.txtl`).
-    appendFileSync(activeStructuredPath, JSON.stringify(redacted) + '\n');
+    const structuredLine = JSON.stringify(redacted) + '\n';
+    if (
+      cachedStructuredFd === null ||
+      cachedStructuredPath !== activeStructuredPath
+    ) {
+      if (cachedStructuredFd !== null) {
+        try {
+          closeSync(cachedStructuredFd);
+        } catch {
+          // ignore
+        }
+      }
+      cachedStructuredFd = openAppendFd(activeStructuredPath);
+      cachedStructuredPath = activeStructuredPath;
+    }
+    if (cachedStructuredFd !== null) {
+      writeSync(cachedStructuredFd, structuredLine);
+    } else {
+      appendFileSync(activeStructuredPath, structuredLine);
+    }
   } catch {
     // Silently ignore — logging must never crash the wizard
   }

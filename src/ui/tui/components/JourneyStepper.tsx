@@ -103,6 +103,42 @@ function getFailedStepLabel(session: WizardSession): string | null {
   return 'Done';
 }
 
+/**
+ * The terminal Done step is special: when the user has actually
+ * reached a successful outro, the step has BOTH "I'm here" semantics
+ * AND "the journey is over" semantics. Rendering the in-progress
+ * `●` glyph (used for active mid-flow steps) makes the screen look
+ * like the wizard is still working — visually indistinguishable from
+ * Setup or Verify being underway. Switch the active glyph to `✓`
+ * when the run has actually concluded with success so the stepper
+ * reflects "you made it" rather than "in progress".
+ *
+ * Returns true only when the user is on the Done step AND the outro
+ * shows success (or the synthetic full-activation success path —
+ * mirrors `isSuccess` in OutroScreen). Errors and cancels keep the
+ * `●` glyph so the visual difference between "succeeded" and
+ * "stopped here for some other reason" stays legible.
+ */
+function isDoneSuccessActive(
+  stepLabel: string,
+  state: StepState,
+  store: WizardStore,
+): boolean {
+  if (stepLabel !== 'Done' || state !== 'active') return false;
+  const kind = store.session.outroData?.kind;
+  if (kind === OutroKind.Success) return true;
+  // Full-activation re-runs reach the Outro without an explicit
+  // outroData — OutroScreen synthesizes Success in that case. Match
+  // its detection so the stepper agrees.
+  if (
+    !kind &&
+    store.session.activationLevel === 'full'
+  ) {
+    return true;
+  }
+  return false;
+}
+
 /** Build set of screens the flow has already passed. */
 function getCompletedScreens(currentScreen: string): Set<string> {
   const completed = new Set<string>();
@@ -160,8 +196,14 @@ export const JourneyStepper = ({ store, width }: JourneyStepperProps) => {
   return (
     <Box paddingX={1}>
       {steps.map((step, i) => {
+        // When the user has actually landed on Done with a successful
+        // outro, swap the in-progress `●` for `✓` and tint it with the
+        // success color. The `←` cursor still points at Done so users
+        // can locate themselves in the stepper, but the glyph reads as
+        // "completed" rather than "still working".
+        const doneSuccess = isDoneSuccessActive(step.label, step.state, store);
         const icon =
-          step.state === 'completed'
+          step.state === 'completed' || doneSuccess
             ? Icons.checkmark
             : step.state === 'active'
             ? Icons.bullet
@@ -169,14 +211,15 @@ export const JourneyStepper = ({ store, width }: JourneyStepperProps) => {
             ? Icons.cross
             : Icons.bulletOpen;
 
-        const color =
-          step.state === 'completed'
-            ? Brand.lilac
-            : step.state === 'active'
-            ? Colors.accent
-            : step.state === 'failed'
-            ? Colors.error
-            : Colors.muted;
+        const color = doneSuccess
+          ? Colors.success
+          : step.state === 'completed'
+          ? Brand.lilac
+          : step.state === 'active'
+          ? Colors.accent
+          : step.state === 'failed'
+          ? Colors.error
+          : Colors.muted;
 
         return (
           <Box key={step.label}>

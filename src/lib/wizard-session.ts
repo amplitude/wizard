@@ -973,6 +973,19 @@ export interface WizardSession {
       | null;
     /** Pre-filled name (e.g. from --project-name CLI flag). */
     suggestedName: string | null;
+    /**
+     * UUID v4 attached as the `Idempotency-Key` header on `POST /projects`.
+     * Generated lazily on the first create attempt and reused across
+     * HTTP retries so a successful create that replied with a network
+     * blip can't double-create the project. Cleared after a successful
+     * create / explicit cancel so a subsequent re-entry into the
+     * create-project flow gets a fresh key.
+     *
+     * Sourced via the helper in `lib/idempotency-key.ts` rather than
+     * being generated here so callers across the TUI + CLI surfaces
+     * share one accessor.
+     */
+    idempotencyKey: string | null;
   };
 }
 
@@ -1298,6 +1311,10 @@ export function buildSession(args: {
       pending: false,
       source: args.appName ? 'cli-flag' : null,
       suggestedName: args.appName ?? null,
+      // Lazily filled by `getOrCreateProjectIdempotencyKey` on the first
+      // create attempt — `null` here keeps initial sessions out of the
+      // checkpoint diff for runs that never enter the create-project flow.
+      idempotencyKey: null,
     },
   };
 }

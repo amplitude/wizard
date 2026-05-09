@@ -11,35 +11,75 @@ import { useState, useEffect, useRef } from 'react';
 import * as fs from 'fs';
 import { useStdoutDimensions } from '../hooks/useStdoutDimensions.js';
 import { useScreenInput } from '../hooks/useScreenInput.js';
+import { useContentArea } from '../context/ContentAreaContext.js';
 import { Colors } from '../styles.js';
 import { renderMarkdown } from '../utils/terminal-rendering.js';
 import { watchFileWhenAvailable } from '../utils/watchFileWhenAvailable.js';
 
-/** Rows consumed by ConsoleView border + TitleBar + separator + tab bar chrome */
-const CHROME_ROWS = 10;
+/**
+ * Fallback rows consumed by ConsoleView border + TitleBar + separator +
+ * tab bar chrome when no ContentAreaContext is available (e.g. unit
+ * tests rendering ReportViewer in isolation). When the context is
+ * present we use its `height` directly, which already accounts for App
+ * chrome — and the caller can deduct any sibling chrome it adds via
+ * `siblingRows` so the report doesn't overflow the viewport.
+ */
+const FALLBACK_CHROME_ROWS = 10;
 
 /** ANSI SGR reset — closes bold/color/background. */
 const ANSI_RESET = '\x1b[0m';
 
 interface ReportViewerProps {
   filePath: string;
+  /**
+   * Rows consumed by sibling content rendered inside the same content
+   * area (e.g. OutroScreen's own header, CTA, and key-hint footer).
+   * Subtracted from the available content height so the scroll area
+   * doesn't push the parent's footer off the bottom of the viewport —
+   * Ink/Yoga defaults `flexShrink` to 0, so a fixed-height
+   * `<Box height={…}>` won't compress to make room for siblings.
+   */
+  siblingRows?: number;
 }
 
-export const ReportViewer = ({ filePath }: ReportViewerProps) => {
-  const [, rows] = useStdoutDimensions();
-  const visibleLines = Math.max(5, rows - CHROME_ROWS);
+export const ReportViewer = ({
+  filePath,
+  siblingRows = 0,
+}: ReportViewerProps) => {
+  const [stdoutCols, stdoutRows] = useStdoutDimensions();
+  const contentArea = useContentArea();
+  // Prefer the content-area metrics when mounted inside the App tree.
+  // The context width already deducts App.tsx's `paddingX` on both
+  // sides; combined with `buildTerminalMarked`'s internal `-4`, the
+  // total padding accounted for is 12 cols, which matches the actual
+  // OutroScreen layout (App paddingX=4 ×2 + sub-view paddingX=2 ×2).
+  const cols = contentArea?.width ?? stdoutCols;
+  const baseRows = contentArea?.height ?? stdoutRows - FALLBACK_CHROME_ROWS;
+  const visibleLines = Math.max(5, baseRows - siblingRows);
 
   const [lines, setLines] = useState<string[]>([]);
   const [offset, setOffset] = useState(0);
   const prevRawRef = useRef<string>('');
+  // Cache the cols used for the last render so we know whether to
+  // re-parse on resize. Re-parsing cost is dominated by `marked`,
+  // which is fine for the rare resize event but wasteful on every
+  // re-render (the picker re-mounts on each keypress).
+  const prevColsRef = useRef<number>(0);
 
   useEffect(() => {
     const updateContent = () => {
       try {
         const raw = fs.readFileSync(filePath, 'utf-8');
-        if (raw === prevRawRef.current) return; // skip redundant re-renders
+        if (raw === prevRawRef.current && prevColsRef.current === cols) {
+          return; // skip redundant re-renders
+        }
         prevRawRef.current = raw;
-        const rendered = renderMarkdown(raw);
+        prevColsRef.current = cols;
+        // Pass terminal width so cli-table3 sizes columns to fit the
+        // viewport instead of overflowing past the right edge — without
+        // this, every line of the Setup Report's events table got a
+        // stray "…" decoration from `<Text wrap="truncate">` below.
+        const rendered = renderMarkdown(raw, cols);
         // marked-terminal wraps long headings/code blocks across multiple
         // lines but only emits the closing reset at the end of the block.
         // When we split on \n and render each line in its own <Text>, any
@@ -67,7 +107,10 @@ export const ReportViewer = ({ filePath }: ReportViewerProps) => {
     });
 
     return () => handle.dispose();
-  }, [filePath]);
+    // `cols` is included so a terminal resize re-parses the markdown
+    // with the new viewport width. Without this dependency, the table
+    // column widths would stay locked to the cols at first mount.
+  }, [filePath, cols]);
 
   const maxOffset = Math.max(0, lines.length - visibleLines);
 
