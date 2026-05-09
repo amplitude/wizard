@@ -316,11 +316,12 @@ describe('cleanupIntegrationSkills', () => {
 // normalizeEventName
 // ---------------------------------------------------------------------------
 //
-// Soft repair gate for `confirm_event_plan`. Fixes shapes the schema
-// forbids (snake_case, kebab-case, camelCase, dotted, single-token) but
-// PRESERVES casing on already-multi-word inputs so user feedback like
-// "lowercase the event names" or "use UPPERCASE" actually round-trips
-// from the LLM through the tool to the user-facing prompt.
+// Soft format gate for `confirm_event_plan`. Pre-PR, the system prompt
+// said "Title Case" but the tool's input schema description said
+// "lowercase" — agents emitted both. The normalizer guarantees the
+// persisted event plan and the user-facing prompt both match the
+// canonical Title Case shape regardless of which guidance the model
+// followed.
 
 describe('normalizeEventName', () => {
   it('leaves correctly-shaped Title Case names unchanged', () => {
@@ -346,31 +347,14 @@ describe('normalizeEventName', () => {
     expect(normalizeEventName('SearchPerformed')).toBe('Search Performed');
   });
 
-  // Casing preservation — load-bearing for the feedback round-trip. If
-  // the user says "lowercase the event names" and the LLM revises with
-  // lowercase space-separated names, we must NOT slam them back to
-  // Title Case before the user sees the revised plan.
-  it('preserves intentional lowercase when the input is already multi-word', () => {
-    expect(normalizeEventName('user signed up')).toBe('user signed up');
-    expect(normalizeEventName('product added to cart')).toBe(
-      'product added to cart',
-    );
-  });
-
-  it('preserves intentional UPPERCASE when the input is already multi-word', () => {
-    expect(normalizeEventName('USER SIGNED UP')).toBe('USER SIGNED UP');
-  });
-
-  it('preserves intentional Sentence case when the input is already multi-word', () => {
-    expect(normalizeEventName('User signed up')).toBe('User signed up');
+  it('converts all-lowercase with spaces to Title Case', () => {
+    expect(normalizeEventName('user signed up')).toBe('User Signed Up');
   });
 
   it('preserves short ALL-CAPS acronyms', () => {
-    // Already multi-word — pass through verbatim.
+    expect(normalizeEventName('api request sent')).toBe('Api Request Sent');
     expect(normalizeEventName('API Request Sent')).toBe('API Request Sent');
     expect(normalizeEventName('SDK Initialized')).toBe('SDK Initialized');
-    // Lowercase multi-word also preserved verbatim — no auto Title-Case.
-    expect(normalizeEventName('api request sent')).toBe('api request sent');
   });
 
   it('truncates names over 50 chars with an ellipsis', () => {
@@ -387,10 +371,6 @@ describe('normalizeEventName', () => {
   it('collapses multiple separators', () => {
     expect(normalizeEventName('user__signed___up')).toBe('User Signed Up');
     expect(normalizeEventName('user.signed.up')).toBe('User Signed Up');
-  });
-
-  it('collapses runs of whitespace without changing case', () => {
-    expect(normalizeEventName('user   signed  up')).toBe('user signed up');
   });
 });
 
@@ -2032,183 +2012,5 @@ describe('isWizardPromptActive / onWizardPromptRelease', () => {
     resolve();
     await inFlight;
     expect(releaseCount).toBe(0);
-  });
-});
-
-// ---------------------------------------------------------------------------
-// confirm_event_plan — feedback round-trip
-//
-// Bug coverage: a user typing "lowercase the event names" / "use UPPERCASE"
-// must see those names round-trip through the LLM and back to the prompt
-// verbatim. The original implementation force-Title-Cased every name in
-// the tool handler, silently undoing case-related feedback before the
-// user ever saw the revised plan.
-// ---------------------------------------------------------------------------
-
-describe('confirm_event_plan feedback round-trip', () => {
-  let setUI: typeof import('../../ui').setUI;
-  let LoggingUI: typeof import('../../ui/logging-ui').LoggingUI;
-  let __resetWizardPromptStateForTests: typeof import('../wizard-tools').__resetWizardPromptStateForTests;
-
-  beforeEach(async () => {
-    ({ setUI } = await import('../../ui'));
-    ({ LoggingUI } = await import('../../ui/logging-ui'));
-    ({ __resetWizardPromptStateForTests } = await import('../wizard-tools'));
-    __resetWizardPromptStateForTests();
-  });
-
-  afterEach(() => {
-    __resetWizardPromptStateForTests();
-    setUI(new LoggingUI());
-  });
-
-  /**
-   * Build a UI whose `promptEventPlan` resolves immediately with a fixed
-   * decision but ALSO records the events it was handed. Lets us assert
-   * that the handler passed the agent's events to the UI without
-   * re-casing them.
-   */
-  function makeRecordingUI(
-    decision:
-      | { decision: 'approved' | 'skipped' }
-      | { decision: 'revised'; feedback: string },
-  ) {
-    const ui = new LoggingUI();
-    const captured: Array<{ name: string; description: string }> = [];
-    ui.promptEventPlan = async (
-      events: Array<{ name: string; description: string }>,
-    ) => {
-      for (const e of events)
-        captured.push({ name: e.name, description: e.description });
-      return decision;
-    };
-    return { ui, captured };
-  }
-
-  it('returns the user feedback string verbatim to the agent (so the LLM gets it for revision)', async () => {
-    // The agent receives the tool's text output as the next message. If
-    // the tool drops or mangles the feedback, the LLM has nothing to act
-    // on and the user concludes their note was ignored.
-    const { ui } = makeRecordingUI({
-      decision: 'revised',
-      feedback: 'lowercase the event names',
-    });
-    setUI(ui);
-
-    const tmpDir = makeTmpDir();
-    try {
-      const tools = await getTools(tmpDir);
-      const tool = findTool(tools, 'confirm_event_plan');
-      const result = (await callTool(tool, {
-        events: [
-          { name: 'User Signed Up', description: 'first feedback round' },
-        ],
-        reason: 'unit test',
-      })) as { content: Array<{ text: string }> };
-      expect(result.content[0].text).toBe(
-        'feedback: lowercase the event names',
-      );
-    } finally {
-      cleanup(tmpDir);
-    }
-  });
-
-  it('passes lowercase multi-word names through to promptEventPlan VERBATIM (no auto Title-Case)', async () => {
-    // Simulates the LLM's revision call after the user said "lowercase
-    // the event names". The agent emits `"user signed up"`; the wizard
-    // must preserve that lowercase string — both into the user-facing
-    // prompt AND into the persisted plan — so the displayed names match
-    // what the implementation will eventually `track()`.
-    const { ui, captured } = makeRecordingUI({ decision: 'approved' });
-    setUI(ui);
-
-    const tmpDir = makeTmpDir();
-    try {
-      const tools = await getTools(tmpDir);
-      const tool = findTool(tools, 'confirm_event_plan');
-      await callTool(tool, {
-        events: [
-          { name: 'user signed up', description: 'fires on signup' },
-          { name: 'product added to cart', description: 'fires on add' },
-        ],
-        reason: 'unit test',
-      });
-      expect(captured).toEqual([
-        { name: 'user signed up', description: 'fires on signup' },
-        { name: 'product added to cart', description: 'fires on add' },
-      ]);
-    } finally {
-      cleanup(tmpDir);
-    }
-  });
-
-  it('passes UPPERCASE multi-word names through verbatim', async () => {
-    const { ui, captured } = makeRecordingUI({ decision: 'approved' });
-    setUI(ui);
-
-    const tmpDir = makeTmpDir();
-    try {
-      const tools = await getTools(tmpDir);
-      const tool = findTool(tools, 'confirm_event_plan');
-      await callTool(tool, {
-        events: [{ name: 'USER SIGNED UP', description: 'fires on signup' }],
-        reason: 'unit test',
-      });
-      expect(captured[0].name).toBe('USER SIGNED UP');
-    } finally {
-      cleanup(tmpDir);
-    }
-  });
-
-  it('persists the agent-supplied casing to .amplitude/events.json on approve (no display-vs-storage drift)', async () => {
-    // The user's note: "when they get implemented they don't show the same
-    // as this" — implementation should mirror what the user saw on the
-    // approval screen. Persistence and prompt go through the same
-    // `events` array, so checking the persisted file is the cheapest
-    // single-shot proof.
-    const { ui } = makeRecordingUI({ decision: 'approved' });
-    setUI(ui);
-
-    const tmpDir = makeTmpDir();
-    try {
-      const tools = await getTools(tmpDir);
-      const tool = findTool(tools, 'confirm_event_plan');
-      await callTool(tool, {
-        events: [
-          { name: 'user signed up', description: 'fires on signup' },
-          { name: 'checkout completed', description: 'fires on success' },
-        ],
-        reason: 'unit test',
-      });
-      const file = path.join(tmpDir, '.amplitude', 'events.json');
-      const persisted = JSON.parse(fs.readFileSync(file, 'utf8'));
-      expect(persisted).toEqual([
-        { name: 'user signed up', description: 'fires on signup' },
-        { name: 'checkout completed', description: 'fires on success' },
-      ]);
-    } finally {
-      cleanup(tmpDir);
-    }
-  });
-
-  it('still repairs malformed shapes the schema forbids (snake_case → Title Case)', async () => {
-    // The repair half of the contract is still load-bearing — agents
-    // occasionally emit `user_signed_up` despite the schema, and we don't
-    // want raw snake_case landing in the UI.
-    const { ui, captured } = makeRecordingUI({ decision: 'approved' });
-    setUI(ui);
-
-    const tmpDir = makeTmpDir();
-    try {
-      const tools = await getTools(tmpDir);
-      const tool = findTool(tools, 'confirm_event_plan');
-      await callTool(tool, {
-        events: [{ name: 'user_signed_up', description: 'snake case' }],
-        reason: 'unit test',
-      });
-      expect(captured[0].name).toBe('User Signed Up');
-    } finally {
-      cleanup(tmpDir);
-    }
   });
 });

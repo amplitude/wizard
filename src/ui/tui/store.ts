@@ -250,16 +250,6 @@ export class WizardStore {
   /** Pending confirmation or choice prompt from the agent. */
   private $pendingPrompt = atom<PendingPrompt | null>(null);
 
-  /**
-   * True between the moment the user submits feedback on an event-plan
-   * prompt and the moment the next event-plan prompt arrives (or the run
-   * concludes). Drives the "Revising plan with your feedback…" status pill
-   * so the user has a clear "we heard you, the LLM is working on it" beat
-   * — without it, EventPlanFullScreen vanishes and RunScreen's tool-activity
-   * feed reads as if nothing happened. Cleared on the next promptEventPlan.
-   */
-  private $revisingEventPlan = atom<boolean>(false);
-
   /** Resolves when the user picks continue vs run wizard after Amplitude pre-detection. */
   private _preDetectedChoiceResolver:
     | ((runWizardAnyway: boolean) => void)
@@ -326,10 +316,6 @@ export class WizardStore {
 
   get pendingPrompt(): PendingPrompt | null {
     return this.$pendingPrompt.get();
-  }
-
-  get revisingEventPlan(): boolean {
-    return this.$revisingEventPlan.get();
   }
 
   // ── Session setters ─────────────────────────────────────────────
@@ -1132,10 +1118,6 @@ export class WizardStore {
   /** Show an event-plan confirmation. Resolves when the user approves, skips, or gives feedback. */
   promptEventPlan(events: PlannedEvent[]): Promise<EventPlanDecision> {
     return new Promise((resolve) => {
-      // The arrival of a new prompt is the signal that any prior
-      // "revising…" beat has landed — clear the flag so the status pill
-      // returns to its normal cadence on the next render.
-      this.$revisingEventPlan.set(false);
       this.$pendingPrompt.set({ kind: 'event-plan', events, resolve });
       this.emitChange();
     });
@@ -1150,13 +1132,6 @@ export class WizardStore {
       response: typeof decision === 'object' ? 'feedback' : String(decision),
     });
     this.$pendingPrompt.set(null);
-    // Light up the "we're revising your plan" beat so the user has
-    // continuous feedback between submitting their note and the LLM
-    // landing the revised plan. Cleared by the next promptEventPlan
-    // (or harmlessly persists if the run terminates with no follow-up).
-    if (decision.decision === 'revised') {
-      this.$revisingEventPlan.set(true);
-    }
     this.emitChange();
     prompt.resolve(decision);
   }
