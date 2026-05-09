@@ -426,6 +426,27 @@ export interface WizardActivity {
   estimatedDurationSec?: number;
 }
 
+/**
+ * One row of the cold-start "discovery feed" — a small chip the TUI fades
+ * into the empty middle of RunScreen as the wizard learns each fact about
+ * the user's project (framework, package manager, TypeScript, etc.).
+ *
+ * Append-only: new facts are pushed at the tail, never re-ordered or
+ * removed. The feed is purely cosmetic; the actual values are also
+ * threaded into the agent's preflight context block — see
+ * `src/lib/agent/preflight-context.ts`.
+ */
+export interface DiscoveryFact {
+  /** Stable id used to dedupe — re-pushing the same id is a no-op. */
+  id: string;
+  /** Short label, e.g. "Framework", "Package manager", "TypeScript". */
+  label: string;
+  /** Right-hand value, e.g. "Next.js (App Router)", "pnpm", "yes". */
+  value: string;
+  /** Wall-clock ms when this fact was first published. */
+  discoveredAt: number;
+}
+
 export interface WizardSession {
   // From CLI args
   debug: boolean;
@@ -760,6 +781,15 @@ export interface WizardSession {
    * sub-row under the journey stepper.
    */
   currentActivity: WizardActivity | null;
+  /**
+   * Append-only feed of facts the wizard has learned about the user's
+   * project during the cold-start window. Surfaced by `DiscoveryFeed`
+   * to fill the empty middle of RunScreen with a sense of presence —
+   * "the wizard is doing something" — instead of a blank void while
+   * the agent boots. Cosmetic only; agent decisions read from
+   * `frameworkContext` / preflight context, not this feed.
+   */
+  discoveryFacts: DiscoveryFact[];
   outroData: OutroData | null;
 
   // Additional features queue (drained via stop hook after main integration)
@@ -1234,6 +1264,7 @@ export function buildSession(args: {
     serviceStatus: null,
     retryState: null,
     currentActivity: null,
+    discoveryFacts: [],
     outroData: null,
     introConcluded: false,
     requiresAccountConfirmation: false,
