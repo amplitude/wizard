@@ -42,6 +42,23 @@ This is configured in `release-please-config.json` and the `--tag beta` flag in 
 
 > **Note:** The `"versioning": "prerelease"` setting in `release-please-config.json` ensures that all commits (`fix:`, `feat:`, etc.) only increment the beta number (`1.0.0-beta.2` → `1.0.0-beta.3`). When ready to move to a stable release, remove `prerelease`, `prerelease-type`, and `versioning` from the config.
 
+## Build pipeline
+
+The published artifact is produced by `pnpm build`, which runs two passes:
+
+1. `pnpm build:bundle` — `tsup` collapses `bin.ts` and the entire `src/`
+   tree into a single `dist/bin.js` file (with `dist/bin.js.map`).
+2. `pnpm build:types` — `tsc --emitDeclarationOnly` writes `.d.ts` files
+   for `bin.ts` and `src/**/*.ts`.
+
+`prepublishOnly` runs `pnpm clean && pnpm build`, so release-please and
+the manual-publish workflow always ship a fresh bundle. See
+[`docs/build.md`](./build.md) for what's bundled, what's externalized,
+and the lazy-load conventions.
+
+If a release fails because of a build regression: `pnpm clean && pnpm
+build` reproduces the publish-time output deterministically.
+
 ## Manual publish (emergency)
 
 If the automated flow fails, use the **Publish (manual)** workflow:
