@@ -254,6 +254,46 @@ describe('resolveRunStatusPill — tier 6: canonical task activeForm (legacy fal
 
     expect(resolveRunStatusPill(store, T0)).toBe('Wiring up event tracking');
   });
+
+  // Regression — the resolver must walk CANONICAL_STEPS in order and
+  // return the CURRENT in-progress step's text, never an earlier step's.
+  // Prevents the "pill says 'Detecting your project setup' while plan
+  // is in_progress" bug that motivated PR #685.
+  it('walks CANONICAL_STEPS: plan in_progress with no activeForm falls back to plan label, not detect', () => {
+    const store = makeStoreForSnapshot();
+    store.setTasks([
+      {
+        label: CANONICAL_STEPS[0].label,
+        activeForm: undefined,
+        status: TaskStatus.Completed,
+        done: true,
+      },
+      {
+        label: CANONICAL_STEPS[1].label,
+        activeForm: undefined,
+        status: TaskStatus.Completed,
+        done: true,
+      },
+      {
+        label: CANONICAL_STEPS[2].label,
+        activeForm: undefined, // agent never set one
+        status: TaskStatus.InProgress,
+        done: false,
+      },
+      {
+        label: CANONICAL_STEPS[3].label,
+        activeForm: undefined,
+        status: TaskStatus.Pending,
+        done: false,
+      },
+    ]);
+    expect(resolveRunStatusPill(store, T0)).toBe(
+      'Plan and approve events to track',
+    );
+    expect(resolveRunStatusPill(store, T0)).not.toBe(
+      'Detecting your project setup',
+    );
+  });
 });
 
 describe('resolveRunStatusPill — tier 7: trailing pushStatus (cold-start)', () => {

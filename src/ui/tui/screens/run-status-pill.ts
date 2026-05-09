@@ -45,7 +45,12 @@
  *      Same staleness window as tier 4.
  *
  *   6. **Active canonical task's `activeForm`** — the original behavior.
- *      Used when none of the live signals above are recent.
+ *      Used when none of the live signals above are recent. Implemented
+ *      by walking `CANONICAL_STEPS` in order and short-circuiting on the
+ *      first in_progress row, NOT `tasks.find(InProgress)`. The latter
+ *      mislabels the pill with `detect`'s text whenever two rows are
+ *      ever in_progress at once. Defensive fallback: same step's
+ *      canonical label, never another step's text.
  *
  *   7. **Trailing free-form `pushStatus` line** — cold-start fallback,
  *      before any task has flipped to in_progress.
@@ -57,6 +62,7 @@
 import { TaskStatus } from '../../wizard-ui.js';
 import { PostAgentStepStatus } from '../session-constants.js';
 import type { WizardStore } from '../store.js';
+import { CANONICAL_STEPS } from '../../../lib/canonical-tasks.js';
 import path from 'node:path';
 
 /**
@@ -175,12 +181,33 @@ export function resolveRunStatusPill(
     }
   }
 
-  // Tier 6 — canonical in-progress task's activeForm. Original behavior;
-  // the safe boring fallback when nothing more specific is fresh.
-  const inProgressTask = store.tasks.find(
-    (t) => t.status === TaskStatus.InProgress,
-  );
-  if (inProgressTask?.activeForm) return inProgressTask.activeForm;
+  // Tier 6 — canonical in-progress task's activeForm. The safe, boring
+  // fallback when nothing more specific is fresh.
+  //
+  // Walk `CANONICAL_STEPS` in order and short-circuit on the first
+  // in_progress row. Crucially, this is NOT `store.tasks.find(t =>
+  // t.status === InProgress)`: if anything (mid-batch render, future
+  // setter that bypasses the renderJourneyTasks frontier cascade) ever
+  // leaves two rows as in_progress at the same time, `find` returns the
+  // FIRST match — which would be `detect`, silently mislabelling the
+  // pill with detect's text while the user visibly watches a later step
+  // run. A user reported exactly this: pill read "Detecting your
+  // project setup" while the task list correctly showed detect ✓,
+  // install ✓, plan in_progress, wire pending. Walking CANONICAL_STEPS
+  // in order — keyed by canonical step index, with `tasks[i]` paired
+  // 1:1 with `CANONICAL_STEPS[i]` — anchors the pill to whichever step
+  // is current. The defensive fallback to the SAME step's canonical
+  // label (rather than `defaultActiveForm` of any other step) makes
+  // sure that even if the agent never set an `activeForm` we surface
+  // the SAME step's text, never a different step's.
+  const tasks = store.tasks;
+  for (let i = 0; i < CANONICAL_STEPS.length; i++) {
+    const task = tasks[i];
+    if (!task) continue;
+    if (task.status !== TaskStatus.InProgress) continue;
+    if (task.activeForm && task.activeForm.trim()) return task.activeForm;
+    return CANONICAL_STEPS[i].label;
+  }
 
   // Tier 7 — trailing free-form `pushStatus` line. Cold-start gap before
   // the first canonical task has flipped to in_progress.
