@@ -202,12 +202,20 @@ export function parseJudgeVerdict(rawText) {
  *     output passes structural scorers AND no refusals.
  *   - Haiku REVERT otherwise.
  *
+ * `options.judgeRequested` distinguishes "binary fixture, judge
+ * intentionally skipped" from "judge requested but every call failed
+ * (rate-limit / auth / network)". The first case is fine to surface as
+ * `keep-haiku` when structurals pass; the second must NOT silently
+ * recommend keep-haiku — we return `inconclusive` so a CI pipeline
+ * doesn't lock in a Haiku decision without actual quality validation.
+ *
  * @param {Array<{
  *   model: 'haiku'|'sonnet',
  *   promptId: string,
  *   structural: { pass: boolean, failures: string[] },
  *   judge?: { score: number },
  * }>} rows
+ * @param {{ judgeRequested?: boolean }} [options]
  * @returns {{
  *   haikuStructuralPass: number,
  *   haikuStructuralFail: number,
@@ -219,7 +227,8 @@ export function parseJudgeVerdict(rawText) {
  *   reasons: string[],
  * }}
  */
-export function summariseResults(rows) {
+export function summariseResults(rows, options = {}) {
+  const { judgeRequested = false } = options;
   const summary = {
     haikuStructuralPass: 0,
     haikuStructuralFail: 0,
@@ -283,6 +292,17 @@ export function summariseResults(rows) {
     return summary;
   }
   if (summary.haikuMedianJudgeScore === null) {
+    if (judgeRequested) {
+      // Judge was requested but every call failed (rate-limit, auth,
+      // network). Do NOT silently recommend keep-haiku — that would lock
+      // in a Haiku decision without any quality validation. Surface as
+      // inconclusive so CI pipelines don't merge a regression.
+      summary.recommendation = 'inconclusive';
+      summary.reasons.push(
+        'judge requested but every call failed — no judge data available',
+      );
+      return summary;
+    }
     // Structural passed but no judge data — fixture may have skipped
     // the judge (e.g. gateway-probe binary fixture).
     summary.recommendation = 'keep-haiku';

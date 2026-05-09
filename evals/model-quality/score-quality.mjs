@@ -37,6 +37,18 @@ import {
   authToRunnerShape,
 } from './lib/run-prompt.mjs';
 
+// `streamText` exposes several lazy promises (`text`, `finishReason`,
+// `usage`). When a stream rejects (e.g. retry-exhausted 429) and the
+// caller only awaits `textStream`, the others become unhandled
+// rejections that kill Node before we can write the report file.
+// Mirror the handler in `run-quality-ab.mjs` so a flaky judge doesn't
+// crash the scorer mid-run after the structural results have already
+// been computed.
+process.on('unhandledRejection', (reason) => {
+  const msg = reason instanceof Error ? reason.message : String(reason);
+  console.error(`# unhandled rejection (suppressed): ${msg.slice(0, 240)}`);
+});
+
 const HERE = dirname(fileURLToPath(import.meta.url));
 
 function parseArgs(argv) {
@@ -309,6 +321,11 @@ async function main() {
       structural: r.structural,
       judge: r.judge,
     })),
+    // Forward the judge intent so summariseResults can distinguish
+    // "binary fixture (judge intentionally skipped)" from "judge
+    // requested but every call failed". The latter must NOT silently
+    // produce a keep-haiku recommendation.
+    { judgeRequested: !args.noJudge },
   );
 
   const latency = aggregateLatency(judgedRows);

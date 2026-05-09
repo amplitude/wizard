@@ -54,19 +54,7 @@ export async function runPrompt(args) {
   const useDirectApiKey = Boolean(auth.apiKey) && !auth.baseURL;
   const gatewayModel = gatewayModelString(alias, useDirectApiKey);
 
-  const provider = deps.createAnthropic({
-    ...(auth.baseURL ? { baseURL: auth.baseURL } : {}),
-    ...(auth.apiKey ? { apiKey: auth.apiKey } : {}),
-    ...(auth.authToken ? { authToken: auth.authToken } : {}),
-  });
-
   const messages = [{ role: 'user', content: userMessage }];
-  const requestArgs = {
-    model: provider(gatewayModel),
-    messages,
-    ...(system ? { system } : {}),
-    ...(typeof maxOutputTokens === 'number' ? { maxOutputTokens } : {}),
-  };
 
   const start = performance.now();
   let ttftMs = null;
@@ -77,6 +65,23 @@ export async function runPrompt(args) {
   let usageError = null;
 
   try {
+    // `createAnthropic` and `provider(modelString)` MUST be inside the
+    // try/catch so a provider-init failure (invalid baseURL, missing
+    // env, transient SDK throw) is captured into `error` instead of
+    // bubbling out as an unhandled rejection — the documented contract
+    // of `runPrompt` is to capture errors, never throw, so the harness
+    // can write the in-memory `lines` array before exiting.
+    const provider = deps.createAnthropic({
+      ...(auth.baseURL ? { baseURL: auth.baseURL } : {}),
+      ...(auth.apiKey ? { apiKey: auth.apiKey } : {}),
+      ...(auth.authToken ? { authToken: auth.authToken } : {}),
+    });
+    const requestArgs = {
+      model: provider(gatewayModel),
+      messages,
+      ...(system ? { system } : {}),
+      ...(typeof maxOutputTokens === 'number' ? { maxOutputTokens } : {}),
+    };
     const result = deps.streamText(requestArgs);
     for await (const part of result.textStream) {
       if (ttftMs === null) {
