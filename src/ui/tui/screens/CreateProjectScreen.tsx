@@ -46,6 +46,10 @@ import {
 } from '../../../lib/api.js';
 import { getHostFromRegion } from '../../../utils/urls.js';
 import { toCredentialAppId } from '../../../lib/wizard-session.js';
+import {
+  clearProjectIdempotencyKey,
+  getOrCreateProjectIdempotencyKey,
+} from '../../../lib/idempotency-key.js';
 
 interface CreateProjectScreenProps {
   store: WizardStore;
@@ -155,9 +159,17 @@ export const CreateProjectScreen = ({ store }: CreateProjectScreenProps) => {
     });
 
     try {
+      // Source the idempotency key from session state so it stays
+      // stable across retries (HTTP-layer 401 retry inside
+      // createAmplitudeApp + user-driven retry from the error screen
+      // both replay the same key — the proxy then dedupes a request that
+      // succeeded on the previous attempt and only the response was
+      // lost). Cleared after a terminal success below.
+      const idempotencyKey = getOrCreateProjectIdempotencyKey(session);
       const result = await createAmplitudeApp(accessToken, zone, {
         orgId,
         name,
+        idempotencyKey,
       });
 
       // Persist the apiKey + update credentials so AuthScreen's completion
@@ -243,6 +255,12 @@ export const CreateProjectScreen = ({ store }: CreateProjectScreenProps) => {
           // Swallow — we've already landed on success; ampli.json will be
           // written on the next successful org refresh or wizard run.
         });
+
+      // Clear the idempotency key on terminal success so a follow-up
+      // `/create-project` invocation starts fresh. We deliberately do NOT
+      // clear on a recoverable error (400/401/409/etc.) — the user's
+      // retry must replay the same key for the proxy to dedupe.
+      clearProjectIdempotencyKey(session);
 
       // Clear the create-project state last, after credentials are set, so
       // the router only transitions once.
@@ -403,6 +421,24 @@ export const CreateProjectScreen = ({ store }: CreateProjectScreenProps) => {
                 </Text>
               </Box>
               <FallbackKeyHandler onOpen={handleOpenFallback} />
+            </Box>
+          )}
+          {phase.code === 'IDEMPOTENCY_CONFLICT' && (
+            <Box flexDirection="column" marginTop={1}>
+              <Text color={Colors.body}>
+                Another create-project request with the same idempotency key
+                is in flight. Wait a moment and retry — the proxy will dedupe
+                the result.
+              </Text>
+              <Box marginTop={1}>
+                <Text color={Colors.muted}>
+                  Press R to retry, Esc to cancel.
+                </Text>
+              </Box>
+              <FallbackKeyHandler
+                onOpen={handleOpenFallback}
+                onRetry={handleRetry}
+              />
             </Box>
           )}
           {phase.code === 'INTERNAL' && (

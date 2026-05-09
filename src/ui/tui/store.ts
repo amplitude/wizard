@@ -1354,6 +1354,11 @@ export class WizardStore {
       pending: true,
       source,
       suggestedName: suggestedName ?? null,
+      // Idempotency key is generated lazily by
+      // `getOrCreateProjectIdempotencyKey` on the first POST. Carry an
+      // existing key forward so a re-entry of the create flow during a
+      // recoverable failure replays the same key.
+      idempotencyKey: this.session.createProject.idempotencyKey,
     });
     analytics.wizardCapture('Create Project Started', { source });
     this.emitChange();
@@ -1366,6 +1371,9 @@ export class WizardStore {
       pending: false,
       source: null,
       suggestedName: null,
+      // Explicit cancel discards any pending idempotency key so a fresh
+      // /create-project later starts clean (different logical attempt).
+      idempotencyKey: null,
     });
     // Cancelling from the account-confirm path means the user changed
     // their mind about creating a new project — bring them back to the
@@ -1389,6 +1397,10 @@ export class WizardStore {
       pending: false,
       source: null,
       suggestedName: null,
+      // Successful create — clear the idempotency key (the screen also
+      // calls `clearProjectIdempotencyKey`, but we mirror it here so
+      // store-driven completions stay consistent).
+      idempotencyKey: null,
     });
     this.emitChange();
   }
