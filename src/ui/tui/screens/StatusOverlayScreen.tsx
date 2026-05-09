@@ -256,11 +256,11 @@ export const StatusOverlayScreen = ({ store }: StatusOverlayScreenProps) => {
         />
         {primaryTasks.slice(0, 8).map((t) => {
           const display = lifecycleDisplay(t.state);
+          // `StateBadge` already renders `glyph + label` — don't print
+          // `display.glyph` separately, otherwise the row prefixes the
+          // lifecycle glyph twice (e.g. `› › Running — …`).
           return (
             <Box key={t.id}>
-              <Text color={display.color} bold>
-                {display.glyph}{' '}
-              </Text>
               <Text color={Colors.body}>
                 <StateBadge display={display} /> — {t.label}
               </Text>
