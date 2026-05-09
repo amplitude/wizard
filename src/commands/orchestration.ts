@@ -583,7 +583,10 @@ export const resumeCommand: CommandModule = {
         } else {
           const ui = getUI();
           ui.log.info(description);
-          ui.log.info(`Resume: ${chalk.bold(command.join(' '))}`);
+          // Use the shell-quoted `resumeCommand` so the printed string is
+          // copy-pasteable when `installDir` (or any other argv) contains
+          // whitespace or shell metacharacters.
+          ui.log.info(`Resume: ${chalk.bold(lsp.resumeCommand)}`);
           if (!execute) {
             ui.log.info(
               chalk.dim('(pass --execute to invoke this command directly)'),
@@ -695,9 +698,7 @@ export const orchestrationCommand: CommandModule = {
                     ),
                   );
                   ui.log.info(lsp.nextAction.description);
-                  ui.log.info(
-                    `Resume: ${chalk.bold(lsp.nextAction.command.join(' '))}`,
-                  );
+                  ui.log.info(`Resume: ${chalk.bold(lsp.resumeCommand)}`);
                 } else {
                   ui.log.info(
                     `Store: ${chalk.dim(store.path)}  ${chalk.dim(
@@ -727,11 +728,7 @@ export const orchestrationCommand: CommandModule = {
                   );
                   ui.log.info('');
                   ui.log.info(`Next action: ${lsp.nextAction.description}`);
-                  ui.log.info(
-                    `Resume:      ${chalk.bold(
-                      lsp.nextAction.command.join(' '),
-                    )}`,
-                  );
+                  ui.log.info(`Resume:      ${chalk.bold(lsp.resumeCommand)}`);
                 }
               }
               process.exit(ExitCode.SUCCESS);
