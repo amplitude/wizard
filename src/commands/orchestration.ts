@@ -317,15 +317,19 @@ export const sessionsCommand: CommandModule = {
           '../lib/orchestration/envelopes.js'
         );
         const store = getOrchestrationStore(opts.installDir);
-        const sessions = store.listSessions();
 
         if (opts.jsonOutput) {
+          // JSON path delegates to the envelope builder which reads the
+          // store internally — skip the local pre-read so the hot path
+          // stays a single read. Mirrors the same fix on `status`,
+          // `tasks`, `choice list`, `verification list`, `resume`.
           const envelope = buildSessionsEnvelope({
             installDir: opts.installDir,
           });
           emitJson(envelope);
         } else {
           const ui = getUI();
+          const sessions = store.listSessions();
           if (sessions.length === 0) {
             ui.log.info(
               chalk.dim('No wizard sessions recorded for this project.'),
@@ -419,10 +423,6 @@ export const sessionCommand: CommandModule = {
           else getUI().log.error(`Session ${idRaw} not found`);
           process.exit(ExitCode.INVALID_ARGS);
         }
-        const tasks = store.listTasks({
-          sessionId: session.id,
-        });
-
         if (opts.jsonOutput) {
           const envelope = buildSessionEnvelope({
             installDir: opts.installDir,
@@ -431,6 +431,14 @@ export const sessionCommand: CommandModule = {
           if (envelope) emitJson(envelope);
           else emitJsonError(`Session ${idRaw} not found`);
         } else {
+          // Human path: read tasks scoped to this session for the
+          // bulleted list. The JSON path's `buildSessionEnvelope`
+          // already reads tasks internally, so keeping this call inside
+          // the `else` branch avoids a duplicate read on the JSON hot
+          // path.
+          const tasks = store.listTasks({
+            sessionId: session.id,
+          });
           const ui = getUI();
           ui.log.info(`${chalk.bold(session.id)}`);
           ui.log.info(`  status:    ${session.status}`);
