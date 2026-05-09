@@ -13,7 +13,7 @@ secrets in place.
 | ------------------------------------------------------- | ----------------------------------------------------------------------------------------------------------------------------- |
 | `scripts/refresh-wizard-oauth-token.mjs`                | Calls Hydra `/oauth2/token` with `grant_type=refresh_token`, writes new credential triple to `GITHUB_OUTPUT`. Zero deps.      |
 | `.github/workflows/refresh-wizard-oauth-token.yml`      | Hourly cron at `:23`. Runs the script, then `gh secret set`s `WIZARD_OAUTH_TOKEN` / `WIZARD_REFRESH_TOKEN` / `WIZARD_EXPIRES_AT`. |
-| `amplitude-wizard ci-bootstrap`                         | One-time setup: pushes the four secrets from your local OAuth session.                                                        |
+| `npx @amplitude/wizard ci-bootstrap`                    | One-time setup: pushes the four secrets from your local OAuth session.                                                        |
 | `WIZARD_SECRET_REFRESH_PAT`                             | Fine-grained PAT with `secrets:write` on this repo. The default `GITHUB_TOKEN` cannot write secrets.                          |
 
 ## One-time setup
@@ -38,7 +38,7 @@ secrets in place.
 4. **Run `ci-bootstrap`**:
 
    ```bash
-   amplitude-wizard ci-bootstrap
+   npx @amplitude/wizard ci-bootstrap
    ```
 
    This pushes four values to repo secrets:
@@ -74,7 +74,7 @@ The workflow surfaces `::error::OAuth refresh failed.` and exits
 non-zero. Common causes:
 
 - **Refresh token revoked.** Most likely after a long inactivity period
-  or a deliberate `wizard logout`. Re-bootstrap (next section).
+  or a deliberate `npx @amplitude/wizard logout`. Re-bootstrap (next section).
 - **Hydra 5xx / network blip.** The next scheduled run will retry; no
   action needed unless multiple consecutive runs fail.
 - **PAT expired.** `gh secret set` returns 401. Mint a new
@@ -83,9 +83,9 @@ non-zero. Common causes:
 ### Re-bootstrapping
 
 ```bash
-amplitude-wizard logout            # clear the stale session
-npx @amplitude/wizard login        # mint a new refresh token
-amplitude-wizard ci-bootstrap --yes
+npx @amplitude/wizard logout            # clear the stale session
+npx @amplitude/wizard login             # mint a new refresh token
+npx @amplitude/wizard ci-bootstrap --yes
 ```
 
 ### Inspecting the secrets locally

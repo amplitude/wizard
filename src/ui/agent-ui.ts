@@ -506,21 +506,31 @@ export class AgentUI implements WizardUI {
           return {
             recoverable: 'reinvoke_with_flag',
             suggestedAction: {
-              command: ['amplitude-wizard', '--app-name', '<different-name>'],
+              command: [
+                'npx',
+                '@amplitude/wizard',
+                '--app-name',
+                '<different-name>',
+              ],
             },
           };
         case 'MISSING_NAME':
           return {
             recoverable: 'reinvoke_with_flag',
             suggestedAction: {
-              command: ['amplitude-wizard', '--app-name', '<your-name>'],
+              command: [
+                'npx',
+                '@amplitude/wizard',
+                '--app-name',
+                '<your-name>',
+              ],
             },
           };
         case 'MISSING_ORG':
           return {
             recoverable: 'reinvoke_with_flag',
             suggestedAction: {
-              command: ['amplitude-wizard', '--org', '<org-id>'],
+              command: ['npx', '@amplitude/wizard', '--org', '<org-id>'],
             },
           };
         case 'QUOTA_REACHED':

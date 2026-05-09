@@ -303,7 +303,7 @@ export async function runDashboardCommand(
     return {
       exitCode: ExitCode.AUTH_REQUIRED,
       message:
-        'No Amplitude credentials available. Run `amplitude-wizard login` first, ' +
+        'No Amplitude credentials available. Run `npx @amplitude/wizard login` first, ' +
         'or set WIZARD_OAUTH_TOKEN + WIZARD_EXPIRES_AT for CI.',
     };
   }

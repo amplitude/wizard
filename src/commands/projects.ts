@@ -81,7 +81,7 @@ export const projectsCommand: CommandModule = {
                         searchPlaceholder:
                           'Search projects, orgs, workspaces, environments…',
                         emptyState:
-                          'No projects matched. Try a different query, or run `wizard login` if you expected results.',
+                          'No projects matched. Try a different query, or run `npx @amplitude/wizard login` if you expected results.',
                       },
                       choices: result.choices.map((c) => ({
                         value: c.appId,

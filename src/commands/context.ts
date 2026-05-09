@@ -57,25 +57,19 @@ export const WIZARD_VERSION: string = (() => {
 })();
 
 /**
- * How the user invoked this CLI — echoed back in help/error messages so we
- * don't tell `npx @amplitude/wizard` users to run `amplitude-wizard login`
- * (which only works when globally installed).
+ * How we render the CLI back to users in help / error / outro text.
  *
- * npx stages packages under a cache path containing `/_npx/`. Everything
- * else is treated as a direct bin invocation.
+ * Always `npx @amplitude/wizard`, regardless of how the current process
+ * was invoked. The bare `amplitude-wizard` / `wizard` binaries only
+ * exist when a user has explicitly run `npm install -g
+ * @amplitude/wizard`; telling the rest of our users to "run
+ * `amplitude-wizard login`" sends them to a command that doesn't
+ * resolve. The npx form works for everyone — globally-installed users
+ * included — so we standardize on it.
+ *
+ * For machine-readable argv hints (`resumeCommand: string[]`,
+ * `loginCommand: string[]`, `suggestedAction.command`), pass the parts
+ * through `normalizeCliCommand` from `src/lib/cli-display.ts` instead
+ * of splitting this string.
  */
-export const CLI_INVOCATION: string = (() => {
-  const scriptPath = process.argv[1] ?? '';
-  if (scriptPath.includes('/_npx/') || scriptPath.includes('\\_npx\\')) {
-    return 'npx @amplitude/wizard';
-  }
-  // npm >= 7 implements `npx` as `npm exec`, which always sets
-  // npm_command=exec — even when npx resolves to an already-installed copy
-  // (e.g. running `npx @amplitude/wizard` from inside this repo, or from
-  // a project that depends on it). argv[1] doesn't contain /_npx/ in that
-  // case, so this catches it.
-  if (process.env.npm_command === 'exec') {
-    return 'npx @amplitude/wizard';
-  }
-  return 'amplitude-wizard';
-})();
+export const CLI_INVOCATION = 'npx @amplitude/wizard' as const;

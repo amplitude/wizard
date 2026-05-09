@@ -135,7 +135,7 @@ export function registerWizardTools(server: WizardMcpToolRegistrar): void {
         'Run the planning phase: detect the framework, build a structured ' +
         'WizardPlan (framework, sdk, intended file changes), and persist it ' +
         'to disk under a fresh planId. NO files are touched. The returned ' +
-        '`planId` can be passed to `apply` (CLI: `amplitude-wizard apply ' +
+        '`planId` can be passed to `apply` (CLI: `npx @amplitude/wizard apply ' +
         '--plan-id <id> --yes`) to actually execute the plan within 24h. ' +
         'This tool is read-only and safe to call repeatedly — each call ' +
         'creates a new plan.',
@@ -261,10 +261,10 @@ export function registerWizardTools(server: WizardMcpToolRegistrar): void {
       description:
         'Persist a dashboard plan (charts + dashboard wrapper + the events ' +
         'they reference) to `<installDir>/.amplitude/dashboard-plan.json`. ' +
-        'A separate `wizard dashboard` command reads this file later to ' +
-        'create the actual charts and dashboard in Amplitude once event ' +
-        'ingestion has caught up. `planId` and `createdAt` are stamped by ' +
-        'the wizard. Returns the persisted plan on success.',
+        'A separate `npx @amplitude/wizard dashboard` command reads this file ' +
+        'later to create the actual charts and dashboard in Amplitude once ' +
+        'event ingestion has caught up. `planId` and `createdAt` are ' +
+        'stamped by the wizard. Returns the persisted plan on success.',
       inputSchema: {
         installDir: z
           .string()

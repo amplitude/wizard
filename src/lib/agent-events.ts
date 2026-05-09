@@ -831,7 +831,7 @@ export function classifyRunError(error: Error): {
     return {
       recoverable: 'human_required',
       suggestedAction: {
-        command: ['amplitude-wizard', 'login'],
+        command: ['npx', '@amplitude/wizard', 'login'],
         docsUrl: 'https://github.com/amplitude/wizard#login',
       },
     };
@@ -857,7 +857,7 @@ export function classifyRunError(error: Error): {
     return {
       recoverable: 'reinvoke_with_flag',
       suggestedAction: {
-        command: ['amplitude-wizard', '--yes'],
+        command: ['npx', '@amplitude/wizard', '--yes'],
       },
     };
   }
@@ -886,7 +886,7 @@ export function classifyRunError(error: Error): {
   return {
     recoverable: 'fatal',
     suggestedAction: {
-      command: ['amplitude-wizard', 'feedback'],
+      command: ['npx', '@amplitude/wizard', 'feedback'],
     },
   };
 }

@@ -59,7 +59,7 @@ No previous timeout is cleared.
 - `process.on('exit', cleanup)` doesn't fire on SIGTERM, SIGHUP, or uncaught
   exceptions. Users left with a black terminal background.
 - OSC 10/11 sequences are written without checking `process.stdout.isTTY`.
-  Piped output (e.g., `amplitude-wizard 2>&1 | tee log.txt`) gets raw escape
+  Piped output (e.g., `npx @amplitude/wizard 2>&1 | tee log.txt`) gets raw escape
   codes in the file.
 - `BG_BLACK` (SGR) and `OSC_BG_DARK` (OSC 11) both set the background. Some
   terminals get confused by the double-specification.
@@ -170,7 +170,7 @@ keystroke. No recovery guidance, no log file path, no link to docs.
 **Recommendation:**
 - Show the log file path (per-project, e.g. `~/.amplitude/wizard/runs/<hash>/log.txt` — invoke `/diagnostics` for the exact path)
 - Show the docs URL: "Manual setup: [docsUrl]"
-- Suggest retry: "Run `amplitude-wizard` again to retry"
+- Suggest retry: "Run `npx @amplitude/wizard` again to retry"
 
 ---
 

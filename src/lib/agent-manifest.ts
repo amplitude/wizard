@@ -110,12 +110,12 @@ export function getAgentManifest(): AgentManifest {
         {
           term: 'API key',
           describe:
-            'An app-level ingestion key embedded into client code (amplitude.init("<key>")). Fetched automatically after `amplitude-wizard login`; agents should not pass one directly.',
+            'An app-level ingestion key embedded into client code (amplitude.init("<key>")). Fetched automatically after `npx @amplitude/wizard login`; agents should not pass one directly.',
         },
         {
           term: 'access token',
           describe:
-            'An OAuth access token minted by `amplitude-wizard login`. Used for server-side API calls, never embedded in client code. Passed with AMPLITUDE_TOKEN.',
+            'An OAuth access token minted by `npx @amplitude/wizard login`. Used for server-side API calls, never embedded in client code. Passed with AMPLITUDE_TOKEN.',
         },
       ],
     },
@@ -195,7 +195,7 @@ export function getAgentManifest(): AgentManifest {
       {
         name: 'AMPLITUDE_TOKEN',
         describe:
-          'OAuth access-token override (requires prior `amplitude-wizard login`)',
+          'OAuth access-token override (requires prior `npx @amplitude/wizard login`)',
       },
       {
         name: 'AMPLITUDE_WIZARD_TOKEN',
@@ -231,7 +231,7 @@ export function getAgentManifest(): AgentManifest {
       {
         code: 3,
         name: 'AUTH_REQUIRED',
-        describe: 'Not logged in; run `amplitude-wizard login` first',
+        describe: 'Not logged in; run `npx @amplitude/wizard login` first',
       },
       {
         code: 4,
@@ -301,7 +301,7 @@ export function getAgentManifest(): AgentManifest {
         flags: [
           {
             name: '--plan-id',
-            describe: 'plan ID returned by `amplitude-wizard plan`',
+            describe: 'plan ID returned by `npx @amplitude/wizard plan`',
             type: 'string',
           },
           {

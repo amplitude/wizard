@@ -9,7 +9,7 @@ export const applyCommand: CommandModule = {
   builder: (yargs) =>
     yargs.options({
       'plan-id': {
-        describe: 'plan ID returned by `amplitude-wizard plan`',
+        describe: 'plan ID returned by `npx @amplitude/wizard plan`',
         type: 'string',
         demandOption: true,
       },
