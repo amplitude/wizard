@@ -210,7 +210,14 @@ const choiceShowCommand: CommandModule = {
             choiceId: asChoiceId(choice.id),
           });
           if (envelope) emitJson(envelope);
-          else emitJsonError(`Choice ${idRaw} not found`, 'CHOICE_NOT_FOUND');
+          else {
+            // TOCTOU: builder re-reads the store, so the choice could
+            // have been removed between our `getChoice` check above and
+            // the envelope build. Surface a non-zero exit so orchestrators
+            // relying on exit codes don't treat the error JSON as success.
+            emitJsonError(`Choice ${idRaw} not found`, 'CHOICE_NOT_FOUND');
+            process.exit(ExtendedExitCode.CHOICE_NOT_FOUND);
+          }
         } else {
           const ui = getUI();
           ui.log.info(`${chalk.bold(choice.id)}  ${chalk.cyan(choice.kind)}`);
