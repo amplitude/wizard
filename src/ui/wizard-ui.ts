@@ -289,6 +289,21 @@ export interface WizardUI {
     bytes?: number;
   }): void;
 
+  /**
+   * The inner agent has invoked a tool (Read/Bash/Edit/Write/Grep/Glob/
+   * MCP/etc.) at PreToolUse. Optional because only InkUI uses this — the
+   * TUI surfaces a rolling 2-3-line substep narration under the active
+   * task in the RunScreen so the user sees WHAT the wizard is doing,
+   * not just that it's still spinning.
+   *
+   * `label` is already verb-formed and capped (see `tool-call-label.ts`
+   * for the transform). LoggingUI / AgentUI no-op — they have their own
+   * surfaces (NDJSON `tool_call` for AgentUI, plain stdout for
+   * LoggingUI). Callers MUST pass `null` filtered out — the TUI stores
+   * whatever string arrives.
+   */
+  recordToolActivity?(label: string): void;
+
   // ── Event plan from .amplitude-events.json ────────────────────
   setEventPlan(events: Array<{ name: string; description: string }>): void;
 
