@@ -33,12 +33,21 @@ interface ProgressListProps {
    * defensive) only the first gets substeps.
    */
   renderActiveSubsteps?: (item: ProgressItem) => ReactNode;
+  /**
+   * Render the trailing "spinner Progress: X/Y completed" footer.
+   * Defaults to true. RunScreen sets this to false because its header
+   * already shows "X done · Y to go · elapsed" — repeating the same
+   * counter at the bottom of the task list is duplicated information
+   * (see fix in PR for the Progress-tab spacing polish).
+   */
+  showFooter?: boolean;
 }
 
 export const ProgressList = ({
   items,
   title,
   renderActiveSubsteps,
+  showFooter = true,
 }: ProgressListProps) => {
   const completed = items.filter((t) => t.status === 'completed').length;
   const total = items.length;
@@ -62,16 +71,18 @@ export const ProgressList = ({
       {items.length === 0 && <LoadingBox message="Analyzing project..." />}
       {items.map((item, i) => {
         // Glyph language matches JourneyStepper: ✓ for completed, ›
-        // (chevron) for in-progress, and a blank gutter for pending so
-        // the eye scans straight down the active and finished items
-        // instead of being snagged by a stray bullet column on every
-        // not-yet-started row.
+        // (chevron) for in-progress, and ○ for pending. The previous
+        // "blank gutter for pending" was visually quiet but inconsistent
+        // with the journey stepper at the top of the screen, which uses
+        // ○ for future steps. Reusing the same glyph palette here makes
+        // the visual language across the whole screen line up:
+        // ○ pending → › active → ✓ done.
         const icon =
           item.status === 'completed'
             ? Icons.checkmark
             : item.status === 'in_progress'
             ? Icons.chevronRight
-            : ' ';
+            : Icons.bulletOpen;
         const color =
           item.status === 'completed'
             ? Colors.success
@@ -123,7 +134,7 @@ export const ProgressList = ({
           </Box>
         );
       })}
-      {total > 0 && (
+      {showFooter && total > 0 && (
         <Box marginTop={1} gap={1}>
           {completed < total && <Spinner />}
           <Text color={Colors.muted}>
