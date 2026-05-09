@@ -2283,13 +2283,25 @@ export class WizardStore {
     if (!content) return;
     const events = this.$eventPlan.get();
     if (events.length === 0) return;
-    // One regex pass; `track` must be a word-suffix so `untracked`
-    // doesn't match. Captures the quote style + the literal name.
-    const pattern = /\btrack\s*\(\s*(['"`])([^'"`$\n]+?)\1/g;
+    // `track` must be a word-suffix so `untracked` doesn't match. We
+    // run three separate patterns so that `$` is only forbidden inside
+    // backtick-quoted strings (where it would signal a `${…}`
+    // interpolation we can't safely flatten). Single- and double-quoted
+    // event names like `track("$100 Purchase")` are valid literals and
+    // must match — earlier we used a single tempered class
+    // `[^'"`$\n]+?` which incorrectly excluded `$` from every quote
+    // style.
+    const patterns = [
+      /\btrack\s*\(\s*'([^'\n]+?)'/g,
+      /\btrack\s*\(\s*"([^"\n]+?)"/g,
+      /\btrack\s*\(\s*`([^`$\n]+?)`/g,
+    ];
     const found = new Set<string>();
-    for (const m of content.matchAll(pattern)) {
-      const name = m[2]?.trim().toLowerCase();
-      if (name) found.add(name);
+    for (const pattern of patterns) {
+      for (const m of content.matchAll(pattern)) {
+        const name = m[1]?.trim().toLowerCase();
+        if (name) found.add(name);
+      }
     }
     if (found.size === 0) return;
     for (const event of events) {
