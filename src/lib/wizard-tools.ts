@@ -885,27 +885,52 @@ export function mergeEnvValues(
 // ---------------------------------------------------------------------------
 
 /**
- * Normalize an event name to the canonical Title Case shape mandated by
- * the wizard commandments ("[Noun] [Past-Tense Verb]", 2–5 words, ≤50
- * chars).
+ * Repair clearly-malformed event-name shapes (snake_case, kebab-case,
+ * camelCase, dotted, separator-only) into the canonical "[Noun]
+ * [Past-Tense Verb]" multi-word shape — but PRESERVE casing the agent
+ * has already chosen when the input is already a multi-word
+ * space-separated string.
  *
- * The system prompt asks the model for Title Case, but the
- * `confirm_event_plan` tool schema historically said "lowercase". When
- * the agent saw both, it sometimes emitted snake_case or all-lowercase
- * names, which then rendered as ugly bullets in the Event Plan viewer
- * and broke chart legends downstream. Rather than reject and force a
- * second prompt round-trip, normalize forgivingly here so the contract
- * is always met regardless of which guidance the model believed.
+ * History: `confirm_event_plan` used to unconditionally Title-Case every
+ * input. That broke a real round-trip — when a user submitted feedback
+ * like "lowercase the event names" or "use UPPERCASE for these events",
+ * the agent dutifully revised the plan, but the normalizer slammed the
+ * names back to Title Case before the user ever saw them. The user
+ * concluded their feedback was being ignored. We now only fix shapes
+ * that the schema explicitly forbids (no spaces / camelCase / kebab /
+ * snake / dot-separated) and pass through anything that already reads
+ * as a sequence of words — whatever case the agent picked is the
+ * agent's choice, possibly in direct response to user feedback. The
+ * commandments + tool schema still strongly prefer Title Case as the
+ * default, so well-behaved agents keep emitting it.
  *
- * Soft normalization — never throws, never rejects. Returns the name
- * unchanged if it's already correctly shaped; converts snake_case,
- * kebab-case, camelCase, and ALL-LOWERCASE inputs into Title Case.
+ * Soft normalization — never throws, never rejects. Truncates to 50
+ * chars regardless of casing.
  *
  * Exported for unit testing.
  */
 export function normalizeEventName(raw: string): string {
   const trimmed = raw.trim();
   if (!trimmed) return trimmed;
+  // Truncation rule applies to every shape — cap at 50 chars before any
+  // other transformation to match the schema's stated limit.
+  const cap = (s: string): string => (s.length > 50 ? s.slice(0, 45) + '…' : s);
+
+  // Detect "already a sentence" — multiple ASCII letter/number tokens
+  // separated only by spaces, with NO underscores / hyphens / dots / TitleCase
+  // boundaries. If the agent gave us this shape, respect their casing
+  // verbatim — they may be honoring user feedback ("lowercase the event
+  // names", "use UPPERCASE", "stylize as Sentence case", etc.). The
+  // commandments still default to Title Case, so this only kicks in
+  // when the agent intentionally diverged.
+  const hasForbiddenSeparators = /[_\-.]/.test(trimmed);
+  const hasIntraWordCaseBoundary = /[a-z0-9][A-Z]/.test(trimmed);
+  const hasSpace = /\s/.test(trimmed);
+  if (hasSpace && !hasForbiddenSeparators && !hasIntraWordCaseBoundary) {
+    // Already multi-word with consistent intra-word casing — pass through.
+    return cap(trimmed.replace(/\s+/g, ' '));
+  }
+
   // Convert separators (underscore, hyphen, dot) to spaces.
   let working = trimmed.replace(/[_\-.]+/g, ' ');
   // Split camelCase / PascalCase boundaries: insert a space before any
@@ -916,9 +941,10 @@ export function normalizeEventName(raw: string): string {
   // Collapse runs of whitespace.
   working = working.replace(/\s+/g, ' ').trim();
   if (!working) return trimmed;
-  // Title-case each word. Preserve fully-uppercase tokens of length ≤4
-  // (acronyms like "API", "URL", "SDK"); otherwise capitalize first
-  // letter and lowercase the rest.
+  // Title-case each word — only reached for shapes the agent got wrong
+  // per the schema (snake / kebab / camel / single-token / dotted).
+  // Preserve fully-uppercase tokens of length ≤4 (acronyms like "API",
+  // "URL", "SDK"); otherwise capitalize first letter and lowercase the rest.
   const titled = working
     .split(' ')
     .map((word) => {
@@ -927,8 +953,7 @@ export function normalizeEventName(raw: string): string {
       return word.charAt(0).toUpperCase() + word.slice(1).toLowerCase();
     })
     .join(' ');
-  // Cap at 50 chars to match the wizard's truncation rule.
-  return titled.length > 50 ? titled.slice(0, 45) + '…' : titled;
+  return cap(titled);
 }
 
 // ---------------------------------------------------------------------------
@@ -1929,7 +1954,7 @@ Returns: "approved", "skipped", or "feedback: <user message>"`,
             name: z
               .string()
               .describe(
-                'Title Case event name, [Noun] [Past-Tense Verb], 2-5 words. Examples: "User Signed Up", "Product Added To Cart", "Search Performed", "Checkout Started". NOT snake_case ("user_signed_up"), camelCase ("userSignedUp"), or lowercase ("user signed up"). Do NOT put descriptions or file paths here.',
+                'Default to Title Case, [Noun] [Past-Tense Verb], 2-5 words. Examples: "User Signed Up", "Product Added To Cart", "Search Performed", "Checkout Started". NOT snake_case ("user_signed_up") or camelCase ("userSignedUp") — those are auto-repaired to Title Case. EXCEPTION: when the user has given feedback that explicitly asks for a different casing convention ("lowercase the event names", "use UPPERCASE", "stylize as Sentence case"), honor their request verbatim — the wizard preserves any space-separated multi-word string regardless of case. Do NOT put descriptions or file paths in this field.',
               ),
             description: z
               .string()
@@ -1947,12 +1972,13 @@ Returns: "approved", "skipped", or "feedback: <user message>"`,
       reason: string;
     }) => {
       const { DEMO_MODE } = await import('./constants.js');
-      // Soft-gate the name format. Agents historically saw conflicting
-      // guidance (commandments said Title Case, the tool schema said
-      // lowercase) and emitted mixed shapes. Normalize forgivingly here
-      // so the persisted plan AND the user-facing prompt always match
-      // the canonical Title Case shape — no second prompt round-trip
-      // needed when the model gets it slightly wrong.
+      // Soft-repair clearly-malformed names (snake_case, camelCase,
+      // kebab-case, dotted, single-token). Multi-word space-separated
+      // names pass through verbatim — the agent's casing is
+      // preserved so user feedback like "lowercase the event names" or
+      // "use UPPERCASE" actually round-trips to the user-facing prompt
+      // and to the implementation. Earlier behavior force-Title-Cased
+      // every name, which silently dropped any case-related feedback.
       let normalizationCount = 0;
       const normalizedEvents = args.events.map((e) => {
         const original = e.name.trim();
@@ -1965,7 +1991,7 @@ Returns: "approved", "skipped", or "feedback: <user message>"`,
       });
       if (normalizationCount > 0) {
         logToFile(
-          `confirm_event_plan: normalized ${normalizationCount}/${args.events.length} event name(s) to Title Case`,
+          `confirm_event_plan: repaired ${normalizationCount}/${args.events.length} malformed event name(s) (snake/kebab/camel/dotted)`,
         );
       }
       const events =
