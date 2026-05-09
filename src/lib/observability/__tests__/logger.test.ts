@@ -13,8 +13,16 @@ import {
   initLogger,
   setTerminalSink,
   configureLogFile,
+  setProjectLogFile,
+  getLogFilePath,
+  getStructuredLogFilePath,
 } from '../logger';
 import { initCorrelation } from '../correlation';
+import {
+  getLogFile,
+  getStructuredLogFile,
+  CACHE_ROOT_OVERRIDE_ENV,
+} from '../../../utils/storage-paths';
 
 describe('logger', () => {
   let tempDir: string;
@@ -256,6 +264,76 @@ describe('logger', () => {
     expect(freshStructured).toContain('after rotation marker');
     const rotatedStructured = readFileSync(structuredLogFile + '.1', 'utf-8');
     expect(rotatedStructured).not.toContain('after rotation marker');
+  });
+
+  // Regression: setProjectLogFile must route the logger to the SAME path
+  // that storage-paths.getLogFile(installDir) returns. Otherwise the
+  // RunScreen "Logs" tab (which tails getLogFile(session.installDir))
+  // shows "Waiting for the agent to start writing logs…" forever while
+  // the logger writes to a sibling directory the user can't see — which
+  // is exactly the production regression this test guards against.
+  it('setProjectLogFile uses the same path as storage-paths.getLogFile', () => {
+    const cacheRoot = join(tempDir, 'cache-root');
+    const previous = process.env[CACHE_ROOT_OVERRIDE_ENV];
+    process.env[CACHE_ROOT_OVERRIDE_ENV] = cacheRoot;
+    try {
+      const installDir = tempDir; // any real directory; hash is stable
+      setProjectLogFile(installDir);
+
+      // Path the LogViewer / /diagnostics consumer reads.
+      const expectedHuman = getLogFile(installDir);
+      const expectedStructured = getStructuredLogFile(installDir);
+
+      // Path the logger reports as active after the switch.
+      expect(getLogFilePath()).toBe(expectedHuman);
+      expect(getStructuredLogFilePath()).toBe(expectedStructured);
+
+      // And actually write through — the file must materialize at exactly
+      // that path, not a sibling.
+      const log = createLogger('path-consistency');
+      log.info('routed correctly');
+      expect(readFileSync(expectedHuman, 'utf-8')).toContain(
+        'routed correctly',
+      );
+      expect(readFileSync(expectedStructured, 'utf-8')).toContain(
+        '"msg":"routed correctly"',
+      );
+    } finally {
+      if (previous === undefined) delete process.env[CACHE_ROOT_OVERRIDE_ENV];
+      else process.env[CACHE_ROOT_OVERRIDE_ENV] = previous;
+    }
+  });
+
+  // Regression: when the per-project run dir is deleted between log
+  // writes (e.g. a developer wipes ~/.amplitude/wizard/runs/<hash>/
+  // between iterations), the cached fd survives but writes silently
+  // disappear. Subsequent log lines must still land in a freshly-
+  // recreated file rather than vanishing.
+  it('recreates the run dir + reopens the fd when the dir is wiped mid-run', () => {
+    const runDir = join(tempDir, 'wipeable');
+    const human = join(runDir, 'log.txt');
+    const structured = join(runDir, 'log.ndjson');
+    configureLogFile({
+      path: human,
+      structuredPath: structured,
+      enabled: true,
+    });
+
+    const log = createLogger('wipe-test');
+    log.info('before wipe');
+    expect(readFileSync(human, 'utf-8')).toContain('before wipe');
+
+    // Simulate the user wiping the runs dir between writes.
+    rmSync(runDir, { recursive: true, force: true });
+    expect(existsSync(runDir)).toBe(false);
+
+    // The next write must succeed — re-ensure the dir, reopen the fd,
+    // retry — not silently no-op.
+    log.info('after wipe');
+
+    expect(existsSync(human)).toBe(true);
+    expect(readFileSync(human, 'utf-8')).toContain('after wipe');
+    expect(readFileSync(structured, 'utf-8')).toContain('"msg":"after wipe"');
   });
 
   it('configureLogFile auto-derives the structured path when only `path` is passed', () => {

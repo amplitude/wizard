@@ -161,6 +161,106 @@ describe('FileWritesPanel', () => {
     expect(out).not.toMatch(/\d+\/\d+ written/);
   });
 
+  // ── No-wrap layout invariants (bug A / B / C) ─────────────────────────
+  //
+  // User screenshot showed three coupled regressions on long Next.js paths:
+  //   A. The row wrapped onto a second visual line.
+  //   B. The keyword `CREATE` lost its final char and rendered as `CREAT`.
+  //   C. The space between keyword and path disappeared (`MODIFYsrc/app/…`).
+  // The fix pins the icon, keyword, and trailing-detail cells with
+  // `flexShrink={0}` and pre-truncates the path to a width budget so Yoga
+  // never reflows a row. These tests lock that contract down across a
+  // representative range of terminal widths.
+  describe('no-wrap layout invariants', () => {
+    const longPath =
+      '/proj/src/app/(category-sidebar)/products/[category]/[subcategory]/[product]/page.tsx';
+    // basename + parents = 90 chars after relativization.
+    const widths = [25, 60, 80, 120, 200];
+
+    for (const cols of widths) {
+      it(`renders a 90-char path on one row at ${cols} cols`, () => {
+        const entry = makeEntry({
+          path: longPath,
+          operation: 'create',
+          status: 'applied',
+          bytes: 646,
+          startedAt: t0,
+          completedAt: t0 + 5,
+        });
+        const { lastFrame } = render(
+          <FileWritesPanel
+            entries={[entry]}
+            installDir="/proj"
+            width={cols}
+          />,
+        );
+        const frame = stripAnsi(lastFrame() ?? '');
+        // Header + exactly one data row. ink-testing-library sometimes
+        // emits a trailing blank — ignore it.
+        const lines = frame
+          .split('\n')
+          .map((l) => l.trimEnd())
+          .filter((l) => l.length > 0);
+        expect(lines.length).toBe(2);
+
+        // Bug B: the keyword must render in full — no `CREAT` truncation.
+        // Bug C: there must be a space between the keyword and the path.
+        // We assert by searching for the keyword followed by whitespace
+        // and *not* immediately followed by a non-space char like `s`.
+        const dataRow = lines[1];
+        expect(dataRow).toMatch(/CREATE\s/);
+        expect(dataRow).not.toMatch(/CREATE[^\s]/);
+        expect(dataRow).not.toMatch(/CREAT\b(?!E)/); // never the truncated form
+        // The trailing detail must stay on the same row as the keyword.
+        expect(dataRow).toContain('646 bytes');
+        expect(dataRow).toContain('5ms');
+      });
+    }
+
+    it('keeps MODIFY and the path separated when the path overflows', () => {
+      // Bug C explicitly: at 80 cols the path is long enough to force
+      // truncation. The keyword/path gap must survive — we should never
+      // see `MODIFYsrc/app/...` on the wire.
+      const entry = makeEntry({
+        path: longPath,
+        operation: 'modify',
+        status: 'applied',
+        bytes: undefined,
+        startedAt: t0,
+        completedAt: t0 + 9,
+      });
+      const { lastFrame } = render(
+        <FileWritesPanel entries={[entry]} installDir="/proj" width={80} />,
+      );
+      const frame = stripAnsi(lastFrame() ?? '');
+      // No row should start the path-glyph segment immediately after
+      // the keyword. We check the inverse: every occurrence of MODIFY
+      // is followed by whitespace.
+      expect(frame).toMatch(/MODIFY\s/);
+      expect(frame).not.toMatch(/MODIFY[A-Za-z…/]/);
+    });
+
+    it('head-truncates long paths with a leading ellipsis', () => {
+      // Bug A: the long path fit on one line by being head-truncated.
+      // We don't pin the exact form (segment count is width-dependent)
+      // but the leading ellipsis must appear and the basename must
+      // survive — that's the meaningful tail for the user.
+      const entry = makeEntry({
+        path: longPath,
+        operation: 'modify',
+        status: 'applied',
+        startedAt: t0,
+        completedAt: t0 + 9,
+      });
+      const { lastFrame } = render(
+        <FileWritesPanel entries={[entry]} installDir="/proj" width={80} />,
+      );
+      const frame = stripAnsi(lastFrame() ?? '');
+      expect(frame).toContain('…');
+      expect(frame).toContain('page.tsx');
+    });
+  });
+
   it('caps visible rows to maxVisible and shows the most recent ones', () => {
     const entries: FileWriteEntry[] = Array.from({ length: 12 }, (_, i) =>
       makeEntry({
