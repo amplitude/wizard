@@ -410,6 +410,29 @@ export function computeLastStoppingPoint(
     pendingMcpActions,
     pendingManualVerifications,
     nextAction,
-    resumeCommand: nextAction.command.join(' '),
+    // Shell-quote any argv element that contains whitespace, quotes, or
+    // shell metacharacters so the human-facing `resumeCommand` is
+    // copy-pasteable when `installDir` (or any other argv) contains a
+    // space — e.g. `/Users/me/my project`. Without this, the joined
+    // string `wizard --install-dir /Users/me/my project` reaches the
+    // shell as two separate words. The structured `command` array is
+    // already correct; this only affects the human display.
+    resumeCommand: shellJoin(nextAction.command),
   };
+}
+
+/** POSIX-shell-quote each token, then join with spaces. */
+function shellJoin(argv: string[]): string {
+  return argv.map(shellQuote).join(' ');
+}
+
+function shellQuote(arg: string): string {
+  // Empty string must become '' so the shell sees an explicit empty arg.
+  if (arg === '') return "''";
+  // If the token is entirely "safe" (alnum + a small punctuation set we
+  // know the shell won't interpret) leave it bare for readability.
+  if (/^[A-Za-z0-9_\-\/.:=@+,]+$/.test(arg)) return arg;
+  // Otherwise wrap in single quotes; embedded single quotes get the
+  // standard `'\''` close/escape/reopen dance.
+  return "'" + arg.replace(/'/g, "'\\''") + "'";
 }
