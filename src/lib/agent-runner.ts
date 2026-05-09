@@ -55,6 +55,15 @@ import {
 import { ExitCode } from './exit-codes';
 import { GENERIC_AGENT_CONFIG } from '../frameworks/generic/generic-wizard-agent';
 import { buildPreflightContext } from './agent/preflight-context';
+import { createLogger } from './observability/logger';
+
+/**
+ * Structured logger for pre-flight gate diagnostics. CLAUDE.md mandates
+ * `createLogger` for production source paths so logs land in the per-
+ * project NDJSON sidecar with searchable ctx fields, not just the legacy
+ * `log.txt` debug stream.
+ */
+const preflightLog = createLogger('preflight');
 
 /** Single source of truth for the support address shown in error messages. */
 const SUPPORT_EMAIL = 'wizard@amplitude.com';
@@ -1026,11 +1035,9 @@ async function runAgentWizardBody(
       session.installDir,
     );
   } catch (err) {
-    logToFile(
-      `[preflight] detectPackageManager failed: ${
-        err instanceof Error ? err.message : String(err)
-      }`,
-    );
+    preflightLog.warn('detectPackageManager failed', {
+      'error message': err instanceof Error ? err.message : String(err),
+    });
   }
 
   if (packageManagerInfo?.primary) {
@@ -1050,7 +1057,17 @@ async function runAgentWizardBody(
     value: cloudRegion.toUpperCase(),
   });
 
-  const preflightBlock = buildPreflightContext({
+  // Detect project size up-front and let `buildPreflightContext` make the
+  // gate decision. Internal LLM-reliability research recommends a JIT-
+  // context-loading posture for medium-and-up codebases; the full pre-
+  // flight Markdown dump only pays off on small projects where it
+  // eliminates the cold-start probe without crowding out attention budget.
+  // Detection has a hard 5s wall-clock cap inside `detectProjectSize`;
+  // large projects that hit the cap are treated as "use JIT" so we don't
+  // pay a probe tax to figure out we're large. Logging happens AFTER the
+  // gate so the diagnostic line reflects the authoritative decision the
+  // gate emitted (no risk of divergence between two recomputations).
+  const preflightCtx = await buildPreflightContext({
     installDir: session.installDir,
     integration: session.integration,
     detectedFrameworkLabel: session.detectedFrameworkLabel,
@@ -1069,9 +1086,18 @@ async function runAgentWizardBody(
     ),
     frameworkContext,
   });
+  preflightLog.info('project size detected', {
+    'file count': preflightCtx.projectSize.fileCount,
+    'event count': preflightCtx.projectSize.eventCount,
+    'timed out': preflightCtx.projectSize.timedOut,
+    'cap hit': preflightCtx.projectSize.capHit,
+    'file threshold': preflightCtx.thresholds.fileThreshold,
+    'event threshold': preflightCtx.thresholds.eventThreshold,
+    mode: preflightCtx.jitMode ? 'jit' : 'full',
+  });
 
   const integrationPrompt =
-    preflightBlock +
+    preflightCtx.prompt +
     '\n' +
     buildIntegrationPrompt(
       config,

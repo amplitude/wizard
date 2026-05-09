@@ -230,12 +230,20 @@ export async function fetchAmplitudeUser(
 /**
  * Error codes returned by the wizard proxy `POST /projects` endpoint.
  * Match the contract defined with the backend agent.
+ *
+ * `IDEMPOTENCY_CONFLICT` is the wizard-side mapping for a proxy 409 with
+ * code `IDEMPOTENCY_KEY_IN_USE` — the proxy emits it when a concurrent
+ * request with the same `Idempotency-Key` is already in flight. Distinct
+ * from `NAME_TAKEN` (which is a permanent collision the user fixes by
+ * picking a new name); a concurrent-idempotency conflict resolves on its
+ * own once the in-flight request finishes.
  */
 export type CreateProjectErrorCode =
   | 'NAME_TAKEN'
   | 'QUOTA_REACHED'
   | 'FORBIDDEN'
   | 'INVALID_REQUEST'
+  | 'IDEMPOTENCY_CONFLICT'
   | 'INTERNAL';
 
 const CreateProjectSuccessSchema = z.object({
@@ -251,11 +259,42 @@ const CreateProjectErrorSchema = z.object({
       'QUOTA_REACHED',
       'FORBIDDEN',
       'INVALID_REQUEST',
+      // Wire code emitted by the wizard-proxy. Mapped to
+      // `IDEMPOTENCY_CONFLICT` on the wizard side via
+      // `mapBackendCreateProjectErrorCode` below so the rest of the
+      // wizard can branch on the user-facing taxonomy.
+      'IDEMPOTENCY_KEY_IN_USE',
       'INTERNAL',
     ]),
     message: z.string(),
   }),
 });
+
+/**
+ * Map a wire-level error code returned by the wizard-proxy to the
+ * wizard-side {@link CreateProjectErrorCode}. The proxy and the wizard
+ * share most names; the only divergence is `IDEMPOTENCY_KEY_IN_USE` →
+ * `IDEMPOTENCY_CONFLICT`, which keeps the wizard taxonomy focused on
+ * what the user / orchestrator should do (retry shortly) rather than the
+ * underlying mechanism. Exported for unit testing.
+ */
+export function mapBackendCreateProjectErrorCode(
+  wireCode: string,
+): CreateProjectErrorCode {
+  if (wireCode === 'IDEMPOTENCY_KEY_IN_USE') return 'IDEMPOTENCY_CONFLICT';
+  switch (wireCode) {
+    case 'NAME_TAKEN':
+    case 'QUOTA_REACHED':
+    case 'FORBIDDEN':
+    case 'INVALID_REQUEST':
+    case 'INTERNAL':
+      return wireCode;
+    default:
+      // Forward-compat: an unknown code from a newer proxy build is
+      // surfaced as INTERNAL so callers' switch statements stay total.
+      return 'INTERNAL';
+  }
+}
 
 export interface CreateProjectResult {
   appId: string;
@@ -378,11 +417,23 @@ function fallbackCreateProjectErrorForStatus(
     );
   }
   if (status === 409) {
+    // 409 has TWO meanings on this endpoint: a permanent name collision
+    // (NAME_TAKEN, user fixes by picking a new name) or a transient
+    // concurrent-request collision (IDEMPOTENCY_CONFLICT, user fixes by
+    // retrying). The structured error body distinguishes them — but if
+    // we're in the fallback path, that body was unavailable or malformed
+    // and we genuinely don't know which one it is.
+    //
+    // Default to the retryable interpretation. If it was actually a name
+    // collision, the retry hits 409 again (this time hopefully with a
+    // parseable body) and the user gets the right "pick a new name"
+    // message. The opposite default would silently send users to fix a
+    // real-but-transient problem with the wrong action.
     return new ApiError(
-      'A project with this name already exists.',
+      'Conflict while creating project. Please retry in a moment.',
       status,
       url,
-      'NAME_TAKEN',
+      'INTERNAL',
     );
   }
   // 429 is the canonical rate-limit. 503 also surfaces Retry-After when
@@ -472,13 +523,32 @@ export function getWizardProxyBase(zone: AmplitudeZone): string {
  *   of `CreateProjectErrorCode` so callers can branch (NAME_TAKEN → retry,
  *   QUOTA_REACHED → fallback, etc.).
  *
+ * `idempotencyKey` MUST be a UUID v4 — the wizard-proxy validates the
+ * header value with a UUID regex (`extractIdempotencyKey`). Generate one
+ * per **logical** create-project attempt and reuse it on retries so a
+ * network blip in the middle of a successful create doesn't double-create
+ * the project. Callers should source the key from session state, not
+ * regenerate per HTTP retry.
+ *
  * Returns `{ appId, apiKey, name }` on success. `apiKey` is sensitive — never
  * log it, and redact it from any analytics/NDJSON output.
  */
 export async function createAmplitudeApp(
   accessToken: string,
   zone: AmplitudeZone,
-  input: { orgId: string; name: string; description?: string },
+  input: {
+    orgId: string;
+    name: string;
+    description?: string;
+    /**
+     * UUID v4 used to dedupe a successful project-create against retries.
+     * Optional today (older proxy builds ignore the header) but strongly
+     * recommended — generate once per logical attempt and persist on
+     * session state so a retry after a 5xx / connection blip resolves
+     * to the same project rather than creating a duplicate.
+     */
+    idempotencyKey?: string;
+  },
 ): Promise<CreateProjectResult> {
   const base = getWizardProxyBase(zone);
   const url = `${base}/projects`;
@@ -518,6 +588,12 @@ export async function createAmplitudeApp(
             Authorization: `Bearer ${accessToken}`,
             'Content-Type': 'application/json',
             'User-Agent': WIZARD_USER_AGENT,
+            // Only attach the header when the caller threaded a key through
+            // — older proxy builds ignore unknown headers, but omitting it
+            // entirely keeps the wire shape minimal for diff inspection.
+            ...(input.idempotencyKey
+              ? { 'Idempotency-Key': input.idempotencyKey }
+              : {}),
           },
           timeout: 20_000,
         },
@@ -560,15 +636,23 @@ export async function createAmplitudeApp(
             error.response?.data,
           );
           if (errBody.success) {
-            const { code, message } = errBody.data.error;
-            // Replace the proxy's generic copy with our Retry-After-aware
-            // line for 429/503 — the structured body usually says "rate
-            // limited" without a hint, and the user-facing surface
-            // benefits from the concrete delay.
+            const wireCode = errBody.data.error.code;
+            const code = mapBackendCreateProjectErrorCode(wireCode);
+            // Two message overrides on the structured-error path:
+            //   1. IDEMPOTENCY_KEY_IN_USE — the proxy's wire message is
+            //      mechanism-focused; we surface the recovery action.
+            //   2. 429/503 with Retry-After — replace the proxy's generic
+            //      "rate limited" line with a concrete delay.
+            // The two cases don't overlap in practice (a proxy
+            // IDEMPOTENCY_KEY_IN_USE is always 409, never 429/503).
+            const baseMessage =
+              wireCode === 'IDEMPOTENCY_KEY_IN_USE'
+                ? 'A project with this idempotency key is being created concurrently. Please retry in a moment.'
+                : errBody.data.error.message;
             const finalMessage =
               (status === 429 || status === 503) && retryAfterMs !== null
                 ? rateLimitedMessage(retryAfterMs, 'creating project')
-                : message;
+                : baseMessage;
             const apiError = new ApiError(finalMessage, status, url, code);
             analytics.captureException(apiError, { endpoint: url, code });
             throw apiError;

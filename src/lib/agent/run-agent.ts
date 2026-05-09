@@ -41,6 +41,7 @@ import {
   streamText,
   type LanguageModel,
   type SystemModelMessage,
+  type UserModelMessage,
 } from 'ai';
 
 import { logToFile } from '../../utils/debug.js';
@@ -238,6 +239,23 @@ export function systemMessageWithCacheControl(
 ): SystemModelMessage {
   return {
     role: 'system',
+    content,
+    providerOptions: {
+      anthropic: { cacheControl: { type: 'ephemeral' } },
+    },
+  };
+}
+
+/**
+ * The first user message carries the framework-specific integration prompt
+ * plus the preflight context block (~3-5 KB / ~1500 tokens). Without a
+ * cache breakpoint here, the gateway re-tokenizes that prefix every turn
+ * — billed at full input rate. Mirrors the legacy SDK's user-message
+ * cache_control at agent-interface.ts:2530.
+ */
+export function userMessageWithCacheControl(content: string): UserModelMessage {
+  return {
+    role: 'user',
     content,
     providerOptions: {
       anthropic: { cacheControl: { type: 'ephemeral' } },
@@ -451,7 +469,7 @@ export async function runAiSdkAgent(
       system: systemMessageWithCacheControl(systemPrompt),
       tools: wrappedTools,
       stopWhen: stepCountIs(maxSteps),
-      prompt: args.prompt,
+      messages: [userMessageWithCacheControl(args.prompt)],
       // Vercel AI SDK retries internally with `maxRetries: 2` by
       // default — but `agent-runner.ts` already retries via the
       // wizard's transient classifier with jitter + Retry-After +
