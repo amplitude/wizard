@@ -97,6 +97,19 @@ describe('WizardStore — per-event wiring status', () => {
       store.markEventStatus('User Signed Up', 'failed');
       expect(store.eventPlan[0].status).toBe('failed');
     });
+
+    it('does NOT let `failed` demote a `done` event', () => {
+      // `done` is terminal — a stray `failed` emission (e.g. an
+      // unrelated heuristic firing after the agent already wired the
+      // track call) must not flip a successfully-applied event into a
+      // failure. Matches the JSDoc invariant: "once an event is `done`
+      // it never demotes" — `failed` only overrides non-`done`.
+      const store = createStore();
+      store.setEventPlan([{ name: 'User Signed Up', description: '' }]);
+      store.markEventStatus('User Signed Up', 'done');
+      store.markEventStatus('User Signed Up', 'failed');
+      expect(store.eventPlan[0].status).toBe('done');
+    });
   });
 
   describe('noteWrittenContent', () => {

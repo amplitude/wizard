@@ -2246,8 +2246,11 @@ export class WizardStore {
       if (e.name.trim().toLowerCase() !== target) return e;
       const current = e.status ?? 'pending';
       if (current === status) return e;
-      // Monotonic guard: never demote a `done` event.
-      if (current === 'done' && status !== 'failed') return e;
+      // Monotonic guard: `done` is terminal — never demote, and don't
+      // let a stray `failed` emission flip a successfully-applied event
+      // into a failure (matches the JSDoc invariant: "once an event is
+      // `done` it never demotes" — `failed` only overrides non-`done`).
+      if (current === 'done') return e;
       changed = true;
       return { ...e, status };
     });
