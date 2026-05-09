@@ -454,6 +454,7 @@ const ProgressTab = ({ store }: { store: WizardStore }) => {
           entries={store.fileWrites}
           installDir={store.session.installDir}
           spinnerFrame={spinnerFrame}
+          width={cols}
         />
 
         {/* Coaching: surfaces calmly after 90s of no task-count progress.
