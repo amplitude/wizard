@@ -19,6 +19,7 @@ import {
   type WizardSession,
   type OutroData,
   type DiscoveredFeature,
+  type DiscoveryFact,
   type CloudRegion,
   type RetryState,
   type PostAgentStep,
@@ -75,6 +76,7 @@ export type {
   RetryState,
   PostAgentStep,
   WizardActivity,
+  DiscoveryFact,
 };
 
 export interface TaskItem {
@@ -1505,6 +1507,19 @@ export class WizardStore {
    */
   setCurrentActivity(activity: WizardActivity | null): void {
     this.$session.setKey('currentActivity', activity);
+    this.emitChange();
+  }
+
+  /**
+   * Append a single discovery fact to the cold-start feed. Re-pushing a
+   * fact with the same `id` is a no-op so framework-detection paths that
+   * fire idempotently don't duplicate rows. Caller owns the timestamp so
+   * tests can pass deterministic values.
+   */
+  pushDiscoveryFact(fact: DiscoveryFact): void {
+    const current = this.session.discoveryFacts;
+    if (current.some((f) => f.id === fact.id)) return;
+    this.$session.setKey('discoveryFacts', [...current, fact]);
     this.emitChange();
   }
 

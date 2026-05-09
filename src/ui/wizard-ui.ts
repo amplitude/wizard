@@ -13,6 +13,7 @@ import type {
   RetryState,
   PostAgentStep,
   WizardActivity,
+  DiscoveryFact,
 } from '../lib/wizard-session';
 
 /** Result returned by the confirm_event_plan tool to the agent. */
@@ -192,6 +193,18 @@ export interface WizardUI {
    *             with `kind: 'idle'` so consumers can detect transitions.
    */
   setCurrentActivity(activity: WizardActivity | null): void;
+
+  /**
+   * Append a single fact to the cold-start "discovery feed" — a small
+   * vertical stack of insight chips the TUI fades into the empty middle
+   * of RunScreen as the wizard learns each value. Cosmetic only; the
+   * agent already gets these values via the preflight context block.
+   *
+   * - InkUI:    delegates to the store; `DiscoveryFeed` reads it.
+   * - LoggingUI: no-op (the CI log already prints these elsewhere).
+   * - AgentUI:  no-op (NDJSON consumers see preflight values directly).
+   */
+  pushDiscoveryFact(fact: DiscoveryFact): void;
 
   // ── Display state ──────────────────────────────────────────────────
   /** Set the detected framework label (e.g., "Django with Wagtail CMS") */

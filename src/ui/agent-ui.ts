@@ -1193,6 +1193,12 @@ export class AgentUI implements WizardUI {
     }
   }
 
+  pushDiscoveryFact(): void {
+    // No-op for NDJSON consumers — discovery facts are a TUI-only
+    // cosmetic feed; the same values are already surfaced via the
+    // preflight context block and existing `progress` events.
+  }
+
   // ── Prompts (auto-approve) ──────────────────────────────────────────
 
   promptConfirm(message: string): Promise<boolean> {
