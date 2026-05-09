@@ -9,7 +9,6 @@
 
 import * as crypto from 'node:crypto';
 import * as http from 'node:http';
-import axios from 'axios';
 import chalk from 'chalk';
 import opn from 'opn';
 import { z } from 'zod';
@@ -315,6 +314,9 @@ async function exchangeCodeForToken(
   zone: AmplitudeZone,
   redirectPort: number,
 ): Promise<OAuthTokenResponse> {
+  // Lazy-import: axios is only needed during the OAuth flow, never on cold
+  // start. Keeps `--version` / `status --json` paths free of axios+form-data.
+  const { default: axios } = await import('axios');
   const { oAuthHost, oAuthClientId } = AMPLITUDE_ZONE_SETTINGS[zone];
   const response = await axios.post(
     `${oAuthHost}/oauth2/token`,
@@ -614,6 +616,8 @@ export async function refreshAccessToken(
   refreshToken: string;
   expiresAt: string;
 }> {
+  // Lazy-import: see comment in exchangeCodeForToken.
+  const { default: axios } = await import('axios');
   const { oAuthHost, oAuthClientId } = AMPLITUDE_ZONE_SETTINGS[zone];
   // Bound the refresh exchange — without this, a hung OAuth endpoint
   // (corporate proxy, transient flake) freezes the wizard indefinitely
