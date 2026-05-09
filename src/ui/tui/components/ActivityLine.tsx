@@ -18,6 +18,11 @@
  * Estimated-duration phrasing only appears when `estimatedDurationSec` is
  * provided by the caller so we never pull a number out of thin air; the
  * rate-limit-retry case sets it dynamically from `nextRetryAtMs`.
+ *
+ * Cold-start over-time hint: when a `cold-start` activity blows past its
+ * estimated duration we swap the suffix from "typically ~Ns" to "this can
+ * take up to Ns on first run" (upper bound rounded to the next 30s
+ * boundary, floor 60s) so it never contradicts the visible elapsed counter.
  */
 
 import { Box, Text } from 'ink';
@@ -53,7 +58,21 @@ export const ActivityLine = ({ store, now = Date.now }: ActivityLineProps) => {
     0,
     Math.floor((now() - activity.startedAt) / 1000),
   );
-  const eta = activity.estimatedDurationSec
+  // Cold-start specific: once we've exceeded the estimate, swap the
+  // suffix to a "this can take up to Ns on first run" message so a
+  // slow first-run reads as known-duration patience instead of unknown
+  // silence. The upper bound is max(60, ceil(elapsed/30)*30) so it
+  // never falls below the visible elapsed counter.
+  const isColdStartOverTime =
+    activity.kind === 'cold-start' &&
+    activity.estimatedDurationSec !== undefined &&
+    elapsedSec > activity.estimatedDurationSec;
+  const eta = isColdStartOverTime
+    ? `, this can take up to ${Math.max(
+        60,
+        Math.ceil(elapsedSec / 30) * 30,
+      )}s on first run`
+    : activity.estimatedDurationSec
     ? `, typically ~${activity.estimatedDurationSec}s`
     : '';
   // Reference `tick` so React doesn't dead-code-eliminate the interval.

@@ -181,4 +181,139 @@ describe('FileWritesPanel', () => {
     // Earlier rows should not render.
     expect(out).not.toContain('file-0.ts');
   });
+
+  // ── Dedupe-by-path coverage ────────────────────────────────────────
+  //
+  // The store appends one entry per emission; the panel must collapse
+  // repeats of the same path into a single row. Pre-fix the user saw 14
+  // rows for ~6 distinct files ("oh god look how bad this is") — these
+  // tests pin the new behavior.
+
+  it('collapses three emissions of the same path into one row with × 3', () => {
+    const entries: FileWriteEntry[] = [
+      makeEntry({
+        path: '/proj/share/ShareDialog.tsx',
+        operation: 'modify',
+        startedAt: t0,
+        completedAt: t0 + 5,
+      }),
+      makeEntry({
+        path: '/proj/share/ShareDialog.tsx',
+        operation: 'modify',
+        startedAt: t0 + 100,
+        completedAt: t0 + 103,
+      }),
+      makeEntry({
+        path: '/proj/share/ShareDialog.tsx',
+        operation: 'modify',
+        startedAt: t0 + 200,
+        completedAt: t0 + 207,
+      }),
+    ];
+    const { lastFrame } = render(
+      <FileWritesPanel entries={entries} installDir="/proj" />,
+    );
+    const out = stripAnsi(lastFrame() ?? '');
+    // Single row only — split on the path string and confirm exactly
+    // one row references it.
+    const occurrences = out.split('share/ShareDialog.tsx').length - 1;
+    expect(occurrences).toBe(1);
+    // Edit-count annotation surfaces in the detail column.
+    expect(out).toContain('3×');
+    // Header counts deduped totals, not raw emissions.
+    expect(out).toContain('1 written');
+    expect(out).not.toContain('3 written');
+  });
+
+  it('renders 2 rows for 2 distinct paths and annotates only the doubled one', () => {
+    const entries: FileWriteEntry[] = [
+      makeEntry({
+        path: '/proj/a.ts',
+        operation: 'modify',
+        startedAt: t0,
+        completedAt: t0 + 4,
+      }),
+      makeEntry({
+        path: '/proj/b.ts',
+        operation: 'modify',
+        startedAt: t0 + 50,
+        completedAt: t0 + 53,
+      }),
+      makeEntry({
+        path: '/proj/b.ts',
+        operation: 'modify',
+        startedAt: t0 + 100,
+        completedAt: t0 + 107,
+      }),
+    ];
+    const { lastFrame } = render(
+      <FileWritesPanel entries={entries} installDir="/proj" />,
+    );
+    const out = stripAnsi(lastFrame() ?? '');
+    // Both files appear, exactly once each.
+    expect(out.split('a.ts').length - 1).toBe(1);
+    expect(out.split('b.ts').length - 1).toBe(1);
+    // Only the doubled path gets a count annotation.
+    expect(out).toContain('2×');
+    // The single-edit row should NOT pick up an edit-count annotation.
+    // We check that no `3×` / higher counts leak in.
+    expect(out).not.toContain('3×');
+    // Header counts deduped totals (2 distinct paths).
+    expect(out).toContain('2 written');
+  });
+
+  it('uses the latest emission’s editTime / bytes for the collapsed row', () => {
+    // Three emissions: the latest carries unique bytes + duration so we
+    // can confirm the row reflects the most recent write, not the first.
+    const entries: FileWriteEntry[] = [
+      makeEntry({
+        path: '/proj/p.ts',
+        operation: 'modify',
+        startedAt: t0,
+        completedAt: t0 + 1,
+        bytes: 100,
+      }),
+      makeEntry({
+        path: '/proj/p.ts',
+        operation: 'modify',
+        startedAt: t0 + 50,
+        completedAt: t0 + 51,
+        bytes: 200,
+      }),
+      makeEntry({
+        path: '/proj/p.ts',
+        operation: 'modify',
+        startedAt: t0 + 1000,
+        completedAt: t0 + 1500,
+        bytes: 999,
+      }),
+    ];
+    const { lastFrame } = render(
+      <FileWritesPanel entries={entries} installDir="/proj" />,
+    );
+    const out = stripAnsi(lastFrame() ?? '');
+    // Latest emission's bytes + duration win.
+    expect(out).toContain('999 bytes');
+    expect(out).toContain('500ms');
+    // Earlier emissions' details are NOT rendered.
+    expect(out).not.toContain('100 bytes');
+    expect(out).not.toContain('200 bytes');
+    expect(out).toContain('3×');
+  });
+
+  it('does not annotate single-edit rows', () => {
+    // Make sure the × suffix only appears when N > 1.
+    const entries: FileWriteEntry[] = [
+      makeEntry({ path: '/proj/single.ts', operation: 'modify' }),
+    ];
+    const { lastFrame } = render(
+      <FileWritesPanel entries={entries} installDir="/proj" />,
+    );
+    const out = stripAnsi(lastFrame() ?? '');
+    expect(out).toContain('single.ts');
+    // No edit-count annotation for single emissions — keeps the common
+    // case clean.
+    expect(out).not.toContain('1×');
+    expect(out).not.toMatch(/edited\s+\d+×/);
+  });
 });
