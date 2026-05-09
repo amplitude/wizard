@@ -12,7 +12,7 @@ import { Box, Text } from 'ink';
 import type { WizardStore, WizardSession } from '../store.js';
 import { useWizardStore } from '../hooks/useWizardStore.js';
 import { Screen, Flow } from '../router.js';
-import { Colors, Icons, Brand } from '../styles.js';
+import { Colors, Icons, Brand, Layout } from '../styles.js';
 import { OutroKind } from '../session-constants.js';
 
 /** Human-readable labels for wizard flow steps. */
@@ -194,7 +194,16 @@ export const JourneyStepper = ({ store, width }: JourneyStepperProps) => {
   });
 
   return (
-    <Box paddingX={1}>
+    // Span the full content width and use the shared `Layout.paddingX`
+    // token so the stepper aligns with the screen content (which lives
+    // inside the same horizontal padding via App.tsx's content-area
+    // Box). Without an explicit `width`, the Box shrinks to its content
+    // and App.tsx's `alignItems="center"` then visually centers the
+    // shrunken row — the "marooned in the middle" complaint. Using
+    // `paddingX={1}` here while content used `Layout.paddingX={2}` was
+    // the other half of the same misalignment ("wide left margin on
+    // content, headers hugging the edge").
+    <Box width={width} paddingX={Layout.paddingX}>
       {steps.map((step, i) => {
         // When the user has actually landed on Done with a successful
         // outro, swap the in-progress `●` for `✓` and tint it with the

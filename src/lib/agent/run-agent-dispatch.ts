@@ -187,6 +187,35 @@ export async function runAgentDispatch(
     // legacy SDK uses (e.g. `anthropic/claude-sonnet-4-6`) — see
     // `selectModel` in `model-config.ts`. `agentConfig.model` carries
     // it through unchanged.
+    //
+    // Pull the in-process wizard-tools MCP server out of
+    // `agentConfig.mcpServers` so the AI-SDK runner can bridge it via
+    // `bridgeWizardToolsMcp`. The legacy runner registers it under the
+    // `'wizard-tools'` key in `agent-interface.ts:1442`. The bridge
+    // exposes the FULL wizard-tools surface (~10 tools incl.
+    // `set_env_values`, `confirm_event_plan`, `choose`,
+    // `wizard_feedback`, the optional `load_skill*` tier tools) to the
+    // AI-SDK agent — without it, the agent silently loses 6+ tools.
+    const mcpServersBag = agentConfig.mcpServers as Record<string, unknown>;
+    const wizardToolsEntry = mcpServersBag?.['wizard-tools'] as
+      | { instance?: unknown; name?: string; type?: string }
+      | undefined;
+    const wizardToolsServer =
+      wizardToolsEntry &&
+      typeof wizardToolsEntry === 'object' &&
+      wizardToolsEntry.instance
+        ? {
+            instance: wizardToolsEntry.instance,
+            name: wizardToolsEntry.name,
+            type: wizardToolsEntry.type,
+          }
+        : undefined;
+    if (!wizardToolsServer) {
+      logToFile(
+        '[ai-sdk-runner] no wizard-tools server in agentConfig.mcpServers — runner will fall back to native tool subset only',
+      );
+    }
+
     const result = await runAiSdkAgent({
       workingDirectory: agentConfig.workingDirectory,
       prompt,
@@ -195,6 +224,7 @@ export async function runAgentDispatch(
       orchestratorContext: agentConfig.orchestratorContext,
       wizardOptions: options,
       onCompactionStarted: config?.onPreCompact,
+      wizardToolsServer,
     });
 
     // Build the synthesized terminal SDKMessage that observability /

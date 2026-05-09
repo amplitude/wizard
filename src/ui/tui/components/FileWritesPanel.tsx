@@ -29,6 +29,19 @@
  *
  * Hidden when there are no rows so RunScreen stays compact during the
  * planning phase before any file write has fired.
+ *
+ * Layout invariants (see also __tests__/FileWritesPanel.test.tsx):
+ *   - Every row is exactly 1 visual line at every terminal width.
+ *   - The keyword cell (CREATE / MODIFY / DELETE) is pinned to a fixed
+ *     7-column box with `flexShrink={0}` so Yoga can never steal a
+ *     character from it. Without that pin, long paths trigger reflow
+ *     where the keyword loses its trailing column ("CREAT…") and the
+ *     space between keyword and path collapses ("MODIFYsrc/app/…").
+ *   - The trailing detail cell (` · edited Xms`, ` · 788 bytes · 4ms`)
+ *     is also `flexShrink={0}` so it stays glued to the row.
+ *   - The path cell is the only `flexShrink={1}` cell and absorbs
+ *     overflow via head-truncation (`…/[product]/page.tsx`) — never
+ *     wrapping onto a second line.
  */
 
 import { Box, Text } from 'ink';
@@ -58,7 +71,54 @@ interface FileWritesPanelProps {
   now?: number;
   /** Cap on rows rendered — older rows are dropped from the head. */
   maxVisible?: number;
+  /**
+   * Visible terminal width in columns. Used to head-truncate long file
+   * paths so every row stays on a single line. When omitted the panel
+   * falls back to a sensible default — the cap exists so a forgotten
+   * width prop still renders consistently rather than reverting to the
+   * old wrap behavior. RunScreen wires this from `useStdoutDimensions`.
+   */
+  width?: number;
 }
+
+/**
+ * Head-truncate a path so the *meaningful* tail (filename + parents)
+ * survives. Long Next.js segment paths like
+ * `src/app/(category-sidebar)/products/[category]/[subcategory]/[product]/page.tsx`
+ * become `…/[product]/page.tsx` instead of being right-truncated into
+ * `src/app/(category-sidebar)/products/[ca…` (which loses the filename).
+ *
+ * Walks segments from the right and stops when adding the next segment
+ * would exceed `maxWidth - 1` (reserved for the leading ellipsis). If
+ * even the basename overflows, falls back to middle-truncation of the
+ * basename so we never wrap.
+ */
+export const truncatePathHead = (raw: string, maxWidth: number): string => {
+  if (raw.length <= maxWidth || maxWidth <= 1) return raw;
+  const segments = raw.split('/');
+  const basename = segments[segments.length - 1] ?? raw;
+  // Basename alone overflows — middle-truncate it. Keeping the file
+  // extension visible is the priority.
+  if (basename.length > maxWidth) {
+    if (maxWidth <= 3) return '…';
+    const keep = maxWidth - 2; // reserve 2 cols for the leading + middle ellipses
+    const head = Math.ceil(keep / 2);
+    const tail = keep - head;
+    return `…${basename.slice(0, head)}…${basename.slice(-tail)}`.slice(
+      0,
+      maxWidth,
+    );
+  }
+  let acc = basename;
+  for (let i = segments.length - 2; i >= 0; i--) {
+    const next = `${segments[i]}/${acc}`;
+    // +2 for the leading `…/` prefix. Stop one segment short.
+    if (next.length + 2 > maxWidth) break;
+    acc = next;
+  }
+  if (acc === basename) return basename;
+  return `…/${acc}`;
+};
 
 const OP_LABELS: Record<FileWriteEntry['operation'], string> = {
   create: 'CREATE',
@@ -71,10 +131,6 @@ const OP_COLORS: Record<FileWriteEntry['operation'], string> = {
   modify: Colors.warning,
   delete: Colors.error,
 };
-
-/** Right-pad to a fixed width with ASCII spaces. */
-const padRight = (s: string, width: number): string =>
-  s.length >= width ? s : s + ' '.repeat(width - s.length);
 
 const formatDuration = (ms: number): string => {
   if (ms < 1000) return `${ms}ms`;
@@ -102,7 +158,9 @@ const formatDuration = (ms: number): string => {
  * same string. Display-time relativization happens in `displayPath`
  * downstream.
  */
-const dedupeByPath = (entries: readonly FileWriteEntry[]): DedupedFileWrite[] => {
+const dedupeByPath = (
+  entries: readonly FileWriteEntry[],
+): DedupedFileWrite[] => {
   const byPath = new Map<string, DedupedFileWrite>();
   for (const entry of entries) {
     const prev = byPath.get(entry.path);
@@ -149,6 +207,7 @@ export const FileWritesPanel = ({
   spinnerFrame,
   now = Date.now(),
   maxVisible = 8,
+  width,
 }: FileWritesPanelProps) => {
   // Dedupe by path FIRST, then slice to maxVisible. Slicing first would
   // drop different-path entries to make room for duplicates — we want
@@ -203,6 +262,7 @@ export const FileWritesPanel = ({
           installDir={installDir}
           spinnerFrame={spinnerFrame}
           now={now}
+          width={width}
         />
       ))}
     </Box>
@@ -220,7 +280,30 @@ interface FileWriteRowProps {
   installDir?: string;
   spinnerFrame?: number;
   now: number;
+  /** Visible width budget for the row (terminal cols). */
+  width?: number;
 }
+
+/**
+ * Per-row column budget. The keyword cell is pinned to 7 cells —
+ * `MODIFY` is 6 chars + 1 trailing space — so Yoga cannot truncate it
+ * to "CREAT" when a long path tries to claim its column. Width 7 is
+ * `max('CREATE', 'MODIFY', 'DELETE') + 1`.
+ */
+const KEYWORD_WIDTH = 7;
+/** Leading indent (' ' before icon) + status icon + space. */
+const ICON_WIDTH = 3;
+/** The keyword box width already includes a trailing space (width 7 for
+ *  a max-6-char label), so no extra gap column is needed. */
+const KEYWORD_PATH_GAP = 0;
+/** Separator between path and trailing detail (` · `). */
+const SEPARATOR = ' · ';
+/** Floor on usable columns when the terminal is unreasonably narrow. */
+const MIN_ROW_WIDTH = 24;
+/** Minimum path budget — below this the row would be unreadable. */
+const MIN_PATH_WIDTH = 8;
+/** Default width when no measurement is available (matches Layout.maxWidth). */
+const DEFAULT_ROW_WIDTH = 120;
 
 const FileWriteRow = ({
   entry,
@@ -228,11 +311,12 @@ const FileWriteRow = ({
   installDir,
   spinnerFrame,
   now,
+  width,
 }: FileWriteRowProps) => {
   const { operation, status } = entry;
-  const opLabel = padRight(OP_LABELS[operation], 6);
+  const opLabel = OP_LABELS[operation];
   const opColor = OP_COLORS[operation];
-  const display = displayPath(entry.path, installDir);
+  const rawDisplay = displayPath(entry.path, installDir);
 
   let icon: ReactElement;
   if (status === 'applied') {
@@ -262,30 +346,75 @@ const FileWriteRow = ({
         : 'edited';
     const sizeHintWithCount =
       editCount > 1 ? `${sizeHint} ${editCount}×` : sizeHint;
-    detail = dur ? `${sizeHintWithCount}  ${dur}` : sizeHintWithCount;
+    detail = dur ? `${sizeHintWithCount} ${dur}` : sizeHintWithCount;
   } else if (status === 'failed') {
     detail = editCount > 1 ? `failed ${editCount}×` : 'failed';
   } else {
     const elapsed = now - entry.startedAt;
     const base =
-      elapsed >= 1000 ? `generating… ${formatDuration(elapsed)}` : 'generating…';
+      elapsed >= 1000
+        ? `generating… ${formatDuration(elapsed)}`
+        : 'generating…';
     detail = editCount > 1 ? `${base} ${editCount}×` : base;
   }
 
+  // Compute the path budget so the row always fits on one line. Without
+  // this, a long path makes Yoga's flex container reflow into a 2-line
+  // layout where the trailing "· edited Xms" jumps to the next row,
+  // misaligned far to the right. Worse, the wrap also chews characters
+  // off the keyword cell (`CREAT` instead of `CREATE`) and collapses
+  // the keyword/path gap (`MODIFYsrc/app/…`). Pinning every cell except
+  // the path with `flexShrink={0}` and pre-truncating the path prevents
+  // both classes of bug.
+  const totalWidth = Math.max(MIN_ROW_WIDTH, width ?? DEFAULT_ROW_WIDTH);
+  const fixedCols =
+    ICON_WIDTH +
+    KEYWORD_WIDTH +
+    KEYWORD_PATH_GAP +
+    SEPARATOR.length +
+    detail.length;
+  const pathBudget = Math.max(MIN_PATH_WIDTH, totalWidth - fixedCols);
+  const display = truncatePathHead(rawDisplay, pathBudget);
+
   return (
-    <Box>
-      <Text> {/* leading indent so rows align with the section header */}</Text>
-      {icon}
-      <Text> </Text>
-      <Text color={opColor} bold>
-        {opLabel}
-      </Text>
-      <Text> </Text>
-      <Text color={Colors.body} wrap="truncate-end">
-        {display}
-      </Text>
-      <Text color={Colors.subtle}> {Icons.dot} </Text>
-      <Text color={Colors.muted}>{detail}</Text>
+    // Row is a single flex container. Every cell except the path pins
+    // its width with `flexShrink={0}`; the path absorbs overflow via
+    // head-truncation. This is the contract the test suite locks down.
+    <Box flexDirection="row">
+      {/* Indent + status icon + trailing space. Pinned to 3 cols so a
+          narrow terminal can't collapse the icon into the keyword. */}
+      <Box flexShrink={0} width={ICON_WIDTH}>
+        <Text> </Text>
+        {icon}
+        <Text> </Text>
+      </Box>
+      {/* Keyword cell — pinned to 7 cols so `MODIFY` + 1 trailing space
+          fits regardless of viewport. Without `flexShrink={0}` Yoga
+          truncates `CREATE` to `CREAT` when the path tries to overflow. */}
+      <Box flexShrink={0} width={KEYWORD_WIDTH}>
+        <Text color={opColor} bold>
+          {opLabel}
+        </Text>
+      </Box>
+      {/* Path cell — the only flexible column. Pre-truncated against
+          `pathBudget` so even a 90-char Next.js segment path renders on
+          one line. `flexShrink={1}` lets Yoga still finalize the layout
+          if our budget is off by a column. `wrap="truncate-end"` on the
+          inner `<Text>` is the safety net: if the width prop disagrees
+          with the actual frame width (rare, but `useStdoutDimensions`
+          can lag a resize event by a frame), Ink will hard-truncate
+          rather than wrap onto a second line. */}
+      <Box flexShrink={1} flexGrow={1} overflow="hidden">
+        <Text color={Colors.body} wrap="truncate-end">
+          {display}
+        </Text>
+      </Box>
+      {/* Trailing detail (` · edited Xms`). Pinned so the keyword/path
+          can't push it onto a second line. */}
+      <Box flexShrink={0}>
+        <Text color={Colors.subtle}>{SEPARATOR}</Text>
+        <Text color={Colors.muted}>{detail}</Text>
+      </Box>
     </Box>
   );
 };
