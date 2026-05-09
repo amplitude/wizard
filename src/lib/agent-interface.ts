@@ -83,7 +83,7 @@ import {
 } from './agent/tool-policy.js';
 import { getWizardCommandments } from './commandments';
 import {
-  classifyToolEvent,
+  classifyToolEventTransitions,
   type JourneyStepId,
   type JourneyStatus,
 } from './journey-state';
@@ -3288,25 +3288,31 @@ export async function runAgent(
                       : typeof input.tool_result !== 'undefined'
                       ? input.tool_result
                       : null;
-                  const transition = classifyToolEvent({
+                  const transitions = classifyToolEventTransitions({
                     phase,
                     toolName,
                     toolInput,
                     toolResult,
                     prevDerived: derivedJourney,
                   });
-                  if (!transition) return;
-                  // Mirror the monotonic guard in WizardStore — a completed
-                  // step never regresses to in_progress, so don't push that
-                  // demotion into the UI.
-                  const prev = derivedJourney[transition.stepId];
-                  if (prev === 'completed' && transition.status !== 'completed')
-                    return;
-                  derivedJourney[transition.stepId] = transition.status;
-                  getUI().applyJourneyTransition(
-                    transition.stepId,
-                    transition.status,
-                  );
+                  if (transitions.length === 0) return;
+                  for (const transition of transitions) {
+                    // Mirror the monotonic guard in WizardStore — a completed
+                    // step never regresses to in_progress, so don't push that
+                    // demotion into the UI.
+                    const prev = derivedJourney[transition.stepId];
+                    if (
+                      prev === 'completed' &&
+                      transition.status !== 'completed'
+                    )
+                      continue;
+                    if (prev === transition.status) continue;
+                    derivedJourney[transition.stepId] = transition.status;
+                    getUI().applyJourneyTransition(
+                      transition.stepId,
+                      transition.status,
+                    );
+                  }
                 } catch (err) {
                   // Classifier errors are non-fatal — the user-visible
                   // checklist falls back to the canonical 4 pending rows

@@ -34,8 +34,17 @@
  *
  * Heuristic (post-G1, tightened in this commit):
  *
+ *   - "Start fresh" signal: when `<installDir>/.amplitude/` is missing
+ *     AND the per-user checkpoint still records a meaningful prior
+ *     selection (org/project/framework/intro), wipe the checkpoint. The
+ *     user nuking `.amplitude/` is the strongest opt-out signal we have
+ *     for the per-user resume cache. This fires regardless of whether a
+ *     binding survived elsewhere — wiping `.amplitude/` should always
+ *     route the next launch through fresh SUSI, not auto-resume the
+ *     previous project.
+ *
  *   - Healthy when EITHER `project-binding.json` OR `ampli.json` exists.
- *     No-op.
+ *     No-op (other than the checkpoint clear above, if it fired).
  *
  *   - When neither binding exists AND a stored API key for this install
  *     dir is still in `credentials.json`, that's an orphaned credential —
@@ -67,7 +76,11 @@ import * as path from 'node:path';
 import { AMPLI_CONFIG_FILENAME } from './ampli-config.js';
 import { logToFile } from '../utils/debug.js';
 import { clearApiKey, readApiKey } from '../utils/api-key-store.js';
-import { getProjectBindingFile } from '../utils/storage-paths.js';
+import {
+  getCheckpointFile,
+  getProjectBindingFile,
+  getProjectMetaDir,
+} from '../utils/storage-paths.js';
 
 export interface SelfHealResult {
   healed: boolean;
@@ -102,8 +115,51 @@ export function selfHealStaleProjectState(installDir: string): SelfHealResult {
   const legacyAmpliJson = path.join(installDir, AMPLI_CONFIG_FILENAME);
   const hasBinding = safeExists(bindingFile) || safeExists(legacyAmpliJson);
 
+  // ── "Start fresh" signal ─────────────────────────────────────────────
+  // If the user wiped `<installDir>/.amplitude/` to start over, the
+  // per-user checkpoint cache (which lives outside the project tree at
+  // `~/.amplitude/wizard/runs/<hash>/checkpoint.json`) survives and would
+  // auto-pick the prior org/project on next launch. Respect "I deleted
+  // .amplitude/ to start over" by clearing the checkpoint when it points
+  // at a meaningful prior selection. This is independent of the
+  // binding/credential heuristic below — we run it first because it can
+  // also fire on healthy projects (the user may have wiped meta + retained
+  // a binding).
+  const projectMetaMissing = !safeExists(getProjectMetaDir(installDir));
+  const checkpointArtifacts: string[] = [];
+  if (projectMetaMissing) {
+    const checkpointFile = getCheckpointFile(installDir);
+    if (
+      safeExists(checkpointFile) &&
+      checkpointHasMeaningfulSelection(checkpointFile)
+    ) {
+      try {
+        fs.rmSync(checkpointFile, { force: true });
+        checkpointArtifacts.push(checkpointFile);
+      } catch (err) {
+        logToFile(
+          `[self-heal] failed to remove ${checkpointFile}: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+      }
+    }
+  }
+
   // Healthy state: at least one binding source is present.
   if (hasBinding) {
+    if (checkpointArtifacts.length > 0) {
+      const reason =
+        '.amplitude/ missing but binding present; cleared stale checkpoint to honour "start fresh"';
+      logToFile(
+        `[self-heal] ${reason}; removed: ${checkpointArtifacts.join(', ')}`,
+      );
+      return {
+        healed: true,
+        reason,
+        artifactsRemoved: checkpointArtifacts,
+      };
+    }
     return {
       healed: false,
       reason:
@@ -123,6 +179,18 @@ export function selfHealStaleProjectState(installDir: string): SelfHealResult {
   }
 
   if (!hasStoredKey) {
+    if (checkpointArtifacts.length > 0) {
+      const reason =
+        '.amplitude/ missing and checkpoint pointed at prior project; cleared checkpoint to honour "start fresh"';
+      logToFile(
+        `[self-heal] ${reason}; removed: ${checkpointArtifacts.join(', ')}`,
+      );
+      return {
+        healed: true,
+        reason,
+        artifactsRemoved: checkpointArtifacts,
+      };
+    }
     return {
       healed: false,
       reason:
@@ -156,6 +224,15 @@ export function selfHealStaleProjectState(installDir: string): SelfHealResult {
       '[self-heal] project-binding.json reappeared on disk between gate ' +
         'and mutation — aborting orphan-credential clear (cred preserved)',
     );
+    if (checkpointArtifacts.length > 0) {
+      const reason =
+        'project-binding.json present on second-look — preserving stored credential; checkpoint already cleared to honour "start fresh"';
+      return {
+        healed: true,
+        reason,
+        artifactsRemoved: checkpointArtifacts,
+      };
+    }
     return {
       healed: false,
       reason:
@@ -164,7 +241,7 @@ export function selfHealStaleProjectState(installDir: string): SelfHealResult {
     };
   }
 
-  const removed: string[] = [];
+  const removed: string[] = [...checkpointArtifacts];
 
   // Legacy dotfile mirrors only get cleared when paired with a stale
   // credential. Otherwise they could just be leftovers that the user
@@ -223,4 +300,38 @@ function safeExists(p: string): boolean {
   } catch {
     return false;
   }
+}
+
+/**
+ * Return true when the checkpoint at `filePath` carries a non-default
+ * selection (org/project picked, framework detected, intro concluded).
+ * An empty / freshly-stamped checkpoint must NOT trigger a wipe — that
+ * would churn benign state across every cold start.
+ *
+ * Best-effort: any read or parse failure returns `false` so we err on the
+ * side of not deleting something we couldn't inspect.
+ */
+function checkpointHasMeaningfulSelection(filePath: string): boolean {
+  try {
+    const raw = fs.readFileSync(filePath, 'utf8');
+    const parsed = JSON.parse(raw) as Record<string, unknown>;
+    if (!parsed || typeof parsed !== 'object') return false;
+
+    // Any of these being set means the checkpoint would resume a
+    // prior session instead of routing the user through fresh SUSI.
+    const meaningful =
+      isNonEmpty(parsed.selectedProjectId) ||
+      isNonEmpty(parsed.selectedWorkspaceId) ||
+      isNonEmpty(parsed.selectedOrgId) ||
+      isNonEmpty(parsed.integration) ||
+      parsed.detectionComplete === true ||
+      parsed.introConcluded === true;
+    return meaningful;
+  } catch {
+    return false;
+  }
+}
+
+function isNonEmpty(value: unknown): boolean {
+  return typeof value === 'string' && value.trim().length > 0;
 }

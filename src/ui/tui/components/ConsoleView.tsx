@@ -37,6 +37,7 @@ import {
   parseCreateProjectSlashInput,
 } from '../console-commands.js';
 import { analytics } from '../../../utils/analytics.js';
+import { logToFile } from '../../../utils/debug.js';
 import { trackWizardFeedback } from '../../../utils/track-wizard-feedback.js';
 import { collectDiagnostics } from '../../../lib/diagnostics-collector.js';
 import { KeyHintBar, type KeyHint } from './KeyHintBar.js';
@@ -525,10 +526,17 @@ export const ConsoleView = ({
       // to hit accidentally while the plan is pending in the background)
       const lc = char.toLowerCase();
       if (lc === 'y') {
+        logToFile('[event-plan] Y pressed → approving plan');
         store.resolveEventPlan({ decision: 'approved' });
       } else if (lc === 's') {
+        logToFile('[event-plan] S pressed → skipping plan');
         store.resolveEventPlan({ decision: 'skipped' });
       } else if (lc === 'f') {
+        // Diagnostic crumb for the "F exits the plan instead of opening
+        // feedback" report — if this line lands in the log but the UI
+        // didn't switch into feedback mode, the bug is downstream of
+        // setPlanInputMode (state batching, parent re-render order, etc.).
+        logToFile('[event-plan] F pressed → entering feedback mode');
         setPlanInputMode('feedback');
       }
     },

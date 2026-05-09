@@ -262,11 +262,20 @@ export const resolveNonInteractiveCredentials = async (
       );
     }
 
+    const { getOrCreateProjectIdempotencyKey, clearProjectIdempotencyKey } =
+      await import('../lib/idempotency-key.js');
     try {
+      // Source the idempotency key from session state so a network blip
+      // mid-create can't double-create the project — proxy dedupes a
+      // replay with the same key. CLI orchestrators that retry a failed
+      // `wizard --project-name X` invocation will get a fresh process
+      // (so a fresh key) — that's the correct behaviour, since "user
+      // re-ran the command" is a different logical attempt.
+      const idempotencyKey = getOrCreateProjectIdempotencyKey(session);
       const created = await createAmplitudeApp(
         session.pendingAuthAccessToken,
         zone,
-        { orgId: org.id, name: projectName },
+        { orgId: org.id, name: projectName, idempotencyKey },
       );
 
       // Persist outside the API's error path — the project exists on the
@@ -294,6 +303,12 @@ export const resolveNonInteractiveCredentials = async (
         appId: toCredentialAppId(created.appId),
       };
       session.projectHasData = false;
+
+      // Successful create — clear the idempotency key so a follow-up
+      // create attempt later in the same session starts fresh. We
+      // intentionally do NOT clear on error so a user-driven retry
+      // replays the same key for proxy-side dedupe.
+      clearProjectIdempotencyKey(session);
 
       if (mode === 'agent' && agentUI) {
         agentUI.emitProjectCreateSuccess({
@@ -327,6 +342,11 @@ export const resolveNonInteractiveCredentials = async (
       if (code === 'FORBIDDEN' || code === 'QUOTA_REACHED')
         process.exit(ExitCode.AUTH_REQUIRED);
       if (code === 'INVALID_REQUEST') process.exit(ExitCode.INVALID_ARGS);
+      // IDEMPOTENCY_CONFLICT is transient (a concurrent request with the
+      // same key is in flight) — exit as NETWORK_ERROR so an orchestrator
+      // sees it as a "retry shortly" signal rather than a permanent
+      // failure. The proxy resolves the conflict within seconds.
+      if (code === 'IDEMPOTENCY_CONFLICT') process.exit(ExitCode.NETWORK_ERROR);
       process.exit(ExitCode.AGENT_FAILED);
     }
   }
