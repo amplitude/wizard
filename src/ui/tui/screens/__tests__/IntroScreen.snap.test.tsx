@@ -90,7 +90,7 @@ describe('IntroScreen snapshots', () => {
     expect(frame).toContain('Cancel');
   });
 
-  it('shows the BETA tag when the framework metadata.beta is true', () => {
+  it('shows the beta marker when the framework metadata.beta is true', () => {
     const store = makeStoreForSnapshot({
       detectionComplete: true,
       detectedFrameworkLabel: 'Unreal',
@@ -101,7 +101,12 @@ describe('IntroScreen snapshots', () => {
       }),
     });
     const { frame } = renderSnapshot(<IntroScreen store={store} />, store);
-    expect(frame).toContain('[BETA]');
+    // The marker moved from a loud `[BETA]` postfix to a quieter
+    // ` · beta` footer-style tag rendered next to the framework name.
+    // The bracketed form was inconsistent with the rest of the
+    // welcome-screen typography (no other label is shouty-uppercase).
+    expect(frame).toContain('· beta');
+    expect(frame).not.toContain('[BETA]');
   });
 
   it('shows the preRunNotice from framework metadata when set', () => {
@@ -130,6 +135,52 @@ describe('IntroScreen snapshots', () => {
     expect(frame).toContain('No framework detected');
     // Generic frameworks should NOT get the "(detected)" suffix
     expect(frame).not.toContain('(detected)');
+  });
+
+  it('renders inline workspace picks when a monorepo has declared globs', () => {
+    // Build a real monorepo on disk so analyzeWorkspace + the
+    // `resolveWorkspacePicks` helper light up. The welcome screen then
+    // surfaces these as direct picks instead of forcing the user
+    // through "Change directory" → typed PathInput.
+    const installDir = fs.mkdtempSync(path.join(os.tmpdir(), 'intro-monorepo-'));
+    try {
+      fs.writeFileSync(
+        path.join(installDir, 'package.json'),
+        JSON.stringify({
+          name: 'mono',
+          private: true,
+          workspaces: ['apps/web', 'packages/*'],
+        }),
+      );
+      fs.mkdirSync(path.join(installDir, 'apps', 'web'), { recursive: true });
+      fs.mkdirSync(path.join(installDir, 'packages'), { recursive: true });
+      fs.mkdirSync(path.join(installDir, 'packages', 'core'));
+
+      const store = makeStoreForSnapshot({
+        installDir,
+        userEmail: 'kelson@amplitude.com',
+        detectionComplete: true,
+        detectedFrameworkLabel: 'Next.js',
+        integration: Integration.nextjs,
+        frameworkConfig: fakeConfig(Integration.nextjs),
+      });
+      const { frame } = renderSnapshot(<IntroScreen store={store} />, store);
+      // Both pick rows surface inline. Wildcard globs render with a
+      // " — pick a workspace" hint so the user knows the next step is
+      // a sub-picker, not a direct commit.
+      expect(frame).toContain('apps/web');
+      expect(frame).toContain('packages/*');
+      // The monorepo warning still renders above the picks (the
+      // workspace-selection helper doesn't replace the warning, just
+      // makes the resolution one keystroke away).
+      expect(frame).toContain('looks like a monorepo root');
+      // "Change directory" is demoted to a fallthrough escape hatch
+      // when inline picks are available.
+      expect(frame).toContain('Use root anyway / type a path');
+      expect(frame).not.toContain('[4] Change directory');
+    } finally {
+      fs.rmSync(installDir, { recursive: true, force: true });
+    }
   });
 
   it('renders the resume-from-checkpoint picker when _restoredFromCheckpoint is true', () => {

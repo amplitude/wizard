@@ -214,6 +214,118 @@ function hasNestedManifest(installDir: string): boolean {
 }
 
 /**
+ * Concrete workspace pick surfaced inline on the welcome screen when the
+ * user lands on a monorepo root. Each entry is either a literal subdir
+ * (`isWildcard: false`) — selecting it changes installDir to that path
+ * directly — or a parent dir for a wildcard glob like `packages/*`
+ * (`isWildcard: true`), which opens a sub-picker over the matching
+ * children. We dedupe on `absolutePath` so the same dir doesn't show up
+ * twice when both a `packages/*` glob and an explicit `packages/foo`
+ * entry are declared.
+ */
+export interface WorkspacePick {
+  /** Original glob string from the manifest (e.g. `packages/*`). */
+  glob: string;
+  /** Absolute path the pick resolves to. */
+  absolutePath: string;
+  /** Display label suitable for a picker row. */
+  label: string;
+  /** True when this pick should open a sub-picker rather than commit directly. */
+  isWildcard: boolean;
+}
+
+/**
+ * Translate the workspace globs from a monorepo manifest into concrete
+ * inline picks for the welcome screen. We deliberately keep this list
+ * small (default cap of 3) — the welcome menu is supposed to feel
+ * tighter than a full file picker.
+ *
+ * Globs we handle:
+ *   - `packages/foo` → literal subdir if it exists on disk
+ *   - `packages/*`   → one wildcard entry whose label is the glob and
+ *                      whose `absolutePath` is the parent dir; consumers
+ *                      then list matching children themselves
+ *
+ * Anything else (`packages/!(legacy)`, `**\/*-app`, etc.) is dropped —
+ * we'd rather skip a fancy glob than render a misleading pick.
+ */
+export function resolveWorkspacePicks(
+  installDir: string,
+  workspaceGlobs: string[],
+  limit = 3,
+): WorkspacePick[] {
+  const seen = new Set<string>();
+  const picks: WorkspacePick[] = [];
+
+  for (const glob of workspaceGlobs) {
+    if (picks.length >= limit) break;
+    const trimmed = glob.trim();
+    if (!trimmed) continue;
+
+    // Wildcard glob — keep only the simple `parent/*` shape; anything
+    // with extra glob meta (`!`, `**`, `?`, `{`, `[`) is too risky to
+    // resolve here.
+    if (trimmed.endsWith('/*')) {
+      const parent = trimmed.slice(0, -2);
+      if (/[*?!{[]/.test(parent)) continue;
+      const abs = parent === '' ? installDir : join(installDir, parent);
+      if (!safeExists(abs)) continue;
+      if (seen.has(abs)) continue;
+      seen.add(abs);
+      picks.push({
+        glob: trimmed,
+        absolutePath: abs,
+        label: trimmed,
+        isWildcard: true,
+      });
+      continue;
+    }
+
+    // Literal entry — must exist on disk.
+    if (/[*?!{[]/.test(trimmed)) continue;
+    const abs = join(installDir, trimmed);
+    if (!safeExists(abs)) continue;
+    if (seen.has(abs)) continue;
+    seen.add(abs);
+    picks.push({
+      glob: trimmed,
+      absolutePath: abs,
+      label: trimmed,
+      isWildcard: false,
+    });
+  }
+
+  return picks;
+}
+
+/**
+ * List the immediate child directories of a wildcard parent (e.g.
+ * `packages/*` → every dir inside `packages/`). Returns absolute paths
+ * sorted alphabetically; non-directories and dotfiles are skipped.
+ * Caller is responsible for filtering to directories that look like
+ * real workspaces — we only care about layout here.
+ */
+export function listWildcardChildren(parentDir: string): string[] {
+  let entries: string[];
+  try {
+    entries = readdirSync(parentDir);
+  } catch {
+    return [];
+  }
+  const children: string[] = [];
+  for (const name of entries) {
+    if (name.startsWith('.')) continue;
+    const abs = join(parentDir, name);
+    try {
+      if (statSync(abs).isDirectory()) children.push(abs);
+    } catch {
+      // best-effort; skip unreadable entries
+    }
+  }
+  return children.sort();
+}
+
+/**
  * Run all sync workspace checks against `installDir`.
  *
  * Never throws. On a missing or unreadable directory returns
