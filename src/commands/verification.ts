@@ -188,11 +188,18 @@ const verificationShowCommand: CommandModule = {
             verificationId: asVerificationId(verification.id),
           });
           if (envelope) emitJson(envelope);
-          else
+          else {
+            // TOCTOU: builder re-reads the store, so the verification
+            // could have been removed between our `getVerification`
+            // check above and the envelope build. Surface a non-zero
+            // exit so orchestrators relying on exit codes don't treat
+            // the error JSON as success.
             emitJsonError(
               `Verification ${idRaw} not found`,
               'VERIFICATION_NOT_FOUND',
             );
+            process.exit(ExtendedExitCode.VERIFICATION_NOT_FOUND);
+          }
         } else {
           const ui = getUI();
           ui.log.info(

@@ -234,7 +234,14 @@ export const taskCommand: CommandModule = {
             taskId: task.id,
           });
           if (envelope) emitJson(envelope);
-          else emitJsonError(`Task ${idRaw} not found`);
+          else {
+            // TOCTOU: builder re-reads the store, so the task could
+            // have been removed between our `getTask` check above and
+            // the envelope build. Surface a non-zero exit so orchestrators
+            // relying on exit codes don't treat the error JSON as success.
+            emitJsonError(`Task ${idRaw} not found`);
+            process.exit(ExitCode.INVALID_ARGS);
+          }
         } else {
           const ui = getUI();
           ui.log.info(`${chalk.bold(task.id)}  ${task.label}`);
@@ -429,7 +436,15 @@ export const sessionCommand: CommandModule = {
             sessionId: session.id,
           });
           if (envelope) emitJson(envelope);
-          else emitJsonError(`Session ${idRaw} not found`);
+          else {
+            // TOCTOU: builder re-reads the store, so the session could
+            // have been removed between our `getSession` check above
+            // and the envelope build. Surface a non-zero exit so
+            // orchestrators relying on exit codes don't treat the error
+            // JSON as success.
+            emitJsonError(`Session ${idRaw} not found`);
+            process.exit(ExitCode.INVALID_ARGS);
+          }
         } else {
           // Human path: read tasks scoped to this session for the
           // bulleted list. The JSON path's `buildSessionEnvelope`
