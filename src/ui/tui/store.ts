@@ -88,9 +88,32 @@ export interface TaskItem {
   done: boolean;
 }
 
+/**
+ * Wiring status for a single planned event during the agent's `wire`
+ * step. Drives the per-event vertical status list in RunScreen so the
+ * user sees one row per event instead of a comma-separated names list.
+ *
+ * - `pending`     — agent has not yet begun wiring this event.
+ * - `in_progress` — agent is actively writing track() for this event.
+ * - `done`        — a track() call for this event name has been observed
+ *                   in a successful Write/Edit/MultiEdit (or the wire
+ *                   step has completed, which marks any remaining
+ *                   pending events done by inference).
+ * - `failed`      — reserved for future use; the wire step doesn't
+ *                   currently surface per-event failures (the canonical
+ *                   step's overall status carries that signal).
+ */
+export type PlannedEventStatus = 'pending' | 'in_progress' | 'done' | 'failed';
+
 export interface PlannedEvent {
   name: string;
   description: string;
+  /**
+   * Wiring status. Optional so callers that build a plan from raw
+   * agent output (no status known yet) can keep their existing shape;
+   * the renderer treats `undefined` as `'pending'`.
+   */
+  status?: PlannedEventStatus;
 }
 
 /**
@@ -2189,8 +2212,88 @@ export class WizardStore {
   }
 
   setEventPlan(events: PlannedEvent[]): void {
-    this.$eventPlan.set(events);
+    // Default every entry to `pending` so the per-event status list in
+    // RunScreen renders the canonical "○ pending" glyph from the moment
+    // the plan lands. Callers may pass an explicit status (e.g. when
+    // restoring from checkpoint) and we preserve it.
+    const normalised = events.map((e) =>
+      e.status ? e : { ...e, status: 'pending' as PlannedEventStatus },
+    );
+    this.$eventPlan.set(normalised);
     this.emitChange();
+  }
+
+  /**
+   * Update the wiring status of a single planned event. Lookup is
+   * case-insensitive against the event `name` so agent emissions like
+   * `track('user signed up', …)` still match a plan entry named
+   * `User Signed Up`.
+   *
+   * Monotonicity: once an event is `done` it never demotes back to
+   * `in_progress` or `pending`. `failed` overrides any non-`done`
+   * status.
+   *
+   * No-op when the name doesn't match any planned event — callers can
+   * safely fire this from heuristic content scanners without first
+   * checking the plan.
+   */
+  markEventStatus(name: string, status: PlannedEventStatus): void {
+    const target = name.trim().toLowerCase();
+    if (!target) return;
+    const events = this.$eventPlan.get();
+    let changed = false;
+    const updated = events.map((e) => {
+      if (e.name.trim().toLowerCase() !== target) return e;
+      const current = e.status ?? 'pending';
+      if (current === status) return e;
+      // Monotonic guard: never demote a `done` event.
+      if (current === 'done' && status !== 'failed') return e;
+      changed = true;
+      return { ...e, status };
+    });
+    if (!changed) return;
+    this.$eventPlan.set(updated);
+    this.emitChange();
+  }
+
+  /**
+   * Scan a written / edited file's content for `track('Event Name', …)`
+   * (or `"Event Name"`) calls and mark every matching planned event as
+   * `done`. Called from the inner-agent's PostToolUse hook with the
+   * Write/Edit content, so the per-event status list in RunScreen
+   * advances row-by-row as the agent commits each track() call.
+   *
+   * Match rules:
+   *   - The token before the parenthesis must end in `track` (so
+   *     `amplitude.track`, `analytics.track`, `track`, etc. all match)
+   *     and be followed by a string literal whose contents equal one
+   *     of the planned event names (case-insensitive, whitespace
+   *     trimmed).
+   *   - Both single and double quotes match. Backticks (template
+   *     literals) match only when there's no `${…}` interpolation in
+   *     the captured string.
+   *
+   * No-op when the event plan is empty or the content has no track
+   * calls — callers don't need to pre-check.
+   */
+  noteWrittenContent(content: string): void {
+    if (!content) return;
+    const events = this.$eventPlan.get();
+    if (events.length === 0) return;
+    // One regex pass; `track` must be a word-suffix so `untracked`
+    // doesn't match. Captures the quote style + the literal name.
+    const pattern = /\btrack\s*\(\s*(['"`])([^'"`$\n]+?)\1/g;
+    const found = new Set<string>();
+    for (const m of content.matchAll(pattern)) {
+      const name = m[2]?.trim().toLowerCase();
+      if (name) found.add(name);
+    }
+    if (found.size === 0) return;
+    for (const event of events) {
+      if (found.has(event.name.trim().toLowerCase())) {
+        this.markEventStatus(event.name, 'done');
+      }
+    }
   }
 
   /**
@@ -2349,6 +2452,30 @@ export class WizardStore {
     if (current === 'completed' && status !== 'completed') return;
     if (current === status) return;
     this.$derivedJourney.set({ ...prev, [stepId]: status });
+
+    // Cascade to per-event statuses on the wire step. The content-scan
+    // path (`noteWrittenContent`) catches events as the agent writes
+    // their track() calls, but a few cases still leave events stuck on
+    // pending — single-line MultiEdits with the name in `old_string`,
+    // edits the user accepted but the hook missed, or the agent
+    // wrapping the wire phase early. When the canonical wire step
+    // flips to `completed`, treat any still-pending events as done by
+    // inference so the UI doesn't lie ("3 / 8 done" while the wizard
+    // moves on to the next screen). Failed events are preserved.
+    if (stepId === 'wire' && status === 'completed') {
+      const events = this.$eventPlan.get();
+      if (events.length > 0) {
+        let changed = false;
+        const updated = events.map((e) => {
+          const cur = e.status ?? 'pending';
+          if (cur === 'done' || cur === 'failed') return e;
+          changed = true;
+          return { ...e, status: 'done' as PlannedEventStatus };
+        });
+        if (changed) this.$eventPlan.set(updated);
+      }
+    }
+
     this.renderJourneyTasks();
     this.emitChange();
   }

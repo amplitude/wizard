@@ -18,7 +18,7 @@ import { useWizardStore } from '../hooks/useWizardStore.js';
 import { useScreenHints } from '../hooks/useScreenHints.js';
 import { useTimedCoaching } from '../hooks/useTimedCoaching.js';
 import type { KeyHint } from '../components/KeyHintBar.js';
-import type { WizardStore } from '../store.js';
+import type { WizardStore, PlannedEventStatus } from '../store.js';
 import {
   TabContainer,
   ProgressList,
@@ -139,24 +139,117 @@ export function resolveRunScreenStatus(store: WizardStore): string | undefined {
   return resolveRunStatusPill(store);
 }
 
-/** Compact inline display of planned event names. */
-const InlineEventPlan = ({ store }: { store: WizardStore }) => {
+/**
+ * Wide-terminal threshold below which we collapse the per-event status
+ * list to a single comma-separated line (the legacy compact form). On
+ * very narrow terminals the vertical list eats too many rows and pushes
+ * the bottom status pill off-screen; the compact form sacrifices
+ * per-event status for layout integrity.
+ */
+const MIN_COLS_FOR_EVENT_LIST = 60;
+
+/**
+ * Choose the glyph and color for a single planned event row based on
+ * its wiring status. Glyph palette matches ProgressList /
+ * JourneyStepper (`○ pending → › active → ✓ done / ✗ failed`) so the
+ * whole RunScreen reads as one consistent visual language.
+ */
+function eventStatusVisual(status: PlannedEventStatus): {
+  glyph: string;
+  color: string;
+} {
+  switch (status) {
+    case 'done':
+      return { glyph: Icons.checkmark, color: Colors.success };
+    case 'in_progress':
+      return { glyph: Icons.chevronRight, color: Colors.active };
+    case 'failed':
+      return { glyph: Icons.cross, color: Colors.error };
+    case 'pending':
+    default:
+      return { glyph: Icons.bulletOpen, color: Colors.muted };
+  }
+}
+
+/**
+ * Per-event status list rendered during the Wiring step.
+ *
+ * Shows one row per planned event with a status glyph (`○ ›  ✓ ✗`) and
+ * a `(N done · M to go)` counter above the list, mirroring the task
+ * counter on the Tasks header. Replaces the previous comma-separated
+ * `Events: foo, bar, baz, …` line which truncated to one row on every
+ * realistic terminal width — users couldn't see all events being
+ * implemented, which was in progress, or which were done.
+ *
+ * Falls back to the legacy compact form on terminals narrower than
+ * MIN_COLS_FOR_EVENT_LIST cols so the bottom status pill stays
+ * on-screen.
+ */
+const InlineEventPlan = ({
+  store,
+  cols,
+}: {
+  store: WizardStore;
+  cols: number;
+}) => {
   const events = store.eventPlan.filter((e) => e.name);
   if (events.length === 0) return null;
 
-  // Tight stacking — the bold "Events:" prefix is the visual separator.
-  // `wrap="truncate-end"` keeps the row on a single line on narrow
-  // terminals (the Events list can run long once the agent fills it
-  // in); otherwise it would wrap and visually compete with the panels
-  // below it for vertical real estate.
+  // Narrow-terminal fallback: keep the legacy single-line compact form
+  // so the rest of the layout (file-writes panel, status pill) stays
+  // on-screen.
+  if (cols < MIN_COLS_FOR_EVENT_LIST) {
+    return (
+      <Box flexDirection="column">
+        <Text color={Colors.secondary} wrap="truncate-end">
+          <Text bold color={Colors.accent}>
+            {Icons.diamond} Events:
+          </Text>{' '}
+          {events.map((e) => e.name).join(', ')}
+        </Text>
+      </Box>
+    );
+  }
+
+  // Default: per-event status list with a `(N done · M to go)` header
+  // counter that mirrors the task header.
+  const done = events.filter((e) => (e.status ?? 'pending') === 'done').length;
+  const failed = events.filter((e) => e.status === 'failed').length;
+  const remaining = events.length - done - failed;
+
   return (
-    <Box flexDirection="column">
-      <Text color={Colors.secondary} wrap="truncate-end">
+    <Box flexDirection="column" marginTop={1}>
+      <Box>
         <Text bold color={Colors.accent}>
-          {Icons.diamond} Events:
-        </Text>{' '}
-        {events.map((e) => e.name).join(', ')}
-      </Text>
+          {Icons.diamond} Events
+        </Text>
+        <Text color={Colors.muted}>
+          {'  '}
+          {remaining > 0
+            ? `(${done} done · ${remaining} to go${
+                failed > 0 ? ` · ${failed} failed` : ''
+              })`
+            : failed > 0
+            ? `(${done} done · ${failed} failed)`
+            : `(${done} done)`}
+        </Text>
+      </Box>
+      {events.map((event) => {
+        const status = event.status ?? 'pending';
+        const { glyph, color } = eventStatusVisual(status);
+        const dim = status === 'pending';
+        return (
+          <Text key={event.name} color={color} dimColor={dim}>
+            {glyph}{' '}
+            <Text
+              color={status === 'done' ? Colors.body : color}
+              dimColor={dim}
+            >
+              {event.name}
+            </Text>
+          </Text>
+        );
+      })}
     </Box>
   );
 };
@@ -516,8 +609,9 @@ const ProgressTab = ({ store }: { store: WizardStore }) => {
             queue, so it's a no-op during the agent run itself. */}
         <FinalizingPanel steps={store.session.postAgentSteps} />
 
-        {/* Inline event plan */}
-        <InlineEventPlan store={store} />
+        {/* Per-event wiring status list (vertical, one row per event)
+            with a narrow-terminal fallback to the legacy compact form. */}
+        <InlineEventPlan store={store} cols={cols} />
 
         {/* Compact conditional tips */}
         <ConditionalTips store={store} />

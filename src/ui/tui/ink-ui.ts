@@ -302,6 +302,10 @@ export class InkUI implements WizardUI {
     this.store.recordToolActivity(label);
   }
 
+  noteWrittenContent(content: string): void {
+    this.store.noteWrittenContent(content);
+  }
+
   setEventPlan(events: Array<{ name: string; description: string }>): void {
     this.store.setEventPlan(events);
   }

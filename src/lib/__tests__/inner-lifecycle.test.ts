@@ -315,3 +315,113 @@ describe('createInnerLifecycleHooks (with AgentUI)', () => {
     });
   });
 });
+
+describe('createInnerLifecycleHooks — noteWrittenContent dispatch', () => {
+  /**
+   * Pin the contract that the PostToolUse hook surfaces the written
+   * content to the UI's optional `noteWrittenContent` method. The TUI's
+   * per-event wiring status list relies on this — every Write/Edit/
+   * MultiEdit content-fragment is scanned for `track('Event Name', …)`
+   * calls and used to advance the planned-event status from `pending`
+   * to `done` row by row.
+   */
+  let captured: string[];
+
+  // Build a minimal UI that records noteWrittenContent calls. We don't
+  // care about the rest of the surface for this test.
+  const makeFakeUI = () => {
+    captured = [];
+    const noteWrittenContent = (content: string): void => {
+      captured.push(content);
+    };
+    // Cast through `unknown` — the test fake only implements the
+    // methods inner-lifecycle actually invokes from postToolUse.
+    return {
+      noteWrittenContent,
+      recordFileChangeApplied: () => {},
+      recordFileChangePlanned: () => {},
+    } as unknown as Parameters<typeof setUI>[0];
+  };
+
+  beforeEach(() => {
+    setUI(makeFakeUI());
+  });
+
+  it('forwards Write `content` to noteWrittenContent', async () => {
+    const lifecycle = createInnerLifecycleHooks({ phase: 'apply' });
+    await lifecycle.hooks().PostToolUse(
+      {
+        tool_name: 'Write',
+        tool_input: {
+          file_path: 'src/handlers/signup.ts',
+          content: `track('User Signed Up', { method: 'email' });`,
+        },
+      },
+      undefined,
+      { signal: new AbortController().signal },
+    );
+
+    expect(captured).toHaveLength(1);
+    expect(captured[0]).toContain("track('User Signed Up'");
+  });
+
+  it('forwards Edit `new_string` to noteWrittenContent', async () => {
+    const lifecycle = createInnerLifecycleHooks({ phase: 'apply' });
+    await lifecycle.hooks().PostToolUse(
+      {
+        tool_name: 'Edit',
+        tool_input: {
+          file_path: 'src/handlers/signin.ts',
+          old_string: '// TODO: track signin',
+          new_string: `analytics.track('User Signed In', {});`,
+        },
+      },
+      undefined,
+      { signal: new AbortController().signal },
+    );
+
+    expect(captured).toHaveLength(1);
+    expect(captured[0]).toContain("track('User Signed In'");
+  });
+
+  it('forwards MultiEdit edits[].new_string concatenated to noteWrittenContent', async () => {
+    const lifecycle = createInnerLifecycleHooks({ phase: 'apply' });
+    await lifecycle.hooks().PostToolUse(
+      {
+        tool_name: 'MultiEdit',
+        tool_input: {
+          file_path: 'src/handlers/index.ts',
+          edits: [
+            {
+              old_string: 'a',
+              new_string: `track('User Signed Up', {});`,
+            },
+            {
+              old_string: 'b',
+              new_string: `track('User Signed Out', {});`,
+            },
+          ],
+        },
+      },
+      undefined,
+      { signal: new AbortController().signal },
+    );
+
+    expect(captured).toHaveLength(1);
+    expect(captured[0]).toContain("track('User Signed Up'");
+    expect(captured[0]).toContain("track('User Signed Out'");
+  });
+
+  it('does not call noteWrittenContent when no content fragments are present', async () => {
+    const lifecycle = createInnerLifecycleHooks({ phase: 'apply' });
+    await lifecycle.hooks().PostToolUse(
+      {
+        tool_name: 'Edit',
+        tool_input: { file_path: 'src/foo.ts' },
+      },
+      undefined,
+      { signal: new AbortController().signal },
+    );
+    expect(captured).toHaveLength(0);
+  });
+});

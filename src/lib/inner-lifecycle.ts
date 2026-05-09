@@ -240,6 +240,38 @@ export function createInnerLifecycleHooks(config: InnerLifecycleConfig): {
       } catch {
         // See preToolUse — same defensive swallow.
       }
+      // Surface the written content to the UI for per-event wiring
+      // status. `Write` carries `obj.content`; `Edit` carries
+      // `obj.new_string`; `MultiEdit` carries `obj.edits[].new_string`.
+      // Concatenate whichever is available — TUI scans for `track('…')`
+      // calls and advances the per-event status list as each event's
+      // wiring lands. Non-TUI UIs no-op (`noteWrittenContent` is
+      // optional in the WizardUI contract).
+      try {
+        const fragments: string[] = [];
+        if (typeof obj.content === 'string') fragments.push(obj.content);
+        if (typeof obj.new_string === 'string') fragments.push(obj.new_string);
+        if (Array.isArray(obj.edits)) {
+          for (const edit of obj.edits) {
+            if (
+              edit &&
+              typeof edit === 'object' &&
+              typeof (edit as Record<string, unknown>).new_string === 'string'
+            ) {
+              fragments.push(
+                (edit as Record<string, unknown>).new_string as string,
+              );
+            }
+          }
+        }
+        if (fragments.length > 0) {
+          const merged = fragments.join('\n');
+          getUI().noteWrittenContent?.(merged);
+        }
+      } catch {
+        // Per-event wiring status is purely cosmetic — never break the
+        // agent loop on a parse error.
+      }
       // Finalise the rollback ledger entry with the new on-disk content.
       // For Edit/MultiEdit/NotebookEdit `obj.content` will be null and
       // the ledger re-reads from disk to capture the final form. The

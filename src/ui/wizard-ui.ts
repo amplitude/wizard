@@ -317,6 +317,25 @@ export interface WizardUI {
    */
   recordToolActivity?(label: string): void;
 
+  /**
+   * Optional content-aware sibling of `recordFileChangeApplied`. The
+   * inner agent's PostToolUse hook calls this with whatever content
+   * string it has visibility into for that write — `Write.content`,
+   * `Edit.new_string`, or the concatenation of `MultiEdit.edits[].new_string`.
+   *
+   * The TUI uses this to advance the per-event status list during the
+   * `wire` step: every `track('Event Name', …)` call observed in the
+   * post-write content marks the matching planned event as `done`.
+   * AgentUI / LoggingUI no-op — outer agents and CI logs already have
+   * structured signals (NDJSON `track_call` is not yet emitted; the
+   * TUI list is the only consumer today).
+   *
+   * Optional and defensive — callers don't need to check for the
+   * method's presence; this interface flags it as `?` so non-TUI
+   * UIs don't have to provide it.
+   */
+  noteWrittenContent?(content: string): void;
+
   // ── Event plan from .amplitude-events.json ────────────────────
   setEventPlan(events: Array<{ name: string; description: string }>): void;
 
