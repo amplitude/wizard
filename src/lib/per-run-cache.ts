@@ -101,7 +101,12 @@ export function _resetPerRunCache(): void {
 // the same PR get a single execution, while a different PR / args path
 // runs as expected.
 
-import { spawn } from 'node:child_process';
+// Use the cross-platform spawn so a Scoop / Chocolatey `gh.cmd` shim
+// resolves on Windows. Node's built-in `spawn` doesn't consult PATHEXT,
+// so calling `spawn('gh', …)` against a `.cmd`-shimmed install would
+// fail with ENOENT even though `gh` is on PATH. Drop-in replacement
+// for `child_process.spawn`.
+import { spawn } from '../utils/cross-platform-spawn';
 
 interface GhResult {
   exitCode: number;
