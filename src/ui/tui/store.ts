@@ -598,7 +598,12 @@ export class WizardStore {
     // file while logs accumulate in a sibling directory the user can't
     // see. `setProjectLogFile` is idempotent and a no-op when the path
     // hasn't changed (e.g. picker selecting the same dir).
-    setProjectLogFile(newInstallDir);
+    try {
+      setProjectLogFile(newInstallDir);
+    } catch {
+      // Non-critical: a logging-path failure (permission denied, read-only
+      // FS, etc.) must not prevent the primary directory-switch operation.
+    }
 
     this.$session.setKey('installDir', newInstallDir);
     this.$session.setKey('frameworkConfig', null);
@@ -696,9 +701,8 @@ export class WizardStore {
     const typedZone = region as 'us' | 'eu';
     void (async () => {
       try {
-        const { readAmpliConfig, writeAmpliConfig } = await import(
-          '../../lib/ampli-config.js'
-        );
+        const { readAmpliConfig, writeAmpliConfig } =
+          await import('../../lib/ampli-config.js');
         const prior = readAmpliConfig(session.installDir);
         if (!prior.ok) return; // no existing binding — nothing to update
         const next = { ...prior.config, Zone: typedZone };
