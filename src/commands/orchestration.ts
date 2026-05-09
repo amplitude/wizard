@@ -35,31 +35,11 @@ import {
 
 // ── Shared option / output helpers ────────────────────────────────────
 
-interface CommonOpts {
-  installDir: string;
-  jsonOutput: boolean;
-}
-
-async function resolveCommonOpts(argv: {
-  installDir?: string;
-  json?: boolean;
-  human?: boolean;
-}): Promise<CommonOpts> {
-  // Run user-provided `--install-dir` through `resolveInstallDir` so a
-  // quoted / env-sourced `~` actually expands to the home directory —
-  // otherwise the orchestration store is looked up under
-  // `<cwd>/~/myapp` instead of `<home>/myapp`. Mirrors the behavior in
-  // `commands/dashboard.ts` and `lib/wizard-session.ts`.
-  const { resolveInstallDir } = await import('../utils/install-dir.js');
-  const installDir = resolveInstallDir(argv.installDir);
-  const { resolveMode } = await import('../lib/mode-config.js');
-  const { jsonOutput } = resolveMode({
-    json: argv.json,
-    human: argv.human,
-    isTTY: Boolean(process.stdout.isTTY),
-  });
-  return { installDir, jsonOutput };
-}
+import {
+  resolveCommonOpts,
+  emitJson,
+  emitJsonError,
+} from './orchestration-common';
 
 function formatTimestamp(ms: number | null | undefined): string {
   if (ms === null || ms === undefined) return chalk.dim('—');
@@ -91,19 +71,6 @@ function lifecycleColor(state: TaskLifecycle): string {
     default:
       return state;
   }
-}
-
-function emitJson(payload: unknown): void {
-  process.stdout.write(JSON.stringify(payload) + '\n');
-}
-
-function emitJsonError(message: string): void {
-  emitJson({
-    v: 1,
-    type: 'error',
-    '@timestamp': new Date().toISOString(),
-    message,
-  });
 }
 
 // ── wizard tasks ──────────────────────────────────────────────────────

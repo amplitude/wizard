@@ -339,8 +339,19 @@ export function computeLastStoppingPoint(
   // — outer agents that already coded against the stub array shape see
   // the same fields populated from real data. PR 3's TUI will read the
   // typed records directly via the new store APIs.
+  //
+  // When `sessionId` is provided, restrict pending checkpoints to those
+  // linked to the requested session — mirrors the `scopedTasks` filter
+  // above so `wizard resume <session-id>` can't surface a choice or
+  // verification belonging to a different (more recently active) session.
+  // Choices use `linkedSessionId`, MCP capabilities use `linkedSessionId`,
+  // and verifications use `blockingSessionId`.
   const pendingChoices: PendingCheckpoint[] = file.choices
     .filter((c: Choice) => c.status === ChoiceStatus.Pending)
+    .filter(
+      (c: Choice) =>
+        !options?.sessionId || c.linkedSessionId === options.sessionId,
+    )
     .map(choiceToCheckpoint);
   const pendingMcpActions: PendingCheckpoint[] = file.mcpCapabilities
     .filter(
@@ -349,12 +360,20 @@ export function computeLastStoppingPoint(
         c.state === McpAppCapabilityState.NeedsAuth ||
         c.state === McpAppCapabilityState.NeedsInstall,
     )
+    .filter(
+      (c: McpAppCapability) =>
+        !options?.sessionId || c.linkedSessionId === options.sessionId,
+    )
     .map(mcpCapabilityToCheckpoint);
   const pendingManualVerifications: PendingCheckpoint[] = file.verifications
     .filter(
       (v: Verification) =>
         v.status === VerificationStatus.Pending ||
         v.status === VerificationStatus.Failed,
+    )
+    .filter(
+      (v: Verification) =>
+        !options?.sessionId || v.blockingSessionId === options.sessionId,
     )
     .map(verificationToCheckpoint);
 

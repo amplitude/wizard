@@ -25,40 +25,11 @@ import chalk from 'chalk';
 
 import { ExitCode, getUI } from './helpers';
 import { ExtendedExitCode } from './orchestration-exit-codes';
-
-interface CommonOpts {
-  installDir: string;
-  jsonOutput: boolean;
-}
-
-async function resolveCommonOpts(argv: {
-  installDir?: string;
-  json?: boolean;
-  human?: boolean;
-}): Promise<CommonOpts> {
-  const installDir = argv.installDir ?? process.cwd();
-  const { resolveMode } = await import('../lib/mode-config.js');
-  const { jsonOutput } = resolveMode({
-    json: argv.json,
-    human: argv.human,
-    isTTY: Boolean(process.stdout.isTTY),
-  });
-  return { installDir, jsonOutput };
-}
-
-function emitJson(payload: unknown): void {
-  process.stdout.write(JSON.stringify(payload) + '\n');
-}
-
-function emitJsonError(message: string, code?: string): void {
-  emitJson({
-    v: 1,
-    type: 'error',
-    '@timestamp': new Date().toISOString(),
-    code,
-    message,
-  });
-}
+import {
+  resolveCommonOpts,
+  emitJson,
+  emitJsonError,
+} from './orchestration-common';
 
 // ── wizard choice list ────────────────────────────────────────────────
 
