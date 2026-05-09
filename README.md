@@ -354,7 +354,7 @@ Available at any point during the wizard:
 | `/create-project` | Create a new Amplitude project inline |
 | `/mcp` | Install or remove the Amplitude MCP server in your editor |
 | `/slack` | Set up the Amplitude Slack integration |
-| `/status` | Show orchestration status: pending choices, verifications, MCP capabilities, next action |
+| `/status` | Show orchestration status: pending choices, verifications, MCP capabilities, next action. Auto-refreshes when the store changes from a sibling shell (PR 4). |
 | `/feedback` | Send product feedback (with optional consent-gated diagnostics) |
 | `/clear` | Clear the Q&A conversation history |
 | `/debug` | Print a diagnostic snapshot (safe to share) |

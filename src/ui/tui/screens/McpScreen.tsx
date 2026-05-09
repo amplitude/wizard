@@ -25,6 +25,10 @@ import { analytics, captureWizardError } from '../../../utils/analytics.js';
 import { wizardSuccessExit } from '../../../utils/wizard-abort.js';
 import { resolveZone } from '../../../lib/zone-resolution.js';
 import { DEFAULT_AMPLITUDE_ZONE } from '../../../lib/constants.js';
+import {
+  recordMcpInstallChoice,
+  answerChoiceByPromptId,
+} from '../../../lib/orchestration/wiring.js';
 
 export type McpMode = 'install' | 'remove';
 
@@ -128,6 +132,18 @@ export const McpScreen = ({
           });
           setClients(detected);
           setPhase(Phase.Ask);
+          // PR 4 wiring: record a per-client Choice so outer agents
+          // see "user is being asked to install MCP for <client>".
+          // The answer is recorded in handleConfirm / handleSkip below.
+          if (mode === 'install') {
+            for (const c of detected) {
+              recordMcpInstallChoice({
+                installDir: store.session.installDir,
+                client: c.name,
+                detectedCount: detected.length,
+              });
+            }
+          }
         }
       } catch {
         if (unmountedRef.current) return;
@@ -164,6 +180,20 @@ export const McpScreen = ({
 
   const handleSkip = () => {
     analytics.wizardCapture('MCP Skipped', { mode });
+    // PR 4 wiring: answer every pending mcp_install Choice for this
+    // session as `skip` so subsequent runs / `/status` see the
+    // decision durably. Best-effort.
+    if (mode === 'install') {
+      for (const c of clients) {
+        const promptId = `mcp_install:${c.name.toLowerCase().replace(/\s+/g, '_')}`;
+        answerChoiceByPromptId(
+          store.session.installDir,
+          promptId,
+          'skip',
+          'human',
+        );
+      }
+    }
     markDone(store, McpOutcome.Skipped, [], standalone, onComplete);
   };
 
@@ -214,6 +244,17 @@ export const McpScreen = ({
     setPhase(Phase.Done);
     const outcome =
       result.length > 0 ? McpOutcome.Installed : McpOutcome.Failed;
+    // PR 4 wiring: answer each per-client mcp_install Choice with the
+    // installed/skipped outcome so `/status` reflects the decision.
+    for (const name of names) {
+      const promptId = `mcp_install:${name.toLowerCase().replace(/\s+/g, '_')}`;
+      answerChoiceByPromptId(
+        store.session.installDir,
+        promptId,
+        result.includes(name) ? 'install' : 'skip',
+        'human',
+      );
+    }
     timerRef.current = setTimeout(
       () => markDone(store, outcome, result, standalone, onComplete),
       2000,

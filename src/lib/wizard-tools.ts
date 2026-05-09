@@ -1983,6 +1983,38 @@ Returns: "approved", "skipped", or "feedback: <user message>"`,
       let text: string;
       if (decision.decision === 'revised') {
         text = `feedback: ${decision.feedback}`;
+        // PR 4 wiring: record an `event_plan_revision` Choice when the
+        // user rejects the plan with feedback. The agent will revise
+        // and re-prompt; the Choice marks the rejection as "answered:
+        // revise" so outer agents see the lifecycle. Failures here
+        // MUST NOT break the existing flow.
+        try {
+          const { recordEventPlanRevisionChoice, answerChoice } = await import(
+            './orchestration/wiring.js'
+          );
+          // Stable hash of the rejected plan: SHA-256 of the joined
+          // event names + descriptions, truncated. Keeps the promptId
+          // deterministic across retries with the same plan.
+          const { createHash } = await import('node:crypto');
+          const hash = createHash('sha256')
+            .update(events.map((e) => `${e.name}|${e.description}`).join('\n'))
+            .digest('hex')
+            .slice(0, 16);
+          const choiceId = recordEventPlanRevisionChoice({
+            installDir: workingDirectory,
+            rejectedPlanHash: hash,
+            feedback: decision.feedback,
+          });
+          if (choiceId) {
+            answerChoice(workingDirectory, choiceId, 'revise', 'human');
+          }
+        } catch (err) {
+          logToFile(
+            `[orchestration] event_plan_revision mirror failed: ${
+              err instanceof Error ? err.message : String(err)
+            }`,
+          );
+        }
       } else {
         text = decision.decision; // 'approved' or 'skipped'
       }

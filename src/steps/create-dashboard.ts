@@ -221,6 +221,32 @@ export async function createDashboardStep(
     // OutroScreen, `/diagnostics`, and repeat runs see the URL. Best-effort.
     persistDashboard(session.installDir, result);
 
+    // PR 4 wiring: record a `dashboard_setup` Choice as answered=create
+    // and add a `dashboard_correctness` Verification. Best-effort.
+    try {
+      const {
+        recordDashboardSetupChoice,
+        answerChoiceByPromptId,
+        recordDashboardCorrectnessVerification,
+      } = await import('../lib/orchestration/wiring.js');
+      recordDashboardSetupChoice({
+        installDir: session.installDir,
+        trigger: 'auto',
+      });
+      answerChoiceByPromptId(
+        session.installDir,
+        'dashboard_setup:auto',
+        'create',
+        'automation',
+      );
+      recordDashboardCorrectnessVerification({
+        installDir: session.installDir,
+        dashboardUrl: result.dashboardUrl,
+      });
+    } catch {
+      // Non-fatal.
+    }
+
     session.checklistDashboardUrl = result.dashboardUrl;
     ui.setDashboardUrl(result.dashboardUrl);
     spinner.stop('Dashboard ready');

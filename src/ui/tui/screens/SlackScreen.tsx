@@ -26,6 +26,10 @@ import { useResolvedZone } from '../hooks/useResolvedZone.js';
 import { logToFile } from '../../../utils/debug.js';
 import { wizardSuccessExit } from '../../../utils/wizard-abort.js';
 import opn from 'opn';
+import {
+  recordSlackSetupChoice,
+  answerChoiceByPromptId,
+} from '../../../lib/orchestration/wiring.js';
 
 interface SlackScreenProps {
   store: WizardStore;
@@ -150,8 +154,24 @@ export const SlackScreen = ({
 
   const [openedUrl, setOpenedUrl] = useState(settingsUrl);
 
+  // PR 4 wiring: record an `slack_setup` Choice on first render so
+  // outer agents see the prompt as it surfaces. Best-effort; the Choice
+  // is keyed on region so re-runs see the same record.
+  useEffect(() => {
+    recordSlackSetupChoice({
+      installDir: store.session.installDir,
+      region,
+    });
+  }, [region]);
+
   const handleConnect = () => {
     setPhase(Phase.Opening);
+    answerChoiceByPromptId(
+      store.session.installDir,
+      `slack_setup:${region}`,
+      'connect',
+      'human',
+    );
 
     const credentials = store.session.credentials;
     const orgId = store.session.selectedOrgId;
@@ -181,6 +201,12 @@ export const SlackScreen = ({
   };
 
   const handleSkip = () => {
+    answerChoiceByPromptId(
+      store.session.installDir,
+      `slack_setup:${region}`,
+      'skip',
+      'human',
+    );
     markDone(store, SlackOutcome.Skipped, standalone, onComplete);
   };
 

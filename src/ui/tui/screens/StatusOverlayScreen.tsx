@@ -31,6 +31,7 @@ import { useMemo } from 'react';
 import type { WizardStore } from '../store.js';
 import { useWizardStore } from '../hooks/useWizardStore.js';
 import { useScreenInput } from '../hooks/useScreenInput.js';
+import { useOrchestrationStore } from '../hooks/useOrchestrationStore.js';
 import { Colors, Icons } from '../styles.js';
 import {
   buildStatusEnvelope,
@@ -85,6 +86,13 @@ export const StatusOverlayScreen = ({ store }: StatusOverlayScreenProps) => {
 
   const installDir = store.session.installDir;
 
+  // PR 4: live-refresh on orchestration store mutations. The hook
+  // subscribes to the file-watch wrapper and returns a version number
+  // that changes on every (debounced) write. Feeding this into the
+  // useMemo deps forces a recompute when a sibling shell calls
+  // `wizard choice answer` etc.
+  const orchVersion = useOrchestrationStore(installDir);
+
   // One snapshot per render, shared across every section.
   const data = useMemo(
     () =>
@@ -112,8 +120,10 @@ export const StatusOverlayScreen = ({ store }: StatusOverlayScreenProps) => {
         };
       }),
     // Recompute whenever a re-render is forced — the underlying file
-    // could have changed since the prior render.
-    [installDir, store.getVersion()],
+    // could have changed since the prior render. `orchVersion` flips
+    // when the watcher fires; `store.getVersion()` flips when the
+    // wizard's in-memory state changes.
+    [installDir, store.getVersion(), orchVersion],
   );
 
   const lsp = data.status.lastStoppingPoint;

@@ -719,3 +719,228 @@ PR 2 anti-nag invariant.
 - Bundling for cold-start. Node + import overhead is unchanged; future PR
   switches the CLI to an esbuild-bundled binary so cold-start drops below
   the brief's 200 ms target.
+
+## PR 4 — beachhead widening + retire-redundancy + supervisor + live `/status`
+
+PR 4 takes the foundation laid in PRs 1–3 and:
+
+1. Widens the user-choice / manual-verification wiring beyond the two
+   PR 2 beachheads + the AUTH_ERROR mirror in PR 3 to every major
+   prompt surface in the wizard.
+2. Documents (and where applicable narrows) the boundary between
+   `WizardSession` (transient TUI display state) and
+   `OrchestrationStore` (durable orchestration state). PR 4 does NOT
+   delete `WizardSession` — that's PR 5's screen-tree redesign; PR 4
+   adds the docblock and the layout map below.
+3. Adds **process supervision** for orchestrated subagents — a
+   `Supervisor` that tracks PIDs, writes heartbeats, SIGTERMs on exit,
+   and reaps stale `Subagent` rows on startup.
+4. Adds a **live-refresh** path for the `/status` TUI overlay: the
+   overlay re-renders within ~200 ms whenever a sibling shell mutates
+   the orchestration store via `wizard choice answer`,
+   `wizard verification mark`, etc.
+
+### A. Beachhead widening — wired callsites
+
+Every newly wired callsite is **additive**. The existing TUI screen,
+agent prompt, or CLI command continues to drive the user-facing flow;
+the orchestration store mirror is a parallel signal so outer agents
+inspecting `wizard status --json` see typed records. Mirror failures
+NEVER break the user-facing flow (they log and swallow).
+
+| Callsite | Surface | Helper | Choice / Verification |
+|----------|---------|--------|-----------------------|
+| `commands/helpers.ts` (env-selection in agent mode) | Choice | `addChoice` directly (PR 2) | `environment_selection` |
+| `lib/wizard-tools.ts:confirm_event_plan` (approve) | Verification | `addVerification` directly (PR 2) | `events_arriving_in_amplitude` |
+| `lib/wizard-tools.ts:confirm_event_plan` (revised feedback) | Choice | `recordEventPlanRevisionChoice` | `event_plan_revision` |
+| `lib/agent-runner.ts` (AUTH_ERROR — keep/revert) | Choice + Verification | `addChoice` directly (PR 3) | `keep_or_revert_files` + `manual_pr_test` |
+| `ui/tui/screens/McpScreen.tsx` (per-client install ask) | Choice | `recordMcpInstallChoice` | `mcp_install` |
+| `ui/tui/screens/SlackScreen.tsx` (connect Slack) | Choice | `recordSlackSetupChoice` | `slack_setup` |
+| `ui/tui/store.ts:setRegion` | Choice | `recordRegionSelectionChoice` | `environment_selection` (region variant) |
+| `ui/tui/store.ts:setLoginUrl` | Verification | `recordOauthBrowserLoginVerification` | `oauth_browser_login` |
+| `ui/tui/store.ts:setCredentials` | Verification (mark passed) | `markVerificationStatus` | `oauth_browser_login` → passed |
+| `ui/tui/store.ts:setDataIngestionConfirmed` | Verification (mark passed) | `markVerificationStatus` | `events_arriving_in_amplitude` → passed |
+| `ui/tui/store.ts:setChecklistDashboardUrl` | Verification | `recordDashboardCorrectnessVerification` | `dashboard_correctness` |
+| `ui/tui/store.ts:startCreateProject` / `cancelCreateProject` / `completeCreateProject` | Choice | `recordProjectCreationChoice` + `answerChoiceByPromptId` | `other` (project creation) |
+| `ui/tui/screens/LogoutScreen.tsx` | Choice | `recordAuthRetryChoice` (`logout`) + `answerChoiceByPromptId` | `auth_retry` |
+| `steps/create-dashboard.ts` (post-agent) | Choice + Verification | `recordDashboardSetupChoice` + `recordDashboardCorrectnessVerification` | `dashboard_setup` + `dashboard_correctness` |
+
+**Intentionally skipped surfaces** (and why):
+
+| Surface | Why skipped |
+|---------|------------|
+| `LoginScreen` (silent token refresh overlay) | Pure refresh — no user prompt; nothing to record. The visible login URL flow is wired via `setLoginUrl`. |
+| `IntroScreen` continue button | Trivial "ack" — no decision to record; recording would just create permanent noise. |
+| `--confirm-app` flag in `commands/helpers.ts` | Already routed through the agent-mode env-selection path; an additional `recordAppConfirmationChoice` helper exists in `wiring.ts` for future use but is not yet wired (would duplicate the env-selection record). |
+| `RegionSelectScreen` direct interaction | Recording happens in `setRegion` (the screen's `onSelect`) — choosing the screen UI and the slash command path both flow through the same setter. |
+| `frameworkContext` setup answers | These are auto-detection / disambiguation answers, not user-facing decisions in the orchestration sense. |
+
+The helpers live in `src/lib/orchestration/wiring.ts` and are re-exported
+from `src/lib/orchestration/index.ts`. Tests in
+`src/lib/orchestration/__tests__/wiring.test.ts`.
+
+#### Anti-nag invariant (carried forward)
+
+`recordMcpInstallChoice` and friends call `findPendingChoice(promptId)`
+under the hood. Re-entering the same prompt in the same session (e.g.
+McpScreen re-mount, or a second `/mcp` slash run) returns the existing
+pending Choice without creating a duplicate. Once answered, a fresh
+`record*` is allowed — but only one Choice can ever be `pending` per
+`promptId` at a time.
+
+### B. WizardSession audit
+
+PR 4 documents — but does not delete — the `WizardSession`
+(`src/lib/wizard-session.ts`) shape. The new docblock at the top of
+that file makes the boundary explicit:
+
+> `WizardSession` = transient TUI display state.
+> `OrchestrationStore` = durable orchestration state.
+> Never duplicate fields between them.
+
+Audit table — every field in `WizardSession` checked against the
+durable store:
+
+| Category | Fields | Action |
+|----------|--------|--------|
+| CLI args / env-derived | `debug`, `verbose`, `ci`, `agent`, `mode`, `forceInstall`, `installDir`, `apiKey`, `localMcp`, `menu`, `benchmark`, `orchestratorContext`, `agentSessionId` | **Keep** — runtime config, rebuilt every launch. |
+| Auth in-flight | `pendingOrgs`, `pendingAuthIdToken`, `pendingAuthAccessToken`, `loginUrl`, `authPhase`, `signupAuth`, `signupTokensObtained`, `signupRequiredFields`, `signupAbandoned`, `signupInFlight`, `signupMagicLinkUrl` | **Keep** — held in memory by design (tokens never serialise to disk). |
+| Credentials | `credentials`, `userEmail` | **Keep** — durable copy lives in `~/.amplitude/wizard/oauth-session.json` + `credentials.json`; in-memory mirror is the live access path. |
+| Framework detection | `integration`, `frameworkContext`, `frameworkContextAnswerOrder`, `typescript`, `detectedFrameworkLabel`, `detectionComplete`, `detectionResults`, `frameworkConfig` | **Keep** — display state; the orchestration store carries `subagent.kind` for the detection task but doesn't need the full result. |
+| Region / project | `region`, `regionForced`, `selectedOrgId/Name`, `selectedProjectId/Name`, `selectedEnvName`, `selectedAppId`, `appId`, `apiKeyNotice`, `requiresAccountConfirmation`, `scopeFilterMismatch` | **Keep** — durable mirror is in `project-binding.json`; the in-memory copy is the canonical session-scope view. |
+| Lifecycle / phase | `runPhase`, `runStartedAt`, `retryState`, `currentActivity`, `discoveryFacts`, `outroData`, `serviceStatus`, `loggingOut`, `_restoredFromCheckpoint` | **Keep** — pure UX surface, intentionally not durable. |
+| Per-screen completion flags | `setupConfirmed`, `mcpComplete`, `mcpOutcome`, `mcpInstalledClients`, `slackComplete`, `slackOutcome`, `dataIngestionConfirmed`, `localInstrumentationComplete`, `activationOptionsComplete`, `activationLevel`, `projectHasData`, `snippetConfigured`, `introConcluded`, `optInFeaturesComplete`, `amplitudePreDetected`, `amplitudePreDetectedChoicePending`, `tosAccepted` | **Keep** — flow predicates; PR 5's screen-tree redesign will collapse many of these into a smaller number of router-driven flags. |
+| Feature opt-ins | `discoveredFeatures`, `llmOptIn`, `sessionReplayOptIn`, `engagementOptIn`, `additionalFeatureQueue`, `additionalFeatureCurrent`, `additionalFeatureCompleted` | **Keep** — owned by the agent's stop hook; durable analogue would over-couple the agent run with the store. |
+| Post-agent steps + dashboard | `postAgentSteps`, `checklistDashboardUrl`, `dashboardFallbackPhase` | **Keep** — display state; URL is also persisted in `<installDir>/.amplitude/dashboard.json` for return runs. PR 4 wires a `dashboard_correctness` Verification on top. |
+| Project creation | `createProject` (object) | **Keep** — TUI creation flow state; PR 4 mirrors via `recordProjectCreationChoice`. |
+
+**Net result:** zero fields removed in PR 4. The redundant *concept* —
+"the wizard duplicating Subagent / Task / Ownership state in memory"
+— never landed in `WizardSession` to begin with; PR 1 was careful to
+introduce sessions/tasks/subagents only on the orchestration store.
+PR 4's job here was to (a) write the docblock so PR 5's redesign has
+a clear contract, and (b) verify by audit that no field was silently
+double-bookkept.
+
+### C. Background-agent supervision
+
+`src/lib/orchestration/supervisor.ts` adds a `Supervisor` class with:
+
+```
+                           ┌──────────────────────┐
+                           │     Supervisor       │
+              register     │  (per install dir)   │
+   subprocess ────────────►│  tracked: PID -> {   │
+   PID + subagentId        │    subagentId,       │
+                           │    rootTaskId, …     │
+                           │  }                   │
+                           └──────────┬───────────┘
+                                      │ every 5s
+                                      ▼
+                  heartbeat file: <runDir>/heartbeats/<pid>.txt
+                                      │
+                                      ▼
+              ┌──────────────────────────────────────────────┐
+              │  reapStaleHeartbeats() — every 5s + on init  │
+              │   • mtime > 30s + isAlive(pid) === false     │
+              │     → mark task `cancelled`,                 │
+              │       reason: 'heartbeat stale'              │
+              └──────────────────────────────────────────────┘
+
+           SIGINT / SIGTERM        ┌────────────────────────┐
+   ────────────────────────────►   │  terminateAll()        │
+                                   │   • SIGTERM each PID   │
+                                   │   • mark tasks         │
+                                   │     cancelled NOW      │
+                                   │   • after 5s grace,    │
+                                   │     SIGKILL stragglers │
+                                   └────────────────────────┘
+
+      wizard startup
+   ──────────────────►   recoverOrphanedSubagents()
+                          • for every Subagent with finishedAt = null
+                            AND root task still active
+                            AND last update > staleThresholdMs
+                          → mark task `failed`,
+                            reason: 'process gone'
+```
+
+**Why the indirection through `Task.result`?** PR 1's `Subagent`
+shape only carries `finishedAt`; it has no `status` /
+`terminationReason` slot. Adding one would be a schema bump in the
+middle of the v2 PR stack. PR 4 instead records termination state on
+the **root Task** (via `transitionTask` with a structured `result`
+including `data.terminationReason`), and stamps the Subagent's
+`finishedAt`. Outer agents reading `wizard task <id>` see the typed
+reason; `wizard sessions` shows the subagent finished. The PR 5 TUI
+redesign will introduce the explicit `Subagent.status` field if
+needed.
+
+The Supervisor's `process.on('SIGINT'/'SIGTERM')` handlers are
+installed lazily on first `track()` call. They use `process.once` so
+they don't accumulate across runs. The wizard's existing shutdown
+sequence (`wizard-abort.ts`) is not modified — Supervisor just adds
+a parallel best-effort cleanup on top.
+
+Tests live in `src/lib/orchestration/__tests__/supervisor.test.ts`
+(5 tests covering track / terminate / stale-reap / startup-recovery /
+untrack).
+
+### D. Live `/status` auto-refresh
+
+```
+   ┌──────────────────────────────┐    on disk write
+   │  StatusOverlayScreen (TUI)   │◄──────────────────┐
+   │                              │                   │
+   │  useOrchestrationStore(dir)  │     fs.watch(dir) │
+   │            ▲                 │                   │
+   │            │ version++       │                   │
+   │            │ (debounced 200ms) ┌─────────────────┴────────┐
+   │            └─────────────────│ watchOrchestrationStore()  │
+   │                              │ (src/lib/orchestration/    │
+   │   useMemo([…, version])      │    watcher.ts)             │
+   │     ↳ withReadCache fresh    │                            │
+   │                              │ Watches the *parent dir*   │
+   └──────────────────────────────┘ filtered to the store      │
+                                    file — atomicWriteJSON     │
+                                    rename invalidates a       │
+                                    file-only fs.watch.        │
+                                    Polling fallback covers    │
+                                    "dir doesn't exist yet."   │
+                                    └──────────────────────────┘
+```
+
+Files added:
+
+- `src/lib/orchestration/watcher.ts` — the file-watch wrapper.
+- `src/ui/tui/hooks/useOrchestrationStore.ts` — the React hook.
+
+`StatusOverlayScreen` now declares `useOrchestrationStore(installDir)`
+and feeds the returned `version` into the dependency list of the
+`useMemo` that calls `buildStatusEnvelope` + the choice / verification
+/ MCP envelope builders. A flurry of writes within the 200 ms
+debounce window coalesces into a single re-render. Disposal is
+automatic on overlay close.
+
+Multi-process safety: when two wizards run in different install dirs,
+the watcher only sees mutations to its own store file (different
+parent dirs). When two wizards run against the *same* install dir
+(rare, the existing apply-lock discourages this), the watcher just
+sees both writers' changes — the overlay re-renders for each, which
+is the desired behaviour.
+
+Tests live in `src/lib/orchestration/__tests__/watcher.test.ts`
+(5 tests covering happy-path / debounce / dispose / late-mount).
+
+### What's deliberately not in PR 4
+
+- Deleting fields from `WizardSession`. The audit table above shows
+  every field is still in active TUI use; the redundancy this PR
+  retires is conceptual (the "we'll have two sources of truth for
+  Subagents" risk PR 1 carefully avoided), not field-level.
+- TUI screen-tree redesign. Still PR 5.
+- Wiring every single MCP tool / agent prompt. The helpers in
+  `wiring.ts` cover every MAJOR surface; less-trafficked surfaces
+  (e.g. the inner agent's `choose` tool, MCP-app per-tool auth
+  prompts) keep their existing transient-text path.
+- Bundling cold-start. Still a follow-up.

@@ -449,6 +449,33 @@ export class WizardStore {
       'app id': credentials?.appId,
       region: zone,
     });
+    // PR 4 wiring: mark every pending `oauth_browser_login` Verification
+    // as `passed` once credentials land. Best-effort.
+    if (credentials) {
+      void (async () => {
+        try {
+          const { getOrchestrationStore } = await import(
+            '../../lib/orchestration/store.js'
+          );
+          const { VerificationStatus, asVerificationId } = await import(
+            '../../lib/orchestration/checkpoints/verifications.js'
+          );
+          const store = getOrchestrationStore(session.installDir);
+          const pending = store.listVerifications({
+            status: VerificationStatus.Pending,
+            kind: 'oauth_browser_login',
+          });
+          for (const v of pending) {
+            store.markVerificationStatus(
+              asVerificationId(v.id),
+              VerificationStatus.Passed,
+            );
+          }
+        } catch {
+          // Non-fatal.
+        }
+      })();
+    }
     this.emitChange();
   }
 
@@ -668,6 +695,23 @@ export class WizardStore {
     // know we're actually opening a browser.
     if (url) {
       this.$session.setKey('authPhase', AuthPhase.AwaitingCallback);
+      // PR 4 wiring: record an `oauth_browser_login` Verification so
+      // outer agents see "user is being asked to complete OAuth in
+      // their browser". Marked passed when credentials land via
+      // `setCredentials`. Best-effort.
+      void (async () => {
+        try {
+          const { recordOauthBrowserLoginVerification } = await import(
+            '../../lib/orchestration/wiring.js'
+          );
+          recordOauthBrowserLoginVerification({
+            installDir: this.session.installDir,
+            loginUrl: url,
+          });
+        } catch {
+          // Non-fatal.
+        }
+      })();
     }
     this.emitChange();
   }
@@ -687,6 +731,30 @@ export class WizardStore {
     this.$session.setKey('region', region as WizardSession['region']);
     this.$session.setKey('regionForced', false);
     analytics.wizardCapture('region selected', { region });
+    // PR 4 wiring: record the region selection as a Choice and mark it
+    // answered with the picked region. Best-effort.
+    void (async () => {
+      try {
+        const { recordRegionSelectionChoice, answerChoiceByPromptId } =
+          await import('../../lib/orchestration/wiring.js');
+        recordRegionSelectionChoice({
+          installDir: this.session.installDir,
+          candidates: [
+            { id: 'us', label: 'US (api.amplitude.com)' },
+            { id: 'eu', label: 'EU (api.eu.amplitude.com)' },
+          ],
+          source: 'screen',
+        });
+        answerChoiceByPromptId(
+          this.session.installDir,
+          'region_selection:screen',
+          region,
+          'human',
+        );
+      } catch {
+        // Non-fatal: orchestration mirroring must never break the UI.
+      }
+    })();
 
     // Persist the chosen zone to project binding files (`project-binding.json`
     // and mirrored `ampli.json`) so the next wizard run uses the right zone —
@@ -1317,11 +1385,56 @@ export class WizardStore {
       'data ingestion confirmed',
       sessionPropertiesCompact(this.session),
     );
+    // PR 4 wiring: mark every pending `events_arriving_in_amplitude`
+    // verification as `passed` once the ingestion check confirms
+    // events flowed. Best-effort — failures must not break the UI.
+    void (async () => {
+      try {
+        const { getOrchestrationStore } = await import(
+          '../../lib/orchestration/store.js'
+        );
+        const { VerificationStatus } = await import(
+          '../../lib/orchestration/checkpoints/verifications.js'
+        );
+        const { asVerificationId } = await import(
+          '../../lib/orchestration/checkpoints/verifications.js'
+        );
+        const store = getOrchestrationStore(this.session.installDir);
+        const pending = store.listVerifications({
+          status: VerificationStatus.Pending,
+          kind: 'events_arriving_in_amplitude',
+        });
+        for (const v of pending) {
+          store.markVerificationStatus(
+            asVerificationId(v.id),
+            VerificationStatus.Passed,
+          );
+        }
+      } catch {
+        // Non-fatal: orchestration mirroring must never break the UI.
+      }
+    })();
     this.emitChange();
   }
 
   setChecklistDashboardUrl(url: string): void {
     this.$session.setKey('checklistDashboardUrl', url);
+    // PR 4 wiring: record a `dashboard_correctness` verification so
+    // outer agents have a follow-up to mark passed once the user has
+    // confirmed the dashboard renders. Best-effort.
+    void (async () => {
+      try {
+        const { recordDashboardCorrectnessVerification } = await import(
+          '../../lib/orchestration/wiring.js'
+        );
+        recordDashboardCorrectnessVerification({
+          installDir: this.session.installDir,
+          dashboardUrl: url,
+        });
+      } catch {
+        // Non-fatal: orchestration mirroring must never break the UI.
+      }
+    })();
     this.emitChange();
   }
 
@@ -1396,12 +1509,44 @@ export class WizardStore {
       idempotencyKey: this.session.createProject.idempotencyKey,
     });
     analytics.wizardCapture('Create Project Started', { source });
+    // PR 4 wiring: record a `project_creation` Choice. Best-effort.
+    void (async () => {
+      try {
+        const { recordProjectCreationChoice } = await import(
+          '../../lib/orchestration/wiring.js'
+        );
+        recordProjectCreationChoice({
+          installDir: this.session.installDir,
+          suggestedName: suggestedName ?? null,
+          source,
+        });
+      } catch {
+        // Non-fatal.
+      }
+    })();
     this.emitChange();
   }
 
   /** Exit the create-project flow without creating a project. */
   cancelCreateProject(): void {
     const source = this.session.createProject.source;
+    if (source) {
+      void (async () => {
+        try {
+          const { answerChoiceByPromptId } = await import(
+            '../../lib/orchestration/wiring.js'
+          );
+          answerChoiceByPromptId(
+            this.session.installDir,
+            `project_creation:${source}`,
+            'cancel',
+            'human',
+          );
+        } catch {
+          // Non-fatal.
+        }
+      })();
+    }
     this.$session.setKey('createProject', {
       pending: false,
       source: null,
@@ -1428,6 +1573,24 @@ export class WizardStore {
    * returned apiKey so the rest of the auth flow stays consistent.
    */
   completeCreateProject(): void {
+    const source = this.session.createProject.source;
+    if (source) {
+      void (async () => {
+        try {
+          const { answerChoiceByPromptId } = await import(
+            '../../lib/orchestration/wiring.js'
+          );
+          answerChoiceByPromptId(
+            this.session.installDir,
+            `project_creation:${source}`,
+            'create',
+            'human',
+          );
+        } catch {
+          // Non-fatal.
+        }
+      })();
+    }
     this.$session.setKey('createProject', {
       pending: false,
       source: null,
