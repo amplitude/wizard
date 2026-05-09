@@ -520,14 +520,22 @@ export const resumeCommand: CommandModule = {
           else getUI().log.error(`Session ${sessionIdRaw} not found`);
           process.exit(ExitCode.INVALID_ARGS);
         }
-        // Scope LSP derivation to the resolved session so the resume command
-        // and description belong to the session the user asked for, not the
-        // most-recently-active session in the store.
-        const lsp = computeLastStoppingPoint(opts.installDir, {
-          sessionId: session.id,
-        });
-        const command = lsp.nextAction.command;
-        const description = lsp.nextAction.description;
+        // The resume `command` array is needed both for the human path
+        // (printed via `Resume: …`) and for the `--execute` spawn below.
+        // Compute it lazily so the JSON-only hot path doesn't pay for an
+        // extra `computeLastStoppingPoint` (and another store read) that
+        // `buildResumeEnvelope` already does internally — mirrors the
+        // "skip pre-read on JSON path" pattern applied to `status` /
+        // `tasks` / `choice list` / `verification list`.
+        let resumeCommand: string[] | undefined;
+        const ensureResumeCommand = (): string[] => {
+          if (resumeCommand) return resumeCommand;
+          const lsp = computeLastStoppingPoint(opts.installDir, {
+            sessionId: session.id,
+          });
+          resumeCommand = lsp.nextAction.command;
+          return resumeCommand;
+        };
 
         if (opts.jsonOutput) {
           const envelope = buildResumeEnvelope({
@@ -537,8 +545,15 @@ export const resumeCommand: CommandModule = {
           });
           emitJson(envelope);
         } else {
+          // Human path: scope LSP to the resolved session so the resume
+          // command and description belong to the session the user asked
+          // for, not the most-recently-active session in the store.
+          const lsp = computeLastStoppingPoint(opts.installDir, {
+            sessionId: session.id,
+          });
+          resumeCommand = lsp.nextAction.command;
           const ui = getUI();
-          ui.log.info(description);
+          ui.log.info(lsp.nextAction.description);
           // Use the shell-quoted `resumeCommand` so the printed string is
           // copy-pasteable when `installDir` (or any other argv) contains
           // whitespace or shell metacharacters.
@@ -557,7 +572,7 @@ export const resumeCommand: CommandModule = {
           // .cmd shim resolves on Windows (Node's built-in spawn does not
           // consult PATHEXT).
           const { spawn } = await import('../utils/cross-platform-spawn.js');
-          const [cmd, ...rest] = command;
+          const [cmd, ...rest] = ensureResumeCommand();
           if (!cmd) {
             if (opts.jsonOutput)
               emitJsonError('Resume command is empty — nothing to execute.');
