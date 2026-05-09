@@ -467,6 +467,13 @@ export const resolveNonInteractiveCredentials = async (
       // `answered` immediately after `promptEnvironmentSelection`
       // returns so the lifecycle is end-to-end visible. Failures in the
       // mirror MUST NOT break the existing env-selection flow.
+      // Carry the (orgId, projectId, envName) triple alongside the public
+      // {id, label, description} shape so we can match the user's selection
+      // back to the exact option deterministically. Matching by label
+      // suffix used to break when two orgs/projects each had a "Production"
+      // environment — `Array.find` would record the first triple's
+      // optionId in the orchestration store regardless of which the user
+      // actually picked.
       const allChoiceOptions = session.pendingOrgs.flatMap((org) =>
         org.projects.flatMap((proj) =>
           (proj.environments ?? [])
@@ -475,6 +482,9 @@ export const resolveNonInteractiveCredentials = async (
               id: String(e.app?.id ?? `${org.id}:${proj.id}:${e.name}`),
               label: `${org.name} / ${proj.name} / ${e.name}`,
               description: `Send events to ${org.name} > ${proj.name} > ${e.name}`,
+              orgId: org.id,
+              projectId: proj.id,
+              envName: e.name,
             })),
         ),
       );
@@ -536,9 +546,16 @@ export const resolveNonInteractiveCredentials = async (
               '../lib/orchestration/checkpoints/choices.js'
             );
             const store = getOrchestrationStore(session.installDir);
-            // Look up the picked option id by matching env triple.
-            const pickedOption = allChoiceOptions.find((o) =>
-              o.label.endsWith(`/ ${selection.env}`),
+            // Look up the picked option by the full (orgId, projectId,
+            // envName) triple. Matching on `label.endsWith('/ <env>')`
+            // used to record the wrong optionId whenever two orgs or
+            // two projects shared an env name (e.g. both have a
+            // "Production").
+            const pickedOption = allChoiceOptions.find(
+              (o) =>
+                o.orgId === selection.orgId &&
+                o.projectId === selection.projectId &&
+                o.envName === selection.env,
             );
             if (pickedOption) {
               store.answerChoice(
