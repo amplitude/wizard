@@ -145,9 +145,13 @@ const InlineEventPlan = ({ store }: { store: WizardStore }) => {
   if (events.length === 0) return null;
 
   // Tight stacking — the bold "Events:" prefix is the visual separator.
+  // `wrap="truncate-end"` keeps the row on a single line on narrow
+  // terminals (the Events list can run long once the agent fills it
+  // in); otherwise it would wrap and visually compete with the panels
+  // below it for vertical real estate.
   return (
     <Box flexDirection="column">
-      <Text color={Colors.secondary}>
+      <Text color={Colors.secondary} wrap="truncate-end">
         <Text bold color={Colors.accent}>
           {Icons.diamond} Events:
         </Text>{' '}
@@ -356,8 +360,13 @@ const ProgressTab = ({ store }: { store: WizardStore }) => {
 
   return (
     <Box flexDirection="row" flexGrow={1}>
-      {/* Left: tasks and status (takes all remaining width) */}
-      <Box flexDirection="column" flexGrow={1} flexShrink={1} paddingX={1}>
+      {/* Left: tasks and status (takes all remaining width).
+          No paddingX here — the parent screen content area in App.tsx
+          already applies `Layout.paddingX`. Stacking an additional
+          paddingX=1 on top produced the "content sits one column
+          further right than the headers" misalignment users called
+          out. */}
+      <Box flexDirection="column" flexGrow={1} flexShrink={1}>
         {/* Header: progress counter + elapsed + retry chip + current file. */}
         <Box marginBottom={1} flexDirection="column">
           <Box justifyContent="space-between">
@@ -433,7 +442,14 @@ const ProgressTab = ({ store }: { store: WizardStore }) => {
           entries={store.fileWrites}
           installDir={store.session.installDir}
           spinnerFrame={spinnerFrame}
-          width={cols - 2}
+          // Subtract App.tsx's `Layout.paddingX` (2 each side) so the
+          // path-budget reflects the actual visible width inside the
+          // content area. Previously this was `cols - 2`, which assumed
+          // the now-removed inner paddingX=1 instead of the outer
+          // Layout.paddingX=2 — paths got more head-truncation budget
+          // than they should have, occasionally letting a long path
+          // collide with the trailing detail column on tight terminals.
+          width={cols - 4}
         />
 
         {/* Coaching: surfaces calmly after 90s of no task-count progress.
