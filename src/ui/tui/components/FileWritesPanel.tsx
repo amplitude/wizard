@@ -101,7 +101,7 @@ export const truncatePathHead = (raw: string, maxWidth: number): string => {
   // extension visible is the priority.
   if (basename.length > maxWidth) {
     if (maxWidth <= 3) return '…';
-    const keep = maxWidth - 1; // reserve 1 col for the ellipsis
+    const keep = maxWidth - 2; // reserve 2 cols for the leading + middle ellipses
     const head = Math.ceil(keep / 2);
     const tail = keep - head;
     return `…${basename.slice(0, head)}…${basename.slice(-tail)}`.slice(
