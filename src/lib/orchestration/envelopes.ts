@@ -232,8 +232,16 @@ export function buildResumeEnvelope(
   opts: BuilderOpts & { sessionId: SessionId; executed?: boolean },
 ): z.infer<typeof ResumeEnvelopeSchema> {
   // Same shared-snapshot contract as `buildLastStoppingPointEnvelope`.
+  // Forward `sessionId` so the LSP is computed for the requested session
+  // rather than the most-recently-active one — otherwise
+  // `wizard resume <session-id> --json` returns the `command` /
+  // `description` for a different session when multiple sessions exist.
+  // Mirrors the human-readable path in `commands/orchestration.ts`.
   const file = readStoreCached(opts.installDir, opts.cacheKey);
-  const lsp = computeLastStoppingPoint(opts.installDir, { storeFile: file });
+  const lsp = computeLastStoppingPoint(opts.installDir, {
+    storeFile: file,
+    sessionId: opts.sessionId,
+  });
   return ResumeEnvelopeSchema.parse({
     v: 1,
     type: 'orchestration_resume',
