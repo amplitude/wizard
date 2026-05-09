@@ -28,6 +28,7 @@ import { DEFAULT_AMPLITUDE_ZONE } from '../../../lib/constants.js';
 import {
   recordMcpInstallChoice,
   answerChoiceByPromptId,
+  mcpInstallPromptId,
 } from '../../../lib/orchestration/wiring.js';
 
 export type McpMode = 'install' | 'remove';
@@ -185,10 +186,13 @@ export const McpScreen = ({
     // decision durably. Best-effort.
     if (mode === 'install') {
       for (const c of clients) {
-        const promptId = `mcp_install:${c.name.toLowerCase().replace(/\s+/g, '_')}`;
+        // Use the canonical promptId helper so this stays in lockstep
+        // with `recordMcpInstallChoice` — drift used to silently leave
+        // the choice in `pending` because `answerChoiceByPromptId`
+        // returns null on miss, which the call site swallows.
         answerChoiceByPromptId(
           store.session.installDir,
-          promptId,
+          mcpInstallPromptId(c.name),
           'skip',
           'human',
         );
@@ -246,11 +250,14 @@ export const McpScreen = ({
       result.length > 0 ? McpOutcome.Installed : McpOutcome.Failed;
     // PR 4 wiring: answer each per-client mcp_install Choice with the
     // installed/skipped outcome so `/status` reflects the decision.
+    // `mcpInstallPromptId` is the canonical normalization used by
+    // `recordMcpInstallChoice`; deriving from it (instead of inlining
+    // `toLowerCase().replace(/\s+/g, '_')` here) keeps the lookup keys
+    // in lockstep across files.
     for (const name of names) {
-      const promptId = `mcp_install:${name.toLowerCase().replace(/\s+/g, '_')}`;
       answerChoiceByPromptId(
         store.session.installDir,
-        promptId,
+        mcpInstallPromptId(name),
         result.includes(name) ? 'install' : 'skip',
         'human',
       );

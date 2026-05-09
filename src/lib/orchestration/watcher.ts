@@ -123,10 +123,17 @@ export function watchOrchestrationStore(
     pollHandle = setInterval(() => {
       if (disposed) return;
       if (!existsSync(dir)) return;
-      const ph = pollHandle;
-      pollHandle = null;
-      if (ph !== null) clearInterval(ph);
-      tryAttach();
+      // Only stop polling once `tryAttach` has actually succeeded —
+      // previously we nulled `pollHandle` and `clearInterval`'d before
+      // calling `tryAttach`, so a transient `fs.watch` failure (EMFILE,
+      // EACCES, EBUSY) on the second poll left the watcher in a wedged
+      // state with no active handle and no retry loop. The user would
+      // see `/status` overlays silently stop refreshing.
+      if (tryAttach()) {
+        const ph = pollHandle;
+        pollHandle = null;
+        if (ph !== null) clearInterval(ph);
+      }
     }, 1_000);
     if (pollHandle !== null && typeof pollHandle.unref === 'function') {
       // Don't keep the event loop alive solely for the poll.
