@@ -131,6 +131,47 @@ describe('computeLastStoppingPoint — populated store', () => {
     expect(lsp.stoppedTasks).toEqual([]);
   });
 
+  it('scopes session metadata + task buckets to the requested sessionId', () => {
+    const store = new OrchestrationStore(installDir);
+    // Older session — would otherwise lose the recency tiebreaker.
+    const sessionA = store.createSession({ goal: 'session A' });
+    const tA = store.createTask({
+      sessionId: sessionA.id,
+      label: 'A waiting task',
+      initialState: TaskLifecycle.Running,
+    });
+    store.transitionTask(tA.id, TaskLifecycle.WaitingForUser, {
+      waitingFor: {
+        id: 'cp_a',
+        kind: 'event_plan_confirm',
+        summary: 'review A plan',
+        enteredAt: NOW - 5_000,
+      },
+    });
+    // Newer session — wins the default "most recently created active session"
+    // selection, so without sessionId scoping the LSP would describe this one.
+    const sessionB = store.createSession({ goal: 'session B' });
+    const tB = store.createTask({
+      sessionId: sessionB.id,
+      label: 'B running task',
+      initialState: TaskLifecycle.Running,
+    });
+
+    const lsp = computeLastStoppingPoint(installDir, {
+      now: NOW + 1_000,
+      sessionId: sessionA.id,
+    });
+    // Session metadata reflects the *requested* session, not the latest one.
+    expect(lsp.currentSessionId).toBe(sessionA.id);
+    expect(lsp.currentGoal).toBe('session A');
+    // Task buckets are scoped to session A.
+    expect(lsp.activeTasks.map((t) => t.id)).toEqual([tA.id]);
+    expect(lsp.activeTasks.map((t) => t.id)).not.toContain(tB.id);
+    // Next action describes session A's waiting checkpoint.
+    expect(lsp.nextAction.kind).toBe('await_user_choice');
+    expect(lsp.nextAction.description).toContain('review A plan');
+  });
+
   it('aggregates ownership across active + recently-stopped tasks', () => {
     const store = new OrchestrationStore(installDir);
     const session = store.createSession({});

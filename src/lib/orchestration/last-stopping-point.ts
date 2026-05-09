@@ -16,7 +16,13 @@
 import { execFileSync } from 'node:child_process';
 
 import { TaskLifecycle, isActive } from './lifecycle';
-import type { LastStoppingPoint, NextAction, Ownership, Task } from './state';
+import type {
+  LastStoppingPoint,
+  NextAction,
+  Ownership,
+  SessionId,
+  Task,
+} from './state';
 import { getOrchestrationStore } from './store';
 import { CLI_INVOCATION } from '../../commands/context';
 
@@ -179,28 +185,43 @@ function deriveNextAction(args: {
  *
  * `now` is injectable for testing — tests can pin `Date.now()` so the 24-hour
  * window is deterministic.
+ *
+ * `sessionId`, when provided, scopes the computation to that specific session:
+ * the snapshot's session metadata and task buckets are restricted to that
+ * session's tasks. This is what `wizard resume <session-id>` uses so the
+ * derived next action belongs to the requested session, not the most-recently
+ * created active session.
  */
 export function computeLastStoppingPoint(
   installDir: string,
-  options?: { now?: number; cliInvocation?: string[] },
+  options?: { now?: number; cliInvocation?: string[]; sessionId?: SessionId },
 ): LastStoppingPoint {
   const now = options?.now ?? Date.now();
   const cutoff = now - TWENTY_FOUR_HOURS_MS;
   const store = getOrchestrationStore(installDir);
   const file = store.read();
 
-  const session =
-    file.sessions
-      .filter((s) => s.status === 'active')
-      .sort((a, b) => b.createdAt - a.createdAt)[0] ?? null;
+  const session = options?.sessionId
+    ? (file.sessions.find((s) => s.id === options.sessionId) ?? null)
+    : (file.sessions
+        .filter((s) => s.status === 'active')
+        .sort((a, b) => b.createdAt - a.createdAt)[0] ?? null);
 
   const branch = session?.branch ?? tryDetectBranch(installDir);
   const worktree = session?.worktree ?? tryDetectWorktree(installDir);
 
-  const activeTasks = file.tasks
+  // When `sessionId` is provided, restrict task buckets to that session so
+  // the derived next action reflects the requested session's state. Without
+  // this, `wizard resume <session-id>` would surface tasks from a different
+  // (more recently active) session.
+  const scopedTasks = options?.sessionId
+    ? file.tasks.filter((t) => t.sessionId === options.sessionId)
+    : file.tasks;
+
+  const activeTasks = scopedTasks
     .filter((t) => isActive(t.state))
     .sort((a, b) => b.updatedAt - a.updatedAt);
-  const stoppedTasks = file.tasks
+  const stoppedTasks = scopedTasks
     .filter(
       (t) =>
         (t.state === TaskLifecycle.Failed ||
@@ -209,7 +230,7 @@ export function computeLastStoppingPoint(
         t.updatedAt >= cutoff,
     )
     .sort((a, b) => b.updatedAt - a.updatedAt);
-  const recentlyCompletedTasks = file.tasks
+  const recentlyCompletedTasks = scopedTasks
     .filter((t) => t.state === TaskLifecycle.Completed && t.updatedAt >= cutoff)
     .sort((a, b) => b.updatedAt - a.updatedAt);
 
@@ -250,7 +271,7 @@ export function computeLastStoppingPoint(
     installDir,
     activeTasks,
     stoppedTasks,
-    hasActiveSession: session !== null,
+    hasActiveSession: session !== null && session.status === 'active',
     invocation: cliInvocation,
   });
 

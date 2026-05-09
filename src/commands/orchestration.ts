@@ -559,7 +559,12 @@ export const resumeCommand: CommandModule = {
           else getUI().log.error(`Session ${sessionIdRaw} not found`);
           process.exit(ExitCode.INVALID_ARGS);
         }
-        const lsp = computeLastStoppingPoint(opts.installDir);
+        // Scope LSP derivation to the resolved session so the resume command
+        // and description belong to the session the user asked for, not the
+        // most-recently-active session in the store.
+        const lsp = computeLastStoppingPoint(opts.installDir, {
+          sessionId: session!.id,
+        });
         const command = lsp.nextAction.command;
         const description = lsp.nextAction.description;
 
