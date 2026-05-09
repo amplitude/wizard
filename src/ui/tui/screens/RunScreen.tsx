@@ -43,6 +43,7 @@ import {
   TRAILING_FEATURES,
 } from '../session-constants.js';
 import { OUTBOUND_URLS } from '../../../lib/constants.js';
+import { linkify } from '../utils/terminal-rendering.js';
 import path from 'node:path';
 import { getLogFile } from '../../../utils/storage-paths.js';
 import { getSessionStartMs } from '../../../lib/observability/index.js';
@@ -556,7 +557,7 @@ const ProgressTab = ({ store }: { store: WizardStore }) => {
         <Box flexShrink={0} flexDirection="column" marginTop={1}>
           <Box paddingX={1} overflow="hidden">
             <Text color={Colors.muted}>
-              {Icons.diamondOpen} {pillStatus}
+              {Icons.diamondOpen} {linkify(pillStatus)}
             </Text>
           </Box>
         </Box>
