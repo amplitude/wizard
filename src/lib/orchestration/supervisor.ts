@@ -341,8 +341,12 @@ export class Supervisor {
   private ensureSignalHandlers(): void {
     if (this.signalHandlersInstalled) return;
     const handler = (sig: NodeJS.Signals) => {
-      // best-effort — terminate every tracked child synchronously, then
-      // re-raise the signal so the wizard's normal exit path runs.
+      // best-effort — fire-and-forget termination for every tracked child.
+      // Note: this is async (`terminateAll` awaits SIGINT → SIGKILL ladders
+      // per child) and we deliberately don't `await` or re-raise the signal
+      // here. Other `process.once` listeners installed by the wizard's
+      // normal exit path are independent — Node fires every registered
+      // listener for the same signal, so the wizard still exits cleanly.
       void this.terminateAll(`signal ${sig}`).catch(() => {
         // ignore
       });

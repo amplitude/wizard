@@ -1393,10 +1393,7 @@ export class WizardStore {
         const { getOrchestrationStore } = await import(
           '../../lib/orchestration/store.js'
         );
-        const { VerificationStatus } = await import(
-          '../../lib/orchestration/checkpoints/verifications.js'
-        );
-        const { asVerificationId } = await import(
+        const { VerificationStatus, asVerificationId } = await import(
           '../../lib/orchestration/checkpoints/verifications.js'
         );
         const store = getOrchestrationStore(this.session.installDir);
