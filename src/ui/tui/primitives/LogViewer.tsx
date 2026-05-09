@@ -383,8 +383,27 @@ export const LogViewer = ({
       ? `error ${selectedErrorOrdinal} of ${errorCount}`
       : `${errorCount} ${errorCount === 1 ? 'error' : 'errors'}`;
 
+  // Collapse the viewport when we have fewer rows than the available
+  // budget — Yoga otherwise reserves the full `viewportHeight` rows
+  // (≈18 blank rows for a 4-line tail), which pushed the Selected /
+  // help / footer chrome to the bottom of the pane and left a yawning
+  // gap mid-screen. Cap below at 1 so the Box always has at least one
+  // line to settle into when the file is empty.
+  const renderedViewportRows = Math.max(
+    1,
+    Math.min(visibleRows.length, viewportHeight),
+  );
+
   return (
-    <Box flexDirection="column" height={visibleLines} paddingX={1}>
+    // `minHeight` (not `height`) lets the LogViewer shrink to actual
+    // content. TabContainer's flex shell still owns the tail of the
+    // pane, so its bottom chrome (status / tab bar) stays pinned to
+    // the terminal floor — but the LogViewer's own footer (Selected /
+    // help / "New logs append…") now sits directly under the visible
+    // tail instead of being pushed to the bottom by reserved-but-empty
+    // viewport rows. With a fixed `height` we always reserved
+    // `visibleLines` rows whether or not we had content to fill them.
+    <Box flexDirection="column" minHeight={1} paddingX={1}>
       <Box justifyContent="space-between">
         <Text color={mode === 'follow' ? Colors.accent : Colors.warning} bold>
           {mode === 'follow' ? 'LIVE FOLLOW' : 'INSPECT'}
@@ -410,7 +429,7 @@ export const LogViewer = ({
         </Text>
       </Box>
 
-      <Box flexDirection="column" height={viewportHeight}>
+      <Box flexDirection="column" height={renderedViewportRows}>
         {visibleRows.map((line, rowIndex) => {
           const absoluteIndex = viewportTop + rowIndex;
           const lineMeta = meta[absoluteIndex];
