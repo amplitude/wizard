@@ -43,7 +43,6 @@ import {
 import { OrchestrationStoreFileSchema } from './schemas';
 import { TaskLifecycle, assertTransition, isTerminal } from './lifecycle';
 import { getOrchestrationStoreFile } from './storage-paths';
-import { getRunDir } from '../../utils/storage-paths';
 import { dirname } from 'node:path';
 import {
   type AddChoiceInput,
@@ -199,8 +198,10 @@ export function saveStore(store: OrchestrationStoreFile): void {
   // Validate before writing — catches mutator bugs at the trust boundary.
   OrchestrationStoreFileSchema.parse(next);
   const path = getOrchestrationStoreFile(next.installDir);
+  // `getOrchestrationStoreFile()` returns `join(getRunDir(installDir),
+  // 'orchestration.json')`, so `dirname(path)` is exactly the run dir —
+  // a single `ensureDir` covers both.
   ensureDir(dirname(path));
-  ensureDir(getRunDir(next.installDir));
   atomicWriteJSON(path, next, { mode: 0o600 });
 }
 

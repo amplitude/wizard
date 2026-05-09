@@ -609,6 +609,21 @@ export const resumeCommand: CommandModule = {
             process.exit(ExitCode.GENERAL_ERROR);
           }
           const child = spawn(cmd, rest, { stdio: 'inherit' });
+          // Attach an `error` listener BEFORE `exit`. If the spawn fails
+          // synchronously (binary not on PATH, ENOENT, EACCES) Node fires
+          // an `error` event; without a listener the EventEmitter rethrows
+          // and crashes the process with a stack trace instead of a clean
+          // CLI failure.
+          child.on('error', (err) => {
+            const message = err instanceof Error ? err.message : String(err);
+            if (opts.jsonOutput)
+              emitJsonError(`Failed to spawn resume command: ${message}`);
+            else
+              getUI().log.error(
+                `Failed to spawn resume command: ${message}`,
+              );
+            process.exit(ExitCode.GENERAL_ERROR);
+          });
           child.on('exit', (code) => {
             process.exit(code ?? 0);
           });
