@@ -68,7 +68,7 @@ import {
   GATEWAY_INVALID_REQUEST_MARKER,
 } from './transient-llm-retry.js';
 import { wizardCanUseTool } from './tool-policy.js';
-import { AgentErrorType } from '../agent-interface.js';
+import { AgentErrorType, type AuthErrorSubkind } from '../agent-interface.js';
 
 /**
  * Default ceiling on agent output tokens. Vertex AI's Anthropic
@@ -161,6 +161,12 @@ export interface RunAiSdkAgentArgs {
 export interface RunAiSdkAgentResult {
   error?: AgentErrorType;
   message?: string;
+  /**
+   * Set only when `error === AgentErrorType.AUTH_ERROR`. Mirrors the legacy
+   * runner's {@link AuthErrorSubkind} so the dispatch bridge can forward it
+   * and `agent-runner.ts` picks the correct error copy.
+   */
+  authSubkind?: AuthErrorSubkind;
   /** Final concatenated text output from `streamText.textStream`. */
   text: string;
   /** Reason the model stopped — `'stop'`, `'tool-calls'`, etc. */
@@ -330,6 +336,7 @@ function evaluatePreToolPolicy(args: {
 function classifyRunnerThrow(err: unknown): {
   errorType: AgentErrorType;
   message: string;
+  authSubkind?: AuthErrorSubkind;
 } {
   const raw = err instanceof Error ? err.message : String(err);
 
@@ -345,7 +352,14 @@ function classifyRunnerThrow(err: unknown): {
     raw.toLowerCase().includes('invalid or expired token') ||
     raw.includes(' 401')
   ) {
-    return { errorType: AgentErrorType.AUTH_ERROR, message: raw };
+    // The AI-SDK path only talks to the LLM gateway (Amplitude MCP is
+    // deferred to D-4), so every auth error here is a gateway 401 /
+    // expired bearer — never the new-user Amplitude OAuth path.
+    return {
+      errorType: AgentErrorType.AUTH_ERROR,
+      message: raw,
+      authSubkind: 'llm-gateway',
+    };
   }
   if (raw.includes('rate_limit') || raw.includes(' 429')) {
     return { errorType: AgentErrorType.RATE_LIMIT, message: raw };
@@ -501,6 +515,9 @@ export async function runAiSdkAgent(
     return {
       error: classified.errorType,
       message: classified.message,
+      ...(classified.authSubkind
+        ? { authSubkind: classified.authSubkind }
+        : {}),
       text: '',
       finishReason: 'error',
       toolCalls,
@@ -610,6 +627,9 @@ export async function runAiSdkAgent(
     return {
       error: classified.errorType,
       message: classified.message,
+      ...(classified.authSubkind
+        ? { authSubkind: classified.authSubkind }
+        : {}),
       text: textBuf,
       finishReason: 'error',
       toolCalls,
@@ -628,6 +648,9 @@ export async function runAiSdkAgent(
     return {
       error: classified.errorType,
       message: classified.message,
+      ...(classified.authSubkind
+        ? { authSubkind: classified.authSubkind }
+        : {}),
       text: textBuf,
       finishReason: 'error',
       toolCalls,
