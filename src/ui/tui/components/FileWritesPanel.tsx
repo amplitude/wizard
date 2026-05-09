@@ -11,6 +11,7 @@
  *   ⠸  CREATE   src/amplitude.ts            generating...
  *   ✓  CREATE   src/events.ts               42 lines    1.2s
  *   ✓  MODIFY   app/layout.tsx              edited      0.3s
+ *   ✓  MODIFY   src/share/ShareDialog.tsx   edited 2×   0.3s
  *   ✗  MODIFY   .env.local                  failed
  *
  * Color tokens (see styles.ts):
@@ -18,6 +19,13 @@
  *   - MODIFY → warning (amber)
  *   - DELETE → error (red)
  *   - in-progress rows lean on Colors.active (violet) for the spinner
+ *
+ * **Dedupe contract.** The store appends one entry per emission — when
+ * the agent edits the same file 4 times we receive 4 entries for that
+ * path. The panel collapses these into a single row keyed on `path`,
+ * showing the LATEST entry's status / duration / bytes. When more than
+ * one emission landed for a path we annotate the row with `× N`. Most
+ * recent emission wins for ordering; stable insertion order otherwise.
  *
  * Hidden when there are no rows so RunScreen stays compact during the
  * planning phase before any file write has fired.
@@ -29,6 +37,16 @@ import path from 'path';
 import { Colors, Icons } from '../styles.js';
 import { BrailleSpinner } from './BrailleSpinner.js';
 import type { FileWriteEntry } from '../store.js';
+
+/**
+ * Per-path aggregation produced by `dedupeByPath` below. Carries the
+ * latest entry plus the total number of emissions seen for that path so
+ * the row can render `edited 3×`.
+ */
+interface DedupedFileWrite {
+  entry: FileWriteEntry;
+  editCount: number;
+}
 
 interface FileWritesPanelProps {
   entries: FileWriteEntry[];
@@ -64,6 +82,51 @@ const formatDuration = (ms: number): string => {
 };
 
 /**
+ * Collapse repeated emissions for the same path into a single row.
+ *
+ * The store keeps an append-only list — every PreToolUse / PostToolUse
+ * pair adds an entry, even when the inner agent edits the same file
+ * multiple times. Rendering that list verbatim produces the duplicate
+ * rows the user complained about ("oh god look how bad this is" — see
+ * PR description).
+ *
+ * Strategy: walk the list once, keying by `path`. For each path keep the
+ * MOST RECENT entry (latest `startedAt` wins) and count how many times
+ * we saw it. Order the result by latest emission so the row order in
+ * the panel still matches the order the agent finished writing —
+ * preserves the "most recent activity at the bottom" feel without
+ * leaving stale duplicates above it.
+ *
+ * Path is used as-is; the inner agent normalizes to absolute paths
+ * before emitting, so two emissions for the same file always carry the
+ * same string. Display-time relativization happens in `displayPath`
+ * downstream.
+ */
+const dedupeByPath = (entries: readonly FileWriteEntry[]): DedupedFileWrite[] => {
+  const byPath = new Map<string, DedupedFileWrite>();
+  for (const entry of entries) {
+    const prev = byPath.get(entry.path);
+    if (!prev) {
+      byPath.set(entry.path, { entry, editCount: 1 });
+      continue;
+    }
+    // Latest emission wins. Strict `>=` would also work but `>` keeps
+    // the first occurrence at a tie, which matches insertion order
+    // when timestamps collide (synthetic test fixtures, sub-ms writes).
+    const latest = entry.startedAt > prev.entry.startedAt ? entry : prev.entry;
+    byPath.set(entry.path, {
+      entry: latest,
+      editCount: prev.editCount + 1,
+    });
+  }
+  // Sort by latest emission's startedAt so the most recent activity
+  // sits at the bottom — same ordering the panel had before dedupe.
+  return Array.from(byPath.values()).sort(
+    (a, b) => a.entry.startedAt - b.entry.startedAt,
+  );
+};
+
+/**
  * Relativize an absolute path against the install dir for display. Falls
  * back to the basename if the path lives outside the project (rare, but
  * possible — skill installs sometimes touch tmp dirs).
@@ -87,22 +150,31 @@ export const FileWritesPanel = ({
   now = Date.now(),
   maxVisible = 8,
 }: FileWritesPanelProps) => {
-  // Slice to the most recent rows. The store also caps at MAX_FILE_WRITES,
-  // but RunScreen has limited vertical real estate — long-running runs
-  // would otherwise push the rest of the dashboard off-screen.
+  // Dedupe by path FIRST, then slice to maxVisible. Slicing first would
+  // drop different-path entries to make room for duplicates — we want
+  // the inverse: collapse duplicates of the same file, then keep the
+  // most recent N distinct files.
+  const dedupedAll = useMemo(() => dedupeByPath(entries), [entries]);
+
   const visible = useMemo(
     () =>
-      entries.length > maxVisible
-        ? entries.slice(entries.length - maxVisible)
-        : entries,
-    [entries, maxVisible],
+      dedupedAll.length > maxVisible
+        ? dedupedAll.slice(dedupedAll.length - maxVisible)
+        : dedupedAll,
+    [dedupedAll, maxVisible],
   );
 
   if (visible.length === 0) return null;
 
-  const completedCount = entries.filter((e) => e.status === 'applied').length;
-  const totalCount = entries.length;
-  const inProgressCount = entries.filter((e) => e.status === 'planned').length;
+  // Header counters reflect the deduped view too — "14 written" reading
+  // off raw emissions is exactly the bug screenshot.
+  const completedCount = dedupedAll.filter(
+    (d) => d.entry.status === 'applied',
+  ).length;
+  const totalCount = dedupedAll.length;
+  const inProgressCount = dedupedAll.filter(
+    (d) => d.entry.status === 'planned',
+  ).length;
 
   return (
     // Bold section header is the visual separator — no blank row above.
@@ -120,10 +192,14 @@ export const FileWritesPanel = ({
             : `${totalCount} written`}
         </Text>
       </Box>
-      {visible.map((entry) => (
+      {visible.map(({ entry, editCount }) => (
         <FileWriteRow
-          key={`${entry.startedAt}-${entry.path}`}
+          // Key on path — entries are deduped, so path is unique within
+          // the rendered list and stable across re-renders even when the
+          // latest entry's startedAt shifts.
+          key={entry.path}
           entry={entry}
+          editCount={editCount}
           installDir={installDir}
           spinnerFrame={spinnerFrame}
           now={now}
@@ -135,6 +211,12 @@ export const FileWritesPanel = ({
 
 interface FileWriteRowProps {
   entry: FileWriteEntry;
+  /**
+   * Total emissions for this path across the run. >1 when the agent
+   * edited the same file multiple times — annotated as `× N` in the
+   * detail column. 1 when the file was written exactly once.
+   */
+  editCount: number;
   installDir?: string;
   spinnerFrame?: number;
   now: number;
@@ -142,6 +224,7 @@ interface FileWriteRowProps {
 
 const FileWriteRow = ({
   entry,
+  editCount,
   installDir,
   spinnerFrame,
   now,
@@ -163,7 +246,10 @@ const FileWriteRow = ({
   // Trailing detail column. While the row is still planned we show
   // "generating…" with elapsed seconds so a stuck write is visible
   // (instead of a dead spinner). On apply we show bytes/lines + total
-  // duration so the user can see throughput.
+  // duration so the user can see throughput. When the same path was
+  // touched more than once, suffix the size hint with `× N` so the
+  // user sees both the latest result and the fact that the agent
+  // revisited the file.
   let detail: string;
   if (status === 'applied') {
     const dur =
@@ -174,12 +260,16 @@ const FileWriteRow = ({
       typeof entry.bytes === 'number'
         ? `${entry.bytes.toLocaleString()} bytes`
         : 'edited';
-    detail = dur ? `${sizeHint}  ${dur}` : sizeHint;
+    const sizeHintWithCount =
+      editCount > 1 ? `${sizeHint} ${editCount}×` : sizeHint;
+    detail = dur ? `${sizeHintWithCount}  ${dur}` : sizeHintWithCount;
   } else if (status === 'failed') {
-    detail = 'failed';
+    detail = editCount > 1 ? `failed ${editCount}×` : 'failed';
   } else {
     const elapsed = now - entry.startedAt;
-    detail = elapsed >= 1000 ? `generating… ${formatDuration(elapsed)}` : 'generating…';
+    const base =
+      elapsed >= 1000 ? `generating… ${formatDuration(elapsed)}` : 'generating…';
+    detail = editCount > 1 ? `${base} ${editCount}×` : base;
   }
 
   return (
