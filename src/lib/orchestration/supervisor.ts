@@ -347,6 +347,14 @@ export class Supervisor {
       // here. Other `process.once` listeners installed by the wizard's
       // normal exit path are independent — Node fires every registered
       // listener for the same signal, so the wizard still exits cleanly.
+      //
+      // We reset `signalHandlersInstalled` because the `once` listener
+      // was just consumed. If the process survives the first signal
+      // (e.g., a higher-level listener cancels the exit, or a CI test
+      // harness sends a stray SIGINT), a subsequent `track()` call needs
+      // to re-install listeners — otherwise the next signal would land
+      // unprotected and orphan the still-tracked children.
+      this.signalHandlersInstalled = false;
       void this.terminateAll(`signal ${sig}`).catch(() => {
         // ignore
       });
