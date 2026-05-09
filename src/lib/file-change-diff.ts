@@ -160,14 +160,20 @@ export function summarizeLedgerEntry(
  * outro / `/diff` command consume. Order matches the ledger's own
  * insertion order (chronological by first PreToolUse capture). Skips
  * entries where {@link summarizeLedgerEntry} returns null.
+ *
+ * `options` is forwarded to {@link summarizeLedgerEntry} so summary-only
+ * callers (e.g. the `/diff` summary command, which only renders +/-
+ * counts and never reads the patch body) can pass `{ includePatch: false }`
+ * and skip the redundant `createPatch` call per entry.
  */
 export function summarizeLedgerDiffs(
   ledger: FileChangeLedger | null,
+  options: SummarizeLedgerEntryOptions = {},
 ): FileDiffSummary[] {
   if (!ledger) return [];
   const out: FileDiffSummary[] = [];
   for (const entry of ledger.getEntries()) {
-    const summary = summarizeLedgerEntry(entry);
+    const summary = summarizeLedgerEntry(entry, options);
     if (summary) out.push(summary);
   }
   return out;

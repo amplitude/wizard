@@ -347,8 +347,11 @@ function executeCommand(raw: string, store: WizardStore): string | void {
         );
         break;
       }
-      // Summary mode (no arg): walk the whole ledger.
-      const diffs = summarizeLedgerDiffs(ledger);
+      // Summary mode (no arg): walk the whole ledger. The summary only
+      // renders +/- counts and the operation glyph — no patch text — so
+      // skip the per-entry `createPatch` call (an O(n·m) re-diff that
+      // `summarizeDiff` already did) for the whole ledger.
+      const diffs = summarizeLedgerDiffs(ledger, { includePatch: false });
       if (diffs.length === 0) {
         store.setCommandFeedback(
           'No file changes captured yet — the agent has not written anything in this session.',
