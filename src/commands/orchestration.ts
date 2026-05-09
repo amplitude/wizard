@@ -619,9 +619,7 @@ export const resumeCommand: CommandModule = {
             if (opts.jsonOutput)
               emitJsonError(`Failed to spawn resume command: ${message}`);
             else
-              getUI().log.error(
-                `Failed to spawn resume command: ${message}`,
-              );
+              getUI().log.error(`Failed to spawn resume command: ${message}`);
             process.exit(ExitCode.GENERAL_ERROR);
           });
           child.on('exit', (code) => {

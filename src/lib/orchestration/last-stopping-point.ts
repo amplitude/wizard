@@ -202,10 +202,10 @@ export function computeLastStoppingPoint(
   const file = store.read();
 
   const session = options?.sessionId
-    ? (file.sessions.find((s) => s.id === options.sessionId) ?? null)
-    : (file.sessions
+    ? file.sessions.find((s) => s.id === options.sessionId) ?? null
+    : file.sessions
         .filter((s) => s.status === 'active')
-        .sort((a, b) => b.createdAt - a.createdAt)[0] ?? null);
+        .sort((a, b) => b.createdAt - a.createdAt)[0] ?? null;
 
   const branch = session?.branch ?? tryDetectBranch(installDir);
   const worktree = session?.worktree ?? tryDetectWorktree(installDir);
