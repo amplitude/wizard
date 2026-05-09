@@ -157,6 +157,12 @@ import {
   mcpCommand,
   manifestCommand,
   ciBootstrapCommand,
+  tasksCommand,
+  taskCommand,
+  sessionsCommand,
+  sessionCommand,
+  resumeCommand,
+  orchestrationCommand,
 } from './src/commands';
 
 // ── Observability bootstrap ─────────────────────────────────────────
@@ -516,6 +522,16 @@ void yargs(hideBin(process.argv))
       describe: 'internal: AMPLITUDE_WIZARD_SKIP_BOOTSTRAP env-var passthrough',
       type: 'boolean',
     },
+    // AMPLITUDE_WIZARD_CACHE_DIR overrides the per-user cache root
+    // (~/.amplitude/wizard/) for tests and power users. Read in
+    // `src/utils/storage-paths.ts:getCacheRoot`. `.env('AMPLITUDE_WIZARD')`
+    // auto-maps it to `cacheDir` and `.strict()` rejects it without this
+    // shadow.
+    'cache-dir': {
+      hidden: true,
+      describe: 'internal: AMPLITUDE_WIZARD_CACHE_DIR env-var passthrough',
+      type: 'string',
+    },
     // AMPLITUDE_WIZARD_SKILL_TIERS=1 opts the agent into the tiered
     // skill-loading prototype (load_skill_menu / load_skill /
     // load_skill_reference + system-prompt slice). Read directly via
@@ -650,6 +666,12 @@ void yargs(hideBin(process.argv))
   .command(mcpCommand)
   .command(manifestCommand)
   .command(ciBootstrapCommand)
+  .command(tasksCommand)
+  .command(taskCommand)
+  .command(sessionsCommand)
+  .command(sessionCommand)
+  .command(resumeCommand)
+  .command(orchestrationCommand)
   .example('$0', 'Run the interactive setup wizard')
   .example('$0 --ci --install-dir .', 'Run in CI mode (OAuth + auto-select)')
   .example(
