@@ -103,59 +103,74 @@ async function createPlannedEventsViaHttp(
   | { kind: 'error'; message: string; notFound: boolean }
 > {
   const url = `${getWizardProxyBase(zone)}/v1/planned-events`;
-  try {
-    const response = await axios.post(
-      url,
-      { appId, events },
-      {
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          'Content-Type': 'application/json',
-          'User-Agent': WIZARD_USER_AGENT,
+  // One-shot retry on a transient 401 — same rationale as
+  // `createAmplitudeApp` in api.ts: the proxy's 30s negative-cache for
+  // failed token introspections (#114330) means looping past a single
+  // retry just produces fast 401s with no recovery. One retry rides
+  // through a token-refresh / clock-skew blip without burning the cache.
+  const MAX_AUTH_RETRIES = 1;
+  let authAttempt = 0;
+  for (;;) {
+    try {
+      const response = await axios.post(
+        url,
+        { appId, events },
+        {
+          headers: {
+            Authorization: `Bearer ${accessToken}`,
+            'Content-Type': 'application/json',
+            'User-Agent': WIZARD_USER_AGENT,
+          },
+          validateStatus: () => true,
+          timeout: PLANNED_EVENTS_HTTP_TIMEOUT_MS,
+          signal: abortSignal,
         },
-        validateStatus: () => true,
-        timeout: PLANNED_EVENTS_HTTP_TIMEOUT_MS,
-        signal: abortSignal,
-      },
-    );
+      );
 
-    if (response.status === 404) {
-      return {
-        kind: 'error',
-        message: 'planned-events endpoint not found',
-        notFound: true,
-      };
-    }
+      if (response.status === 401 && authAttempt < MAX_AUTH_RETRIES) {
+        authAttempt++;
+        logToFile('[commitPlannedEvents] 401 — retrying once');
+        continue;
+      }
 
-    if (response.status >= 200 && response.status < 300) {
-      const parsed = PlannedEventsSuccessSchema.safeParse(response.data);
-      if (parsed.success) {
+      if (response.status === 404) {
         return {
-          kind: 'ok',
-          createdEvents: parsed.data.eventTypes,
+          kind: 'error',
+          message: 'planned-events endpoint not found',
+          notFound: true,
         };
       }
-      logToFile(
-        `[commitPlannedEvents] planned-events success body parse failed: ${JSON.stringify(
-          response.data,
-        )}`,
-      );
-      return {
-        kind: 'error',
-        message: 'Invalid response from planned-events endpoint',
-        notFound: false,
-      };
-    }
 
-    const errParsed = PlannedEventsErrorSchema.safeParse(response.data);
-    const msg = errParsed.success
-      ? `${errParsed.data.error.code}: ${errParsed.data.error.message}`
-      : `HTTP ${response.status}`;
-    return { kind: 'error', message: msg, notFound: false };
-  } catch (err) {
-    const message = err instanceof Error ? err.message : String(err);
-    logToFile(`[commitPlannedEvents] planned-events HTTP error: ${message}`);
-    return { kind: 'error', message, notFound: false };
+      if (response.status >= 200 && response.status < 300) {
+        const parsed = PlannedEventsSuccessSchema.safeParse(response.data);
+        if (parsed.success) {
+          return {
+            kind: 'ok',
+            createdEvents: parsed.data.eventTypes,
+          };
+        }
+        logToFile(
+          `[commitPlannedEvents] planned-events success body parse failed: ${JSON.stringify(
+            response.data,
+          )}`,
+        );
+        return {
+          kind: 'error',
+          message: 'Invalid response from planned-events endpoint',
+          notFound: false,
+        };
+      }
+
+      const errParsed = PlannedEventsErrorSchema.safeParse(response.data);
+      const msg = errParsed.success
+        ? `${errParsed.data.error.code}: ${errParsed.data.error.message}`
+        : `HTTP ${response.status}`;
+      return { kind: 'error', message: msg, notFound: false };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      logToFile(`[commitPlannedEvents] planned-events HTTP error: ${message}`);
+      return { kind: 'error', message, notFound: false };
+    }
   }
 }
 
