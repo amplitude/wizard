@@ -787,6 +787,11 @@ export class OrchestrationStore {
       capability.userDecisionAt = nowIso;
     } else if (newState === McpStateEnum.NeedsUserChoice) {
       capability.userDecision = 'pending';
+      // Clear the stale decision timestamp from a previous installed/skipped
+      // state — consumers that infer "a decision has been made" from
+      // `userDecisionAt !== null` would otherwise see a stale truthy value
+      // even though the capability is back to pending.
+      capability.userDecisionAt = null;
     }
     saveStore(store);
     return capability;

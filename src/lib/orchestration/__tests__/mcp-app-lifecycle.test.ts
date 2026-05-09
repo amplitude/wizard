@@ -255,4 +255,42 @@ describe('OrchestrationStore — MCP capability CRUD', () => {
     expect(installed.userDecision).toBe('installed');
     expect(installed.userDecisionAt).not.toBeNull();
   });
+
+  it('clears userDecisionAt when transitioning back to NeedsUserChoice', () => {
+    const store = new OrchestrationStore(installDir);
+    const session = store.createSession({});
+    const cap = store.addMcpCapability({
+      kind: McpAppCapabilityKind.CursorInstall,
+      whyNeeded: 'editor MCP',
+      whatItEnables: 'cursor uses wizard tools',
+      required: false,
+      consequenceIfSkipped: 'cursor cannot call wizard',
+      safeToSkip: true,
+      reversible: true,
+      userDecisionResumeCommand: ['wizard', 'mcp', 'install'],
+      linkedSessionId: session.id,
+    });
+    store.transitionMcpCapability(
+      asMcpAppCapabilityId(cap.id),
+      McpAppCapabilityState.NeedsUserChoice,
+      'initial prompt',
+    );
+    const skipped = store.transitionMcpCapability(
+      asMcpAppCapabilityId(cap.id),
+      McpAppCapabilityState.InstallSkipped,
+      'user skipped',
+    );
+    // Skipping stamps userDecisionAt with an ISO timestamp.
+    expect(skipped.userDecisionAt).not.toBeNull();
+    const reAsked = store.transitionMcpCapability(
+      asMcpAppCapabilityId(cap.id),
+      McpAppCapabilityState.NeedsUserChoice,
+      're-asking after event-plan change',
+    );
+    // Decision is back to pending, so the stale "decided at" timestamp
+    // must be cleared. Consumers gating on `userDecisionAt !== null` were
+    // otherwise seeing a stale truthy value.
+    expect(reAsked.userDecision).toBe('pending');
+    expect(reAsked.userDecisionAt).toBeNull();
+  });
 });
