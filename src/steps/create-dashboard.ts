@@ -221,14 +221,14 @@ export async function createDashboardStep(
     // OutroScreen, `/diagnostics`, and repeat runs see the URL. Best-effort.
     persistDashboard(session.installDir, result);
 
-    // PR 4 wiring: record a `dashboard_setup` Choice as answered=create
-    // and add a `dashboard_correctness` Verification. Best-effort.
+    // PR 4 wiring: record a `dashboard_setup` Choice as answered=create.
+    // The matching `dashboard_correctness` verification is recorded by
+    // `store.setChecklistDashboardUrl` (triggered via `ui.setDashboardUrl`
+    // below) — recording it here too would create a duplicate pending
+    // verification for the same URL since verifications have no dedup.
     try {
-      const {
-        recordDashboardSetupChoice,
-        answerChoiceByPromptId,
-        recordDashboardCorrectnessVerification,
-      } = await import('../lib/orchestration/wiring.js');
+      const { recordDashboardSetupChoice, answerChoiceByPromptId } =
+        await import('../lib/orchestration/wiring.js');
       recordDashboardSetupChoice({
         installDir: session.installDir,
         trigger: 'auto',
@@ -239,10 +239,6 @@ export async function createDashboardStep(
         'create',
         'automation',
       );
-      recordDashboardCorrectnessVerification({
-        installDir: session.installDir,
-        dashboardUrl: result.dashboardUrl,
-      });
     } catch {
       // Non-fatal.
     }
