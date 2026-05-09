@@ -429,8 +429,8 @@ function appendThroughFd(
   getFd: () => { fd: number | null; cachedPath: string | null },
   setFd: (fd: number | null, cachedPath: string | null) => void,
 ): void {
-  let { fd } = getFd();
-  const { cachedPath } = getFd();
+  const { fd: initialFd, cachedPath } = getFd();
+  let fd = initialFd;
   const fileMissing = !existsSync(path);
 
   // Path changed (setProjectLogFile / configureLogFile / rotation) OR
