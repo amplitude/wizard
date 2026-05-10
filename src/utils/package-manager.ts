@@ -226,7 +226,7 @@ export const EXPO: PackageManager = {
   },
 };
 
-export const packageManagers = [BUN, YARN_V1, YARN_V2, PNPM, NPM, EXPO];
+const packageManagers = [BUN, YARN_V1, YARN_V2, PNPM, NPM, EXPO];
 
 export function detectAllPackageManagers({
   installDir,

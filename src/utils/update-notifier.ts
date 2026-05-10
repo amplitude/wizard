@@ -102,7 +102,7 @@ async function fetchLatestVersion(
   }
 }
 
-export function shouldCheckForUpdates(): boolean {
+function shouldCheckForUpdates(): boolean {
   if (process.env.AMPLITUDE_WIZARD_NO_UPDATE_CHECK === '1') return false;
   if (process.env.NO_UPDATE_NOTIFIER) return false;
   if (process.env.DO_NOT_TRACK === '1') return false;
@@ -124,7 +124,7 @@ export interface UpdateCheckResult {
  *
  * @returns The detected result (for tests), or null if skipped.
  */
-export async function checkForUpdate(
+async function checkForUpdate(
   pkgName: string,
   currentVersion: string,
   options: { timeoutMs?: number; force?: boolean } = {},

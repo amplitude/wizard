@@ -200,7 +200,7 @@ export function getLegacyAmpliHomeOAuthPath(): string {
  * it's a transient download immediately extracted into `<installDir>/.claude/`.
  * `os.tmpdir()` is used (not literal `/tmp/`) so the wizard works on Windows.
  */
-export function skillDownloadPath(skillId: string): string {
+function skillDownloadPath(skillId: string): string {
   return join(tmpdir(), `amplitude-skill-${skillId}.zip`);
 }
 

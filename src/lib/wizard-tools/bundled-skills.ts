@@ -495,7 +495,7 @@ export function buildSkillMenuFileContent(): SkillMenuFileContent {
  * the caller falls back to the in-prompt menu so a write failure never
  * blocks the run.
  */
-export function writeSkillMenuFile(installDir: string): string | null {
+function writeSkillMenuFile(installDir: string): string | null {
   const skillsDir = path.join(installDir, '.claude', 'skills');
   const menuPath = path.join(skillsDir, SKILL_MENU_FILENAME);
   try {

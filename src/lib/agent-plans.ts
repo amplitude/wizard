@@ -35,7 +35,7 @@ import {
 // ── Plan shape ──────────────────────────────────────────────────────
 
 /** A single file the inner agent intends to create or modify. */
-export const FileChangeSchema = z.object({
+const FileChangeSchema = z.object({
   /** Path relative to `installDir`. Never absolute, never escapes the project root. */
   path: z.string().min(1).max(512),
   operation: z.enum(['create', 'modify', 'delete']),
@@ -44,7 +44,7 @@ export const FileChangeSchema = z.object({
 export type FileChange = z.infer<typeof FileChangeSchema>;
 
 /** A single event the inner agent intends to instrument. */
-export const PlannedEventSchema = z.object({
+const PlannedEventSchema = z.object({
   name: z.string().min(1).max(80),
   description: z.string().max(500),
 });

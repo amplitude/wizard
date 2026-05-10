@@ -47,7 +47,7 @@ function* mockQueryGenerator(): Generator<SDKMessage, void> {
   };
 }
 
-export function query(_input: QueryInput): Generator<SDKMessage, void> {
+function query(_input: QueryInput): Generator<SDKMessage, void> {
   return mockQueryGenerator();
 }
 
@@ -77,7 +77,7 @@ export interface MockToolDefinition {
   handler: MockToolHandler;
 }
 
-export function tool(
+function tool(
   name: string,
   description: string,
   inputSchema: unknown,
@@ -96,7 +96,7 @@ export interface MockMcpSdkServerConfigWithInstance {
   instance: MockMcpServerInstance;
 }
 
-export function createSdkMcpServer(config: {
+function createSdkMcpServer(config: {
   name: string;
   version: string;
   tools: MockToolDefinition[];

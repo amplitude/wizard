@@ -208,7 +208,7 @@ const SKILL_MENU_FETCH_TIMEOUT_MS = 15_000;
  * the caller falls back to bundled skills, so silently swallowing a slow
  * network is the correct behavior).
  */
-export async function fetchSkillMenu(
+async function fetchSkillMenu(
   skillsBaseUrl: string,
 ): Promise<SkillMenu | null> {
   const menuUrl = `${skillsBaseUrl}/skill-menu.json`;
@@ -784,7 +784,7 @@ export function resolveEnvPath(
  * breaks those workflows and encourages putting API keys in tracked files.
  * Browser Amplitude keys should live in `*.local` siblings instead.
  */
-export const SHARED_COMMITTED_ENV_BASENAMES: ReadonlySet<string> = new Set([
+const SHARED_COMMITTED_ENV_BASENAMES: ReadonlySet<string> = new Set([
   '.env',
   '.env.development',
   '.env.production',

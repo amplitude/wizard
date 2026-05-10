@@ -43,7 +43,7 @@ function toPosix(p: string): string {
  * Walk `root` recursively, returning a map of repo-relative POSIX
  * paths to file metadata.
  */
-export function snapshotDir(root: string): FsSnapshot['files'] {
+function snapshotDir(root: string): FsSnapshot['files'] {
   const out: FsSnapshot['files'] = {};
   const stack: string[] = [root];
   while (stack.length > 0) {
@@ -85,7 +85,7 @@ export function snapshotDir(root: string): FsSnapshot['files'] {
  *
  * Path lists are sorted so scorer reports diff stably across runs.
  */
-export function diffSnapshots(
+function diffSnapshots(
   pristine: FsSnapshot['files'],
   working: FsSnapshot['files'],
 ): FsSnapshot['diff'] {

@@ -82,7 +82,7 @@ export function brandGradient(text: string): string {
  * Syntax-highlight a code string for terminal display.
  * Returns the original string if highlighting fails.
  */
-export function highlightCode(code: string, language?: string): string {
+function highlightCode(code: string, language?: string): string {
   try {
     return highlight(code, { language, ignoreIllegals: true });
   } catch {

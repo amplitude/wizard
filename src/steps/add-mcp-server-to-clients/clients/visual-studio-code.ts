@@ -5,7 +5,7 @@ import { DefaultMCPClient, MCPServerConfig } from '../MCPClient';
 import { buildMCPUrl } from '../defaults';
 import type { CloudRegion } from '../../../utils/types';
 
-export const VisualStudioCodeMCPConfig = z
+const VisualStudioCodeMCPConfig = z
   .object({
     servers: z.record(
       z.string(),

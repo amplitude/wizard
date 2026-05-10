@@ -93,7 +93,7 @@ interface FileWritesPanelProps {
  * even the basename overflows, falls back to middle-truncation of the
  * basename so we never wrap.
  */
-export const truncatePathHead = (raw: string, maxWidth: number): string => {
+const truncatePathHead = (raw: string, maxWidth: number): string => {
   if (raw.length <= maxWidth || maxWidth <= 1) return raw;
   const segments = raw.split('/');
   const basename = segments[segments.length - 1] ?? raw;

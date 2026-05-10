@@ -185,7 +185,7 @@ export function parseEnvSelectionStdinLine(line: string | null | undefined): {
  * plus the `manualEntry` hint so an orchestrator can prompt the user
  * for `--app-id <id>` directly.
  */
-export const MAX_ENV_SELECTION_CHOICES = 50;
+const MAX_ENV_SELECTION_CHOICES = 50;
 
 // ── NDJSON event types ──────────────────────────────────────────────
 

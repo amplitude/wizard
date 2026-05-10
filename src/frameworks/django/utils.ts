@@ -282,7 +282,7 @@ export async function findDjangoSettingsFile(
 /**
  * Find the main Django urls.py file
  */
-export async function findDjangoUrlsFile(
+async function findDjangoUrlsFile(
   options: Pick<WizardOptions, 'installDir'>,
 ): Promise<string | undefined> {
   const { installDir } = options;

@@ -5,7 +5,7 @@ import { DefaultMCPClientConfig } from '../defaults';
 import type { CloudRegion } from '../../../utils/types';
 import { z } from 'zod';
 
-export const ClaudeMCPConfig = DefaultMCPClientConfig;
+const ClaudeMCPConfig = DefaultMCPClientConfig;
 
 export type ClaudeMCPConfig = z.infer<typeof DefaultMCPClientConfig>;
 

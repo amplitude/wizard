@@ -181,7 +181,7 @@ export const getInstalledClients = async (
   return installedClients;
 };
 
-export const addMCPServer = async (
+const addMCPServer = async (
   clients: MCPClient[],
   personalApiKey?: string,
   selectedFeatures?: string[],

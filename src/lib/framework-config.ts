@@ -267,7 +267,7 @@ export interface UIConfig<
 /**
  * Generate welcome message from framework name
  */
-export function getWelcomeMessage(frameworkName: string): string {
+function getWelcomeMessage(frameworkName: string): string {
   return `Amplitude ${frameworkName} wizard (agent-powered)`;
 }
 

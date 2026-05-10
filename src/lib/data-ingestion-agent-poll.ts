@@ -4,7 +4,7 @@ import type { WizardSession } from './wizard-session.js';
 export const DATA_INGESTION_POLL_BACKOFF_START_MS = 5_000;
 
 /** Added to the prior delay each cycle until the cap is reached (ms). */
-export const DATA_INGESTION_POLL_BACKOFF_STEP_MS = 5_000;
+const DATA_INGESTION_POLL_BACKOFF_STEP_MS = 5_000;
 
 /** Ceiling for inter-poll delay (ms). */
 export const DATA_INGESTION_POLL_BACKOFF_CAP_MS = 30_000;

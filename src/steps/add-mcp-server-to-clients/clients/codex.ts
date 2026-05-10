@@ -11,7 +11,7 @@ import type { CloudRegion } from '../../../utils/types';
 
 import { analytics } from '../../../utils/analytics';
 
-export const CodexMCPConfig = DefaultMCPClientConfig;
+const CodexMCPConfig = DefaultMCPClientConfig;
 
 export type CodexMCPConfig = z.infer<typeof DefaultMCPClientConfig>;
 

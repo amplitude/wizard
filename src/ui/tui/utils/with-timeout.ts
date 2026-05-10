@@ -5,7 +5,7 @@
  * Every API call in screens should be wrapped in this.
  */
 
-export class TimeoutError extends Error {
+class TimeoutError extends Error {
   constructor(label: string, ms: number) {
     super(`${label} timed out after ${ms}ms`);
     this.name = 'TimeoutError';

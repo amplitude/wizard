@@ -75,7 +75,7 @@ const ENV_KEY_NAME = 'AMPLITUDE_API_KEY';
 // every test file has been updated.
 
 /** @deprecated No-op since the keychain backend was removed. */
-export function __setBinaryAvailableForTests(
+function __setBinaryAvailableForTests(
   _name: string,
   _available: boolean | undefined,
 ): void {
@@ -83,7 +83,7 @@ export function __setBinaryAvailableForTests(
 }
 
 /** @deprecated No-op since the keychain backend was removed. */
-export function __resetHeadlessCacheForTests(): void {
+function __resetHeadlessCacheForTests(): void {
   // Intentionally empty — preserved for test back-compat only.
 }
 
