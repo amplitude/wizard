@@ -140,13 +140,3 @@ export const Layout = {
   hintBarHeight: 1,
   separatorChar: '─',
 } as const;
-
-// ── Alignment ────────────────────────────────────────────────────────
-
-export enum HAlign {
-  Left = 'flex-start',
-}
-
-export enum VAlign {
-  Top = 'flex-start',
-}
