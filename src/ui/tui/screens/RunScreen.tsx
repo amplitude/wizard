@@ -139,24 +139,37 @@ export function resolveRunScreenStatus(store: WizardStore): string | undefined {
   return resolveRunStatusPill(store);
 }
 
-/** Compact inline display of planned event names. */
+/** Vertical list of planned event names + descriptions. */
 const InlineEventPlan = ({ store }: { store: WizardStore }) => {
   const events = store.eventPlan.filter((e) => e.name);
   if (events.length === 0) return null;
 
-  // Tight stacking — the bold "Events:" prefix is the visual separator.
-  // `wrap="truncate-end"` keeps the row on a single line on narrow
-  // terminals (the Events list can run long once the agent fills it
-  // in); otherwise it would wrap and visually compete with the panels
-  // below it for vertical real estate.
+  // Vertical bullet list. The Progress tab has a screen-full of
+  // empty space below the active task list once Wiring is the
+  // focused step; the previous single-line `truncate-end` row
+  // stuffed every event name into one truncated line ending in
+  // "…" even when there were 30 free rows below it. Now each
+  // event gets its own row with name + description on a soft-wrap
+  // boundary so long names stay readable and the user can audit
+  // the plan they just approved without flipping to /events.
   return (
-    <Box flexDirection="column">
-      <Text color={Colors.secondary} wrap="truncate-end">
-        <Text bold color={Colors.accent}>
-          {Icons.diamond} Events:
-        </Text>{' '}
-        {events.map((e) => e.name).join(', ')}
+    <Box flexDirection="column" marginTop={1}>
+      <Text bold color={Colors.accent}>
+        {Icons.diamond} Events ({events.length})
       </Text>
+      {events.map((e, i) => (
+        <Box key={`${e.name}-${i}`} flexDirection="row">
+          <Text color={Colors.muted}> · </Text>
+          <Box flexDirection="column" flexGrow={1}>
+            <Text color={Colors.secondary}>
+              <Text bold>{e.name}</Text>
+              {e.description ? (
+                <Text color={Colors.muted}> — {e.description}</Text>
+              ) : null}
+            </Text>
+          </Box>
+        </Box>
+      ))}
     </Box>
   );
 };
