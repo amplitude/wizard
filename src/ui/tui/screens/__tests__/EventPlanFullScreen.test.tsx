@@ -127,4 +127,81 @@ describe('EventPlanFullScreen', () => {
     // what triggers resolveEventPlan({decision: 'revised'}).
     expect(resolveSpy).not.toHaveBeenCalled();
   });
+
+  describe('conversational mode (round ≥ 2)', () => {
+    it('renders prior-feedback quote and +N/−M deltas after a revised round', async () => {
+      // Round 1: agent proposes a 3-event plan.
+      const round1 = [
+        { name: 'User Signed Up', description: 'Fires on signup.' },
+        { name: 'User Signed In', description: 'Fires on login.' },
+        { name: 'Page Viewed', description: 'Fires on page view.' },
+      ];
+      const promise1 = store.promptEventPlan(round1);
+      // User gives feedback. Resolving with `revised` stashes the
+      // feedback to pair with the NEXT promptEventPlan.
+      store.resolveEventPlan({
+        decision: 'revised',
+        feedback: 'rename to snake_case and drop page_viewed',
+      });
+      await promise1;
+
+      // Round 2: agent's revised plan — 2 renamed events, page_viewed
+      // dropped.
+      const round2 = [
+        { name: 'user_signed_up', description: 'Fires on signup.' },
+        { name: 'user_signed_in', description: 'Fires on login.' },
+      ];
+      void store.promptEventPlan(round2);
+
+      const { lastFrame } = render(
+        <EventPlanFullScreen
+          store={store}
+          events={round2}
+          width={120}
+          height={30}
+        />,
+      );
+      const frame = lastFrame() ?? '';
+      // Conversational title + quoted feedback + delta line.
+      expect(frame).toContain('Round 2 — revised after your feedback');
+      expect(frame).toContain('rename to snake_case and drop page_viewed');
+      expect(frame).toContain('+2 added');
+      expect(frame).toContain('−3 removed'); // all 3 prior names removed (renamed = remove + add)
+      // Removed events render struck-through (still visible so the user
+      // can audit what the AI dropped).
+      expect(frame).toContain('Page Viewed');
+      // New events render with `+` glyph.
+      expect(frame).toContain('user_signed_up');
+      expect(frame).toContain('user_signed_in');
+    });
+
+    it('round 1 (initial proposal) still shows the simple title — no convo header', () => {
+      const round1 = [
+        { name: 'evt_a', description: 'A' },
+        { name: 'evt_b', description: 'B' },
+      ];
+      void store.promptEventPlan(round1);
+      const { lastFrame } = render(
+        <EventPlanFullScreen
+          store={store}
+          events={round1}
+          width={120}
+          height={30}
+        />,
+      );
+      const frame = lastFrame() ?? '';
+      expect(frame).toContain('Suggested events for your app:');
+      expect(frame).not.toContain('Round 2');
+      expect(frame).not.toContain('You:');
+    });
+
+    it('approving clears round history so a future plan starts a fresh conversation', async () => {
+      const initial = [{ name: 'a', description: '' }];
+      const promise = store.promptEventPlan(initial);
+      expect(store.eventPlanRounds).toHaveLength(1);
+      store.resolveEventPlan({ decision: 'approved' });
+      await promise;
+      expect(store.eventPlanRounds).toHaveLength(0);
+    });
+  });
 });

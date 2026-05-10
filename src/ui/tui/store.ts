@@ -94,6 +94,31 @@ export interface PlannedEvent {
 }
 
 /**
+ * One round of the event-plan ↔ user feedback loop.
+ *
+ * Captured each time the agent calls `promptEventPlan` so the approval
+ * screen can render the conversation between the user and the AI:
+ * round 1 is the AI's first proposal (`feedback: null`); round N>1 is
+ * the AI's revision after the user's `feedback` from round N-1's `[F]`
+ * decision.
+ *
+ * The history is cleared on `approved` / `skipped` (the loop is over)
+ * and intentionally NOT serialized — it's purely UI scaffolding for the
+ * current session.
+ */
+export interface EventPlanRound {
+  /** Wall-clock ms when this round was opened. */
+  at: number;
+  /** Plan the AI proposed in this round. */
+  plan: PlannedEvent[];
+  /**
+   * User feedback from the prior round that caused this revision.
+   * `null` only for the very first round.
+   */
+  feedback: string | null;
+}
+
+/**
  * One row of the FileWritesPanel — bound to a single
  * `recordFileChangePlanned` → `recordFileChangeApplied` pair from the
  * inner agent. `path` is keyed on the absolute path the inner agent
@@ -153,6 +178,17 @@ export class WizardStore {
   private $statusMessages = atom<string[]>([]);
   private $tasks = atom<TaskItem[]>([]);
   private $eventPlan = atom<PlannedEvent[]>([]);
+  /**
+   * Conversation history of plan ↔ feedback rounds. See `EventPlanRound`
+   * doc — feeds the conversational mode of EventPlanFullScreen.
+   */
+  private $eventPlanRounds = atom<EventPlanRound[]>([]);
+  /**
+   * Feedback the user typed in the immediately-prior `[F]` decision —
+   * pairs with the NEXT `promptEventPlan` call to construct the new
+   * round. Cleared on consume and on terminal decisions.
+   */
+  private pendingPlanFeedback: string | null = null;
   /**
    * Live list of file writes the inner agent has issued during the run.
    * Bounded to the most recent MAX_FILE_WRITES entries (FIFO eviction)
@@ -300,6 +336,15 @@ export class WizardStore {
 
   get eventPlan(): PlannedEvent[] {
     return this.$eventPlan.get();
+  }
+
+  /**
+   * Round-by-round history of the plan ↔ feedback loop. Empty until the
+   * agent's first `promptEventPlan` lands; cleared on
+   * `approved` / `skipped`.
+   */
+  get eventPlanRounds(): EventPlanRound[] {
+    return this.$eventPlanRounds.get();
   }
 
   get fileWrites(): FileWriteEntry[] {
@@ -1183,15 +1228,37 @@ export class WizardStore {
     }
   }
 
-  /** Show an event-plan confirmation. Resolves when the user approves, skips, or gives feedback. */
+  /**
+   * Show an event-plan confirmation. Resolves when the user approves, skips,
+   * or gives feedback.
+   *
+   * Each call appends an `EventPlanRound` to the history so the screen can
+   * render the conversation. Round 1 has `feedback: null`; subsequent
+   * rounds carry the feedback the user typed in the prior `[F]` decision
+   * (consumed from `pendingPlanFeedback`).
+   */
   promptEventPlan(events: PlannedEvent[]): Promise<EventPlanDecision> {
     return new Promise((resolve) => {
+      const round: EventPlanRound = {
+        at: Date.now(),
+        plan: events,
+        feedback: this.pendingPlanFeedback,
+      };
+      this.pendingPlanFeedback = null;
+      this.$eventPlanRounds.set([...this.$eventPlanRounds.get(), round]);
       this.$pendingPrompt.set({ kind: 'event-plan', events, resolve });
       this.emitChange();
     });
   }
 
-  /** Resolve the pending event-plan prompt. */
+  /**
+   * Resolve the pending event-plan prompt.
+   *
+   * On `revised`: stash the feedback so it pairs with the next
+   * `promptEventPlan` call (the agent's response). On `approved` or
+   * `skipped`: the loop is over, drop the round history so a future plan
+   * proposal in the same session starts a fresh conversation.
+   */
   resolveEventPlan(decision: EventPlanDecision): void {
     const prompt = this.$pendingPrompt.get();
     if (!prompt || prompt.kind !== 'event-plan') return;
@@ -1199,6 +1266,12 @@ export class WizardStore {
       'prompt kind': 'event-plan',
       response: typeof decision === 'object' ? 'feedback' : String(decision),
     });
+    if (typeof decision === 'object' && decision.decision === 'revised') {
+      this.pendingPlanFeedback = decision.feedback;
+    } else {
+      this.pendingPlanFeedback = null;
+      this.$eventPlanRounds.set([]);
+    }
     this.$pendingPrompt.set(null);
     this.emitChange();
     prompt.resolve(decision);
