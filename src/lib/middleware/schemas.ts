@@ -53,21 +53,17 @@ const sdkContentBlockSchema: z.ZodType<SDKContentBlock> = z
   })
   .passthrough();
 
-const sdkCompactMetadataSchema: z.ZodType<SDKCompactMetadata> = z.object(
-  {
-    pre_tokens: z.number().optional(),
-    trigger: z.string().optional(),
-  },
-);
+const sdkCompactMetadataSchema: z.ZodType<SDKCompactMetadata> = z.object({
+  pre_tokens: z.number().optional(),
+  trigger: z.string().optional(),
+});
 
-const sdkModelUsageEntrySchema: z.ZodType<SDKModelUsageEntry> = z.object(
-  {
-    inputTokens: z.number().optional(),
-    outputTokens: z.number().optional(),
-    cacheCreationInputTokens: z.number().optional(),
-    cacheReadInputTokens: z.number().optional(),
-  },
-);
+const sdkModelUsageEntrySchema: z.ZodType<SDKModelUsageEntry> = z.object({
+  inputTokens: z.number().optional(),
+  outputTokens: z.number().optional(),
+  cacheCreationInputTokens: z.number().optional(),
+  cacheReadInputTokens: z.number().optional(),
+});
 
 const sdkMessageBodySchema = z
   .object({

@@ -1,7 +1,7 @@
 import { KEYS } from './index';
 import type { WizardStep } from './framework-test-types';
 
-const DEFAULT_WIZARD_STEPS: WizardStep[] = [
+export const DEFAULT_WIZARD_STEPS: WizardStep[] = [
   // {
   //   name: 'uncommitted',
   //   waitFor: 'You have uncommitted or untracked files in your repo:',

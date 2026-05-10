@@ -135,16 +135,3 @@ export function buildAiSdkAgentTools(opts: AiSdkAgentToolsOptions): ToolSet {
 
   return tools;
 }
-
-/**
- * Names of every NATIVE AI-SDK tool the runner advertises (i.e. tools
- * built in this file, not bridged from the wizard-tools MCP). The
- * bridged tool names live in the bridge's `toolNames` field at runtime.
- *
- * Used by diagnostics and tests; not consumed by the policy layer
- * (which keys on the normalized name instead — see
- * `normalizeAiSdkToolName` in `run-agent.ts`).
- */
-const AI_SDK_AGENT_TOOL_NAMES = ['write_file'] as const;
-
-export type AiSdkAgentToolName = (typeof AI_SDK_AGENT_TOOL_NAMES)[number];
