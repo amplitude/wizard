@@ -3,10 +3,10 @@ import { describe, expect, it, vi, beforeEach } from 'vitest';
 
 import { EventPlanFullScreen } from '../EventPlanFullScreen.js';
 import { WizardStore } from '../../store.js';
-import { defaultFlow } from '../../flows.js';
+import { Flow } from '../../flows.js';
 
 function makeStore() {
-  return new WizardStore(defaultFlow);
+  return new WizardStore(Flow.Wizard);
 }
 
 const sampleEvents = (n: number) =>
