@@ -6,7 +6,7 @@ import { DefaultMCPClientConfig, getNativeHTTPServerConfig } from '../defaults';
 import type { CloudRegion } from '../../../utils/types';
 import { z } from 'zod';
 
-export const CursorMCPConfig = DefaultMCPClientConfig;
+const CursorMCPConfig = DefaultMCPClientConfig;
 
 export type CursorMCPConfig = z.infer<typeof DefaultMCPClientConfig>;
 

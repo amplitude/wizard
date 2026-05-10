@@ -145,6 +145,6 @@ export function buildAiSdkAgentTools(opts: AiSdkAgentToolsOptions): ToolSet {
  * (which keys on the normalized name instead — see
  * `normalizeAiSdkToolName` in `run-agent.ts`).
  */
-export const AI_SDK_AGENT_TOOL_NAMES = ['write_file'] as const;
+const AI_SDK_AGENT_TOOL_NAMES = ['write_file'] as const;
 
 export type AiSdkAgentToolName = (typeof AI_SDK_AGENT_TOOL_NAMES)[number];

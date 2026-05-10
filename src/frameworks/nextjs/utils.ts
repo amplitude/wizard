@@ -11,7 +11,7 @@ export enum NextJsRouter {
   PAGES_ROUTER = 'pages-router',
 }
 
-export const IGNORE_PATTERNS = [
+const IGNORE_PATTERNS = [
   '**/node_modules/**',
   '**/dist/**',
   '**/build/**',

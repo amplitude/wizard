@@ -7,7 +7,7 @@ import { getDotGitignore } from '../utils/file-utils';
 import * as fs from 'fs';
 import path from 'path';
 
-export async function addOrUpdateEnvironmentVariablesStep({
+async function addOrUpdateEnvironmentVariablesStep({
   installDir,
   variables,
   integration,

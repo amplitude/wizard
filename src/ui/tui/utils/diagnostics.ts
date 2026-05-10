@@ -19,7 +19,7 @@ export interface FlowStepEvaluation {
 }
 
 /** Walk the flow pipeline and explain each routing decision. */
-export function evaluateFlow(
+function evaluateFlow(
   session: WizardSession,
   flow: Flow = Flow.Wizard,
 ): FlowStepEvaluation[] {

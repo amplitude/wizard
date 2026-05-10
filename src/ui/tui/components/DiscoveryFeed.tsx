@@ -140,4 +140,3 @@ export const DiscoveryFeed = ({
 };
 
 // Re-export for tests that want to assert the reveal cadence.
-export { REVEAL_STEP_MS };

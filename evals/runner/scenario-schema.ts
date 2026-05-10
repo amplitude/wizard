@@ -20,7 +20,7 @@ import { FRAMEWORK_TO_SDK } from './framework-sdk-table.js';
  */
 const RingSchema = z.union([z.literal(1), z.literal(2), z.literal(3)]);
 
-export const ScenarioSchema = z
+const ScenarioSchema = z
   .object({
     name: z.string().min(1, 'scenario name must be non-empty'),
     ring: RingSchema,

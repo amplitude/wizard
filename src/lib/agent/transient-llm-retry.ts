@@ -203,7 +203,7 @@ export function isPayloadShapeRejection(err: StructuredUpstreamError): boolean {
   return err.status === 400 && err.upstream !== undefined;
 }
 
-export const AGENT_TRANSIENT_SDK_OUTPUT_PATTERNS = [
+const AGENT_TRANSIENT_SDK_OUTPUT_PATTERNS = [
   { pattern: 'API Error: 400', label: 'api_400' },
   { pattern: 'API Error: 408', label: 'api_408' },
   // 502 / 504 are transient gateway-frontend failures (Vertex backend hop

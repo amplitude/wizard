@@ -761,7 +761,7 @@ query branches($orgId: ID!, $projectId: ID!) {
 }`;
 
 /** Fetches branches for a project. */
-export async function fetchBranches(
+async function fetchBranches(
   idToken: string,
   zone: AmplitudeZone,
   orgId: string,
@@ -907,7 +907,7 @@ query OwnedDashboards {
  * Returns { hasCharts: false, hasDashboards: false } on any error so the
  * checklist falls back to the default empty state rather than crashing.
  */
-export async function fetchOwnedDashboards(
+async function fetchOwnedDashboards(
   accessToken: string,
   zone: AmplitudeZone,
   orgId: string,
@@ -1017,7 +1017,7 @@ query sources($orgId: ID!, $projectId: ID!, $branchId: ID!, $versionId: ID!) {
 }`;
 
 /** Fetches sources for a specific branch version. */
-export async function fetchSources(
+async function fetchSources(
   idToken: string,
   zone: AmplitudeZone,
   orgId: string,
@@ -1459,8 +1459,8 @@ function handleApiError(error: unknown, operation: string): ApiError {
 
 // ── Legacy stubs — kept so files referencing the old Amplitude types compile ──
 
-export const ApiUserSchema = z.object({ distinct_id: z.string() });
-export const ApiProjectSchema = z.object({
+const ApiUserSchema = z.object({ distinct_id: z.string() });
+const ApiProjectSchema = z.object({
   id: z.number(),
   uuid: z.string(),
   organization: z.string(),
@@ -1472,7 +1472,7 @@ export type ApiProject = z.infer<typeof ApiProjectSchema>;
 
 /** @deprecated Amplitude stub. Use fetchAmplitudeUser instead. */
 // eslint-disable-next-line @typescript-eslint/require-await
-export async function fetchUserData(
+async function fetchUserData(
   _accessToken: string,
   _baseUrl: string,
 ): Promise<ApiUser> {
@@ -1483,7 +1483,7 @@ export async function fetchUserData(
 
 /** @deprecated Amplitude stub. Use fetchAmplitudeUser instead. */
 // eslint-disable-next-line @typescript-eslint/require-await
-export async function fetchProjectData(
+async function fetchProjectData(
   _accessToken: string,
   _projectId: number,
   _baseUrl: string,

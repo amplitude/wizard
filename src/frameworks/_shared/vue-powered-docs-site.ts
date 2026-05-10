@@ -6,7 +6,7 @@ import { hasPackageInstalled } from '../../utils/package-json';
  * presentation tooling, not product Vue applications. The Vue wizard targets
  * SPA entrypoints; these should use the generic browser (JavaScript Web) path.
  */
-export const VUE_POWERED_DOCS_SITE_PACKAGES = [
+const VUE_POWERED_DOCS_SITE_PACKAGES = [
   'vitepress',
   'vuepress',
   'vuepress-vite',

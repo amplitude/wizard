@@ -169,7 +169,7 @@ export function findCallsByName(
  * scope (not inside a function, class, block, etc.) — useful for
  * "init() must not run at module scope of a Server Component."
  */
-export function isAtModuleScope(
+function isAtModuleScope(
   call: ts.CallExpression,
   source: ts.SourceFile,
 ): boolean {

@@ -655,7 +655,7 @@ export async function refreshAccessToken(
 export type OAuthConfig = { scopes: string[]; signup?: boolean };
 
 /** @deprecated Use performAmplitudeAuth() directly. */
-export async function performOAuthFlow(
+async function performOAuthFlow(
   _config: OAuthConfig,
 ): Promise<OAuthTokenResponse> {
   const result = await performAmplitudeAuth({});

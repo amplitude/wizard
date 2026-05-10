@@ -6,7 +6,7 @@
  */
 export type WizardMode = 'fast' | 'standard' | 'thorough';
 
-export const WIZARD_MODES: readonly WizardMode[] = [
+const WIZARD_MODES: readonly WizardMode[] = [
   'fast',
   'standard',
   'thorough',

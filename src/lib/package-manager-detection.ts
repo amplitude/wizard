@@ -299,7 +299,7 @@ const BUNDLER: DetectedPackageManager = {
   runCommand: 'bundle exec',
 };
 
-export function bundlerPackageManager(): Promise<PackageManagerInfo> {
+function bundlerPackageManager(): Promise<PackageManagerInfo> {
   return Promise.resolve({
     detected: [BUNDLER],
     primary: BUNDLER,

@@ -5,7 +5,7 @@ import { spawn, execSync } from 'child_process';
 import type { ChildProcess } from 'child_process';
 import { dim, green, red } from '../../src/utils/logging';
 
-export const KEYS = {
+const KEYS = {
   UP: '\u001b[A',
   DOWN: '\u001b[B',
   LEFT: '\u001b[D',
@@ -14,9 +14,9 @@ export const KEYS = {
   SPACE: ' ',
 };
 
-export const TEST_ARGS = {};
+const TEST_ARGS = {};
 
-export const log = {
+const log = {
   success: (message: string) => {
     green(`[SUCCESS] ${message}`);
   },
@@ -28,7 +28,7 @@ export const log = {
   },
 };
 
-export class WizardTestEnv {
+class WizardTestEnv {
   taskHandle: ChildProcess;
 
   constructor(
@@ -165,7 +165,7 @@ export class WizardTestEnv {
  * Initialize a git repository in the given directory
  * @param projectDir
  */
-export function initGit(projectDir: string): void {
+function initGit(projectDir: string): void {
   try {
     execSync('git init', { cwd: projectDir });
     // Add all files to the git repo
@@ -189,7 +189,7 @@ export function initGit(projectDir: string): void {
  * if in doubt, please commit your local non-test changes first!
  * @param projectDir
  */
-export function cleanupGit(projectDir: string): void {
+function cleanupGit(projectDir: string): void {
   try {
     // Remove the .git directory
     execSync(`rm -rf ${projectDir}/.git`);
@@ -207,7 +207,7 @@ export function cleanupGit(projectDir: string): void {
  *
  * @param projectDir
  */
-export function revertLocalChanges(projectDir: string): void {
+function revertLocalChanges(projectDir: string): void {
   try {
     // Revert tracked files
     execSync('git checkout .', { cwd: projectDir });
@@ -226,7 +226,7 @@ export function revertLocalChanges(projectDir: string): void {
  *
  * @returns WizardTestEnv
  */
-export function startWizardInstance(
+function startWizardInstance(
   projectDir: string,
   debug = false,
 ): WizardTestEnv {
@@ -248,7 +248,7 @@ export function startWizardInstance(
  * @param filePath
  * @param content
  */
-export function createFile(filePath: string, content?: string) {
+function createFile(filePath: string, content?: string) {
   return fs.writeFileSync(filePath, content || '');
 }
 
@@ -259,7 +259,7 @@ export function createFile(filePath: string, content?: string) {
  * @param oldContent
  * @param newContent
  */
-export function modifyFile(
+function modifyFile(
   filePath: string,
   replaceMap: Record<string, string>,
 ) {
@@ -279,7 +279,7 @@ export function modifyFile(
  * @param {string} filePath
  * @param {(string | string[])} content
  */
-export function checkFileContents(
+function checkFileContents(
   filePath: string,
   content: string | string[],
 ) {
@@ -296,7 +296,7 @@ export function checkFileContents(
  *
  * @param filePath
  */
-export function checkFileExists(filePath: string) {
+function checkFileExists(filePath: string) {
   expect(fs.existsSync(filePath)).toBe(true);
 }
 
@@ -306,7 +306,7 @@ export function checkFileExists(filePath: string) {
  * @param projectDir
  * @param packageName
  */
-export function checkPackageJson(projectDir: string, packageName: string) {
+function checkPackageJson(projectDir: string, packageName: string) {
   checkFileContents(`${projectDir}/package.json`, packageName);
 }
 
@@ -315,7 +315,7 @@ export function checkPackageJson(projectDir: string, packageName: string) {
  * Check if the project builds and ends with status code 0.
  * @param projectDir
  */
-export async function checkIfBuilds(projectDir: string) {
+async function checkIfBuilds(projectDir: string) {
   const testEnv = new WizardTestEnv('npm', ['run', 'build'], {
     cwd: projectDir,
   });
@@ -332,7 +332,7 @@ export async function checkIfBuilds(projectDir: string) {
  * @param projectDir
  * @param expectedOutput
  */
-export async function checkIfRunsOnDevMode(
+async function checkIfRunsOnDevMode(
   projectDir: string,
   expectedOutput: string,
 ) {
@@ -351,7 +351,7 @@ export async function checkIfRunsOnDevMode(
  * @param projectDir
  * @param expectedOutput
  */
-export async function checkIfRunsOnProdMode(
+async function checkIfRunsOnProdMode(
   projectDir: string,
   expectedOutput: string,
   startCommand = 'start',

@@ -43,7 +43,7 @@ export { getDashboardPlanFile };
  * skill emits today. `unknown` is included as a forward-compat slot for new
  * shapes the skill might introduce — readers should treat it as opaque.
  */
-export const DashboardChartTypeSchema = z.enum([
+const DashboardChartTypeSchema = z.enum([
   'funnel',
   'line',
   'bar',
@@ -60,7 +60,7 @@ export type DashboardChartType = z.infer<typeof DashboardChartTypeSchema>;
  * (name + optional property list) so a deferred command can intersect the
  * plan with what's actually been instrumented when it runs.
  */
-export const DashboardPlanEventSchema = z
+const DashboardPlanEventSchema = z
   .object({
     name: z.string().min(1),
     properties: z.array(z.string().min(1)).optional(),
@@ -75,7 +75,7 @@ export type DashboardPlanEvent = z.infer<typeof DashboardPlanEventSchema>;
  * specific extras (e.g. groupBy filters, retention windows) without a
  * breaking change.
  */
-export const DashboardPlanChartSchema = z
+const DashboardPlanChartSchema = z
   .object({
     title: z.string().min(1),
     eventName: z.string().min(1),
@@ -91,7 +91,7 @@ export type DashboardPlanChart = z.infer<typeof DashboardPlanChartSchema>;
  * The dashboard wrapper itself. `layout` is opaque to PR 2 readers — the
  * deferred command in PR 3 picks this up.
  */
-export const DashboardPlanDashboardSchema = z
+const DashboardPlanDashboardSchema = z
   .object({
     title: z.string().min(1),
     layout: z.enum(['grid', 'list']).optional(),

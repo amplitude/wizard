@@ -72,7 +72,7 @@ export interface CreateDashboardStepArgs {
 // calls. Inlined here to avoid a cycle between this step and agent-runner.
 // agent-runner exports the same string from POST_AGENT_STEP_CREATE_DASHBOARD;
 // keep them in sync — a small unit test asserts the equality.
-export const STEP_ID = 'create-dashboard';
+const STEP_ID = 'create-dashboard';
 
 /**
  * Run the dashboard creation step. Never throws — on failure or timeout,
