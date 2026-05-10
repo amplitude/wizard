@@ -10,7 +10,7 @@ import { init } from '@amplitude/unified';
  * `NEXT_PUBLIC_AMPLITUDE_API_KEY` keeps the secret in `.env.local`
  * and out of source control.
  */
-function AmplitudeProvider({
+export function AmplitudeProvider({
   children,
 }: {
   children: React.ReactNode;
