@@ -446,9 +446,8 @@ export async function refreshTokenIfStale(
   label: string,
 ): Promise<string> {
   try {
-    const { getStoredToken, getStoredUser, storeToken } = await import(
-      '../utils/ampli-settings.js'
-    );
+    const { getStoredToken, getStoredUser, storeToken } =
+      await import('../utils/ampli-settings.js');
     const { refreshAccessToken } = await import('../utils/oauth.js');
     const { EXPIRY_BUFFER_MS } = await import('../utils/token-refresh.js');
     const user = getStoredUser();
@@ -462,9 +461,8 @@ export async function refreshTokenIfStale(
       // a previous refresh rotated it — drop any MCP sessions bound to
       // the stale value before handing it back. Cheap & idempotent.
       if (stored.accessToken !== fallback) {
-        const { invalidateMcpSessionsForToken } = await import(
-          './mcp-with-fallback.js'
-        );
+        const { invalidateMcpSessionsForToken } =
+          await import('./mcp-with-fallback.js');
         invalidateMcpSessionsForToken(fallback);
       }
       return stored.accessToken;
@@ -488,9 +486,8 @@ export async function refreshTokenIfStale(
       // next callAmplitudeMcp opens a fresh session with the rotated
       // bearer instead of 401-ing and falling through to the 12s agent
       // fallback.
-      const { invalidateMcpSessionsForToken } = await import(
-        './mcp-with-fallback.js'
-      );
+      const { invalidateMcpSessionsForToken } =
+        await import('./mcp-with-fallback.js');
       invalidateMcpSessionsForToken(fallback);
       if (stored.accessToken !== fallback) {
         invalidateMcpSessionsForToken(stored.accessToken);
@@ -548,9 +545,8 @@ export async function runAgentWizard(
     restoreSetupReportIfMissing,
     persistDraftEventPlan,
   } = await import('./wizard-tools.js');
-  const { getLatestEventPlanDecision } = await import(
-    './agent/event-plan-feedback-state.js'
-  );
+  const { getLatestEventPlanDecision } =
+    await import('./agent/event-plan-feedback-state.js');
 
   // Initialise the file-change ledger BEFORE we touch ANY user file so
   // its preamble snapshot of the working tree (gitignore content,
@@ -558,9 +554,8 @@ export async function runAgentWizard(
   // ensureWizardArtifactsIgnored writes to `.gitignore`, so it MUST run
   // after the ledger has captured the original gitignore — otherwise
   // rollback would "restore" the wizard's own gitignore additions.
-  const { initFileChangeLedger, executeRollbackWithStatus } = await import(
-    './file-change-ledger.js'
-  );
+  const { initFileChangeLedger, executeRollbackWithStatus } =
+    await import('./file-change-ledger.js');
   initFileChangeLedger(session.installDir);
 
   // Idempotent — safe to call on every run. Without this, `git status`
@@ -1007,9 +1002,8 @@ async function runAgentWizardBody(
   // promise so it can't block cold-start. On any failure the classifier
   // degrades silently (returns null → no chips published).
   if (accessToken && host) {
-    const { ensureV1Suffix } = await import(
-      './agent/wizard-ai-sdk-anthropic.js'
-    );
+    const { ensureV1Suffix } =
+      await import('./agent/wizard-ai-sdk-anthropic.js');
     const directApiKey = process.env.ANTHROPIC_API_KEY?.trim();
     const llmConfig: LlmClassifierConfig = directApiKey
       ? { apiKey: directApiKey }
@@ -1022,7 +1016,9 @@ async function runAgentWizardBody(
       session.installDir,
       llmConfig,
       publishDiscoveryFact,
-    );
+    ).catch(() => {
+      /* fire-and-forget */
+    });
   }
 
   // Framework context was already gathered by SetupScreen + detection
@@ -1065,9 +1061,8 @@ async function runAgentWizardBody(
   // (with a sensible default fallback). When staging succeeds the prompt pins
   // that id; otherwise a deterministic on-disk resolver picks at most one
   // `integration-*` match so the model never chooses among several Glob hits.
-  const { preStageSkills, bundledSkillExists } = await import(
-    './wizard-tools.js'
-  );
+  const { preStageSkills, bundledSkillExists } =
+    await import('./wizard-tools.js');
   const { listIntegrationSkillIdsOnDisk, resolveIntegrationSkillId } =
     await import('./integration-skill-resolve.js');
   const integrationSkillId = config.metadata.getIntegrationSkillId
@@ -1689,9 +1684,8 @@ async function runAgentWizardBody(
   // Upload environment variables to hosting providers (auto-accept)
   let uploadedEnvVars: string[] = [];
   if (config.environment.uploadToHosting) {
-    const { uploadEnvironmentVariablesStep } = await import(
-      '../steps/index.js'
-    );
+    const { uploadEnvironmentVariablesStep } =
+      await import('../steps/index.js');
     uploadedEnvVars = await uploadEnvironmentVariablesStep(envVars, {
       integration: config.metadata.integration,
       session,
@@ -1805,7 +1799,7 @@ async function runAgentWizardBody(
 
   // Build outro data and store it for OutroScreen
   const continueUrl = isCreateAccountOnboarding(session)
-    ? session.signupMagicLinkUrl ?? OUTBOUND_URLS.products(cloudRegion)
+    ? (session.signupMagicLinkUrl ?? OUTBOUND_URLS.products(cloudRegion))
     : undefined;
 
   if (session.agent && !session.ci && session.signupMagicLinkUrl) {
@@ -1898,9 +1892,8 @@ async function pollForDataIngestion(
   accessToken: string,
   cloudRegion: string,
 ): Promise<void> {
-  const { fetchHasAnyEventsMcp, fetchAmplitudeUser } = await import(
-    '../lib/api.js'
-  );
+  const { fetchHasAnyEventsMcp, fetchAmplitudeUser } =
+    await import('../lib/api.js');
   const { logToFile } = await import('../utils/debug.js');
 
   const MAX_WAIT_MS = resolveDataIngestionMaxWaitMs(session);

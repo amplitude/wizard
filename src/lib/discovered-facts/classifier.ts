@@ -135,19 +135,23 @@ export async function inferProjectFacts(
     ]);
     const { sanitizingFetch } = await import('../gateway-request-sanitize.js');
 
+    const { ensureV1Suffix } =
+      await import('../agent/wizard-ai-sdk-anthropic.js');
     const providerConfig =
       'apiKey' in llmConfig
         ? { apiKey: llmConfig.apiKey }
-        : { baseURL: llmConfig.baseURL, authToken: llmConfig.authToken };
+        : {
+            baseURL: ensureV1Suffix(llmConfig.baseURL),
+            authToken: llmConfig.authToken,
+          };
 
     const provider = createAnthropic({
       ...providerConfig,
       fetch: sanitizingFetch,
     });
 
-    const { HAIKU_MODEL_DIRECT, HAIKU_MODEL_GATEWAY } = await import(
-      '../agent/model-config.js'
-    );
+    const { HAIKU_MODEL_DIRECT, HAIKU_MODEL_GATEWAY } =
+      await import('../agent/model-config.js');
     const modelId =
       'apiKey' in llmConfig ? HAIKU_MODEL_DIRECT : HAIKU_MODEL_GATEWAY;
 
