@@ -51,6 +51,11 @@ vi.mock('../../utils/oauth', () => ({
   refreshAccessToken: vi.fn(),
 }));
 
+const mockInferProjectFacts = vi.fn();
+vi.mock('../discovered-facts/classifier.js', () => ({
+  inferProjectFacts: (...args: unknown[]) => mockInferProjectFacts(...args),
+}));
+
 // Step-id constants are referenced by agent-runner (`seedPostAgentSteps`)
 // AND by each step file (`setPostAgentStep` calls). They must stay
 // equal — the FinalizingPanel finds rows by id and the patch is a no-op
@@ -656,36 +661,74 @@ describe('events-only success path (DEFER_DASHBOARD_PLAN PR 4)', () => {
 });
 
 describe('publishInferredProjectFacts (Discovered facts wiring)', () => {
-  // Smoke test: confirm the agent-runner wiring publishes the
-  // `vertical` chip when the user's package.json ships Stripe. We
-  // pass in a `publish` spy that mirrors the inline closure inside
-  // `runAgentWizard` — the spy plays the role of `getUI()
-  // .pushDiscoveryFact`. Asserting on (id, body) is enough to verify
-  // both the classifier wiring and the chip-payload shape; the full
-  // runner is too integrated to invoke end-to-end here.
-  it('publishes a Vertical chip for a stripe-dep package.json', () => {
+  beforeEach(() => {
+    mockInferProjectFacts.mockReset();
+  });
+
+  const llmConfig = {
+    baseURL: 'https://core.amplitude.com/wizard/v1',
+    authToken: 'test-token',
+  };
+
+  it('publishes both chips when the LLM returns non-null values', async () => {
+    mockInferProjectFacts.mockResolvedValueOnce({
+      vertical: 'Ecommerce',
+      appType: 'Full-stack web',
+    });
+
     const publish = vi.fn();
-    publishInferredProjectFacts(
-      { dependencies: { stripe: '^15.0.0' } },
-      '/__irrelevant_for_vertical_check__',
+    await publishInferredProjectFacts(
+      { dependencies: { stripe: '^15.0.0', next: '^14.0.0' } },
+      '/__irrelevant__',
+      llmConfig,
       publish,
     );
+
     expect(publish).toHaveBeenCalledWith('vertical', {
       label: 'Vertical',
       value: 'Ecommerce',
     });
+    expect(publish).toHaveBeenCalledWith('app-type', {
+      label: 'App type',
+      value: 'Full-stack web',
+    });
   });
 
-  it('skips publishing when no bucket fires (never push an "Unknown" chip)', () => {
+  it('skips publishing when the LLM returns null for both fields', async () => {
+    mockInferProjectFacts.mockResolvedValueOnce({
+      vertical: null,
+      appType: null,
+    });
+
     const publish = vi.fn();
-    publishInferredProjectFacts(
+    await publishInferredProjectFacts(
       { dependencies: { lodash: '^4.0.0' } },
       '/__no_such_dir__',
+      llmConfig,
       publish,
     );
-    // Lodash alone matches no vertical and no app-type bucket, so
-    // neither chip should be published — the feed should never carry
-    // a noisy null/Unknown chip.
+
     expect(publish).not.toHaveBeenCalled();
+  });
+
+  it('publishes only the non-null chip when one field is null', async () => {
+    mockInferProjectFacts.mockResolvedValueOnce({
+      vertical: 'AI app',
+      appType: null,
+    });
+
+    const publish = vi.fn();
+    await publishInferredProjectFacts(
+      { dependencies: { openai: '^4.0.0' } },
+      '/__no_such_dir__',
+      llmConfig,
+      publish,
+    );
+
+    expect(publish).toHaveBeenCalledTimes(1);
+    expect(publish).toHaveBeenCalledWith('vertical', {
+      label: 'Vertical',
+      value: 'AI app',
+    });
   });
 });

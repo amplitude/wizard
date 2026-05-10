@@ -21,7 +21,10 @@ import type { PackageDotJson } from '../utils/package-json';
 import type { WizardOptions } from '../utils/types';
 import { analytics, captureWizardError } from '../utils/analytics';
 import { getUI } from '../ui';
-import { inferVertical, inferAppType } from './discovered-facts/classifier.js';
+import {
+  inferProjectFacts,
+  type LlmClassifierConfig,
+} from './discovered-facts/classifier.js';
 import {
   getAgent,
   AgentErrorType,
@@ -84,26 +87,30 @@ const SUPPORT_EMAIL = 'wizard@amplitude.com';
 export const POST_AGENT_STEP_COMMIT_EVENTS = 'commit-events';
 
 /**
- * Run the vertical + app-type classifiers against the user's
+ * Run the LLM-powered vertical + app-type classifier against the user's
  * package.json and publish a Discovered-fact chip per non-null result.
  * Extracted from `runAgentWizard` so it's unit-testable in isolation
  * via a `publish` spy (the runner itself is far too integrated to
  * exercise end-to-end in tests). Skipping `null` results matches the
  * "don't publish 'Unknown' chips" rule documented in
  * `discovered-facts/classifier.ts`.
+ *
+ * The LLM call is a lightweight Haiku one-shot (~1-2s). On any failure
+ * the function silently returns without publishing — the feed just
+ * doesn't show those chips, which is always safe.
  */
-export function publishInferredProjectFacts(
+export async function publishInferredProjectFacts(
   packageJson: PackageDotJson | null,
   installDir: string,
+  llmConfig: LlmClassifierConfig,
   publish: (id: string, body: { label: string; value: string }) => void,
-): void {
-  const verticalFact = inferVertical(packageJson, installDir);
-  if (verticalFact) {
-    publish('vertical', { label: 'Vertical', value: verticalFact.value });
+): Promise<void> {
+  const facts = await inferProjectFacts(packageJson, installDir, llmConfig);
+  if (facts.vertical) {
+    publish('vertical', { label: 'Vertical', value: facts.vertical });
   }
-  const appTypeFact = inferAppType(packageJson, installDir);
-  if (appTypeFact) {
-    publish('app-type', { label: 'App type', value: appTypeFact.value });
+  if (facts.appType) {
+    publish('app-type', { label: 'App type', value: facts.appType });
   }
 }
 
@@ -898,18 +905,11 @@ async function runAgentWizardBody(
     });
   }
 
-  // Inferred-signal chips: vertical + app type. These are coarse,
-  // non-PII labels derived from package.json + a lightweight directory
-  // probe — purely cosmetic chips that warm the discovery feed beyond
-  // the literal stack tags. Both classifiers return null when no
-  // bucket fires, in which case we skip the publish entirely so the
-  // feed never shows a noisy "Unknown". See
-  // `discovered-facts/classifier.ts` for the priority order.
-  publishInferredProjectFacts(
-    packageJson,
-    session.installDir,
-    publishDiscoveryFact,
-  );
+  // LLM-powered vertical + app-type classification is deferred to
+  // after credential confirmation (needs access token for the LLM
+  // gateway). The fire-and-forget call is placed after `refreshTokenIfStale`
+  // below so the Haiku one-shot runs in the background while cold-start
+  // continues — chips fade in asynchronously when the response arrives.
 
   // Set analytics tags for framework version
   if (frameworkVersion && config.detection.getVersionBucket) {
@@ -999,6 +999,31 @@ async function runAgentWizardBody(
     DEFAULT_AMPLITUDE_ZONE,
     { readDisk: true },
   );
+
+  // Inferred-signal chips: vertical + app type. Fire a one-shot Haiku
+  // call in the background — the chips fade in asynchronously when the
+  // LLM responds (~1-2s). Uses the refreshed access token + host for
+  // gateway auth. The `void` is intentional: we never await this
+  // promise so it can't block cold-start. On any failure the classifier
+  // degrades silently (returns null → no chips published).
+  if (accessToken && host) {
+    const { ensureV1Suffix } = await import(
+      './agent/wizard-ai-sdk-anthropic.js'
+    );
+    const directApiKey = process.env.ANTHROPIC_API_KEY?.trim();
+    const llmConfig: LlmClassifierConfig = directApiKey
+      ? { apiKey: directApiKey }
+      : {
+          baseURL: ensureV1Suffix(getLlmGatewayUrlFromHost(host)),
+          authToken: accessToken,
+        };
+    void publishInferredProjectFacts(
+      packageJson,
+      session.installDir,
+      llmConfig,
+      publishDiscoveryFact,
+    );
+  }
 
   // Framework context was already gathered by SetupScreen + detection
   const frameworkContext = session.frameworkContext;

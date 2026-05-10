@@ -1,18 +1,55 @@
 /**
- * Unit coverage for the discovered-facts classifiers.
+ * Unit coverage for the LLM-powered discovered-facts classifier.
  *
- * Both classifiers are pure data lookups (with one filesystem probe in
- * `inferAppType`), so we test each priority bucket in isolation plus the
- * null-skip case. Adding a new bucket means: add a check above the
- * fallthrough in `classifier.ts`, add a test here, update the PR body.
+ * The classifier delegates to a Haiku `generateObject` call, so tests mock
+ * the `ai` + `@ai-sdk/anthropic` imports and verify:
+ *   - Prompt construction includes the right dependency + directory signals
+ *   - LLM response is correctly threaded through to the return value
+ *   - Errors degrade gracefully (both fields → null, no throw)
+ *   - Null packageJson or empty deps short-circuit without an LLM call
  */
-import { describe, it, expect, beforeAll, afterAll } from 'vitest';
+import { describe, it, expect, vi, beforeEach } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
 
-import { inferVertical, inferAppType } from '../classifier.js';
 import type { PackageDotJson } from '../../../utils/package-json.js';
+import {
+  collectDependencyNames,
+  collectDirectorySignals,
+  buildClassificationPrompt,
+  inferProjectFacts,
+  type LlmClassifierConfig,
+  type ProjectFacts,
+} from '../classifier.js';
+
+// ── Mocks ──────────────────────────────────────────────────────────────────────
+
+const mockGenerateObject = vi.fn();
+
+vi.mock('ai', () => ({
+  generateObject: (...args: unknown[]) => mockGenerateObject(...args),
+}));
+
+const mockCreateAnthropic = vi.fn(() => (modelId: string) => ({
+  modelId,
+  provider: 'anthropic',
+}));
+
+vi.mock('@ai-sdk/anthropic', () => ({
+  createAnthropic: (...args: unknown[]) => mockCreateAnthropic(...args),
+}));
+
+vi.mock('../../gateway-request-sanitize.js', () => ({
+  sanitizingFetch: globalThis.fetch,
+}));
+
+vi.mock('../../agent/model-config.js', () => ({
+  HAIKU_MODEL_DIRECT: 'claude-haiku-4-5-20251001',
+  HAIKU_MODEL_GATEWAY: 'anthropic/claude-haiku-4-5-20251001',
+}));
+
+// ── Helpers ────────────────────────────────────────────────────────────────────
 
 const NO_DIR = '/__no_such_install_dir__/should_not_exist';
 
@@ -20,239 +57,222 @@ function pkg(deps: Record<string, string>): PackageDotJson {
   return { dependencies: deps };
 }
 
-describe('inferVertical', () => {
-  it('returns Ecommerce when stripe is a top-level dep', () => {
-    expect(inferVertical(pkg({ stripe: '^15.0.0' }), NO_DIR)).toEqual({
-      value: 'Ecommerce',
+const gatewayConfig: LlmClassifierConfig = {
+  baseURL: 'https://core.amplitude.com/wizard/v1',
+  authToken: 'test-token',
+};
+
+const directConfig: LlmClassifierConfig = {
+  apiKey: 'sk-ant-test-key',
+};
+
+function mockLlmResponse(facts: ProjectFacts): void {
+  mockGenerateObject.mockResolvedValueOnce({ object: facts });
+}
+
+function mockLlmError(message: string): void {
+  mockGenerateObject.mockRejectedValueOnce(new Error(message));
+}
+
+// ── Tests ──────────────────────────────────────────────────────────────────────
+
+beforeEach(() => {
+  vi.clearAllMocks();
+});
+
+describe('collectDependencyNames', () => {
+  it('merges deps, devDeps, and optionalDeps into a sorted deduplicated list', () => {
+    const result = collectDependencyNames({
+      dependencies: { react: '^18.0.0', lodash: '^4.0.0' },
+      devDependencies: { vitest: '^1.0.0', react: '^18.0.0' },
+      optionalDependencies: { fsevents: '^2.0.0' },
     });
+    expect(result).toEqual(['fsevents', 'lodash', 'react', 'vitest']);
   });
 
-  it('returns Ecommerce for @stripe/* scoped deps (e.g. @stripe/stripe-js)', () => {
-    expect(
-      inferVertical(pkg({ '@stripe/stripe-js': '^2.4.0' }), NO_DIR),
-    ).toEqual({ value: 'Ecommerce' });
-  });
-
-  it('returns AI app for openai dep', () => {
-    expect(inferVertical(pkg({ openai: '^4.0.0' }), NO_DIR)).toEqual({
-      value: 'AI app',
-    });
-  });
-
-  it('returns AI app for @anthropic-ai/sdk dep', () => {
-    expect(
-      inferVertical(pkg({ '@anthropic-ai/sdk': '^0.30.0' }), NO_DIR),
-    ).toEqual({ value: 'AI app' });
-  });
-
-  it('returns AI app for the Vercel ai SDK dep', () => {
-    expect(inferVertical(pkg({ ai: '^3.0.0' }), NO_DIR)).toEqual({
-      value: 'AI app',
-    });
-  });
-
-  it('promotes SaaS to B2B SaaS when an ORM is present alongside auth', () => {
-    expect(
-      inferVertical(pkg({ prisma: '^5.0.0', 'next-auth': '^4.24.0' }), NO_DIR),
-    ).toEqual({ value: 'B2B SaaS' });
-  });
-
-  it('returns B2B SaaS for drizzle-orm + @clerk/* (prefix-matched)', () => {
-    expect(
-      inferVertical(
-        pkg({ 'drizzle-orm': '^0.30.0', '@clerk/nextjs': '^5.0.0' }),
-        NO_DIR,
-      ),
-    ).toEqual({ value: 'B2B SaaS' });
-  });
-
-  it('returns B2B SaaS for mongoose + @auth0/*', () => {
-    expect(
-      inferVertical(
-        pkg({ mongoose: '^8.0.0', '@auth0/nextjs-auth0': '^3.5.0' }),
-        NO_DIR,
-      ),
-    ).toEqual({ value: 'B2B SaaS' });
-  });
-
-  it('returns SaaS when only an auth lib is present (no ORM)', () => {
-    expect(inferVertical(pkg({ 'next-auth': '^4.24.0' }), NO_DIR)).toEqual({
-      value: 'SaaS',
-    });
-  });
-
-  it('returns SaaS for @supabase/auth-* without an ORM', () => {
-    expect(
-      inferVertical(
-        pkg({ '@supabase/auth-helpers-nextjs': '^0.10.0' }),
-        NO_DIR,
-      ),
-    ).toEqual({ value: 'SaaS' });
-  });
-
-  it('does NOT match a bare @supabase/supabase-js as auth (only @supabase/auth-*)', () => {
-    // The spec deliberately scopes the prefix to `@supabase/auth-`, not
-    // any `@supabase/*` package, so an app using only the data-plane
-    // client doesn't get bucketed as SaaS.
-    expect(
-      inferVertical(pkg({ '@supabase/supabase-js': '^2.0.0' }), NO_DIR),
-    ).toBeNull();
-  });
-
-  it('returns null when no bucket fires (skip the chip rather than publish "Unknown")', () => {
-    expect(
-      inferVertical(pkg({ react: '^18.0.0', lodash: '^4.0.0' }), NO_DIR),
-    ).toBeNull();
-  });
-
-  it('returns null when packageJson is null', () => {
-    expect(inferVertical(null, NO_DIR)).toBeNull();
-  });
-
-  it('Stripe wins over auth (priority order: ecommerce before SaaS)', () => {
-    // A Stripe app that also uses next-auth should still be Ecommerce —
-    // first match wins.
-    expect(
-      inferVertical(pkg({ stripe: '^15.0.0', 'next-auth': '^4.24.0' }), NO_DIR),
-    ).toEqual({ value: 'Ecommerce' });
-  });
-
-  it('also matches deps declared in devDependencies', () => {
-    // hasPackageInstalled looks across deps + devDeps + optionalDeps.
-    // Belt-and-suspenders test: confirm a stripe in devDeps still fires.
-    const json: PackageDotJson = { devDependencies: { stripe: '^15.0.0' } };
-    expect(inferVertical(json, NO_DIR)).toEqual({ value: 'Ecommerce' });
+  it('returns empty array for no dependencies', () => {
+    expect(collectDependencyNames({})).toEqual([]);
   });
 });
 
-describe('inferAppType', () => {
-  // Use a tmpdir-scoped fixture for the "Next.js + app/api" branch since
-  // it's the only branch that touches the filesystem.
-  let fixtureDir: string;
+describe('collectDirectorySignals', () => {
+  let tmpDir: string;
 
-  beforeAll(() => {
-    fixtureDir = fs.mkdtempSync(
-      path.join(os.tmpdir(), 'wizard-classifier-test-'),
+  it('detects present directories', () => {
+    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'classifier-test-'));
+    fs.mkdirSync(path.join(tmpDir, 'app', 'api'), { recursive: true });
+    fs.mkdirSync(path.join(tmpDir, 'src', 'pages', 'api'), {
+      recursive: true,
+    });
+
+    const signals = collectDirectorySignals(tmpDir);
+    expect(signals['app/api']).toBe(true);
+    expect(signals['pages/api']).toBe(false);
+    expect(signals['src/app/api']).toBe(false);
+    expect(signals['src/pages/api']).toBe(true);
+
+    fs.rmSync(tmpDir, { recursive: true, force: true });
+  });
+
+  it('reports all absent for a nonexistent directory', () => {
+    const signals = collectDirectorySignals(NO_DIR);
+    expect(Object.values(signals).every((v) => v === false)).toBe(true);
+  });
+});
+
+describe('buildClassificationPrompt', () => {
+  it('includes dependency names and directory signals', () => {
+    const prompt = buildClassificationPrompt(['express', 'react', 'stripe'], {
+      'app/api': true,
+      'pages/api': false,
+      'src/app/api': false,
+      'src/pages/api': false,
+    });
+    expect(prompt).toContain('express, react, stripe');
+    expect(prompt).toContain('app/api: present');
+    expect(prompt).toContain('pages/api: absent');
+  });
+
+  it('contains classification guidance', () => {
+    const prompt = buildClassificationPrompt(['next'], {
+      'app/api': false,
+      'pages/api': false,
+      'src/app/api': false,
+      'src/pages/api': false,
+    });
+    expect(prompt).toContain('vertical');
+    expect(prompt).toContain('appType');
+    expect(prompt).toContain('Ecommerce');
+    expect(prompt).toContain('Full-stack web');
+  });
+});
+
+describe('inferProjectFacts', () => {
+  it('returns LLM-inferred vertical and appType', async () => {
+    mockLlmResponse({ vertical: 'Ecommerce', appType: 'Full-stack web' });
+
+    const result = await inferProjectFacts(
+      pkg({ stripe: '^15.0.0', next: '^14.0.0' }),
+      NO_DIR,
+      gatewayConfig,
     );
-    fs.mkdirSync(path.join(fixtureDir, 'app', 'api'), { recursive: true });
+
+    expect(result).toEqual({
+      vertical: 'Ecommerce',
+      appType: 'Full-stack web',
+    });
+    expect(mockGenerateObject).toHaveBeenCalledOnce();
   });
 
-  afterAll(() => {
-    fs.rmSync(fixtureDir, { recursive: true, force: true });
+  it('passes gateway auth to the Anthropic provider', async () => {
+    mockLlmResponse({ vertical: 'SaaS', appType: null });
+
+    await inferProjectFacts(
+      pkg({ 'next-auth': '^4.24.0' }),
+      NO_DIR,
+      gatewayConfig,
+    );
+
+    expect(mockCreateAnthropic).toHaveBeenCalledWith(
+      expect.objectContaining({
+        baseURL: 'https://core.amplitude.com/wizard/v1',
+        authToken: 'test-token',
+      }),
+    );
   });
 
-  it('returns Full-stack web for Next.js + app/api dir present', () => {
-    expect(
-      inferAppType(pkg({ next: '^14.0.0', react: '^18.0.0' }), fixtureDir),
-    ).toEqual({ value: 'Full-stack web' });
+  it('passes direct API key when configured', async () => {
+    mockLlmResponse({ vertical: 'AI app', appType: 'SPA web' });
+
+    await inferProjectFacts(pkg({ openai: '^4.0.0' }), NO_DIR, directConfig);
+
+    expect(mockCreateAnthropic).toHaveBeenCalledWith(
+      expect.objectContaining({ apiKey: 'sk-ant-test-key' }),
+    );
   });
 
-  it('returns Full-stack web for Next.js + src/app/api dir (src/ layout)', () => {
-    // `create-next-app` offers a `src/`-prefixed layout where API routes
-    // live at `src/app/api` or `src/pages/api`. Probing only the root
-    // `app/api` and `pages/api` paths misclassified those projects as
-    // `'Marketing/SPA web'`. Regression test: stamp a `src/app/api` dir
-    // in a fresh tmpdir and confirm we land on `'Full-stack web'`.
-    const srcLayoutDir = fs.mkdtempSync(
-      path.join(os.tmpdir(), 'wizard-classifier-test-src-'),
+  it('uses gateway model format for gateway auth', async () => {
+    mockLlmResponse({ vertical: null, appType: null });
+
+    await inferProjectFacts(pkg({ react: '^18.0.0' }), NO_DIR, gatewayConfig);
+
+    const callArgs = mockGenerateObject.mock.calls[0][0];
+    expect(callArgs.model.modelId).toBe('anthropic/claude-haiku-4-5-20251001');
+  });
+
+  it('uses direct model format for direct API key', async () => {
+    mockLlmResponse({ vertical: null, appType: null });
+
+    await inferProjectFacts(pkg({ react: '^18.0.0' }), NO_DIR, directConfig);
+
+    const callArgs = mockGenerateObject.mock.calls[0][0];
+    expect(callArgs.model.modelId).toBe('claude-haiku-4-5-20251001');
+  });
+
+  it('returns both null when packageJson is null', async () => {
+    const result = await inferProjectFacts(null, NO_DIR, gatewayConfig);
+    expect(result).toEqual({ vertical: null, appType: null });
+    expect(mockGenerateObject).not.toHaveBeenCalled();
+  });
+
+  it('returns both null when dependencies are empty', async () => {
+    const result = await inferProjectFacts({}, NO_DIR, gatewayConfig);
+    expect(result).toEqual({ vertical: null, appType: null });
+    expect(mockGenerateObject).not.toHaveBeenCalled();
+  });
+
+  it('degrades gracefully on LLM error (returns null, does not throw)', async () => {
+    mockLlmError('network timeout');
+
+    const result = await inferProjectFacts(
+      pkg({ stripe: '^15.0.0' }),
+      NO_DIR,
+      gatewayConfig,
+    );
+
+    expect(result).toEqual({ vertical: null, appType: null });
+  });
+
+  it('includes dependency names in the prompt sent to the LLM', async () => {
+    mockLlmResponse({ vertical: 'Ecommerce', appType: null });
+
+    await inferProjectFacts(
+      pkg({ stripe: '^15.0.0', react: '^18.0.0' }),
+      NO_DIR,
+      gatewayConfig,
+    );
+
+    const callArgs = mockGenerateObject.mock.calls[0][0];
+    expect(callArgs.prompt).toContain('react');
+    expect(callArgs.prompt).toContain('stripe');
+  });
+
+  it('includes directory signals in the prompt sent to the LLM', async () => {
+    const tmpDir = fs.mkdtempSync(
+      path.join(os.tmpdir(), 'classifier-prompt-test-'),
     );
     try {
-      fs.mkdirSync(path.join(srcLayoutDir, 'src', 'app', 'api'), {
-        recursive: true,
-      });
-      expect(
-        inferAppType(pkg({ next: '^14.0.0', react: '^18.0.0' }), srcLayoutDir),
-      ).toEqual({ value: 'Full-stack web' });
+      fs.mkdirSync(path.join(tmpDir, 'app', 'api'), { recursive: true });
+      mockLlmResponse({ vertical: null, appType: 'Full-stack web' });
+
+      await inferProjectFacts(pkg({ next: '^14.0.0' }), tmpDir, gatewayConfig);
+
+      const callArgs = mockGenerateObject.mock.calls[0][0];
+      expect(callArgs.prompt).toContain('app/api: present');
     } finally {
-      fs.rmSync(srcLayoutDir, { recursive: true, force: true });
+      fs.rmSync(tmpDir, { recursive: true, force: true });
     }
   });
 
-  it('returns Full-stack web for Next.js + src/pages/api dir (legacy src/ layout)', () => {
-    // Same intent as above for the Pages Router under `src/`.
-    const srcPagesDir = fs.mkdtempSync(
-      path.join(os.tmpdir(), 'wizard-classifier-test-src-pages-'),
+  it('handles LLM returning partial null (one field set, one null)', async () => {
+    mockLlmResponse({ vertical: 'AI app', appType: null });
+
+    const result = await inferProjectFacts(
+      pkg({ openai: '^4.0.0' }),
+      NO_DIR,
+      gatewayConfig,
     );
-    try {
-      fs.mkdirSync(path.join(srcPagesDir, 'src', 'pages', 'api'), {
-        recursive: true,
-      });
-      expect(
-        inferAppType(pkg({ next: '^14.0.0', react: '^18.0.0' }), srcPagesDir),
-      ).toEqual({ value: 'Full-stack web' });
-    } finally {
-      fs.rmSync(srcPagesDir, { recursive: true, force: true });
-    }
-  });
 
-  it('returns Marketing/SPA web for Next.js without api/ dir', () => {
-    expect(
-      inferAppType(pkg({ next: '^14.0.0', react: '^18.0.0' }), NO_DIR),
-    ).toEqual({ value: 'Marketing/SPA web' });
-  });
-
-  it('returns SPA web for vite + react-router with no api/ dir', () => {
-    expect(
-      inferAppType(
-        pkg({
-          vite: '^5.0.0',
-          'react-router-dom': '^6.0.0',
-          react: '^18.0.0',
-        }),
-        NO_DIR,
-      ),
-    ).toEqual({ value: 'SPA web' });
-  });
-
-  it('returns API server for express with no FE framework', () => {
-    expect(inferAppType(pkg({ express: '^4.18.0' }), NO_DIR)).toEqual({
-      value: 'API server',
-    });
-  });
-
-  it('returns API server for fastify alone', () => {
-    expect(inferAppType(pkg({ fastify: '^4.0.0' }), NO_DIR)).toEqual({
-      value: 'API server',
-    });
-  });
-
-  it('returns API server for hono alone', () => {
-    expect(inferAppType(pkg({ hono: '^4.0.0' }), NO_DIR)).toEqual({
-      value: 'API server',
-    });
-  });
-
-  it('does NOT classify express + react as API server (FE framework gates the bucket)', () => {
-    // Express + React is more likely a custom-server SSR or proxy
-    // setup; we don't claim it as an API server.
-    expect(
-      inferAppType(pkg({ express: '^4.18.0', react: '^18.0.0' }), NO_DIR),
-    ).toBeNull();
-  });
-
-  it('returns null for vite + react WITHOUT react-router (no SPA-router signal)', () => {
-    expect(
-      inferAppType(pkg({ vite: '^5.0.0', react: '^18.0.0' }), NO_DIR),
-    ).toBeNull();
-  });
-
-  it('returns null when packageJson is null', () => {
-    expect(inferAppType(null, NO_DIR)).toBeNull();
-  });
-
-  it('Next.js classification beats vite+react-router (priority order)', () => {
-    // A project with both `next` and vite+react-router shouldn't
-    // happen in practice, but if it does, Next.js wins.
-    expect(
-      inferAppType(
-        pkg({
-          next: '^14.0.0',
-          vite: '^5.0.0',
-          'react-router-dom': '^6.0.0',
-          react: '^18.0.0',
-        }),
-        NO_DIR,
-      ),
-    ).toEqual({ value: 'Marketing/SPA web' });
+    expect(result).toEqual({ vertical: 'AI app', appType: null });
   });
 });
