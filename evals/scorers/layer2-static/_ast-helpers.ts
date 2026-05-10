@@ -164,32 +164,3 @@ export function findCallsByName(
   return out;
 }
 
-/**
- * Return true if the call expression sits at the top-level module
- * scope (not inside a function, class, block, etc.) — useful for
- * "init() must not run at module scope of a Server Component."
- */
-function isAtModuleScope(
-  call: ts.CallExpression,
-  source: ts.SourceFile,
-): boolean {
-  let parent: ts.Node | undefined = call.parent;
-  while (parent && parent !== source) {
-    if (
-      ts.isFunctionDeclaration(parent) ||
-      ts.isFunctionExpression(parent) ||
-      ts.isArrowFunction(parent) ||
-      ts.isMethodDeclaration(parent) ||
-      ts.isClassDeclaration(parent) ||
-      ts.isBlock(parent) ||
-      ts.isIfStatement(parent) ||
-      ts.isForStatement(parent) ||
-      ts.isWhileStatement(parent) ||
-      ts.isTryStatement(parent)
-    ) {
-      return false;
-    }
-    parent = parent.parent;
-  }
-  return true;
-}

@@ -5,7 +5,7 @@ import { spawn, execSync } from 'child_process';
 import type { ChildProcess } from 'child_process';
 import { dim, green, red } from '../../src/utils/logging';
 
-const KEYS = {
+export const KEYS = {
   UP: '\u001b[A',
   DOWN: '\u001b[B',
   LEFT: '\u001b[D',
@@ -13,8 +13,6 @@ const KEYS = {
   ENTER: '\r',
   SPACE: ' ',
 };
-
-const TEST_ARGS = {};
 
 const log = {
   success: (message: string) => {
@@ -226,7 +224,7 @@ function revertLocalChanges(projectDir: string): void {
  *
  * @returns WizardTestEnv
  */
-function startWizardInstance(
+export function startWizardInstance(
   projectDir: string,
   debug = false,
 ): WizardTestEnv {
@@ -248,7 +246,7 @@ function startWizardInstance(
  * @param filePath
  * @param content
  */
-function createFile(filePath: string, content?: string) {
+export function createFile(filePath: string, content?: string) {
   return fs.writeFileSync(filePath, content || '');
 }
 
@@ -259,7 +257,7 @@ function createFile(filePath: string, content?: string) {
  * @param oldContent
  * @param newContent
  */
-function modifyFile(
+export function modifyFile(
   filePath: string,
   replaceMap: Record<string, string>,
 ) {
@@ -296,7 +294,7 @@ function checkFileContents(
  *
  * @param filePath
  */
-function checkFileExists(filePath: string) {
+export function checkFileExists(filePath: string) {
   expect(fs.existsSync(filePath)).toBe(true);
 }
 
@@ -306,7 +304,7 @@ function checkFileExists(filePath: string) {
  * @param projectDir
  * @param packageName
  */
-function checkPackageJson(projectDir: string, packageName: string) {
+export function checkPackageJson(projectDir: string, packageName: string) {
   checkFileContents(`${projectDir}/package.json`, packageName);
 }
 
@@ -315,7 +313,7 @@ function checkPackageJson(projectDir: string, packageName: string) {
  * Check if the project builds and ends with status code 0.
  * @param projectDir
  */
-async function checkIfBuilds(projectDir: string) {
+export async function checkIfBuilds(projectDir: string) {
   const testEnv = new WizardTestEnv('npm', ['run', 'build'], {
     cwd: projectDir,
   });
@@ -332,7 +330,7 @@ async function checkIfBuilds(projectDir: string) {
  * @param projectDir
  * @param expectedOutput
  */
-async function checkIfRunsOnDevMode(
+export async function checkIfRunsOnDevMode(
   projectDir: string,
   expectedOutput: string,
 ) {
@@ -351,7 +349,7 @@ async function checkIfRunsOnDevMode(
  * @param projectDir
  * @param expectedOutput
  */
-async function checkIfRunsOnProdMode(
+export async function checkIfRunsOnProdMode(
   projectDir: string,
   expectedOutput: string,
   startCommand = 'start',

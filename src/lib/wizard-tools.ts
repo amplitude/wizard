@@ -27,7 +27,7 @@ import { getUI } from '../ui';
 import type { EventPlanDecision } from '../ui/wizard-ui';
 import { wrapMcpServerWithSentry } from './observability/index';
 import { toWizardDashboardOpenUrl } from '../utils/dashboard-open-url';
-import type { SkillEntry, SkillMenu } from './wizard-tools/bundled-skills.js';
+import type { SkillEntry } from './wizard-tools/bundled-skills.js';
 import {
   bundledSkillExists,
   isSkillTiersEnabled,
@@ -193,64 +193,6 @@ export function isAllowedSkillUrl(rawUrl: string): boolean {
 // Currently unused; skills are bundled locally. Enable by setting SKILLS_URL
 // env var (e.g. https://github.com/amplitude/context-hub/releases/latest/download).
 // ---------------------------------------------------------------------------
-
-/**
- * Bound on the remote skill-menu fetch. The wizard waits on this call before
- * the agent can run, so an unbounded fetch on a stuck CDN connection would
- * stall the entire setup. 15s comfortably covers a worst-case GitHub Releases
- * fetch but ensures we fall back to bundled skills instead of hanging.
- */
-const SKILL_MENU_FETCH_TIMEOUT_MS = 15_000;
-
-/**
- * Fetch the skill menu from a remote skills server (GitHub Releases).
- * Returns parsed data on success, `null` on failure (including timeout —
- * the caller falls back to bundled skills, so silently swallowing a slow
- * network is the correct behavior).
- */
-async function fetchSkillMenu(
-  skillsBaseUrl: string,
-): Promise<SkillMenu | null> {
-  const menuUrl = `${skillsBaseUrl}/skill-menu.json`;
-  logToFile(`fetchSkillMenu: fetching from ${menuUrl}`);
-
-  // Bound the request with an AbortController so a hung CDN connection
-  // doesn't stall agent startup. Timer is always cleared in `finally`.
-  const controller = new AbortController();
-  const timeoutId = setTimeout(
-    () => controller.abort(),
-    SKILL_MENU_FETCH_TIMEOUT_MS,
-  );
-  try {
-    const resp = await fetch(menuUrl, { signal: controller.signal });
-    if (resp.ok) {
-      const data = (await resp.json()) as SkillMenu;
-      logToFile(
-        `fetchSkillMenu: loaded (${
-          Object.keys(data.categories).length
-        } categories)`,
-      );
-      return data;
-    }
-    logToFile(`fetchSkillMenu: failed with HTTP ${resp.status}`);
-    return null;
-  } catch (err) {
-    const isAbort =
-      err instanceof Error &&
-      (err.name === 'AbortError' ||
-        (err as Error & { code?: string }).code === 'ABORT_ERR');
-    logToFile(
-      isAbort
-        ? `fetchSkillMenu: timed out after ${SKILL_MENU_FETCH_TIMEOUT_MS}ms`
-        : `fetchSkillMenu: error: ${
-            err instanceof Error ? err.message : String(err)
-          }`,
-    );
-    return null;
-  } finally {
-    clearTimeout(timeoutId);
-  }
-}
 
 /**
  * Download and extract a skill from a remote URL.

@@ -265,13 +265,6 @@ export interface UIConfig<
 }
 
 /**
- * Generate welcome message from framework name
- */
-function getWelcomeMessage(frameworkName: string): string {
-  return `Amplitude ${frameworkName} wizard (agent-powered)`;
-}
-
-/**
  * Shared spinner message for all frameworks
  */
 export const SPINNER_MESSAGE = 'Writing your Amplitude setup...';

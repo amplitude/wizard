@@ -179,23 +179,6 @@ const CliArgsSchema = z.object({
   region: z.enum(['us', 'eu']).nullable().optional().default(null),
 });
 
-/**
- * Zod schema for validated Amplitude credentials.
- * Exported for incremental adoption at credential-construction sites.
- */
-const CredentialsSchema = z.object({
-  accessToken: z.string().min(1, 'accessToken is required'),
-  idToken: z.string().optional(),
-  projectApiKey: z.string().min(1, 'projectApiKey is required'),
-  host: z.string().url('host must be a valid URL'),
-  /**
-   * Numeric Amplitude app ID. Branded `AppId` on success or the literal
-   * `0` sentinel when the env hasn't been picked yet. Construct via
-   * `toCredentialAppId(value)` at the trust boundary.
-   */
-  appId: z.union([AppIdSchema, z.literal(0)]),
-});
-
 function parseAppIdArg(value: string | undefined): AppId | undefined {
   return tryToAppId(value);
 }

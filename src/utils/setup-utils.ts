@@ -1,11 +1,10 @@
 import * as childProcess from 'node:child_process';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
-import { isAbsolute, join, relative } from 'node:path';
+import { join } from 'node:path';
 
 import chalk from 'chalk';
 import { traceStep } from '../telemetry';
-import { debug } from './debug';
 import type { PackageDotJson } from './package-json';
 import {
   type PackageManager,
@@ -806,40 +805,4 @@ async function askForAmplitudeApiKey(installDir?: string): Promise<string> {
   }
 
   return trimmed;
-}
-
-/**
- * Creates a new config file with the given filepath and codeSnippet.
- */
-async function createNewConfigFile(
-  filepath: string,
-  codeSnippet: string,
-  { installDir }: Pick<WizardOptions, 'installDir'>,
-  moreInformation?: string,
-): Promise<boolean> {
-  if (!isAbsolute(filepath)) {
-    debug(`createNewConfigFile: filepath is not absolute: ${filepath}`);
-    return false;
-  }
-
-  const prettyFilename = chalk.cyan(relative(installDir, filepath));
-
-  try {
-    await fs.promises.writeFile(filepath, codeSnippet);
-
-    getUI().log.success(`Added new ${prettyFilename} file.`);
-
-    if (moreInformation) {
-      getUI().log.info(chalk.gray(moreInformation));
-    }
-
-    return true;
-  } catch (e) {
-    debug(e);
-    getUI().log.warn(
-      `Could not create a new ${prettyFilename} file. Please create one manually and follow the instructions below.`,
-    );
-  }
-
-  return false;
 }
