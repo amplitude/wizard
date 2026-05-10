@@ -12,7 +12,7 @@ interface CardLayoutProps {
   children: ReactNode;
 }
 
-export const CardLayout = ({
+const CardLayout = ({
   hAlign = HAlign.Left,
   vAlign = VAlign.Top,
   children,

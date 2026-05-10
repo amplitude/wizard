@@ -56,7 +56,7 @@ export function useScreenHintsValue(): readonly KeyHint[] {
 }
 
 /** Test-only — reset the module atom between test cases. */
-export function __resetScreenHintsForTests(): void {
+function __resetScreenHintsForTests(): void {
   $screenHints.set(EMPTY_HINTS);
 }
 

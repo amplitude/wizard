@@ -43,7 +43,7 @@ export const DEFAULT_FILE_THRESHOLD = 200;
 export const DEFAULT_EVENT_THRESHOLD = 50;
 
 /** Default wall-clock cap on the recursive directory scan. */
-export const DEFAULT_DETECTION_TIMEOUT_MS = 5_000;
+const DEFAULT_DETECTION_TIMEOUT_MS = 5_000;
 
 /**
  * Hard cap on files counted before bailing. Once we know the project
@@ -58,8 +58,8 @@ export const DEFAULT_DETECTION_TIMEOUT_MS = 5_000;
 export const DEFAULT_MAX_FILES_SCANNED = 500;
 
 /** Env-var override names. Documented in `CLAUDE.md`. */
-export const FILE_THRESHOLD_ENV = 'AMPLITUDE_WIZARD_PREFLIGHT_FILE_THRESHOLD';
-export const EVENT_THRESHOLD_ENV = 'AMPLITUDE_WIZARD_PREFLIGHT_EVENT_THRESHOLD';
+const FILE_THRESHOLD_ENV = 'AMPLITUDE_WIZARD_PREFLIGHT_FILE_THRESHOLD';
+const EVENT_THRESHOLD_ENV = 'AMPLITUDE_WIZARD_PREFLIGHT_EVENT_THRESHOLD';
 
 /**
  * Directory basenames we never descend into during the source-file count.

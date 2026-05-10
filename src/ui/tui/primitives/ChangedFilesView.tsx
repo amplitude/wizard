@@ -78,7 +78,7 @@ export function buildChangedFileList(
  *
  * Exported for test injection — the component calls this lazily on demand.
  */
-export function readGitDiff(cwd: string, path: string): string {
+function readGitDiff(cwd: string, path: string): string {
   try {
     const raw = execFileSync(
       'git',

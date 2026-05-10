@@ -41,7 +41,7 @@ export interface AgentHook {
   notes: string;
 }
 
-export const agentHooks: AgentHook[] = [
+const agentHooks: AgentHook[] = [
   {
     name: 'PreToolUse',
     pre: true,

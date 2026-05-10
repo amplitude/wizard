@@ -119,7 +119,6 @@ import {
   startGatewayBearerRefreshTimer,
 } from './llm-gateway-bearer-refresh.js';
 
-export { selectModel, sdkStandardFallbackModel };
 export { parseEventPlanContent };
 export {
   MAX_BASH_SLEEP_SECONDS,
@@ -1453,7 +1452,7 @@ export function buildDisallowedBuiltinTools(
 /**
  * Initialize agent configuration for the LLM gateway
  */
-export async function initializeAgent(
+async function initializeAgent(
   config: AgentConfig,
   options: WizardOptions,
 ): Promise<AgentRunConfig> {
@@ -1864,7 +1863,7 @@ export async function getAgent(
  * Used when no Amplitude API key is present (local development).
  * Streams stdout line-by-line and forwards text to the spinner.
  */
-export async function runAgentLocally(
+async function runAgentLocally(
   prompt: string,
   workingDirectory: string,
   spinner: SpinnerHandle,

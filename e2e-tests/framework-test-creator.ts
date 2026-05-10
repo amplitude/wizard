@@ -9,7 +9,7 @@ import {
 import type { FrameworkTestConfig } from './utils/framework-test-types';
 import { DEFAULT_WIZARD_STEPS } from './utils/framework-test-utils';
 
-export function createFrameworkTest(config: FrameworkTestConfig): void {
+function createFrameworkTest(config: FrameworkTestConfig): void {
   const projectDir = path.resolve(
     __dirname,
     'test-applications',

@@ -22,7 +22,6 @@ export {
 export type { WizardLogger, LogLevel } from './logger';
 
 // Redaction
-export { redact, redactString } from './redact';
 
 // Correlation
 export {

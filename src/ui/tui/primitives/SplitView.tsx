@@ -15,7 +15,7 @@ interface SplitViewProps {
   gap?: number;
 }
 
-export const SplitView = ({ left, right, gap = 2 }: SplitViewProps) => {
+const SplitView = ({ left, right, gap = 2 }: SplitViewProps) => {
   const [columns] = useStdoutDimensions();
   const stacked = columns < STACK_THRESHOLD;
 
