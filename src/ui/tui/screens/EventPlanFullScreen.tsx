@@ -89,10 +89,10 @@ function diffEvents(
 const CHROME_ROWS = 7;
 /**
  * Extra rows the conversational header consumes when rendering
- * round ≥ 2: 1 spacer + 1 "you said" row + 1 quoted-feedback row +
- * 1 "+N -M" delta row + 1 trailing spacer = 5.
+ * round ≥ 2: 1 marginTop spacer + 1 "You: <feedback>" row +
+ * 1 "AI: revised plan" row = 3.
  */
-const CONVO_HEADER_ROWS = 5;
+const CONVO_HEADER_ROWS = 3;
 
 interface EventPlanFullScreenProps {
   store: WizardStore;
@@ -128,9 +128,7 @@ export const EventPlanFullScreen = ({
   const prior = rounds.length > 1 ? rounds[rounds.length - 2] : null;
   const isRevision = last !== null && last.feedback !== null && prior !== null;
   const diff =
-    isRevision && prior && last
-      ? diffEvents(prior.plan, last.plan)
-      : null;
+    isRevision && prior && last ? diffEvents(prior.plan, last.plan) : null;
   const rowsToRender: Array<{ event: PlannedEvent; marker: DiffMarker }> = diff
     ? diff.rows
     : events.map((event) => ({ event, marker: 'unchanged' as const }));
@@ -300,8 +298,7 @@ export const EventPlanFullScreen = ({
               : marker === 'removed'
                 ? Colors.error
                 : Colors.accent;
-          const nameColor =
-            marker === 'removed' ? Colors.muted : Colors.accent;
+          const nameColor = marker === 'removed' ? Colors.muted : Colors.accent;
           return (
             <Text
               key={`${clampedOffset + i}-${marker}-${e.name || ''}`}
@@ -310,11 +307,7 @@ export const EventPlanFullScreen = ({
               <Text color={markerColor} bold>
                 {markerGlyph}{' '}
               </Text>
-              <Text
-                color={nameColor}
-                bold
-                strikethrough={marker === 'removed'}
-              >
+              <Text color={nameColor} bold strikethrough={marker === 'removed'}>
                 {e.name}
               </Text>
               {e.description ? (
