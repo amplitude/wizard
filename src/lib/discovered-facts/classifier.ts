@@ -126,15 +126,15 @@ export function inferVertical(
 
 /**
  * Coarse "what shape of app" label. Priority order (first match wins):
- *   1. Next.js + (`app/api/` || `pages/api/`) → Full-stack web
+ *   1. Next.js + (`[src/]app/api/` || `[src/]pages/api/`) → Full-stack web
  *   2. Next.js without api/ → Marketing/SPA web
  *   3. Vite + react-router (no api/) → SPA web
  *   4. Express / Fastify / Hono with no FE framework → API server
  *   5. null
  *
- * The `app/api` / `pages/api` directory check is the only filesystem
- * probe; we inline `fs.existsSync` rather than introducing a helper
- * since this is the sole consumer.
+ * The `[src/]app/api` / `[src/]pages/api` directory check is the only
+ * filesystem probe; we inline `fs.existsSync` rather than introducing
+ * a helper since this is the sole consumer.
  */
 export function inferAppType(
   packageJson: PackageDotJson | null,
@@ -156,7 +156,9 @@ export function inferAppType(
 
   const hasApiRoutes =
     fs.existsSync(join(installDir, 'app', 'api')) ||
-    fs.existsSync(join(installDir, 'pages', 'api'));
+    fs.existsSync(join(installDir, 'pages', 'api')) ||
+    fs.existsSync(join(installDir, 'src', 'app', 'api')) ||
+    fs.existsSync(join(installDir, 'src', 'pages', 'api'));
 
   if (hasNextJs) {
     return hasApiRoutes
