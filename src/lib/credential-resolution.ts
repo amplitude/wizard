@@ -93,6 +93,44 @@ export function resolveCiOAuthTokenFromEnv(): {
 }
 
 /**
+ * Outcome of `resolveCredentials`. Discriminated so callers can branch
+ * explicitly on "needs user input" instead of silently waiting on
+ * `session.pendingOrgs` to be picked up by some downstream surface.
+ *
+ * The `'needs_user_choice'` arm exists specifically to fix the second-run
+ * stall after `git reset --hard` wiped `<installDir>/.amplitude/`: prior to
+ * surfacing this signal the resolver would set `pendingOrgs` and return
+ * silently, and a non-TUI caller (e.g. anything reading `session.credentials`
+ * on the assumption that an awaited resolve == "ready to run") would treat
+ * the absence of an error as success. The result is now load-bearing —
+ * agent/CI callers MUST emit a structured rejection or fall back to an
+ * interactive prompt; pretending the call succeeded is the bug.
+ */
+export type ResolveCredentialsResult =
+  /** Credentials populated; `session.credentials` is non-null. */
+  | { outcome: 'resolved' }
+  /**
+   * The user is signed in but the wizard cannot pick an environment
+   * unilaterally — typical second-run scenario after `git reset --hard`
+   * wiped `.amplitude/project-binding.json` while leaving multiple
+   * environments fetchable from the live API. `session.pendingOrgs` is set;
+   * the TUI surface drives the env picker and CI/agent surfaces emit a
+   * structured `auth_required: env_selection_failed` envelope.
+   */
+  | {
+      outcome: 'needs_user_choice';
+      kind: 'environment_selection';
+      /** Number of environments with API keys in the user's first project. */
+      envsWithKey: number;
+    }
+  /** Stored token fetch hit a non-recoverable API failure — apiKeyNotice set. */
+  | { outcome: 'api_key_notice' }
+  /** No stored OAuth token / silent refresh failed — caller routes to fresh OAuth. */
+  | { outcome: 'unauthenticated' }
+  /** CI env-var auth path: `WIZARD_OAUTH_TOKEN` populated `session.credentials`. */
+  | { outcome: 'ci_env_token' };
+
+/**
  * Resolve credentials from stored OAuth tokens and environment data.
  *
  * Mutates `session` in place:
@@ -103,6 +141,13 @@ export function resolveCiOAuthTokenFromEnv(): {
  *
  * Skips entirely when `session.apiKey` is already set (--api-key flag) or
  * `session.credentials` is already populated.
+ *
+ * Returns a `ResolveCredentialsResult` describing the outcome. Callers that
+ * need to know "did this stall on a missing user choice?" without re-reading
+ * session fields should branch on `result.outcome` directly. The function
+ * NEVER hangs and NEVER throws on the deferred-environment path — both were
+ * earlier failure modes that left the wizard parked at "Detecting your
+ * project setup" with no diagnostic.
  */
 export async function resolveCredentials(
   session: WizardSession,
@@ -140,9 +185,16 @@ export async function resolveCredentials(
      */
     accessTokenOverride?: string;
   },
-): Promise<void> {
+): Promise<ResolveCredentialsResult> {
   // Already have credentials (e.g. from --api-key flag)
-  if (session.credentials || session.apiKey) return;
+  if (session.credentials || session.apiKey) return { outcome: 'resolved' };
+
+  // Stamped only on the deferred-env path inside the OAuth-resolution
+  // branch below. Hoisted so the final `return` can build a typed
+  // `'needs_user_choice'` result without re-deriving the count from
+  // `session.pendingOrgs` (which carries the full org tree, not the
+  // already-filtered envs-with-keys count we logged).
+  let deferredEnvCount: number | null = null;
 
   const installDir = session.installDir;
 
@@ -204,7 +256,7 @@ export async function resolveCredentials(
         expiresAt: new Date(ciEnvAuth.expiresAtMs).toISOString(),
       },
     );
-    return;
+    return { outcome: 'ci_env_token' };
   }
 
   // Resolve zone from stored user and project config
@@ -560,6 +612,11 @@ export async function resolveCredentials(
                   }".`,
                 };
               }
+              // The user IS authenticated — their filters just didn't
+              // match. Stamp deferredEnvCount so the final return logic
+              // produces `'needs_user_choice'` instead of falling
+              // through to `'unauthenticated'`.
+              deferredEnvCount = envsWithKey.length;
             }
           } else if (
             envsWithKey.length === 1 &&
@@ -622,6 +679,18 @@ export async function resolveCredentials(
             // defer to caller for selection so the wizard emits a
             // structured `needs_input` and the user gets to choose
             // (or confirm) before any writes happen.
+            //
+            // Stamp `deferredEnvCount` so the function's return value
+            // can carry an explicit `'needs_user_choice'` outcome
+            // instead of relying on callers to inspect
+            // `session.pendingOrgs` after the await. Prior to this
+            // signal a non-TUI caller could legitimately read
+            // `session.credentials === null` and assume the resolver
+            // had failed — the typical second-run-after-`git reset
+            // --hard` symptom was the wizard parking at "Detecting
+            // your project setup" with no diagnostic, because the
+            // run loop kept polling for credentials that no surface
+            // was wired to populate.
             logToFile(
               `[credential-resolution] ${
                 envsWithKey.length
@@ -632,6 +701,7 @@ export async function resolveCredentials(
             session.pendingOrgs = userInfo.orgs;
             session.pendingAuthIdToken = tokenForRun.idToken;
             session.pendingAuthAccessToken = tokenForRun.accessToken;
+            deferredEnvCount = envsWithKey.length;
           } else {
             logToFile(
               '[credential-resolution] no environments with API keys — showing apiKeyNotice',
@@ -707,6 +777,24 @@ export async function resolveCredentials(
     );
     session.credentials = null;
   }
+
+  // Build the structured result. Order matters: `'resolved'` is
+  // load-bearing for callers that branch on `result.outcome ===
+  // 'resolved'` to skip the OAuth ceremony, so it has to win over
+  // `'needs_user_choice'` whenever credentials actually landed (e.g.
+  // the deferred-env path was reached but a later step — like the
+  // legacy `getAPIKey` fallback in the catch arm above — populated
+  // `session.credentials` after the fact).
+  if (session.credentials !== null) return { outcome: 'resolved' };
+  if (deferredEnvCount !== null) {
+    return {
+      outcome: 'needs_user_choice',
+      kind: 'environment_selection',
+      envsWithKey: deferredEnvCount,
+    };
+  }
+  if (session.apiKeyNotice !== null) return { outcome: 'api_key_notice' };
+  return { outcome: 'unauthenticated' };
 }
 
 /**

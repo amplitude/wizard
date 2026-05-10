@@ -479,3 +479,208 @@ describe('resolveCredentials — WIZARD_OAUTH_TOKEN priority over OAuth file', (
     expect(session.credentials?.host).toBe('https://eu.amplitude.com');
   });
 });
+
+// ── Second-run-after-`git reset --hard` regression ────────────────────
+//
+// Bug:
+//   1. User runs the wizard once → `.amplitude/project-binding.json`
+//      written, `~/.amplitude/wizard/credentials.json` populated.
+//   2. User runs `git reset --hard` → `.amplitude/project-binding.json`
+//      and `.amplitude/events.json` get wiped.
+//   3. User reruns the wizard. self-heal correctly clears the orphan API
+//      key entry. resolveCredentials silently refreshes the OAuth token,
+//      fetches user info, finds 2 environments with API keys for the
+//      first project, and "defers" — populates `pendingOrgs` and returns.
+//   4. Pre-fix: the void return looked indistinguishable from "credentials
+//      ready" to non-TUI callers. The wizard parked at "Detecting your
+//      project setup" with no diagnostic, and there was no in-band signal
+//      a downstream surface could branch on to route the user to the
+//      env picker / emit `auth_required: env_selection_failed`.
+//
+// Lock-down: in the multi-env defer scenario the resolver MUST
+//   - NOT hang (return within a deterministic await),
+//   - NOT throw,
+//   - return `{ outcome: 'needs_user_choice', kind: 'environment_selection',
+//     envsWithKey: 2 }`,
+//   - populate `pendingOrgs` + `pendingAuthIdToken` + `pendingAuthAccessToken`
+//     so a TUI surface can drive the env picker.
+describe('resolveCredentials — second-run after `.amplitude/` wipe', () => {
+  beforeEach(() => {
+    vi.resetAllMocks();
+  });
+
+  it('returns needs_user_choice when binding is missing and the project has multiple envs', async () => {
+    const { getStoredUser, getStoredToken } = await import(
+      '../../utils/ampli-settings.js'
+    );
+    const { fetchAmplitudeUser } = await import('../api.js');
+    const { readApiKeyWithSource } = await import(
+      '../../utils/api-key-store.js'
+    );
+
+    // Simulate self-heal having already cleared the orphan API key entry
+    // for this install dir — this is the precondition that takes us off
+    // the "use locally stored API key" fast path and onto the
+    // fetch-user-then-defer path.
+    vi.mocked(readApiKeyWithSource).mockReturnValue(null);
+
+    // Token refresh succeeded silently — matches the user-reported log
+    // line `[token-refresh] silent refresh succeeded`.
+    const { tryRefreshToken } = await import('../../utils/token-refresh.js');
+    vi.mocked(getStoredUser).mockReturnValue(makeRealUser('us'));
+    vi.mocked(getStoredToken).mockReturnValue({
+      ...makeToken(),
+      expiresAt: new Date(Date.now() - 60 * 1000).toISOString(),
+    });
+    vi.mocked(tryRefreshToken).mockResolvedValueOnce({
+      accessToken: 'rotated-access-token',
+      idToken: 'rotated-id-token',
+      refreshToken: 'rotated-refresh-token',
+      expiresAt: Date.now() + 3600 * 1000,
+    });
+
+    // Live API returns one project with TWO environments (Production +
+    // Development). This is the exact shape the user's report described:
+    // `[credential-resolution] 2 environments found — deferring`.
+    vi.mocked(fetchAmplitudeUser).mockResolvedValue({
+      email: 'test@example.com',
+      orgs: [
+        {
+          id: 'org-1',
+          name: 'Test Org',
+          projects: [
+            {
+              id: 'ws-1',
+              name: 'Test WS',
+              environments: [
+                {
+                  name: 'Production',
+                  rank: 0,
+                  app: { id: 'app-prod', apiKey: 'api-key-prod' },
+                },
+                {
+                  name: 'Development',
+                  rank: 1,
+                  app: { id: 'app-dev', apiKey: 'api-key-dev' },
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+
+    const session = buildSession({});
+
+    // Prove the call returns within a finite await (no hang).
+    const TIMEOUT_MS = 1000;
+    const result = await Promise.race([
+      resolveCredentials(session, { requireOrgId: false }),
+      new Promise<never>((_, reject) =>
+        setTimeout(
+          () => reject(new Error(`resolveCredentials hung > ${TIMEOUT_MS}ms`)),
+          TIMEOUT_MS,
+        ),
+      ),
+    ]);
+
+    // Explicit "needs user choice" outcome — the load-bearing signal.
+    // Pre-fix this would have been `undefined` (Promise<void>).
+    expect(result).toEqual({
+      outcome: 'needs_user_choice',
+      kind: 'environment_selection',
+      envsWithKey: 2,
+    });
+
+    // pendingOrgs + pending tokens populated so the TUI env picker
+    // (or the agent-mode `promptEnvironmentSelection` helper) has
+    // everything it needs.
+    expect(session.pendingOrgs).toHaveLength(1);
+    expect(session.pendingOrgs?.[0]?.projects?.[0]?.environments).toHaveLength(
+      2,
+    );
+    expect(session.pendingAuthIdToken).toBe('rotated-id-token');
+    expect(session.pendingAuthAccessToken).toBe('rotated-access-token');
+
+    // Credentials remain null — must NOT auto-pick. Auto-picking the
+    // first env would silently write to a possibly-wrong project
+    // (the very class of bug the `--confirm-app` gate exists to prevent).
+    expect(session.credentials).toBeNull();
+  });
+
+  it('returns resolved when a stored API key exists (self-heal did not run)', async () => {
+    // Sanity sibling: the same scenario without the self-heal step
+    // takes the locally-stored-API-key fast path — proves the new
+    // result type still surfaces `'resolved'` correctly when the
+    // resolver does land credentials.
+    const { getStoredUser, getStoredToken } = await import(
+      '../../utils/ampli-settings.js'
+    );
+    const { readApiKeyWithSource } = await import(
+      '../../utils/api-key-store.js'
+    );
+
+    vi.mocked(getStoredUser).mockReturnValue(makeRealUser('us'));
+    vi.mocked(getStoredToken).mockReturnValue(makeToken());
+    vi.mocked(readApiKeyWithSource).mockReturnValue({
+      key: 'cached-api-key',
+      source: 'cache',
+    });
+
+    const session = buildSession({});
+    const result = await resolveCredentials(session, { requireOrgId: false });
+
+    expect(result.outcome).toBe('resolved');
+    expect(session.credentials?.projectApiKey).toBe('cached-api-key');
+  });
+
+  it('returns unauthenticated when no stored token exists', async () => {
+    const { getStoredUser } = await import('../../utils/ampli-settings.js');
+    vi.mocked(getStoredUser).mockReturnValue(undefined);
+
+    const session = buildSession({});
+    const result = await resolveCredentials(session, { requireOrgId: false });
+
+    expect(result).toEqual({ outcome: 'unauthenticated' });
+    expect(session.credentials).toBeNull();
+  });
+
+  it('returns api_key_notice when fetch succeeds but the project has no environments with keys', async () => {
+    const { getStoredUser, getStoredToken } = await import(
+      '../../utils/ampli-settings.js'
+    );
+    const { fetchAmplitudeUser } = await import('../api.js');
+    const { readApiKeyWithSource } = await import(
+      '../../utils/api-key-store.js'
+    );
+
+    vi.mocked(readApiKeyWithSource).mockReturnValue(null);
+    vi.mocked(getStoredUser).mockReturnValue(makeRealUser('us'));
+    vi.mocked(getStoredToken).mockReturnValue(makeToken());
+    vi.mocked(fetchAmplitudeUser).mockResolvedValue({
+      email: 'test@example.com',
+      orgs: [
+        {
+          id: 'org-1',
+          name: 'Test Org',
+          projects: [
+            {
+              id: 'ws-1',
+              name: 'Test WS',
+              // No envs with keys — admin-only access scenario.
+              environments: [
+                { name: 'Production', rank: 0, app: { id: 'app-prod' } },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+
+    const session = buildSession({});
+    const result = await resolveCredentials(session, { requireOrgId: false });
+
+    expect(result).toEqual({ outcome: 'api_key_notice' });
+    expect(session.apiKeyNotice).toContain('API key');
+  });
+});
