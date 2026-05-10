@@ -898,7 +898,6 @@ async function runAgentWizardBody(
     // silent fallback into `getOrAskForProjectData` that may itself
     // stall on prompts.
     if (!session.ci && !session.agent) {
-      const { logToFile } = await import('../utils/debug.js');
       logToFile(
         '[agent-runner] WARN: credentials null in TUI mode at runAgent entry — Auth flow gate let through an unconfirmed session. Falling back to getOrAskForProjectData; if this stalls, the AuthScreen never set credentials before the run kicked off.',
         {
