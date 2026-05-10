@@ -21,6 +21,7 @@ import {
   buildDashboardDeferredMessage,
   classifyAgentOutcome,
   classifyApiErrorSubtype,
+  publishInferredProjectFacts,
   refreshTokenIfStale,
   runColdStartParallel,
   POST_AGENT_STEP_COMMIT_EVENTS,
@@ -797,5 +798,40 @@ describe('runColdStartParallel (cold-start perf)', () => {
     // important contract is that the await above rejected with the
     // agent error, not the detector's null fallback.)
     expect(detectorResolved).toBeDefined();
+  });
+});
+
+describe('publishInferredProjectFacts (Discovered facts wiring)', () => {
+  // Smoke test: confirm the agent-runner wiring publishes the
+  // `vertical` chip when the user's package.json ships Stripe. We
+  // pass in a `publish` spy that mirrors the inline closure inside
+  // `runAgentWizard` — the spy plays the role of `getUI()
+  // .pushDiscoveryFact`. Asserting on (id, body) is enough to verify
+  // both the classifier wiring and the chip-payload shape; the full
+  // runner is too integrated to invoke end-to-end here.
+  it('publishes a Vertical chip for a stripe-dep package.json', () => {
+    const publish = vi.fn();
+    publishInferredProjectFacts(
+      { dependencies: { stripe: '^15.0.0' } },
+      '/__irrelevant_for_vertical_check__',
+      publish,
+    );
+    expect(publish).toHaveBeenCalledWith('vertical', {
+      label: 'Vertical',
+      value: 'Ecommerce',
+    });
+  });
+
+  it('skips publishing when no bucket fires (never push an "Unknown" chip)', () => {
+    const publish = vi.fn();
+    publishInferredProjectFacts(
+      { dependencies: { lodash: '^4.0.0' } },
+      '/__no_such_dir__',
+      publish,
+    );
+    // Lodash alone matches no vertical and no app-type bucket, so
+    // neither chip should be published — the feed should never carry
+    // a noisy null/Unknown chip.
+    expect(publish).not.toHaveBeenCalled();
   });
 });
