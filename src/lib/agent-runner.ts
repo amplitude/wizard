@@ -889,6 +889,28 @@ async function runAgentWizardBody(
   // Credentials are pre-set by bin.ts (TUI mode) via the AuthScreen SUSI flow.
   // Only fall back to getOrAskForProjectData for CI mode or non-TUI fallback.
   if (!session.credentials) {
+    // Diagnostic: in TUI mode we should never reach the agent runner
+    // with null credentials — the Auth flow gate (`isComplete` requires
+    // `credentials !== null`) is the single source of truth. If we DO
+    // reach here, the gate let the user past, which means a different
+    // bug. Log loudly so the next "stalled session after `git reset
+    // --hard`" report has an unambiguous breadcrumb instead of a
+    // silent fallback into `getOrAskForProjectData` that may itself
+    // stall on prompts.
+    if (!session.ci && !session.agent) {
+      const { logToFile } = await import('../utils/debug.js');
+      logToFile(
+        '[agent-runner] WARN: credentials null in TUI mode at runAgent entry — Auth flow gate let through an unconfirmed session. Falling back to getOrAskForProjectData; if this stalls, the AuthScreen never set credentials before the run kicked off.',
+        {
+          hasPendingOrgs: session.pendingOrgs !== null,
+          pendingOrgsLength: session.pendingOrgs?.length ?? 0,
+          selectedOrgId: session.selectedOrgId ?? null,
+          selectedProjectId: session.selectedProjectId ?? null,
+          selectedEnvName: session.selectedEnvName ?? null,
+          requiresAccountConfirmation: session.requiresAccountConfirmation,
+        },
+      );
+    }
     const authResult = await getOrAskForProjectData({
       authOnboardingPath: session.authOnboardingPath,
       ci: session.ci,
