@@ -6,12 +6,6 @@
  */
 export type WizardMode = 'fast' | 'standard' | 'thorough';
 
-const WIZARD_MODES: readonly WizardMode[] = [
-  'fast',
-  'standard',
-  'thorough',
-] as const;
-
 export type AmplitudeProjectData = Record<string, unknown>;
 
 export type PreselectedProject = {

@@ -292,21 +292,6 @@ export function unrealPackageManager(): Promise<PackageManagerInfo> {
 // Ruby (Bundler) helper
 // ---------------------------------------------------------------------------
 
-const BUNDLER: DetectedPackageManager = {
-  name: 'bundler',
-  label: 'Bundler',
-  installCommand: 'bundle add',
-  runCommand: 'bundle exec',
-};
-
-function bundlerPackageManager(): Promise<PackageManagerInfo> {
-  return Promise.resolve({
-    detected: [BUNDLER],
-    primary: BUNDLER,
-    recommendation: 'Use Bundler (bundle add). Run commands with bundle exec.',
-  });
-}
-
 // ---------------------------------------------------------------------------
 // Android (Gradle) helper
 // ---------------------------------------------------------------------------
