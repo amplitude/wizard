@@ -53,10 +53,7 @@ describe('inferVertical', () => {
 
   it('promotes SaaS to B2B SaaS when an ORM is present alongside auth', () => {
     expect(
-      inferVertical(
-        pkg({ prisma: '^5.0.0', 'next-auth': '^4.24.0' }),
-        NO_DIR,
-      ),
+      inferVertical(pkg({ prisma: '^5.0.0', 'next-auth': '^4.24.0' }), NO_DIR),
     ).toEqual({ value: 'B2B SaaS' });
   });
 
@@ -79,14 +76,17 @@ describe('inferVertical', () => {
   });
 
   it('returns SaaS when only an auth lib is present (no ORM)', () => {
-    expect(
-      inferVertical(pkg({ 'next-auth': '^4.24.0' }), NO_DIR),
-    ).toEqual({ value: 'SaaS' });
+    expect(inferVertical(pkg({ 'next-auth': '^4.24.0' }), NO_DIR)).toEqual({
+      value: 'SaaS',
+    });
   });
 
   it('returns SaaS for @supabase/auth-* without an ORM', () => {
     expect(
-      inferVertical(pkg({ '@supabase/auth-helpers-nextjs': '^0.10.0' }), NO_DIR),
+      inferVertical(
+        pkg({ '@supabase/auth-helpers-nextjs': '^0.10.0' }),
+        NO_DIR,
+      ),
     ).toEqual({ value: 'SaaS' });
   });
 
@@ -101,10 +101,7 @@ describe('inferVertical', () => {
 
   it('returns null when no bucket fires (skip the chip rather than publish "Unknown")', () => {
     expect(
-      inferVertical(
-        pkg({ react: '^18.0.0', lodash: '^4.0.0' }),
-        NO_DIR,
-      ),
+      inferVertical(pkg({ react: '^18.0.0', lodash: '^4.0.0' }), NO_DIR),
     ).toBeNull();
   });
 
@@ -116,10 +113,7 @@ describe('inferVertical', () => {
     // A Stripe app that also uses next-auth should still be Ecommerce —
     // first match wins.
     expect(
-      inferVertical(
-        pkg({ stripe: '^15.0.0', 'next-auth': '^4.24.0' }),
-        NO_DIR,
-      ),
+      inferVertical(pkg({ stripe: '^15.0.0', 'next-auth': '^4.24.0' }), NO_DIR),
     ).toEqual({ value: 'Ecommerce' });
   });
 
@@ -153,6 +147,44 @@ describe('inferAppType', () => {
     ).toEqual({ value: 'Full-stack web' });
   });
 
+  it('returns Full-stack web for Next.js + src/app/api dir (src/ layout)', () => {
+    // `create-next-app` offers a `src/`-prefixed layout where API routes
+    // live at `src/app/api` or `src/pages/api`. Probing only the root
+    // `app/api` and `pages/api` paths misclassified those projects as
+    // `'Marketing/SPA web'`. Regression test: stamp a `src/app/api` dir
+    // in a fresh tmpdir and confirm we land on `'Full-stack web'`.
+    const srcLayoutDir = fs.mkdtempSync(
+      path.join(os.tmpdir(), 'wizard-classifier-test-src-'),
+    );
+    try {
+      fs.mkdirSync(path.join(srcLayoutDir, 'src', 'app', 'api'), {
+        recursive: true,
+      });
+      expect(
+        inferAppType(pkg({ next: '^14.0.0', react: '^18.0.0' }), srcLayoutDir),
+      ).toEqual({ value: 'Full-stack web' });
+    } finally {
+      fs.rmSync(srcLayoutDir, { recursive: true, force: true });
+    }
+  });
+
+  it('returns Full-stack web for Next.js + src/pages/api dir (legacy src/ layout)', () => {
+    // Same intent as above for the Pages Router under `src/`.
+    const srcPagesDir = fs.mkdtempSync(
+      path.join(os.tmpdir(), 'wizard-classifier-test-src-pages-'),
+    );
+    try {
+      fs.mkdirSync(path.join(srcPagesDir, 'src', 'pages', 'api'), {
+        recursive: true,
+      });
+      expect(
+        inferAppType(pkg({ next: '^14.0.0', react: '^18.0.0' }), srcPagesDir),
+      ).toEqual({ value: 'Full-stack web' });
+    } finally {
+      fs.rmSync(srcPagesDir, { recursive: true, force: true });
+    }
+  });
+
   it('returns Marketing/SPA web for Next.js without api/ dir', () => {
     expect(
       inferAppType(pkg({ next: '^14.0.0', react: '^18.0.0' }), NO_DIR),
@@ -173,15 +205,15 @@ describe('inferAppType', () => {
   });
 
   it('returns API server for express with no FE framework', () => {
-    expect(
-      inferAppType(pkg({ express: '^4.18.0' }), NO_DIR),
-    ).toEqual({ value: 'API server' });
+    expect(inferAppType(pkg({ express: '^4.18.0' }), NO_DIR)).toEqual({
+      value: 'API server',
+    });
   });
 
   it('returns API server for fastify alone', () => {
-    expect(
-      inferAppType(pkg({ fastify: '^4.0.0' }), NO_DIR),
-    ).toEqual({ value: 'API server' });
+    expect(inferAppType(pkg({ fastify: '^4.0.0' }), NO_DIR)).toEqual({
+      value: 'API server',
+    });
   });
 
   it('returns API server for hono alone', () => {
@@ -194,19 +226,13 @@ describe('inferAppType', () => {
     // Express + React is more likely a custom-server SSR or proxy
     // setup; we don't claim it as an API server.
     expect(
-      inferAppType(
-        pkg({ express: '^4.18.0', react: '^18.0.0' }),
-        NO_DIR,
-      ),
+      inferAppType(pkg({ express: '^4.18.0', react: '^18.0.0' }), NO_DIR),
     ).toBeNull();
   });
 
   it('returns null for vite + react WITHOUT react-router (no SPA-router signal)', () => {
     expect(
-      inferAppType(
-        pkg({ vite: '^5.0.0', react: '^18.0.0' }),
-        NO_DIR,
-      ),
+      inferAppType(pkg({ vite: '^5.0.0', react: '^18.0.0' }), NO_DIR),
     ).toBeNull();
   });
 

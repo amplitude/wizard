@@ -154,9 +154,16 @@ export function inferAppType(
   const hasFastify = hasPackageInstalled('fastify', packageJson);
   const hasHono = hasPackageInstalled('hono', packageJson);
 
+  // Next.js supports both root and `src/`-prefixed layouts (the
+  // `create-next-app` template offers both, and `detectNextJsSurfaces` in
+  // `src/frameworks/nextjs/utils.ts` already handles both via globs).
+  // Without the `src/` probes, full-stack apps using the `src/`
+  // convention get misclassified as `'Marketing/SPA web'`.
   const hasApiRoutes =
     fs.existsSync(join(installDir, 'app', 'api')) ||
-    fs.existsSync(join(installDir, 'pages', 'api'));
+    fs.existsSync(join(installDir, 'pages', 'api')) ||
+    fs.existsSync(join(installDir, 'src', 'app', 'api')) ||
+    fs.existsSync(join(installDir, 'src', 'pages', 'api'));
 
   if (hasNextJs) {
     return hasApiRoutes

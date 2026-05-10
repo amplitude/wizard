@@ -21,10 +21,7 @@ import type { PackageDotJson } from '../utils/package-json';
 import type { WizardOptions } from '../utils/types';
 import { analytics, captureWizardError } from '../utils/analytics';
 import { getUI } from '../ui';
-import {
-  inferVertical,
-  inferAppType,
-} from './discovered-facts/classifier.js';
+import { inferVertical, inferAppType } from './discovered-facts/classifier.js';
 import {
   getAgent,
   AgentErrorType,
@@ -98,10 +95,7 @@ export const POST_AGENT_STEP_COMMIT_EVENTS = 'commit-events';
 export function publishInferredProjectFacts(
   packageJson: PackageDotJson | null,
   installDir: string,
-  publish: (
-    id: string,
-    body: { label: string; value: string },
-  ) => void,
+  publish: (id: string, body: { label: string; value: string }) => void,
 ): void {
   const verticalFact = inferVertical(packageJson, installDir);
   if (verticalFact) {
