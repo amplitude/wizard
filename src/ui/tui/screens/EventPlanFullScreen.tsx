@@ -8,8 +8,16 @@
  * intermittently invisible on smaller terminals (the user reported
  * "adjusting terminal size brought it back").
  *
+ * On round 2+ (i.e. after the user gave feedback at least once via [F]),
+ * the screen renders a conversational header showing what the user said
+ * and per-event diff markers against the prior round: `+` added (green),
+ * `−` removed (red, struck-through), unchanged events render plain. This
+ * makes the feedback loop feel like a back-and-forth between the user
+ * and the AI instead of an opaque list-replacement that erased context.
+ *
  * Layout invariants:
  *   - Title pinned to top (`flexShrink={0}`)
+ *   - Optional conversation block (rounds ≥ 2 only) — between title and list
  *   - Events list grows to fill available rows (`flexGrow={1}`,
  *     `overflow="hidden"`). The visible window is sized from the `height`
  *     prop so we never silently clip past the viewport, and any overflow
@@ -32,6 +40,45 @@ import { Colors, Icons, Layout } from '../styles.js';
 import type { PlannedEvent } from '../store.js';
 
 /**
+ * Compute per-event diff between two plans. Membership is by name —
+ * the agent regenerates descriptions on revision, so diffing on
+ * description would falsely flag unchanged events as "modified".
+ */
+type DiffMarker = 'added' | 'removed' | 'unchanged';
+
+function diffEvents(
+  prior: PlannedEvent[],
+  current: PlannedEvent[],
+): {
+  rows: Array<{ event: PlannedEvent; marker: DiffMarker }>;
+  added: number;
+  removed: number;
+} {
+  const priorNames = new Set(prior.map((e) => e.name));
+  const currentNames = new Set(current.map((e) => e.name));
+  const rows: Array<{ event: PlannedEvent; marker: DiffMarker }> = [];
+  let added = 0;
+  let removed = 0;
+  // Render removed events first so the user sees what was dropped before
+  // scanning the kept/added rows.
+  for (const e of prior) {
+    if (!currentNames.has(e.name)) {
+      rows.push({ event: e, marker: 'removed' });
+      removed += 1;
+    }
+  }
+  for (const e of current) {
+    if (priorNames.has(e.name)) {
+      rows.push({ event: e, marker: 'unchanged' });
+    } else {
+      rows.push({ event: e, marker: 'added' });
+      added += 1;
+    }
+  }
+  return { rows, added, removed };
+}
+
+/**
  * Rows of chrome consumed by everything OTHER than the events list:
  *   2  outer paddingY (top + bottom)
  *   2  title block (subtitle + bold title line)
@@ -40,6 +87,12 @@ import type { PlannedEvent } from '../store.js';
  *   1  hint content row
  */
 const CHROME_ROWS = 7;
+/**
+ * Extra rows the conversational header consumes when rendering
+ * round ≥ 2: 1 spacer + 1 "you said" row + 1 quoted-feedback row +
+ * 1 "+N -M" delta row + 1 trailing spacer = 5.
+ */
+const CONVO_HEADER_ROWS = 5;
 
 interface EventPlanFullScreenProps {
   store: WizardStore;
@@ -66,22 +119,42 @@ export const EventPlanFullScreen = ({
   const [cursorVisible, setCursorVisible] = useState(true);
   const [scrollOffset, setScrollOffset] = useState(0);
 
+  // Round-aware view: the prior round (if any) gives us the diff context
+  // that turns this from "list replacement" into "conversation". `prior`
+  // is the plan the user saw last time before they pressed `[F]`; `last`
+  // is the round we're currently displaying.
+  const rounds = store.eventPlanRounds;
+  const last = rounds.length > 0 ? rounds[rounds.length - 1] : null;
+  const prior = rounds.length > 1 ? rounds[rounds.length - 2] : null;
+  const isRevision = last !== null && last.feedback !== null && prior !== null;
+  const diff =
+    isRevision && prior && last
+      ? diffEvents(prior.plan, last.plan)
+      : null;
+  const rowsToRender: Array<{ event: PlannedEvent; marker: DiffMarker }> = diff
+    ? diff.rows
+    : events.map((event) => ({ event, marker: 'unchanged' as const }));
+
   // Rows available for the events list itself, derived from the current
   // viewport height. Sizing the window here (instead of from a hard cap
   // like MAX_VISIBLE_EVENTS) means events can never be silently clipped
   // by Yoga's overflow="hidden" — anything that doesn't fit goes behind
   // a scroll indicator the user can reach with the arrow keys.
-  const eventsBudget = Math.max(1, height - CHROME_ROWS);
-  const needsScroll = events.length > eventsBudget;
+  const chromeRows = CHROME_ROWS + (isRevision ? CONVO_HEADER_ROWS : 0);
+  const eventsBudget = Math.max(1, height - chromeRows);
+  const needsScroll = rowsToRender.length > eventsBudget;
   // Reserve one row for the scroll-state indicator when scrolling is on.
   const visibleCount = needsScroll
     ? Math.max(1, eventsBudget - 1)
     : eventsBudget;
-  const maxOffset = Math.max(0, events.length - visibleCount);
+  const maxOffset = Math.max(0, rowsToRender.length - visibleCount);
   const clampedOffset = Math.min(scrollOffset, maxOffset);
-  const visible = events.slice(clampedOffset, clampedOffset + visibleCount);
+  const visible = rowsToRender.slice(
+    clampedOffset,
+    clampedOffset + visibleCount,
+  );
   const above = clampedOffset;
-  const below = events.length - clampedOffset - visible.length;
+  const below = rowsToRender.length - clampedOffset - visible.length;
 
   // Blink the cursor in feedback mode (purely cosmetic).
   useEffect(() => {
@@ -158,12 +231,49 @@ export const EventPlanFullScreen = ({
     >
       {/* Title — pinned to top */}
       <Box flexDirection="column" flexShrink={0}>
-        <Text color={Colors.muted}>Suggested events for your app:</Text>
+        <Text color={Colors.muted}>
+          {isRevision
+            ? `Round ${rounds.length} — revised after your feedback:`
+            : 'Suggested events for your app:'}
+        </Text>
         <Text color={Colors.heading} bold>
           Instrumentation Plan ({events.length} event
           {events.length === 1 ? '' : 's'})
         </Text>
       </Box>
+
+      {/* Conversational header — only on rounds ≥ 2. Quotes the user's
+          most recent feedback and shows the AI's net response (+N added,
+          -M removed) so the user can see at a glance whether their
+          intent landed before scanning the list. */}
+      {isRevision && last?.feedback && diff ? (
+        <Box flexDirection="column" flexShrink={0} marginTop={1}>
+          <Text color={Colors.muted}>
+            <Text color={Colors.heading} bold>
+              You
+            </Text>
+            : <Text color={Colors.secondary}>"{last.feedback}"</Text>
+          </Text>
+          <Text color={Colors.muted}>
+            <Text color={Colors.heading} bold>
+              AI
+            </Text>
+            : revised plan{' '}
+            {diff.added > 0 ? (
+              <Text color={Colors.success}>+{diff.added} added</Text>
+            ) : null}
+            {diff.added > 0 && diff.removed > 0 ? (
+              <Text color={Colors.muted}> · </Text>
+            ) : null}
+            {diff.removed > 0 ? (
+              <Text color={Colors.error}>−{diff.removed} removed</Text>
+            ) : null}
+            {diff.added === 0 && diff.removed === 0 ? (
+              <Text color={Colors.muted}>(same set of events)</Text>
+            ) : null}
+          </Text>
+        </Box>
+      ) : null}
 
       {/* Events list — fills the remaining vertical space, but the visible
           window is bounded by `visibleCount` so nothing gets silently
@@ -176,19 +286,43 @@ export const EventPlanFullScreen = ({
         overflow="hidden"
         marginTop={1}
       >
-        {visible.map((e, i) => (
-          <Text
-            key={`${clampedOffset + i}-${e.name || ''}`}
-            wrap="truncate-end"
-          >
-            <Text color={Colors.accent} bold>
-              {Icons.bullet} {e.name}
+        {visible.map((row, i) => {
+          const { event: e, marker } = row;
+          const markerGlyph =
+            marker === 'added'
+              ? '+'
+              : marker === 'removed'
+                ? '−'
+                : Icons.bullet;
+          const markerColor =
+            marker === 'added'
+              ? Colors.success
+              : marker === 'removed'
+                ? Colors.error
+                : Colors.accent;
+          const nameColor =
+            marker === 'removed' ? Colors.muted : Colors.accent;
+          return (
+            <Text
+              key={`${clampedOffset + i}-${marker}-${e.name || ''}`}
+              wrap="truncate-end"
+            >
+              <Text color={markerColor} bold>
+                {markerGlyph}{' '}
+              </Text>
+              <Text
+                color={nameColor}
+                bold
+                strikethrough={marker === 'removed'}
+              >
+                {e.name}
+              </Text>
+              {e.description ? (
+                <Text color={Colors.secondary}> — {e.description}</Text>
+              ) : null}
             </Text>
-            {e.description ? (
-              <Text color={Colors.secondary}> — {e.description}</Text>
-            ) : null}
-          </Text>
-        ))}
+          );
+        })}
         {needsScroll && (
           <Text color={Colors.muted}>
             {Icons.dot}
