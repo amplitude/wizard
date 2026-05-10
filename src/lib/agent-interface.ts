@@ -3521,6 +3521,23 @@ export async function runAgent(
           // messages, abort the SDK query and route to the AUTH_ERROR outro
           // so the user sees a clear failure + manual-signup fallback
           // instead of a stuck spinner.
+          //
+          // Production observation (run fe1fead2 / 2026-05-10): calling
+          // `controller.abort('auth_failed')` alone does NOT stop the SDK's
+          // internal retry loop. The SDK kept emitting api_retry messages
+          // for attempts 3, 4, 5, 6 after the abort fired at retry 2, and
+          // the for-await kept draining them — incrementing authRetryCount
+          // and re-logging the abort — for ~30s of dead spinner time before
+          // the SDK finally errored out at max_retries: 10. The abort
+          // signal propagates eventually (the SDK throws AbortError once
+          // it actually gives up), but not in time to spare the user.
+          //
+          // Throw an AbortError synchronously the first time the threshold
+          // is crossed. The for-await unwinds, lands in the existing
+          // `catch (innerError)` block, sees `authErrorDetected=true`, and
+          // exits the outer retry loop via the `break` at the
+          // "Agent loop exiting: auth error detected" branch — without
+          // letting another 4+ doomed retries through.
           if (
             message.type === 'system' &&
             message.subtype === 'api_retry' &&
@@ -3549,6 +3566,13 @@ export async function runAgent(
               if (!controller.signal.aborted) {
                 controller.abort('auth_failed');
               }
+              // Synchronously bail from the SDK message loop so the SDK's
+              // backoff queue can't deliver attempts N+1, N+2, … . The
+              // outer `catch (innerError)` reads `authErrorDetected` and
+              // routes us to the AUTH_ERROR outro without retrying.
+              const abortErr = new Error('auth_failed');
+              abortErr.name = 'AbortError';
+              throw abortErr;
             }
           }
 
