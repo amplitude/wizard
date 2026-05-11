@@ -286,11 +286,18 @@ When('I decline the Terms of Service', function () {
 When(
   'the signup probe returns needs_information for {string}',
   function (field: string) {
-    // Mirrors SigningUpScreen receiving needs_information from the server:
-    // store.setSignupRequiredFields([field]). The router's next resolve()
-    // will land on the ToS screen (always-rendered post-probe) or
-    // SignupFullName depending on what's needed.
-    session.signupRequiredFields = [field];
+    // Mirror the parser's spoof block (`src/utils/direct-signup.ts`):
+    // when BE flag is OFF and `terms_acceptance` isn't in `required`,
+    // the parser injects it and populates the legal-doc bundle from
+    // local constants. Downstream code (router, screens) sees the
+    // same shape it will see when the BE flag flips ON.
+    session.signupRequiredFields =
+      field === 'terms_acceptance' ? [field] : [field, 'terms_acceptance'];
+    session.legalDocumentBundle = {
+      terms_of_service: 'https://amplitude.com/terms',
+      privacy_policy: 'https://amplitude.com/privacy',
+    };
+    session.legalDocumentSource = 'local';
   },
 );
 
