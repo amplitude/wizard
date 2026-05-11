@@ -244,11 +244,13 @@ export const FLOWS: Record<Flow, FlowEntry[]> = {
       screen: Screen.ToS,
       show: (s) =>
         isCreateAccountOnboarding(s) &&
-        (s.signupRequiredFields ?? []).includes('terms_acceptance') &&
+        s.signupRequiredFields !== null &&
+        s.signupRequiredFields.includes('terms_acceptance') &&
         s.tosAccepted !== true,
       isComplete: (s) =>
         !isCreateAccountOnboarding(s) ||
-        !(s.signupRequiredFields ?? []).includes('terms_acceptance') ||
+        s.signupRequiredFields === null ||
+        !s.signupRequiredFields.includes('terms_acceptance') ||
         s.tosAccepted === true,
       // Returning false when the screen was *skipped* (server never asked,
       // or ToS was never accepted) is critical: `isComplete` returns true

@@ -1,5 +1,11 @@
 import type { AmplitudeAuthResult } from './oauth.js';
-import { performDirectSignup, type RequiredKey } from './direct-signup.js';
+import {
+  performDirectSignup,
+  type DirectSignupInput,
+  type RequiredKey,
+  type LegalDocumentBundle,
+  type LegalDocumentSource,
+} from './direct-signup.js';
 import { replaceStoredUser, type StoredUser } from './ampli-settings.js';
 import { fetchAmplitudeUser, type AmplitudeUserInfo } from '../lib/api.js';
 import { createLogger } from '../lib/observability/logger.js';
@@ -125,18 +131,13 @@ export type AgenticSignupAttemptedProperties = {
   'user fetch retry count'?: number;
   /**
    * Where the legal-document URLs that informed this attempt's
-   * `terms_acceptance` slot came from:
-   *   - 'server' — BE provided them in `needs_information.terms_acceptance.documents`
-   *   - 'local' — parser's spoof block synthesized them from local constants
-   *   - 'unused' — this attempt's body carried no `terms_acceptance` (probe
-   *     POST, existing-user redirect, error before terms collection, etc.)
-   *
-   * Set on every status arm so dashboards can slice adoption by URL
-   * source and tie it to the eventual outcome (success vs. unsupported
-   * vs. signup_error). Becomes the primary adoption metric once the BE
-   * flag flips ON across env tiers.
+   * `terms_acceptance` slot came from. `'unused'` covers attempts whose
+   * body carried no `terms_acceptance` (probe POST, existing-user
+   * redirect, error before terms collection). Set on every status arm so
+   * dashboards can slice adoption by URL source and tie it to the
+   * eventual outcome.
    */
-  'legal document source'?: 'server' | 'local' | 'unused';
+  'legal document source'?: LegalDocumentSource | 'unused';
 };
 
 export const trackSignupAttempt = (
@@ -177,10 +178,7 @@ export type SignupOrAuthInput =
       kind: 'follow_up';
       email: string | null;
       fullName: string;
-      legalDocumentBundle: {
-        terms_of_service: string;
-        privacy_policy: string;
-      };
+      legalDocumentBundle: LegalDocumentBundle;
       zone: AmplitudeZone;
       signal?: AbortSignal;
     };
@@ -214,23 +212,17 @@ export type PerformSignupOrAuthResult =
       kind: 'needs_information';
       requiredFields: RequiredKey[];
       /**
-       * Legal-doc URLs the parser produced for this probe response.
-       * Non-null in Phase A whenever `'terms_acceptance' in requiredFields`
-       * (which the parser's spoof guarantees for new agentic signups).
-       * Caller writes this into `session.legalDocumentBundle` so the ToS
-       * screen and the follow-up POST can both pull from one place.
+       * Legal-doc URLs the parser produced. Caller writes this into
+       * `session.legalDocumentBundle` so the ToS screen and the follow-up
+       * POST body both pull from one place.
        */
-      legalDocumentBundle: {
-        terms_of_service: string;
-        privacy_policy: string;
-      } | null;
+      legalDocumentBundle: LegalDocumentBundle | null;
       /**
-       * Source of `legalDocumentBundle`'s URLs — passed through from the
-       * direct-signup parser. Caller writes this into
-       * `session.legalDocumentSource` so subsequent telemetry arms can
-       * read the source without re-threading it through the wrapper.
+       * Caller writes this into `session.legalDocumentSource` so
+       * subsequent telemetry arms can read the source without
+       * re-threading it through the wrapper.
        */
-      legalDocumentSource: 'server' | 'local';
+      legalDocumentSource: LegalDocumentSource;
     }
   | { kind: 'redirect' }
   | { kind: 'error'; message: string };
@@ -264,27 +256,10 @@ export async function performSignupOrAuth(
     log.debug('missing email; skipping direct signup');
     return { kind: 'error', message: 'missing email' };
   }
-  // Narrow the discriminated input to the underlying-typed shape that
-  // `performDirectSignup` accepts. Email-non-null guard above lets us
-  // upgrade `email: string | null` to `email: string` here. No optional-
-  // field reassembly: the wrapper passes the discriminator through so
-  // direct-signup builds the body via its own switch.
-  const directSignupInput =
-    input.kind === 'initial'
-      ? {
-          kind: 'initial' as const,
-          email: input.email,
-          zone: input.zone,
-          signal: input.signal,
-        }
-      : {
-          kind: 'follow_up' as const,
-          email: input.email,
-          fullName: input.fullName,
-          legalDocumentBundle: input.legalDocumentBundle,
-          zone: input.zone,
-          signal: input.signal,
-        };
+  // SignupOrAuthInput differs from DirectSignupInput only in email's
+  // nullability. After the guard above, narrow via spread + explicit
+  // email — performDirectSignup builds the body via its own switch.
+  const directSignupInput: DirectSignupInput = { ...input, email: input.email };
 
   log.debug('attempting direct signup', { kind: input.kind });
   // performDirectSignup is contracted to catch its own network/parse errors

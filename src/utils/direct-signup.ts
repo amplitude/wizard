@@ -35,6 +35,29 @@ export type RequiredKey = (typeof KNOWN_REQUIRED_KEYS)[number];
 export const KNOWN_DOC_KINDS = ['terms_of_service', 'privacy_policy'] as const;
 export type DocKind = (typeof KNOWN_DOC_KINDS)[number];
 
+/**
+ * Map of legal-doc kind → URL. Shared across the wire boundary
+ * (`needs_information` parser, signup-or-auth wrapper, session) and the
+ * follow-up POST body builder. Adding a new `DocKind` propagates here
+ * automatically via tsc.
+ */
+export type LegalDocumentBundle = Record<DocKind, string>;
+
+/**
+ * Where a `LegalDocumentBundle`'s URLs originated:
+ * `'server'` — BE-supplied via `needs_information.terms_acceptance.documents`.
+ * `'local'` — synthesized from local constants by the parser's spoof block.
+ */
+export type LegalDocumentSource = 'server' | 'local';
+
+// === SPOOF — DELETE WHEN REMOVING LOCAL FALLBACK ===
+// Local URLs the parser substitutes when the BE flag is OFF. Keyed by
+// DocKind so adding a new kind propagates here via tsc.
+const LOCAL_DOC_URLS: LegalDocumentBundle = {
+  terms_of_service: TERMS_OF_SERVICE_URL,
+  privacy_policy: PRIVACY_POLICY_URL,
+};
+
 // Discriminated union response schemas from the provisioning endpoint.
 // `dashboard_url` — optional magic-link URL (amplitude/javascript PR #108967).
 const OAuthProvisioningSchema = z.object({
@@ -213,10 +236,7 @@ export type DirectSignupInput =
       kind: 'follow_up';
       email: string;
       fullName: string;
-      legalDocumentBundle: {
-        terms_of_service: string;
-        privacy_policy: string;
-      };
+      legalDocumentBundle: LegalDocumentBundle;
       zone: AmplitudeZone;
       signal?: AbortSignal;
     };
@@ -239,24 +259,13 @@ export type DirectSignupResult =
       kind: 'needs_information';
       requiredFields: RequiredKey[];
       /**
-       * URLs of the legal documents the user must accept. Populated under
-       * the spoof in Phase A whenever `'terms_acceptance' in requiredFields`.
-       * Nullable on type to accommodate Phase D (BE drops the requirement)
-       * — at that point the screen-show predicate evaluates false and ToS
-       * is naturally skipped.
+       * Legal-doc URLs. Nullable so the BE can drop the requirement
+       * later — at that point the ToS-show predicate evaluates false and
+       * the screen is naturally skipped.
        */
-      legalDocumentBundle: {
-        terms_of_service: string;
-        privacy_policy: string;
-      } | null;
-      /**
-       * Where `legalDocumentBundle`'s URLs originated — `'server'` when BE
-       * provided them in `needs_information.terms_acceptance.documents`,
-       * `'local'` when the parser's spoof block synthesized them from
-       * local constants. Used as the value of the `'legal document source'`
-       * telemetry tag.
-       */
-      legalDocumentSource: 'server' | 'local';
+      legalDocumentBundle: LegalDocumentBundle | null;
+      /** Source feeds the `'legal document source'` telemetry tag. */
+      legalDocumentSource: LegalDocumentSource;
     }
   | { kind: 'error'; message: string; code?: string };
 
@@ -375,34 +384,23 @@ export async function performDirectSignup(
       };
     }
 
-    let legalDocumentBundle: {
-      terms_of_service: string;
-      privacy_policy: string;
-    } | null;
-    let legalDocumentSource: 'server' | 'local';
+    let legalDocumentBundle: LegalDocumentBundle | null;
+    let legalDocumentSource: LegalDocumentSource;
     let normalizedRequired: RequiredKey[] = [...requiredFromBE];
 
     if (requiredHasTerms && termsParse.success) {
-      // Case (b) — BE provided. termsParse.data is the typed keyed record
-      // from TermsAcceptanceDocsSchema's .transform().
       legalDocumentBundle = termsParse.data;
       legalDocumentSource = 'server';
     } else {
-      // === SPOOF BLOCK — DELETE WHEN REMOVING LOCAL FALLBACK ===
-      // Case (a) — BE flag OFF. Synthesize local URLs and inject
-      // 'terms_acceptance' into requiredFields so downstream sees
-      // case (a) and case (b) as the same shape. The screen, the body
-      // construction, the flow predicates — none of them branch on BE
-      // flag state. When the BE flag is ON across env tiers and adoption
-      // telemetry confirms it's safe, this entire `else` branch is what
-      // the cleanup PR deletes — no downstream changes required.
-      legalDocumentBundle = {
-        terms_of_service: TERMS_OF_SERVICE_URL,
-        privacy_policy: PRIVACY_POLICY_URL,
-      };
+      // === SPOOF — DELETE WHEN REMOVING LOCAL FALLBACK ===
+      // BE flag OFF: synthesize URLs and inject 'terms_acceptance' so
+      // downstream sees the same shape as the BE-supplied case. When the
+      // flag is ON across env tiers, the entire `else` branch is what the
+      // cleanup PR deletes — no downstream changes required.
+      legalDocumentBundle = LOCAL_DOC_URLS;
       legalDocumentSource = 'local';
       normalizedRequired = [...requiredFromBE, 'terms_acceptance'];
-      // === END SPOOF BLOCK ===
+      // === END SPOOF ===
     }
 
     return {

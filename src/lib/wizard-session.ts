@@ -17,7 +17,11 @@ import { EMAIL_REGEX } from './constants';
 import type { AmplitudeZone, Integration } from './constants';
 import type { FrameworkConfig } from './framework-config';
 import { resolveInstallDir } from '../utils/install-dir';
-import type { RequiredKey } from '../utils/direct-signup';
+import type {
+  RequiredKey,
+  LegalDocumentBundle,
+  LegalDocumentSource,
+} from '../utils/direct-signup';
 
 /**
  * Whether the user is signing into an existing Amplitude account or
@@ -882,25 +886,18 @@ export interface WizardSession {
    * Asymmetric reset would let stale URLs ride into a follow-up POST whose
    * acceptance got cleared.
    */
-  legalDocumentBundle: {
-    terms_of_service: string;
-    privacy_policy: string;
-  } | null;
+  legalDocumentBundle: LegalDocumentBundle | null;
 
   /**
-   * Where `legalDocumentBundle`'s URLs originated:
-   *   - `'server'` — BE provided them in `needs_information.terms_acceptance.documents`
-   *   - `'local'` — the parser's spoof block synthesized them from local constants
-   *   - `null` — no probe response yet, or no terms_acceptance involved
-   *
-   * Used as the value of the `'legal document source'` telemetry tag on
-   * `signup-attempt` events, including arms that fire after the probe
-   * (success, error, requires_redirect) — so we don't have to thread the
-   * source through every wrapper input.
+   * Where `legalDocumentBundle`'s URLs originated. `null` when there's no
+   * probe response yet (or no terms_acceptance involved). Used as the
+   * value of the `'legal document source'` telemetry tag on signup-attempt
+   * events — including post-probe arms (success, error, requires_redirect)
+   * — so we don't have to thread the source through every wrapper input.
    *
    * Reset alongside `legalDocumentBundle`.
    */
-  legalDocumentSource: 'server' | 'local' | null;
+  legalDocumentSource: LegalDocumentSource | null;
 
   /**
    * Direct-signup success result, captured by SigningUpScreen on the
