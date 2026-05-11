@@ -766,12 +766,18 @@ export class WizardStore {
 
   resetToS(): void {
     this.$session.setKey('tosAccepted', null);
-    // Reset alongside `tosAccepted` — same invariant rationale as in
-    // `_resetCeremonyKeys`. Keeping them lock-step prevents a stale
-    // bundle from riding into a follow-up POST whose acceptance got
-    // cleared by back-nav.
-    this.$session.setKey('legalDocumentBundle', null);
-    this.$session.setKey('legalDocumentSource', null);
+    // Intentionally leave `legalDocumentBundle` and `legalDocumentSource`
+    // intact. They're tied to the probe response that drove this
+    // ceremony, not to the acceptance decision. After this revert, the
+    // router immediately re-resolves to the ToS screen (because
+    // `'terms_acceptance'` is still in `signupRequiredFields` and
+    // `tosAccepted` is now null), and `ToSScreen` renders nothing when
+    // the bundle is null — clearing them here would strand the user on
+    // a blank screen with no interactive elements. The stale-bundle
+    // invariant matters only when the *whole* ceremony resets (new
+    // email → new probe response → possibly-new URLs); that's handled
+    // by `_resetCeremonyKeys`, which wipes the bundle alongside the
+    // rest of the ceremony state.
     analytics.wizardCapture('back navigation', { to: 'tos' });
     this.emitChange();
   }

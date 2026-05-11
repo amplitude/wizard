@@ -2338,11 +2338,16 @@ describe('WizardStore', () => {
       expect(store.session.signupTokensObtained).toBe(false);
     });
 
-    it('resetToS clears tosAccepted AND legalDocument{Bundle,Source} lock-step', () => {
-      // The user backs out of the ToS screen post-acceptance. resetToS
-      // must clear the acceptance flag AND the URL bundle that informed
-      // it. Asymmetric reset would let a stale bundle ride into a
-      // follow-up POST after a re-accept on possibly-rotated URLs.
+    it('resetToS clears tosAccepted but preserves legalDocument{Bundle,Source}', () => {
+      // The user backs out of the ToS screen post-acceptance. The
+      // router immediately re-resolves to the ToS screen (because
+      // `'terms_acceptance'` is still in `signupRequiredFields` and
+      // `tosAccepted` is now null), and `ToSScreen` reads URLs from the
+      // bundle — clearing them here would strand the user on a blank
+      // screen with no interactive elements. The stale-bundle invariant
+      // matters only when the WHOLE ceremony resets (new email → new
+      // probe response → possibly-new URLs), which is `_resetCeremonyKeys`'
+      // job, asserted in the test below.
       const store = createStore();
       const internal = store as unknown as {
         $session: { setKey: (k: string, v: unknown) => void };
@@ -2356,6 +2361,36 @@ describe('WizardStore', () => {
 
       store.resetToS();
 
+      expect(store.session.tosAccepted).toBeNull();
+      expect(store.session.legalDocumentBundle).toEqual({
+        terms_of_service: 'https://amplitude.com/terms',
+        privacy_policy: 'https://amplitude.com/privacy',
+      });
+      expect(store.session.legalDocumentSource).toBe('local');
+    });
+
+    it('full-ceremony reset (via setSignupEmail(null)) wipes the legal-doc bundle', () => {
+      // Companion guarantee to resetToS's preservation: when the WHOLE
+      // ceremony resets (user backs all the way out to the email
+      // screen), `_resetCeremonyKeys` MUST wipe the bundle + source
+      // alongside tosAccepted. Otherwise a follow-up ceremony with a
+      // different email could send the prior probe's URLs in the
+      // accept-tos body.
+      const store = createStore();
+      const internal = store as unknown as {
+        $session: { setKey: (k: string, v: unknown) => void };
+      };
+      internal.$session.setKey('signupEmail', 'ada@example.com');
+      internal.$session.setKey('tosAccepted', true);
+      internal.$session.setKey('legalDocumentBundle', {
+        terms_of_service: 'https://amplitude.com/terms',
+        privacy_policy: 'https://amplitude.com/privacy',
+      });
+      internal.$session.setKey('legalDocumentSource', 'local');
+
+      store.setSignupEmail(null);
+
+      expect(store.session.signupEmail).toBeNull();
       expect(store.session.tosAccepted).toBeNull();
       expect(store.session.legalDocumentBundle).toBeNull();
       expect(store.session.legalDocumentSource).toBeNull();
