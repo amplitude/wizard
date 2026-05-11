@@ -62,6 +62,7 @@ import {
 import { createInnerLifecycleHooks } from './inner-lifecycle';
 import {
   classifyWriteOperation,
+  deriveStallTier,
   sanitizeErrorMessageForLog,
   truncateLogMessage,
 } from './agent-events';
@@ -1235,6 +1236,30 @@ export async function initializeAgent(
     const useDirectApiKey = !!process.env.ANTHROPIC_API_KEY;
     const useLocalClaude = !config.amplitudeBearerToken && !useDirectApiKey;
 
+    // PR B5: per-phase cold-start timing breakdown emitter. Each phase
+    // boundary (gateway_probe, mcp_bootstrap) below is wrapped in a
+    // `try/finally` so the breakdown event always ships, even when the
+    // phase throws — orchestrators see a timing breadcrumb for the
+    // failing phase rather than a silent gap on the wire. No-op on
+    // InkUI / LoggingUI (only AgentUI implements the method).
+    const emitColdStartPhase = (
+      phase: 'mcp_bootstrap' | 'gateway_probe',
+      startedAt: number,
+    ): void => {
+      try {
+        getUI().emitColdStartBreakdown?.({
+          phase,
+          startedAt,
+          finishedAt: Date.now(),
+        });
+      } catch (err) {
+        logToFile(
+          `[agent-interface] emitColdStartBreakdown(${phase}) threw`,
+          err,
+        );
+      }
+    };
+
     if (useDirectApiKey) {
       // An inherited ANTHROPIC_AUTH_TOKEN from an outer agent session would
       // override ANTHROPIC_API_KEY in some SDK paths. Clear it so the user's
@@ -1250,8 +1275,18 @@ export async function initializeAgent(
       // Configure LLM gateway environment variables (inherited by SDK subprocess)
       const gatewayUrl = getLlmGatewayUrlFromHost(config.amplitudeApiHost);
 
-      // Fail fast if the gateway isn't responding rather than hanging indefinitely
-      const alive = await checkGatewayLiveness(gatewayUrl);
+      // Fail fast if the gateway isn't responding rather than hanging
+      // indefinitely. Wrapped in `try/finally` so the `gateway_probe`
+      // breakdown event ships even when the gateway is unreachable —
+      // orchestrators see the probe's timing on the wire (and the
+      // accompanying thrown error envelope) instead of a silent stall.
+      const gatewayProbeStartedAt = Date.now();
+      let alive = false;
+      try {
+        alive = await checkGatewayLiveness(gatewayUrl);
+      } finally {
+        emitColdStartPhase('gateway_probe', gatewayProbeStartedAt);
+      }
       if (!alive) {
         throw new Error(
           `Could not reach the Amplitude LLM gateway (${gatewayUrl}). ` +
@@ -1464,12 +1499,56 @@ export async function initializeAgent(
 
     // Add in-process wizard tools (env files, package manager detection).
     // The status reporter is wired up per-run by runAgent via setStatusReporter.
-    const wizardToolsServer = await createWizardToolsServer({
-      workingDirectory: config.workingDirectory,
-      detectPackageManager: config.detectPackageManager,
-      skillsBaseUrl: config.skillsBaseUrl,
-      statusReporter: () => _activeStatusReporter,
-    });
+    // Wrapped in `try/finally` so the `mcp_bootstrap` breakdown event
+    // ships even when wizard-tools-server creation throws — orchestrators
+    // see the boot's timing on the wire (paired with the thrown error
+    // envelope) instead of a silent stall.
+    const mcpBootstrapStartedAt = Date.now();
+    let wizardToolsServer: Awaited<ReturnType<typeof createWizardToolsServer>>;
+    try {
+      wizardToolsServer = await createWizardToolsServer({
+        workingDirectory: config.workingDirectory,
+        detectPackageManager: config.detectPackageManager,
+        skillsBaseUrl: config.skillsBaseUrl,
+        statusReporter: () => _activeStatusReporter,
+      });
+      // PR B7: emit `mcp_status: wizard_tools/available` once the in-
+      // process server is up. Orchestrators key off this to confirm the
+      // wizard-tools surface is callable; absence of an `available`
+      // event paired with a `failed` event below means the boot threw.
+      // Wrapped so emitter failures never block the actual boot.
+      try {
+        getUI().emitMcpStatus?.({
+          server: 'wizard_tools',
+          state: 'available',
+          transition_ts: Date.now(),
+          detail: 'wizard-tools server bootstrapped on stdio',
+        });
+      } catch {
+        /* mcp_status emission must never block agent bootstrap */
+      }
+    } catch (bootErr) {
+      // PR B7: emit `mcp_status: wizard_tools/failed` BEFORE rethrowing
+      // so the lifecycle event lands on the wire alongside (and
+      // before) any subsequent `run_error` envelope. Without this an
+      // orchestrator would see the run abort without ever knowing the
+      // wizard-tools server was the cause.
+      try {
+        const msg =
+          bootErr instanceof Error ? bootErr.message : String(bootErr);
+        getUI().emitMcpStatus?.({
+          server: 'wizard_tools',
+          state: 'failed',
+          transition_ts: Date.now(),
+          detail: msg,
+        });
+      } catch {
+        /* mcp_status emission must never block error propagation */
+      }
+      throw bootErr;
+    } finally {
+      emitColdStartPhase('mcp_bootstrap', mcpBootstrapStartedAt);
+    }
     mcpServers['wizard-tools'] = wizardToolsServer;
 
     const agentRunConfig: AgentRunConfig = {
@@ -2061,6 +2140,23 @@ export async function runAgent(
     return { plannedEvents: lastParsedEventPlan };
   };
 
+  // Wall-clock anchor for stall-tier detection. Updated whenever the
+  // inner agent surfaces a tool call or status — see the
+  // `onActivity()` helper below. Distinct from `startTime` (which never
+  // moves after attempt #1) so the heartbeat tick can compute
+  // "milliseconds since last activity" with a single subtraction.
+  let lastActivityAt = Date.now();
+  const onActivity = (): void => {
+    lastActivityAt = Date.now();
+    // Activity resumed — clear the per-window stall-tier guard so the
+    // next 10s of silence can re-trigger 'noticed'.
+    try {
+      getUI().resetStallStatus?.();
+    } catch {
+      // never throw from telemetry path
+    }
+  };
+
   // Heartbeat interval — fires unconditionally every 10s so AgentUI's
   // `progress: heartbeat` NDJSON event lands on a fixed cadence even
   // when the agent is mid-tool-call and nobody has called pushStatus
@@ -2075,6 +2171,30 @@ export async function runAgent(
       elapsedMs: Date.now() - startTime,
       attempt: attemptCount > 0 ? attemptCount : undefined,
     });
+    // v2 protocol: derive + emit a `stall_status` coaching tier from
+    // the silence window. AgentUI dedups per-tier so only the first
+    // hit of each (noticed / concerning / critical) lands on the wire
+    // per stall window. InkUI / LoggingUI no-op via the optional
+    // method shape.
+    const stallMs = Date.now() - lastActivityAt;
+    const tier = deriveStallTier(stallMs);
+    if (tier) {
+      try {
+        getUI().emitStallStatus?.({
+          tier,
+          durationMs: stallMs,
+          lastActivity: lastActivityAt,
+          hint:
+            tier === 'noticed'
+              ? 'Agent has been quiet — still working on the previous step.'
+              : tier === 'concerning'
+              ? 'Agent has been silent for 30s+. Check status or consider retrying.'
+              : 'Agent has been silent for 60s+. Likely stalled — retry imminent.',
+        });
+      } catch {
+        // Telemetry must never break the run loop.
+      }
+    }
   }, 10_000);
 
   // Dual-path watchers for the canonical `.amplitude/{events,dashboard}.json`
@@ -2322,6 +2442,10 @@ export async function runAgent(
         recentStatuses.push(report.detail);
         if (recentStatuses.length > 3) recentStatuses.shift();
         agentState.recordStatus(report.code, report.detail);
+        // Activity signal for v2 stall_status — onStatus fires for any
+        // structured pushStatus the inner agent emits. See `onActivity`
+        // declaration above the heartbeat interval.
+        onActivity();
       },
       onError(report) {
         // First error wins — stall/retry loop reads this after the attempt.
@@ -2434,6 +2558,19 @@ export async function runAgent(
       streamPillBuffer = '';
     };
 
+    // PR B4: each pass through the loop sets `attemptStartedBackoffMs`
+    // to the sleep that just elapsed (only meaningful for attempt > 0).
+    // `attemptStartedReason` discriminates the entry path. Both are
+    // consumed by the `emitAttemptStarted` call below, AFTER the
+    // backoff sleep (so orchestrators see "decided to retry" then
+    // "attempt N actually running" in order).
+    let attemptStartedBackoffMs = 0;
+    let attemptStartedReason:
+      | 'cold_start'
+      | 'stall_retry'
+      | 'auth_refresh'
+      | 'network_retry' = 'cold_start';
+
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
       attemptCount = attempt + 1;
       agentState.setAttemptId(`attempt-${attempt}`);
@@ -2525,6 +2662,16 @@ export async function runAgent(
           // UI may not be initialised in some test paths.
         }
         await new Promise((resolve) => setTimeout(resolve, backoffMs));
+        // PR B4: stash the backoff that just elapsed AND map the retry
+        // reason discriminator (`stall` / `transient_api` / `sdk_thrown`)
+        // onto the orchestrator-facing `attempt_started.reason` set
+        // (`stall_retry` / `network_retry`). `auth_refresh` is set
+        // separately at the auth-retry branch below — we keep the
+        // mapping local here so the cold-start (`attempt === 0`) path
+        // doesn't touch the variables.
+        attemptStartedBackoffMs = backoffMs;
+        attemptStartedReason =
+          lastRetryReason === 'stall' ? 'stall_retry' : 'network_retry';
         // Clear per-attempt output so stale error markers don't affect the fresh run
         collectedText.length = 0;
         recentStatuses.length = 0;
@@ -2567,6 +2714,13 @@ export async function runAgent(
       // serializes the mcpServers config once in `initializeAgent` and
       // hands it to the spawned subprocess, which keeps using those
       // exact headers until reconnection. Bugbot catch on PR #608.
+      // PR B4: when a bearer rotation actually happens on a RETRY
+      // attempt, upgrade the `attempt_started.reason` from
+      // `stall_retry` / `network_retry` to `auth_refresh` — the
+      // orchestrator wants to know this attempt is starting with a
+      // fresh credential, not just a fresh AbortController. The flag
+      // is local to this iteration; we don't carry it across attempts.
+      let bearerRotatedThisAttempt = false;
       try {
         const { refreshTokenIfStale } = await import('./agent-runner.js');
         await refreshGatewayBearer({
@@ -2579,6 +2733,7 @@ export async function runAgent(
             analytics.wizardCapture('agent inter-attempt token refresh', {
               attempt,
             });
+            bearerRotatedThisAttempt = true;
           },
         });
       } catch (err) {
@@ -2592,6 +2747,35 @@ export async function runAgent(
             err instanceof Error ? err.message : String(err)
           }`,
         );
+      }
+
+      // PR B4: emit `attempt_started` AFTER the bearer refresh ran (so
+      // `auth_refresh` reason can win when a rotation happened) and
+      // AFTER the backoff sleep (so the envelope fires when the attempt
+      // actually begins, not when the wizard decided to retry). On
+      // attempt 0 the previous branch never ran — `attemptStartedReason`
+      // is still `'cold_start'` and `attemptStartedBackoffMs` is 0,
+      // which is exactly the envelope shape we want. Guarded with a
+      // try/catch so a misbehaving emitter can never abort the attempt.
+      try {
+        const effectiveReason =
+          attempt > 0 && bearerRotatedThisAttempt
+            ? 'auth_refresh'
+            : attemptStartedReason;
+        getUI().emitAttemptStarted?.({
+          attemptNumber: attempt + 1,
+          totalBudget: MAX_RETRIES + 1,
+          reason: effectiveReason,
+          // Only forward backoffMs when > 0 — cold-start runs omit it
+          // on the wire (orchestrators read absence as "no preceding
+          // sleep"). The emitter does its own optional-omit logic, but
+          // gating here makes the cold-start contract explicit.
+          ...(attemptStartedBackoffMs > 0
+            ? { backoffMs: attemptStartedBackoffMs }
+            : {}),
+        });
+      } catch {
+        // Never let a UI emit failure abort the attempt.
       }
 
       // Fresh prompt stream per attempt — stdin stays open until result received
@@ -2993,7 +3177,10 @@ export async function runAgent(
               // are observers — they never deny or alter SDK behavior. We
               // chain them with our authoritative gates below so the
               // allowlist still runs for every tool call.
-              const inner = createInnerLifecycleHooks({ phase: 'wizard' });
+              const inner = createInnerLifecycleHooks({
+                phase: 'wizard',
+                installDir: agentConfig.workingDirectory,
+              });
               const innerHooks = inner.hooks();
               const gatedPreToolUse = createPreToolUseHook({
                 onCircuitBreakerTripped: config?.onCircuitBreakerTripped,
@@ -3376,6 +3563,12 @@ export async function runAgent(
           // instead of carrying tail words from the previous one.
           resetStreamPill();
 
+          // v2 protocol: a non-stream_event message is the canonical signal
+          // that the inner agent is producing work. Reset the stall-tier
+          // anchor + AgentUI per-window guard so the next 10s of silence
+          // can re-trigger 'noticed'.
+          onActivity();
+
           // Pass receivedSuccessResult so handleSDKMessage can suppress user-facing error
           // output for post-success cleanup errors while still logging them to file
           handleSDKMessage(
@@ -3546,6 +3739,20 @@ export async function runAgent(
                 'retry count': authRetryCount,
                 attempt: attempt + 1,
               });
+              // Emit the structured lifecycle event BEFORE the abort so an
+              // agent-mode orchestrator sees the exhaustion in the stream
+              // (vs inferring it from the downstream `auth_required`).
+              // Wrapped in try/catch because UI emission must never block
+              // the abort path — orchestrators that drop the event still
+              // get the AUTH_ERROR outcome on `run_completed`.
+              try {
+                getUI().emitAuthRetryExhausted?.({
+                  attempts: authRetryCount,
+                  subkind: 'llm-gateway',
+                });
+              } catch (err) {
+                logToFile('emitAuthRetryExhausted threw', err);
+              }
               if (!controller.signal.aborted) {
                 controller.abort('auth_failed');
               }

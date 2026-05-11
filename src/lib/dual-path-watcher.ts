@@ -68,8 +68,10 @@ export function startDualPathWatcher(
   opts: DualPathWatcherOptions,
 ): DualPathWatcherHandle {
   const watch = opts.watch ?? defaultWatch;
-  const setIntervalFn = opts.setInterval ?? globalThis.setInterval;
-  const clearIntervalFn = opts.clearInterval ?? globalThis.clearInterval;
+  const setIntervalFn: (handler: () => void, ms: number) => unknown =
+    opts.setInterval ?? globalThis.setInterval;
+  const clearIntervalFn: (handle: unknown) => void =
+    opts.clearInterval ?? (globalThis.clearInterval as (h: unknown) => void);
   const pollMs = opts.pollMs ?? 1000;
 
   const handles: fs.FSWatcher[] = [];

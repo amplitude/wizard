@@ -343,6 +343,26 @@ async function abortOnApiError(
       break;
   }
 
+  // Tag the orchestrator-facing envelope. RATE_LIMIT and the
+  // `rate_limit` API subtype both map to a back-off remediation,
+  // while terminated_400 / stream_closed / other map to a retry on
+  // the next launch. Distinct from GATEWAY_DOWN above because the
+  // retry budget already exhausted inside the SDK loop — the
+  // orchestrator should NOT instant-retry, but a deliberate re-launch
+  // is fine.
+  try {
+    const code =
+      errorType === AgentErrorType.RATE_LIMIT || errorSubtype === 'rate_limit'
+        ? 'RATE_LIMIT'
+        : 'API_ERROR';
+    getUI().emitRunError?.({
+      message: `API error: ${safeMessage || 'unknown'} (${errorSubtype})`,
+      code,
+      recoverable: 'retry',
+    });
+  } catch (err) {
+    logToFile('[agent-runner] emitRunError (API_ERROR/RATE_LIMIT) threw', err);
+  }
   await wizardAbort({
     message: userMessage,
     error: new WizardError(`API error: ${safeMessage || 'unknown'}`, {
@@ -890,6 +910,27 @@ async function runAgentWizardBody(
   // Credentials are pre-set by bin.ts (TUI mode) via the AuthScreen SUSI flow.
   // Only fall back to getOrAskForProjectData for CI mode or non-TUI fallback.
   if (!session.credentials) {
+    // Diagnostic: in TUI mode we should never reach the agent runner
+    // with null credentials — the Auth flow gate (`isComplete` requires
+    // `credentials !== null`) is the single source of truth. If we DO
+    // reach here, the gate let the user past, which means a different
+    // bug. Log loudly so the next "stalled session after `git reset
+    // --hard`" report has an unambiguous breadcrumb instead of a
+    // silent fallback into `getOrAskForProjectData` that may itself
+    // stall on prompts.
+    if (!session.ci && !session.agent) {
+      logToFile(
+        '[agent-runner] WARN: credentials null in TUI mode at runAgent entry — Auth flow gate let through an unconfirmed session. Falling back to getOrAskForProjectData; if this stalls, the AuthScreen never set credentials before the run kicked off.',
+        {
+          hasPendingOrgs: session.pendingOrgs !== null,
+          pendingOrgsLength: session.pendingOrgs?.length ?? 0,
+          selectedOrgId: session.selectedOrgId ?? null,
+          selectedProjectId: session.selectedProjectId ?? null,
+          selectedEnvName: session.selectedEnvName ?? null,
+          requiresAccountConfirmation: session.requiresAccountConfirmation,
+        },
+      );
+    }
     const authResult = await getOrAskForProjectData({
       authOnboardingPath: session.authOnboardingPath,
       ci: session.ci,
@@ -956,6 +997,16 @@ async function runAgentWizardBody(
   const skipAmplitudeMcp =
     config.prompts.buildPrompt !== undefined || !accessToken;
 
+  // Mark the coarse `cold_start` phase boundary for orchestrators
+  // observing the NDJSON stream. Pairs with `agent_running` (first
+  // tool call), `finalizing` (seedPostAgentSteps), and a terminal
+  // `completed` / `error`. Idempotent; the AgentUI emitter dedups.
+  try {
+    getUI().emitRunPhase?.('cold_start');
+  } catch (err) {
+    logToFile('[agent-runner] emitRunPhase(cold_start) threw', err);
+  }
+
   // Cold-start phase 1: skill staging. The next few seconds is bundled-skill
   // copy + on-disk resolution; surface it on the activity line so the user
   // doesn't read the silence as a hung process. Cleared on the matching
@@ -976,44 +1027,74 @@ async function runAgentWizardBody(
     logToFile('cold-start: setCurrentActivity (skills) failed', err);
   }
 
+  // PR B5: per-phase cold-start timing breakdown. Each of the five phases
+  // below is wrapped in a `try/finally` so the breakdown event always
+  // ships, even when the phase throws — orchestrators see a timing
+  // breadcrumb for the failing phase rather than a silent gap on the
+  // wire. The emitter is a no-op on InkUI / LoggingUI (TUI shows the
+  // labeled activity line; CI logs the per-phase step messages).
+  const emitColdStartPhase = (
+    phase:
+      | 'skill_staging'
+      | 'package_manager_detection'
+      | 'framework_detection',
+    startedAt: number,
+  ): void => {
+    try {
+      getUI().emitColdStartBreakdown?.({
+        phase,
+        startedAt,
+        finishedAt: Date.now(),
+      });
+    } catch (err) {
+      logToFile(`[agent-runner] emitColdStartBreakdown(${phase}) threw`, err);
+    }
+  };
+
   // Pre-stage all bundled skills the agent will need into the user's
   // .claude/skills/ directory. The taxonomy / instrumentation / dashboard
   // skills are constants; the integration skill is resolved per framework
   // (with a sensible default fallback). When staging succeeds the prompt pins
   // that id; otherwise a deterministic on-disk resolver picks at most one
   // `integration-*` match so the model never chooses among several Glob hits.
-  const { preStageSkills, bundledSkillExists } = await import(
-    './wizard-tools.js'
-  );
-  const { listIntegrationSkillIdsOnDisk, resolveIntegrationSkillId } =
-    await import('./integration-skill-resolve.js');
-  const integrationSkillId = config.metadata.getIntegrationSkillId
-    ? config.metadata.getIntegrationSkillId(frameworkContext)
-    : (() => {
-        const fallback = `integration-${config.metadata.integration}`;
-        return bundledSkillExists(fallback) ? fallback : null;
-      })();
-  const { integrationStaged } = preStageSkills(
-    session.installDir,
-    integrationSkillId,
-  );
+  const skillStagingStartedAt = Date.now();
+  let integrationSkillIdForPrompt: string | null;
+  try {
+    const { preStageSkills, bundledSkillExists } = await import(
+      './wizard-tools.js'
+    );
+    const { listIntegrationSkillIdsOnDisk, resolveIntegrationSkillId } =
+      await import('./integration-skill-resolve.js');
+    const integrationSkillId = config.metadata.getIntegrationSkillId
+      ? config.metadata.getIntegrationSkillId(frameworkContext)
+      : (() => {
+          const fallback = `integration-${config.metadata.integration}`;
+          return bundledSkillExists(fallback) ? fallback : null;
+        })();
+    const { integrationStaged } = preStageSkills(
+      session.installDir,
+      integrationSkillId,
+    );
 
-  let integrationSkillIdForPrompt: string | null =
-    integrationStaged && integrationSkillId ? integrationSkillId : null;
-  if (!integrationSkillIdForPrompt) {
-    const diskIds = listIntegrationSkillIdsOnDisk(session.installDir);
-    const resolved = resolveIntegrationSkillId({
-      integration: config.metadata.integration,
-      primaryBundledId: integrationSkillId,
-      frameworkContext,
-      candidateSkillIds: diskIds,
-    });
-    if (resolved?.source === 'lexicographic_tiebreak') {
-      logToFile(
-        `[runAgentWizard] integration skill lexicographic tie-break: picked "${resolved.skillId}" (scoped pool had multiple matches; consider tightening framework hints).`,
-      );
+    integrationSkillIdForPrompt =
+      integrationStaged && integrationSkillId ? integrationSkillId : null;
+    if (!integrationSkillIdForPrompt) {
+      const diskIds = listIntegrationSkillIdsOnDisk(session.installDir);
+      const resolved = resolveIntegrationSkillId({
+        integration: config.metadata.integration,
+        primaryBundledId: integrationSkillId,
+        frameworkContext,
+        candidateSkillIds: diskIds,
+      });
+      if (resolved?.source === 'lexicographic_tiebreak') {
+        logToFile(
+          `[runAgentWizard] integration skill lexicographic tie-break: picked "${resolved.skillId}" (scoped pool had multiple matches; consider tightening framework hints).`,
+        );
+      }
+      integrationSkillIdForPrompt = resolved?.skillId ?? null;
     }
-    integrationSkillIdForPrompt = resolved?.skillId ?? null;
+  } finally {
+    emitColdStartPhase('skill_staging', skillStagingStartedAt);
   }
 
   // Cold-start phase 2: project read. The next 1-5s is package-manager
@@ -1044,6 +1125,7 @@ async function runAgentWizardBody(
   let packageManagerInfo: Awaited<
     ReturnType<typeof config.detection.detectPackageManager>
   > | null = null;
+  const packageManagerDetectionStartedAt = Date.now();
   try {
     packageManagerInfo = await config.detection.detectPackageManager(
       session.installDir,
@@ -1052,6 +1134,11 @@ async function runAgentWizardBody(
     preflightLog.warn('detectPackageManager failed', {
       'error message': err instanceof Error ? err.message : String(err),
     });
+  } finally {
+    emitColdStartPhase(
+      'package_manager_detection',
+      packageManagerDetectionStartedAt,
+    );
   }
 
   if (packageManagerInfo?.primary) {
@@ -1099,25 +1186,31 @@ async function runAgentWizardBody(
   // pay a probe tax to figure out we're large. Logging happens AFTER the
   // gate so the diagnostic line reflects the authoritative decision the
   // gate emitted (no risk of divergence between two recomputations).
-  const preflightCtx = await buildPreflightContext({
-    installDir: session.installDir,
-    integration: session.integration,
-    detectedFrameworkLabel: session.detectedFrameworkLabel,
-    frameworkVersion: frameworkVersion ?? null,
-    typescript: typeScriptDetected,
-    packageManagerInfo,
-    userEmail: session.userEmail,
-    selectedOrgId: session.selectedOrgId,
-    selectedOrgName: session.selectedOrgName,
-    selectedProjectId: session.selectedProjectId,
-    selectedProjectName: session.selectedProjectName,
-    selectedEnvName: session.selectedEnvName,
-    cloudRegion,
-    projectBound: fsSync.existsSync(
-      path.join(session.installDir, '.amplitude', 'project-binding.json'),
-    ),
-    frameworkContext,
-  });
+  const frameworkDetectionStartedAt = Date.now();
+  let preflightCtx: Awaited<ReturnType<typeof buildPreflightContext>>;
+  try {
+    preflightCtx = await buildPreflightContext({
+      installDir: session.installDir,
+      integration: session.integration,
+      detectedFrameworkLabel: session.detectedFrameworkLabel,
+      frameworkVersion: frameworkVersion ?? null,
+      typescript: typeScriptDetected,
+      packageManagerInfo,
+      userEmail: session.userEmail,
+      selectedOrgId: session.selectedOrgId,
+      selectedOrgName: session.selectedOrgName,
+      selectedProjectId: session.selectedProjectId,
+      selectedProjectName: session.selectedProjectName,
+      selectedEnvName: session.selectedEnvName,
+      cloudRegion,
+      projectBound: fsSync.existsSync(
+        path.join(session.installDir, '.amplitude', 'project-binding.json'),
+      ),
+      frameworkContext,
+    });
+  } finally {
+    emitColdStartPhase('framework_detection', frameworkDetectionStartedAt);
+  }
   preflightLog.info('project size detected', {
     'file count': preflightCtx.projectSize.fileCount,
     'event count': preflightCtx.projectSize.eventCount,
@@ -1191,6 +1284,25 @@ async function runAgentWizardBody(
   // returns to its pre-wizard state on every exit path — no separate
   // outro hook needed.
   getUI().startRun();
+
+  // PR B17: emit the startup capability announcement immediately
+  // after `run_started` so an orchestrator sees the protocol /
+  // event-version contract — and the per-project artifact paths —
+  // BEFORE any contract-shaped event lands on the stream. Wrapped
+  // in try/catch so a misbehaving emitter can never block run start
+  // (the announcement is observational). AgentUI is the only UI
+  // that implements `emitWizardCapabilities`; InkUI / LoggingUI
+  // no-op.
+  //
+  // `installDir` is passed through so the emitter can populate
+  // `data.paths` (log file, NDJSON log, run dir, cache root) — a CI
+  // orchestrator can upload the per-project log as an artifact
+  // without replicating the `sha256(installDir)` hashing logic.
+  try {
+    getUI().emitWizardCapabilities?.({ installDir: session.installDir });
+  } catch (err) {
+    logToFile('[agent-runner] emitWizardCapabilities threw', err);
+  }
 
   // Cold-start phase 3: agent SDK init (MCP server connect, model handshake,
   // system-prompt cache prime, first LLM round-trip). Frequently the longest
@@ -1502,6 +1614,32 @@ async function runAgentWizardBody(
     if (!isLlmGateway) {
       session.credentials = null;
     }
+
+    // Emit the structured `auth_required` envelope BEFORE wizardAbort so
+    // an agent-mode orchestrator has the machine-readable payload (mid-run
+    // discriminator, partial-progress flags, resume command) before the
+    // terminal `run_completed` envelope lands. Previously only the TUI
+    // flow surfaced this via the keep/revert prompt; agent mode silently
+    // aborted with a generic error event.
+    try {
+      const { dashboardComplete, eventsInstrumented } =
+        classifyAgentOutcome(session);
+      getUI().emitAuthRequired?.({
+        reason: isLlmGateway
+          ? 'gateway_token_expired'
+          : 'amplitude_token_expired',
+        instruction: authMessage,
+        loginCommand: ['amplitude-wizard', 'login'],
+        resumeCommand: ['amplitude-wizard', '--agent'],
+        midRun: true,
+        preserveFiles: true,
+        partialProgress: { eventsInstrumented, dashboardComplete },
+        authSubkind: isLlmGateway ? 'llm-gateway' : 'amplitude',
+      });
+    } catch (err) {
+      logToFile('[agent-runner] emitAuthRequired threw', err);
+    }
+
     await wizardAbort({
       message: authMessage,
       error: new WizardError('Authentication failed during agent run', {
@@ -1576,6 +1714,34 @@ async function runAgentWizardBody(
       // (skill loading) failing right at startup. Abort with the
       // jargon-free copy from PR #336.
       const isMcp = errorType === AgentErrorType.MCP_MISSING;
+      // Emit the structured error envelope with the typed `code`
+      // discriminator BEFORE wizardAbort so an orchestrator parsing
+      // the NDJSON stream can distinguish MCP / resource failures from
+      // generic AGENT_FAILED exits without parsing the message string.
+      try {
+        getUI().emitRunError?.({
+          message: isMcp
+            ? 'Agent could not access Amplitude MCP server'
+            : 'Agent could not access setup resource',
+          code: isMcp ? 'MCP_MISSING' : 'RESOURCE_MISSING',
+          // `wizard-tools` is the in-process MCP server bundled with
+          // the wizard (skill loading); `amplitude-wizard` is the
+          // remote `mcp.amplitude.com` server. The detail string is
+          // free-form (set by the inner agent via report_status), so
+          // we surface it as a hint for orchestrator routing without
+          // requiring exact-match parsing.
+          mcpServer:
+            detail && detail.includes('wizard-tools')
+              ? 'wizard-tools'
+              : 'amplitude-wizard',
+          recoverable: 'retry',
+          suggestedAction: {
+            docsUrl: config.metadata.docsUrl,
+          },
+        });
+      } catch (err) {
+        logToFile('[agent-runner] emitRunError (MCP/RESOURCE) threw', err);
+      }
       await wizardAbort({
         message: isMcp
           ? `Couldn't reach Amplitude's setup service — this looks like a network or service issue.\n\nTry again in a moment, or set up ${config.metadata.name} manually:\n${config.metadata.docsUrl}`
@@ -1612,6 +1778,19 @@ async function runAgentWizardBody(
     );
 
     const usingDirectKey = !!process.env.ANTHROPIC_API_KEY;
+    // Tag the orchestrator-facing envelope with `code: 'GATEWAY_DOWN'`
+    // so a consumer can distinguish "retry your launch" (5xx blip)
+    // from "upgrade wizard" / "back off" without parsing the
+    // human-readable message.
+    try {
+      getUI().emitRunError?.({
+        message: `LLM gateway unavailable: ${safeAgentMessage || 'unknown'}`,
+        code: 'GATEWAY_DOWN',
+        recoverable: 'retry',
+      });
+    } catch (err) {
+      logToFile('[agent-runner] emitRunError (GATEWAY_DOWN) threw', err);
+    }
     await wizardAbort({
       message: `Amplitude LLM gateway unavailable\n\nEvery retry attempt failed with the same upstream error (${
         safeAgentMessage || 'API Error: 400 terminated'
@@ -1644,6 +1823,27 @@ async function runAgentWizardBody(
     );
 
     const usingDirectKey = !!process.env.ANTHROPIC_API_KEY;
+    // GATEWAY_INVALID_REQUEST is non-recoverable in the current
+    // session — retrying sends the same payload back through the
+    // same broken pipe. Tag as `fatal` so orchestrators don't burn
+    // retry budget; the suggestedAction points at `npm i` to upgrade.
+    try {
+      getUI().emitRunError?.({
+        message: `Wizard request rejected by gateway: ${
+          safeAgentMessage || 'unknown'
+        }`,
+        code: 'GATEWAY_INVALID_REQUEST',
+        recoverable: 'fatal',
+        suggestedAction: {
+          command: ['npm', 'install', '-g', '@amplitude/wizard@latest'],
+        },
+      });
+    } catch (err) {
+      logToFile(
+        '[agent-runner] emitRunError (GATEWAY_INVALID_REQUEST) threw',
+        err,
+      );
+    }
     await wizardAbort({
       message: `Wizard request rejected by Amplitude gateway\n\nThe gateway returned "Invalid request sent to model provider" — this build of the wizard is sending a request shape (e.g. an \`anthropic-beta\` header or tool schema field) that the upstream model provider does not accept. Retrying will not help because the next request will be identically rejected.\n\nFix: upgrade to the latest \`@amplitude/wizard\` (npm i -g @amplitude/wizard@latest) — this build addresses known schema/beta rejection cases.\n\n${buildGatewayBypassHint()}\n\nIf you are already on the latest build, please report it (with the log file at ${getLogFilePath()}) to: ${SUPPORT_EMAIL}`,
       error: new WizardError(
@@ -1776,6 +1976,32 @@ async function runAgentWizardBody(
   // creation moved to the deferred `amplitude-wizard dashboard` command.
   // The final-success message and (optionally) a `dashboard-plan.json`
   // hand-off replace the inline dashboard step.
+  // PR B6: emit the `tool_call_summary` rollup BEFORE the
+  // `run_phase: finalizing` envelope so an orchestrator can render
+  // the inner-agent tool usage summary before the post-agent steps
+  // section appears in their UI. The terminal-exit emission in
+  // `wizardSuccessExit` / `wizardAbort` re-emits a cumulative rollup
+  // (covering any post-agent step tool calls), with dedup on the
+  // payload signature so we don't ship identical envelopes back-to-
+  // back. Wrapped so the rollup can never block the phase transition
+  // or the post-agent step queue from running.
+  try {
+    getUI().emitToolCallSummary?.();
+  } catch (err) {
+    logToFile('[agent-runner] emitToolCallSummary(finalize) threw', err);
+  }
+
+  // Mark the coarse `finalizing` phase boundary — the inner agent
+  // has stopped and the wizard is running its post-agent steps
+  // (commit events, env upload, MCP install, etc.). Pairs with the
+  // terminal `completed` / `error` emitted from wizardSuccessExit /
+  // wizardAbort below.
+  try {
+    getUI().emitRunPhase?.('finalizing');
+  } catch (err) {
+    logToFile('[agent-runner] emitRunPhase(finalizing) threw', err);
+  }
+
   getUI().seedPostAgentSteps([
     {
       id: POST_AGENT_STEP_COMMIT_EVENTS,

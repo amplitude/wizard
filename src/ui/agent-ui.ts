@@ -25,19 +25,36 @@ import type {
   VerificationResultData,
   SetupContextData,
   SetupCompleteData,
+  FileChangeErrorClass,
+  ColdStartPhase,
+  MCPStatusServer,
+  MCPStatusState,
 } from '../lib/agent-events';
 import {
   EVENT_DATA_VERSIONS,
+  WIZARD_PROTOCOL_VERSION,
+  buildColdStartBreakdown,
+  buildProgressEstimate,
   classifyRunError,
+  nextDecisionId,
+  ToolCallStats,
   truncateLogMessage,
   type RecoverableHint,
   type SuggestedAction,
+  type ToolCallOutcome,
+  type WizardCapabilitiesPaths,
 } from '../lib/agent-events';
 import { registerSetupComplete } from '../lib/setup-complete-registry';
 import { createInterface } from 'readline';
 import { z } from 'zod';
 import { installPipeErrorHandlers, safePipeWrite } from '../utils/pipe-errors';
 import { toWizardDashboardOpenUrl } from '../utils/dashboard-open-url';
+import {
+  getCacheRoot,
+  getLogFile,
+  getRunDir,
+  getStructuredLogFile,
+} from '../utils/storage-paths';
 
 // Belt-and-suspenders: bin.ts also installs these. Idempotent, so a
 // second call from this module covers test harnesses and any other
@@ -259,20 +276,31 @@ function lookupDataVersion(
  * wiring (when we honor `--auto-approve` strictly) will add
  * `back_compat` (the `--agent` implies-autoApprove path) so
  * orchestrators can detect and migrate away from the implicit grant.
+ *
+ * `decisionId` MUST be the value returned by the matching
+ * `emitNeedsInput` call. Callers obtain it from `emitNeedsInput`'s
+ * return value rather than minting their own — this is the
+ * single-writer invariant that keeps ids monotonic and unique.
  */
 function emitDecisionAuto(data: {
   code: string;
+  decisionId: string;
   value: unknown;
   reason: 'auto_approve' | 'back_compat';
 }): void {
-  emit('lifecycle', `decision_auto: ${data.code}=${String(data.value)}`, {
-    data: {
-      event: 'decision_auto',
-      code: data.code,
-      value: data.value,
-      reason: data.reason,
+  emit(
+    'lifecycle',
+    `decision_auto: ${data.code}=${String(data.value)} (${data.decisionId})`,
+    {
+      data: {
+        event: 'decision_auto',
+        code: data.code,
+        decisionId: data.decisionId,
+        value: data.value,
+        reason: data.reason,
+      },
     },
-  });
+  );
 }
 
 /**
@@ -299,6 +327,153 @@ function getNdjsonRedactor(): (s: string) => string {
     _ndjsonRedactor = (s: string) => s;
   }
   return _ndjsonRedactor;
+}
+
+/**
+ * Zod schema validating the wire-boundary envelope shape. Intentionally
+ * structural (not a per-event-type discriminated union) so we get
+ * defense-in-depth on the framing layer without locking the validation
+ * cost to O(N) discriminator branches. Per-event-type shapes are
+ * documented in `agent-events.ts`; the registry-vs-discriminator
+ * coherence check happens below in `validateEnvelopeOrLog`.
+ *
+ * Permissive shape: every event MUST have `v=1`, an ISO timestamp,
+ * the typed `type`, and a string `message`. `data` is unknown — we
+ * narrow further only when it carries an `event` discriminator.
+ */
+const agentEventSchema = z.object({
+  v: z.literal(1),
+  '@timestamp': z.string(),
+  type: z.enum([
+    'lifecycle',
+    'log',
+    'status',
+    'progress',
+    'session_state',
+    'prompt',
+    'needs_input',
+    'diagnostic',
+    'result',
+    'error',
+  ]),
+  message: z.string(),
+  session_id: z.string().optional(),
+  run_id: z.string().optional(),
+  level: z.enum(['info', 'warn', 'error', 'success', 'step']).optional(),
+  data_version: z.number().optional(),
+  data: z.unknown().optional(),
+});
+
+/**
+ * Per-event Zod schema for `mcp_status` `data` payloads. The
+ * envelope-level `agentEventSchema` checks the outer frame only; this
+ * adds defense-in-depth to the MCP lifecycle event so a misbehaving
+ * caller that ships an invalid `(server, state)` pair gets caught at
+ * the emit boundary rather than poisoning the orchestrator's parser.
+ *
+ * Kept in the AgentUI file (not in `agent-events.ts`) because the
+ * shared types module is import-cycle-sensitive — adding zod usage
+ * there pulls the SDK dependency into every consumer of the agent-
+ * events type bag, including the lightweight TUI screens that don't
+ * need it.
+ */
+const mcpStatusDataSchema = z.object({
+  server: z.enum(['wizard_tools', 'editor_install']),
+  state: z.enum([
+    'unavailable',
+    'available',
+    'needs_auth',
+    'needs_install',
+    'needs_user_choice',
+    'install_skipped',
+    'installed',
+    'failed',
+    'not_applicable',
+  ]),
+  transition_ts: z.number().int().nonnegative(),
+  detail: z.string().optional(),
+});
+
+/**
+ * Validate the envelope just before it lands on stdout. Failures
+ * route to the on-disk log (`logToFile`) — NEVER to stderr (Ink owns
+ * stdout in TUI mode and stderr would interleave with NDJSON), NEVER
+ * throwing (a bad envelope must not crash the wizard mid-run).
+ *
+ * In addition to the structural shape, this also asserts:
+ *  - When `data.event` is set, the `data_version` matches the
+ *    registry entry — catches "I added a new event but forgot to
+ *    register its version" regressions.
+ *  - The `event` discriminator on `data` is a string (some failure
+ *    modes set it to numbers / booleans).
+ *
+ * Returns the validated event (or the original envelope when
+ * validation fails — we still EMIT, just with a log trail of the
+ * defect so the bug is fixable without losing data on the wire).
+ */
+function validateEnvelopeOrLog(event: NDJSONEvent): NDJSONEvent {
+  const parsed = agentEventSchema.safeParse(event);
+  if (!parsed.success) {
+    try {
+      const issues = parsed.error.issues
+        .map((i) => `${i.path.join('.')}: ${i.message}`)
+        .join('; ');
+      logToFileLazy(
+        `[agent-ui] NDJSON envelope failed schema validation — wire format invariant breached. issues=${issues}; event.type=${
+          event.type
+        }; event.message=${event.message.slice(0, 80)}`,
+      );
+    } catch {
+      // Logger may not be available; never throw from emit.
+    }
+    return event;
+  }
+
+  // Coherence check: registry value must match data_version when
+  // the event has a discriminator. A v1 schema bump that lands on
+  // disk without a corresponding registry update shows up as an
+  // assertion log here. Single source of truth: EVENT_DATA_VERSIONS.
+  if (
+    typeof event.data === 'object' &&
+    event.data !== null &&
+    typeof (event.data as { event?: unknown }).event === 'string'
+  ) {
+    const discriminator = (event.data as { event: string }).event;
+    const registry = EVENT_DATA_VERSIONS as Readonly<Record<string, number>>;
+    const expected = registry[discriminator];
+    if (expected !== undefined && event.data_version !== expected) {
+      try {
+        logToFileLazy(
+          `[agent-ui] data_version mismatch on '${discriminator}': expected ${expected} from EVENT_DATA_VERSIONS, got ${event.data_version}. Bump EVENT_DATA_VERSIONS or update the emitter.`,
+        );
+      } catch {
+        // never throw from emit
+      }
+    }
+  }
+
+  return event;
+}
+
+/**
+ * Lazy debug logger. Pulled lazily because eager imports of
+ * `../utils/debug` in this module pull in the full debug log machinery
+ * (file rotation, redaction, mtime checks) at module init — slow on a
+ * cold start. We only need the helper when an envelope is bad.
+ */
+let _logToFile: ((msg: string) => void) | null = null;
+function logToFileLazy(msg: string): void {
+  if (!_logToFile) {
+    try {
+      const mod = require('../utils/debug') as {
+        logToFile: (msg: string) => void;
+      };
+      _logToFile = mod.logToFile;
+    } catch {
+      _logToFile = () => undefined;
+    }
+  }
+  _logToFile(msg);
 }
 
 function emit(
@@ -335,6 +510,11 @@ function emit(
     // omits anyway, but keeping the key absent is clearer in tests).
     ...(data_version !== undefined ? { data_version } : {}),
   };
+  // Zod-validate the envelope at the wire boundary. Failures land in
+  // the on-disk log (never throw, never stderr — Ink owns stdout) so
+  // schema regressions surface as a fixable defect on the next run
+  // rather than a silent data corruption on the wire.
+  validateEnvelopeOrLog(event);
   // Final wire-boundary scrub: redact env-value secrets (notably
   // WIZARD_OAUTH_TOKEN, supplied as a CI org secret) from anywhere in
   // the serialized line. Cheap on clean lines (a single `includes`
@@ -393,7 +573,9 @@ export class AgentUI implements WizardUI {
       | 'no_stored_credentials'
       | 'token_expired'
       | 'refresh_failed'
-      | 'env_selection_failed';
+      | 'env_selection_failed'
+      | 'amplitude_token_expired'
+      | 'gateway_token_expired';
     instruction: string;
     loginCommand: string[];
     resumeCommand?: string[];
@@ -432,6 +614,39 @@ export class AgentUI implements WizardUI {
       rank: number;
       label: string;
     }>;
+    /**
+     * `true` when the auth failure happened DURING an in-flight agent
+     * run (vs the pre-run credential resolution path). Distinct because
+     * mid-run failures often have partial side effects (files written,
+     * events instrumented) and the orchestrator should advertise
+     * `--resume` instead of suggesting a clean restart.
+     */
+    midRun?: boolean;
+    /**
+     * `true` when the wizard has decided to preserve any files written
+     * before the auth failure. Mirrors the OutroScreen's "Keep" choice
+     * in the TUI — an orchestrator should communicate the same intent
+     * to the human ("your changes were kept; re-run to resume").
+     */
+    preserveFiles?: boolean;
+    /**
+     * Coarse-grained partial-progress flags so the orchestrator can
+     * render an honest "X done, Y partial" status to the human without
+     * shelling out to inspect the filesystem.
+     */
+    partialProgress?: {
+      eventsInstrumented?: boolean;
+      dashboardComplete?: boolean;
+    };
+    /**
+     * Distinguishes the upstream that surfaced the failure: `amplitude`
+     * (Amplitude OAuth bearer) vs `llm-gateway` (the Amplitude-hosted
+     * LLM gateway's session token). Both manifest as a 401 but their
+     * remediation differs — re-running the wizard refreshes the
+     * gateway token automatically, while an Amplitude OAuth failure
+     * requires `amplitude-wizard login`.
+     */
+    authSubkind?: 'amplitude' | 'llm-gateway';
   }): void {
     emit('lifecycle', data.instruction, {
       level: 'error',
@@ -444,8 +659,77 @@ export class AgentUI implements WizardUI {
           ? { previousAttempt: data.previousAttempt }
           : {}),
         ...(data.choices ? { choices: data.choices } : {}),
+        ...(data.midRun ? { midRun: true } : {}),
+        ...(data.preserveFiles ? { preserveFiles: true } : {}),
+        ...(data.partialProgress
+          ? { partialProgress: data.partialProgress }
+          : {}),
+        ...(data.authSubkind ? { authSubkind: data.authSubkind } : {}),
       },
     });
+  }
+
+  /**
+   * Emit a structured `error` envelope with a machine-readable `code`
+   * discriminator. Used by the explicit AgentErrorType branches in
+   * `agent-runner.ts` (GATEWAY_DOWN, RATE_LIMIT, MCP_MISSING, etc.) to
+   * give the orchestrator a precise next-step hint without parsing the
+   * sanitized message string. Pairs with the subsequent `run_completed`
+   * envelope from `wizardAbort`. Wire shape mirrors `setRunError` plus
+   * the typed `code` + optional `mcpServer` discriminator.
+   */
+  emitRunError(data: {
+    message: string;
+    code:
+      | 'GATEWAY_DOWN'
+      | 'GATEWAY_INVALID_REQUEST'
+      | 'RATE_LIMIT'
+      | 'API_ERROR'
+      | 'MCP_MISSING'
+      | 'RESOURCE_MISSING';
+    mcpServer?: 'wizard-tools' | 'amplitude-wizard';
+    recoverable?: RecoverableHint;
+    suggestedAction?: SuggestedAction;
+  }): void {
+    emit('error', data.message, {
+      level: 'error',
+      data: {
+        event: 'run_error',
+        code: data.code,
+        ...(data.mcpServer ? { mcpServer: data.mcpServer } : {}),
+        recoverable: data.recoverable ?? 'fatal',
+        ...(data.suggestedAction
+          ? { suggestedAction: data.suggestedAction }
+          : {}),
+      },
+    });
+  }
+
+  /**
+   * Emit a `lifecycle: auth_retry_exhausted` event at the SDK
+   * retry-loop boundary. Pairs with the eventual AUTH_ERROR /
+   * `auth_required` follow-on — sees that exhaustion happened BEFORE
+   * the abort lands. See `AuthRetryExhaustedData` in
+   * `agent-events.ts`.
+   */
+  emitAuthRetryExhausted(data: {
+    attempts: number;
+    subkind?: 'amplitude' | 'llm-gateway';
+  }): void {
+    emit(
+      'lifecycle',
+      `auth_retry_exhausted: attempts=${data.attempts}${
+        data.subkind ? ` subkind=${data.subkind}` : ''
+      }`,
+      {
+        level: 'warn',
+        data: {
+          event: 'auth_retry_exhausted',
+          attempts: data.attempts,
+          ...(data.subkind ? { subkind: data.subkind } : {}),
+        },
+      },
+    );
   }
 
   /**
@@ -616,11 +900,21 @@ export class AgentUI implements WizardUI {
    * audit) before proceeding with `recommended`. When neither
    * `--auto-approve` nor `--yes` is set in agent mode, the caller should
    * emit + exit `ExitCode.INPUT_REQUIRED` (12).
+   *
+   * Returns the freshly-minted `decisionId` (e.g. `dec_001`). Callers
+   * MUST thread this id through to the matching `decision_auto`
+   * (or other resolution envelope) so orchestrators can pair the
+   * request with the response. If the caller supplies a `decisionId`
+   * on `data`, it is honored verbatim (used by test fixtures and the
+   * paged env-picker that wants a stable id across pages); otherwise
+   * a fresh id is minted from the process-local counter.
    */
-  emitNeedsInput<V = string>(data: NeedsInputData<V>): void {
+  emitNeedsInput<V = string>(data: NeedsInputData<V>): string {
+    const decisionId = data.decisionId ?? nextDecisionId();
     const wireData: NeedsInputWireData<V> = {
       event: 'needs_input',
       code: data.code,
+      decisionId,
       ui: data.ui,
       choices: data.choices,
       recommended: data.recommended,
@@ -632,6 +926,7 @@ export class AgentUI implements WizardUI {
       manualEntry: data.manualEntry,
     };
     emit('needs_input', data.message, { data: wireData });
+    return decisionId;
   }
 
   // ── Inner-agent lifecycle ───────────────────────────────────────────
@@ -653,11 +948,39 @@ export class AgentUI implements WizardUI {
   }
 
   /**
+   * Cumulative tool-call telemetry across the run. Populated on every
+   * `emitToolCall` (PreToolUse boundary) and `recordToolOutcome`
+   * (PostToolUse boundary, called from `inner-lifecycle.ts`). Read at
+   * phase / terminal boundaries by `emitToolCallSummary` to build the
+   * rollup envelope. Private — outer callers go through the
+   * `emitToolCall` / `recordToolOutcome` / `emitToolCallSummary` API.
+   */
+  private _toolCallStats: ToolCallStats = new ToolCallStats();
+
+  /**
+   * Last-emitted `tool_call_summary` signature. Used to dedup
+   * back-to-back emissions at the same boundary (phase finalize then
+   * terminal exit with no intervening tool calls) so an orchestrator
+   * doesn't see an identical payload twice on the wire. Comparing
+   * the signature string is sufficient because the payload is fully
+   * value-typed.
+   */
+  private _lastToolCallSummarySignature: string | null = null;
+
+  /**
    * The inner agent is about to call a tool. Use the helper
    * `summarizeToolInput` from `agent-events` to build a privacy-safe
    * `summary` rather than passing the raw input through.
+   *
+   * Side effect: increments the run-level `ToolCallStats` accumulator
+   * so `emitToolCallSummary` can build a rollup at phase / terminal
+   * boundaries. The increment happens here (rather than in the
+   * inner-lifecycle hook) so any path that calls `emitToolCall`
+   * directly (today: none; tomorrow: future probe-call shims) is
+   * counted automatically.
    */
   emitToolCall(data: Omit<ToolCallData, 'event'>): void {
+    this._toolCallStats.recordCall(data.tool);
     emit(
       'progress',
       data.summary
@@ -665,6 +988,62 @@ export class AgentUI implements WizardUI {
         : `tool: ${data.tool}`,
       { data: { event: 'tool_call', ...data } },
     );
+  }
+
+  /**
+   * Record the outcome of the most recent tool call for the given
+   * tool. Called from the PostToolUse hook in `inner-lifecycle.ts`
+   * — kept on the AgentUI surface (rather than on the
+   * `ToolCallStats` directly) so the inner-lifecycle hook has a
+   * stable seam for future telemetry without reaching into the
+   * accumulator's internals.
+   *
+   * `denied` is reserved for the rare path where the SDK refuses a
+   * tool call pre-execution (permission gate, allowlist miss). The
+   * common case is `success` / `error` keyed off PostToolUse
+   * `is_error`.
+   */
+  recordToolOutcome(tool: string, outcome: ToolCallOutcome): void {
+    this._toolCallStats.recordOutcome(tool, outcome);
+  }
+
+  /**
+   * Emit the aggregated `tool_call_summary` rollup. See
+   * `EVENT_DATA_VERSIONS.tool_call_summary` for the full contract.
+   *
+   *   - No-op when `totalCalls === 0` — orchestrators key off
+   *     absence of this event to render "no tools were called".
+   *   - No-op when the current payload signature matches the last
+   *     emitted one (duplicate boundary call, or a terminal
+   *     emission with no new tool calls since finalize). Keeps the
+   *     wire free of identical back-to-back rollups.
+   */
+  emitToolCallSummary(): void {
+    const payload = this._toolCallStats.build();
+    if (!payload) return;
+    // Stable signature — JSON.stringify gives a deterministic
+    // ordering on the value-typed payload because the keys are
+    // inserted in a fixed order by `build()`. Cheap and explicit.
+    const signature = JSON.stringify(payload);
+    if (signature === this._lastToolCallSummarySignature) return;
+    this._lastToolCallSummarySignature = signature;
+    emit(
+      'progress',
+      `tool_call_summary: ${payload.totalCalls} calls (${payload.durationMsTotal}ms)`,
+      { data: payload },
+    );
+  }
+
+  /**
+   * Read-only accessor for the live `ToolCallStats` accumulator.
+   * Exposed so the inner-lifecycle PostToolUse hook can record
+   * outcomes without going through a per-tool method, and so the
+   * regression suite can assert intermediate state. Returns the
+   * actual instance, not a copy — callers must not mutate it
+   * directly (use `recordToolOutcome` instead).
+   */
+  getToolCallStats(): ToolCallStats {
+    return this._toolCallStats;
   }
 
   /**
@@ -832,7 +1211,21 @@ export class AgentUI implements WizardUI {
 
   // ── Post-agent step lifecycle ───────────────────────────────────────
 
+  // PR B4: track the post-agent step queue locally so `setPostAgentStep`
+  // can emit a `progress_estimate` rollup at each terminal-state
+  // transition (`completed` / `skipped`). Without the seeded total we
+  // couldn't compute the percent — orchestrators would see fine-grained
+  // `post_agent_step` events but no canonical progress bar to render.
+  private _postAgentStepIds: string[] = [];
+  private _postAgentStepDone = new Set<string>();
+
   seedPostAgentSteps(steps: PostAgentStep[]): void {
+    // Reset the per-run tracking. A second `seedPostAgentSteps` call
+    // is rare but supported (e.g. agent run + verify run on the same
+    // session); the prior queue's progress shouldn't bleed into the
+    // new one.
+    this._postAgentStepIds = steps.map((s) => s.id);
+    this._postAgentStepDone = new Set<string>();
     emit('progress', `post_agent_seeded: ${steps.length} step(s)`, {
       data: {
         event: 'post_agent_seeded',
@@ -857,6 +1250,210 @@ export class AgentUI implements WizardUI {
         reason: patch.reason,
       },
     });
+    // PR B4: emit the orchestrator-facing rollup on terminal-state
+    // transitions. `in_progress` / `pending` aren't terminal — we
+    // don't bump `current` for them (a step bouncing back to
+    // `pending` from `in_progress` shouldn't lower the percent on
+    // the wire).
+    if (
+      (patch.status === 'completed' || patch.status === 'skipped') &&
+      this._postAgentStepIds.includes(id) &&
+      !this._postAgentStepDone.has(id)
+    ) {
+      this._postAgentStepDone.add(id);
+      this.emitProgressEstimate({
+        stage: 'post_agent_steps',
+        current: this._postAgentStepDone.size,
+        total: this._postAgentStepIds.length,
+      });
+    }
+  }
+
+  // ── PR B4: progress_estimate (orchestrator rollup) ──────────────────
+  //
+  // Multi-item operations (post-agent step queue, MCP install across
+  // editors, event-plan write) advertise a single canonical
+  // `(stage, current, total, percent)` envelope at every meaningful
+  // boundary. Orchestrators that want to render a progress bar
+  // subscribe to `progress_estimate` and ignore the fine-grained
+  // per-item events.
+
+  emitProgressEstimate(args: {
+    stage: string;
+    current: number;
+    total: number;
+  }): void {
+    const payload = buildProgressEstimate(args.stage, args.current, args.total);
+    if (payload === null) {
+      // total < 1 — no-op. Orchestrators must not see a
+      // `progress_estimate` for a zero-item operation.
+      return;
+    }
+    emit(
+      'progress',
+      `progress_estimate: ${payload.stage} ${payload.current}/${payload.total} (${payload.percent}%)`,
+      {
+        data: payload,
+      },
+    );
+  }
+
+  // ── PR B5: cold_start_breakdown (per-phase timing) ──────────────────
+  //
+  // The coarse `run_phase: cold_start` envelope tells a parent agent
+  // "the wizard is cold-starting". `cold_start_breakdown` tells them
+  // WHICH of the five cold-start phases consumed the time. Emitted at
+  // the END of each phase boundary by the runner (skill staging,
+  // package-manager detection, framework preflight, MCP bootstrap,
+  // gateway probe). See `EVENT_DATA_VERSIONS.cold_start_breakdown` for
+  // the full contract.
+
+  emitColdStartBreakdown(args: {
+    phase: ColdStartPhase;
+    startedAt: number;
+    finishedAt: number;
+  }): void {
+    const payload = buildColdStartBreakdown(
+      args.phase,
+      args.startedAt,
+      args.finishedAt,
+    );
+    emit(
+      'progress',
+      `cold_start_breakdown: ${payload.phase} (${payload.durationMs}ms)`,
+      {
+        data: payload,
+      },
+    );
+  }
+
+  // ── PR B7: mcp_status (MCP server lifecycle observability) ─────────
+  //
+  // Today parent agents have no visibility into the wizard's MCP
+  // server state — the in-process `wizard_tools` server boots
+  // silently during cold start, and the `editor_install` flow
+  // silently detects (or doesn't) supported editors and silently
+  // installs (or skips) the editor MCP config. `mcp_status` fires
+  // at every state transition with a `{ server, state,
+  // transition_ts, detail? }` payload so an orchestrator can render
+  // both lifecycles in real time. See `EVENT_DATA_VERSIONS.mcp_status`
+  // and `MCPStatusData` for the full contract.
+
+  emitMcpStatus(data: {
+    server: MCPStatusServer;
+    state: MCPStatusState;
+    transition_ts: number;
+    detail?: string;
+  }): void {
+    // Defense-in-depth: validate the payload before it leaves the
+    // wizard. The envelope-level `agentEventSchema` only checks the
+    // outer frame; this Zod check catches a misbehaving caller that
+    // would otherwise ship a malformed `(server, state)` pair the
+    // orchestrator can't branch on. Failures land in the on-disk
+    // log (same routing as `validateEnvelopeOrLog`); the emit still
+    // proceeds so we don't drop the signal on a typo in `detail`.
+    const parsed = mcpStatusDataSchema.safeParse(data);
+    if (!parsed.success) {
+      try {
+        const issues = parsed.error.issues
+          .map((i) => `${i.path.join('.')}: ${i.message}`)
+          .join('; ');
+        logToFileLazy(
+          `[agent-ui] mcp_status payload failed schema validation — ${issues}; server=${data.server}; state=${data.state}`,
+        );
+      } catch {
+        // never throw from emit
+      }
+      return;
+    }
+    emit('lifecycle', `mcp_status: ${data.server} -> ${data.state}`, {
+      data: { event: 'mcp_status', ...data },
+    });
+  }
+
+  // ── PR B17: wizard_capabilities (startup announcement + paths) ────
+  //
+  // Emitted exactly once per run, as the FIRST orchestrator-facing
+  // envelope after `run_started` and BEFORE `run_phase: cold_start`.
+  // The agent-runner wires the call site immediately after
+  // `startRun()` — see `agent-runner.ts`.
+  //
+  // Payload mirrors the full `EVENT_DATA_VERSIONS` registry so an
+  // orchestrator can branch on per-event versions at parse time
+  // without a wizard upgrade. `supportedEvents` is the same set,
+  // pre-sorted, so orchestrators that only care about presence
+  // ("does this wizard emit `progress_estimate`?") don't have to
+  // sort on their side.
+  //
+  // `mode` is hardcoded to `'agent'` here because AgentUI is the
+  // only `WizardUI` implementation that emits NDJSON. The field is
+  // on the contract (see `WizardCapabilitiesMode`) so future CI /
+  // interactive emitters don't need a schema bump.
+  //
+  // `paths` (v2) carries the per-project artifact paths derived
+  // from `src/utils/storage-paths.ts` so a CI orchestrator can
+  // upload `~/.amplitude/wizard/runs/<hash>/log.txt` as a build
+  // artifact without replicating the `sha256(installDir)` hashing
+  // logic. Closes Agent-Mode Auditor A5 High-severity finding. The
+  // block is OMITTED from the envelope when `installDir` is
+  // unresolvable at emit time — orchestrators key off field
+  // presence (`if (data.paths)`) rather than checking for empty
+  // strings.
+
+  emitWizardCapabilities(data?: { installDir?: string }): void {
+    // Snapshot the registry as a plain object so JSON.stringify
+    // produces stable, insertion-ordered output (the registry is
+    // declared as a `const` literal — its key order is the
+    // declaration order, which the orchestrator contract pins on).
+    const eventDataVersions: Record<string, number> = {
+      ...EVENT_DATA_VERSIONS,
+    };
+    const supportedEvents = Object.keys(EVENT_DATA_VERSIONS).sort();
+    // Resolve per-project paths via the canonical storage-paths
+    // helpers. When `installDir` isn't resolvable (very unlikely —
+    // capabilities is emitted right after `run_started`), omit the
+    // field entirely rather than emit empty strings so consumers
+    // can rely on `data.paths` presence as the has-paths signal.
+    // `getCacheRoot()` is unconditional (per-user, not per-project)
+    // but is grouped under `paths` for a single coherent block.
+    let paths: WizardCapabilitiesPaths | undefined;
+    const installDir = data?.installDir;
+    if (typeof installDir === 'string' && installDir.length > 0) {
+      try {
+        paths = {
+          logFile: getLogFile(installDir),
+          logFileNdjson: getStructuredLogFile(installDir),
+          runDir: getRunDir(installDir),
+          cacheRoot: getCacheRoot(),
+        };
+      } catch (err) {
+        // never throw from emit — the announcement is purely
+        // observational. Drop `paths` rather than block the envelope.
+        try {
+          logToFileLazy(
+            `[agent-ui] emitWizardCapabilities: paths resolution failed — ${
+              err instanceof Error ? err.message : String(err)
+            }`,
+          );
+        } catch {
+          // swallow
+        }
+      }
+    }
+    emit(
+      'lifecycle',
+      `wizard_capabilities: protocol v${WIZARD_PROTOCOL_VERSION}, ${supportedEvents.length} events`,
+      {
+        data: {
+          event: 'wizard_capabilities',
+          protocolVersion: WIZARD_PROTOCOL_VERSION,
+          eventDataVersions,
+          supportedEvents,
+          mode: 'agent',
+          ...(paths ? { paths } : {}),
+        },
+      },
+    );
   }
 
   // ── Session state ───────────────────────────────────────────────────
@@ -872,10 +1469,36 @@ export class AgentUI implements WizardUI {
    * `outcome` + `exitCode` are the contract.
    */
   private _runStartedAtMs: number | null = null;
+  // Run-phase deduplication. We emit `run_phase` at coarse boundaries
+  // (cold_start / agent_running / finalizing / completed / error)
+  // and the agent-runner is the lone caller — but agent_running fires
+  // from every tool call's preToolUse hook, so dedup at the wire
+  // boundary keeps a noisy hook chain from spamming the stream.
+  private _lastRunPhase: string | null = null;
 
   startRun(): void {
     this._runStartedAtMs = Date.now();
     emit('lifecycle', 'run_started', { data: { event: 'start_run' } });
+  }
+
+  /**
+   * Emit a `lifecycle: run_phase` event when the wizard transits
+   * between coarse phase boundaries. Idempotent — repeated calls
+   * with the same phase no-op. See `RunPhase` in `agent-events.ts`.
+   */
+  emitRunPhase(
+    phase:
+      | 'cold_start'
+      | 'agent_running'
+      | 'finalizing'
+      | 'completed'
+      | 'error',
+  ): void {
+    if (this._lastRunPhase === phase) return;
+    this._lastRunPhase = phase;
+    emit('lifecycle', `run_phase: ${phase}`, {
+      data: { event: 'run_phase', phase },
+    });
   }
 
   /**
@@ -996,6 +1619,45 @@ export class AgentUI implements WizardUI {
     );
   }
 
+  // ── PR B4: attempt_started ──────────────────────────────────────────
+  //
+  // `transient_retry` answers "the wizard decided to retry; sleeping Ns".
+  // `attempt_started` answers "attempt N is now actually running" —
+  // emitted at the top of each outer-loop iteration AFTER the backoff
+  // sleep has elapsed and a fresh AbortController has been wired up.
+  // The two together let orchestrators render a faithful retry-lifecycle
+  // banner without timing inference.
+
+  emitAttemptStarted(data: {
+    attemptNumber: number;
+    totalBudget: number;
+    reason: 'cold_start' | 'stall_retry' | 'auth_refresh' | 'network_retry';
+    backoffMs?: number;
+  }): void {
+    const suffix =
+      data.backoffMs !== undefined && data.backoffMs > 0
+        ? ` after ${data.backoffMs}ms backoff`
+        : '';
+    emit(
+      'progress',
+      `attempt_started: ${data.attemptNumber}/${data.totalBudget} (${data.reason})${suffix}`,
+      {
+        data: {
+          event: 'attempt_started',
+          attemptNumber: data.attemptNumber,
+          totalBudget: data.totalBudget,
+          reason: data.reason,
+          // Only include backoffMs when explicitly provided — omitting
+          // it on the wire keeps the cold-start envelope minimal
+          // (orchestrators read absence as "no backoff preceded").
+          ...(data.backoffMs !== undefined
+            ? { backoffMs: data.backoffMs }
+            : {}),
+        },
+      },
+    );
+  }
+
   emitCompactionStarted(data: { trigger: 'manual' | 'auto' }): void {
     emit('progress', `compaction_started (${data.trigger})`, {
       data: { event: 'compaction_started', ...data },
@@ -1014,6 +1676,169 @@ export class AgentUI implements WizardUI {
       `compaction_completed (${data.trigger} ${data.preTokens}${post} tokens)`,
       {
         data: { event: 'compaction_completed', ...data },
+      },
+    );
+  }
+
+  // ── v2 protocol: current_file rollup ────────────────────────────────
+  //
+  // Today every Edit / Write tool call emits its own fine-grained
+  // `tool_call` + `file_change_planned` / `file_change_applied`. That's
+  // great for an audit log but noisy for an orchestrator that just wants
+  // a "now editing X" header. `current_file` is the coarse rollup —
+  // debounced so repeated edits to the same file inside a 250ms window
+  // collapse into a single event. Pinning a per-(path, op) tuple at the
+  // emitter rather than wire-side gives parent agents a stable signal
+  // they can subscribe to without bookkeeping.
+
+  private _lastCurrentFile: {
+    path: string;
+    operation: 'create' | 'modify' | 'delete';
+    at: number;
+  } | null = null;
+  /** Debounce window — same (path, operation) inside this window no-ops. */
+  private static readonly CURRENT_FILE_DEBOUNCE_MS = 250;
+
+  emitCurrentFile(data: {
+    path: string;
+    relativePath: string;
+    operation: 'create' | 'modify' | 'delete';
+  }): void {
+    const now = Date.now();
+    const last = this._lastCurrentFile;
+    if (
+      last &&
+      last.path === data.path &&
+      last.operation === data.operation &&
+      now - last.at < AgentUI.CURRENT_FILE_DEBOUNCE_MS
+    ) {
+      // Same file + op inside the debounce window — drop. The
+      // orchestrator already has a chip for this file; the duplicate
+      // would just churn rendering.
+      return;
+    }
+    this._lastCurrentFile = {
+      path: data.path,
+      operation: data.operation,
+      at: now,
+    };
+    emit('progress', `current_file: ${data.operation} ${data.relativePath}`, {
+      data: {
+        event: 'current_file',
+        path: data.path,
+        relativePath: data.relativePath,
+        operation: data.operation,
+      },
+    });
+  }
+
+  // ── v2 protocol: stall_status coaching tiers ────────────────────────
+  //
+  // The wizard's stall detector fires at 10s / 30s / 60s of silence.
+  // Mirror that escalation onto NDJSON so parent agents can render the
+  // same coaching tier ("the wizard's been quiet for 10s" → "concerning"
+  // → "critical, consider retrying") in lockstep with the TUI. Per-tier
+  // dedup at the wire boundary so a runaway emitter can't spam
+  // orchestrators — a tier fires at most once per stall window, reset
+  // by `resetStallStatus()` when activity resumes.
+
+  private _lastStallTier: 'noticed' | 'concerning' | 'critical' | null = null;
+
+  emitStallStatus(data: {
+    tier: 'noticed' | 'concerning' | 'critical';
+    durationMs: number;
+    lastActivity: number;
+    hint?: string;
+  }): void {
+    if (this._lastStallTier === data.tier) {
+      // Same tier already emitted this window. Caller should invoke
+      // `resetStallStatus()` when activity resumes.
+      return;
+    }
+    this._lastStallTier = data.tier;
+    emit('progress', `stall_status: ${data.tier} (${data.durationMs}ms)`, {
+      data: {
+        event: 'stall_status',
+        tier: data.tier,
+        durationMs: data.durationMs,
+        lastActivity: data.lastActivity,
+        ...(data.hint ? { hint: data.hint } : {}),
+      },
+    });
+  }
+
+  /**
+   * Reset the per-window stall-tier guard. Callers invoke this when
+   * the inner agent resumes producing tool calls / status updates —
+   * the next stall window starts fresh and the 'noticed' tier can
+   * fire again.
+   */
+  resetStallStatus(): void {
+    this._lastStallTier = null;
+  }
+
+  // ── v2 protocol: run_resumed checkpoint signal ──────────────────────
+  //
+  // When the wizard restarts from a checkpoint (post-crash, post-SIGINT,
+  // post-token-expiry), the first envelope after `run_started` should be
+  // `run_resumed` so an orchestrator can render "continuing from where
+  // we left off" instead of "fresh run". Distinct from
+  // `checkpoint_loaded` (which fires only when `--resume` finds a fresh
+  // file): `run_resumed` carries the orchestrator-facing summary needed
+  // to drive UX, not just the load event.
+
+  emitRunResumed(data: {
+    fromCheckpointAt: string;
+    lastPhase:
+      | 'cold_start'
+      | 'agent_running'
+      | 'finalizing'
+      | 'completed'
+      | 'error'
+      | 'unknown';
+    restoredStateSummary: string;
+  }): void {
+    emit(
+      'lifecycle',
+      `run_resumed (last_phase=${data.lastPhase}, from=${data.fromCheckpointAt})`,
+      {
+        data: {
+          event: 'run_resumed',
+          from_checkpoint_at: data.fromCheckpointAt,
+          last_phase: data.lastPhase,
+          restored_state_summary: data.restoredStateSummary,
+        },
+      },
+    );
+  }
+
+  // ── v2 protocol: file_change_failed (write-tool error) ──────────────
+  //
+  // PostToolUse hooks see `is_error: true` on the tool_response object.
+  // Today the generic `tool_call` event captures the input but not the
+  // outcome. `file_change_failed` pairs with the preceding
+  // `file_change_planned` so an orchestrator can label "tried to edit
+  // X, failed because Y" on the already-rendered preview without
+  // parsing tool_result text.
+
+  emitFileChangeFailed(data: {
+    path: string;
+    operation: 'create' | 'modify' | 'delete';
+    errorClass: FileChangeErrorClass;
+    errorMessage: string;
+  }): void {
+    emit(
+      'error',
+      `file_change_failed: ${data.operation} ${data.path} (${data.errorClass})`,
+      {
+        level: 'error',
+        data: {
+          event: 'file_change_failed',
+          path: data.path,
+          operation: data.operation,
+          errorClass: data.errorClass,
+          errorMessage: data.errorMessage,
+        },
       },
     );
   }
@@ -1039,6 +1864,12 @@ export class AgentUI implements WizardUI {
     const hint = classifyRunError(error);
     emit('error', sanitized, {
       data: {
+        // `event: 'run_error'` discriminator brings this envelope in
+        // line with every other event family. Without it, an
+        // orchestrator filtering on `data.event` saw nothing here and
+        // had to special-case `type === 'error'`. data_version
+        // registry keys off this discriminator.
+        event: 'run_error',
         name: error.name,
         recoverable: hint.recoverable,
         ...(hint.suggestedAction
@@ -1193,10 +2024,27 @@ export class AgentUI implements WizardUI {
     }
   }
 
-  pushDiscoveryFact(): void {
-    // No-op for NDJSON consumers — discovery facts are a TUI-only
-    // cosmetic feed; the same values are already surfaced via the
-    // preflight context block and existing `progress` events.
+  /**
+   * Emit a `progress: discovery_fact` event mirroring the TUI's
+   * cold-start "discovery feed" chip. Lets parent agents render the
+   * same vertical / app-type / framework / package-manager / region
+   * facts the wizard surfaces in Ink. Idempotent on the receiving
+   * end via the stable `id` — orchestrators upsert chips keyed off
+   * it. Cosmetic only; the values are already on the wire via the
+   * preflight context block and session_state events.
+   */
+  pushDiscoveryFact(
+    fact: import('../lib/wizard-session.js').DiscoveryFact,
+  ): void {
+    emit('progress', `discovery_fact: ${fact.label} = ${fact.value}`, {
+      data: {
+        event: 'discovery_fact',
+        id: fact.id,
+        label: fact.label,
+        value: fact.value,
+        discoveredAt: fact.discoveredAt,
+      },
+    });
   }
 
   // ── Prompts (auto-approve) ──────────────────────────────────────────
@@ -1210,7 +2058,7 @@ export class AgentUI implements WizardUI {
     // Also emit the structured `needs_input` so new orchestrators can
     // inspect choices + resume flags. Default-yes preserves today's
     // auto-approve semantics.
-    this.emitNeedsInput({
+    const decisionId = this.emitNeedsInput({
       code: 'confirm',
       message,
       ui: {
@@ -1228,9 +2076,13 @@ export class AgentUI implements WizardUI {
     // subscribe to `needs_input` can tell "this was auto-resolved"
     // from "this is awaiting an answer". Order matters: needs_input
     // first, decision_auto after, both before the promise resolves
-    // (and before any subsequent control flow advances).
+    // (and before any subsequent control flow advances). The
+    // `decisionId` returned above ties the two envelopes together
+    // so a `code: 'confirm'` reuse later in the same run can't be
+    // mis-paired with this resolution.
     emitDecisionAuto({
       code: 'confirm',
+      decisionId,
       value: 'yes',
       reason: 'auto_approve',
     });
@@ -1244,7 +2096,7 @@ export class AgentUI implements WizardUI {
     });
     // Pick widget by list size: ≥10 options → searchable, else plain select.
     const component = options.length >= 10 ? 'searchable_select' : 'select';
-    this.emitNeedsInput({
+    const decisionId = this.emitNeedsInput({
       code: 'choice',
       message,
       ui: {
@@ -1260,6 +2112,7 @@ export class AgentUI implements WizardUI {
     });
     emitDecisionAuto({
       code: 'choice',
+      decisionId,
       value: selected,
       reason: 'auto_approve',
     });
@@ -1326,7 +2179,7 @@ export class AgentUI implements WizardUI {
     // contradicted the docstring on `EVENT_DATA_VERSIONS.decision_auto`.
     // Choices are flat strings so orchestrators can `resumeFlags`
     // their way into a different decision if a human is in the loop.
-    this.emitNeedsInput<'approved' | 'skipped' | 'revised'>({
+    const decisionId = this.emitNeedsInput<'approved' | 'skipped' | 'revised'>({
       code: 'event_plan',
       message: `Approve ${events.length} proposed events?`,
       ui: {
@@ -1383,9 +2236,12 @@ export class AgentUI implements WizardUI {
     // Companion `decision_auto` for the needs_input above. Orchestrators
     // subscribed to needs_input → decision_auto pairs can tell that
     // the wizard auto-resolved this prompt rather than awaiting a
-    // human answer.
+    // human answer. `decisionId` carried through from the matching
+    // `emitNeedsInput` call so the pairing is exact even if a second
+    // event_plan prompt fires later in the same run.
     emitDecisionAuto({
       code: 'event_plan',
+      decisionId,
       value: 'approved',
       reason: 'auto_approve',
     });
@@ -1684,7 +2540,7 @@ export class AgentUI implements WizardUI {
     const recommendedReason = recommendedChoice
       ? `Highest-ranked environment in the first available workspace (${recommendedChoice.description}).`
       : undefined;
-    this.emitNeedsInput<string>({
+    const decisionId = this.emitNeedsInput<string>({
       code: 'environment_selection',
       message: `Multiple Amplitude environments available — select one of ${choices.length}.`,
       ui: {
@@ -1794,6 +2650,20 @@ export class AgentUI implements WizardUI {
           level: 'warn',
         },
       );
+      // Companion `decision_auto` for the `needs_input:
+      // environment_selection` emitted above. Closes the
+      // request/response correlation loop — orchestrators that
+      // subscribe to `needs_input` see a matching `decision_auto`
+      // tagged with the same `decisionId` instead of having to
+      // infer "the wizard auto-picked" from the absence of a
+      // resolution envelope. Stringified `appId` echoes the wire
+      // shape on `NeedsInputChoice.value`.
+      emitDecisionAuto({
+        code: 'environment_selection',
+        decisionId,
+        value: String(autoChoice.appId ?? ''),
+        reason: 'auto_approve',
+      });
       return {
         orgId: autoChoice.orgId,
         projectId: autoChoice.projectId,

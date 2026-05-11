@@ -239,6 +239,159 @@ describe('createInnerLifecycleHooks (with AgentUI)', () => {
     expect(applied).toBeUndefined();
   });
 
+  it('PostToolUse on Edit failure emits file_change_failed and SUPPRESSES file_change_applied', async () => {
+    // Regression: when the inner agent's Edit tool reports an error
+    // (`is_error: true`), the wizard previously still emitted
+    // `file_change_applied`, advertising a successful write to the
+    // orchestrator's audit trail even though nothing landed on disk.
+    // v2 protocol gates on outcome — failure → file_change_failed,
+    // success-side emit and ledger post-write both skipped.
+    const lifecycle = createInnerLifecycleHooks({ phase: 'apply' });
+    await lifecycle.hooks().PostToolUse(
+      {
+        tool_name: 'Edit',
+        tool_input: { file_path: 'src/lib/amplitude.ts' },
+        tool_response: {
+          is_error: true,
+          error: 'String to replace not found',
+        },
+      },
+      undefined,
+      { signal: new AbortController().signal },
+    );
+
+    const allEvents = writes.map((l) => JSON.parse(l.trim()) as NDJSONEvent);
+    const failed = allEvents.find(
+      (e) =>
+        (e.data as { event?: string } | undefined)?.event ===
+        'file_change_failed',
+    );
+    expect(failed?.data).toMatchObject({
+      event: 'file_change_failed',
+      path: 'src/lib/amplitude.ts',
+      operation: 'modify',
+      errorClass: 'syntax',
+      errorMessage: 'String to replace not found',
+    });
+    // No success-side file_change_applied on a failed write.
+    const applied = allEvents.find(
+      (e) =>
+        (e.data as { event?: string } | undefined)?.event ===
+        'file_change_applied',
+    );
+    expect(applied).toBeUndefined();
+  });
+
+  it('PostToolUse on successful Write still emits file_change_applied', async () => {
+    // Sanity check: the new failure gate doesn't break the happy path.
+    // No `tool_response` (or `is_error: false`) → success branch.
+    const lifecycle = createInnerLifecycleHooks({ phase: 'apply' });
+    await lifecycle.hooks().PostToolUse(
+      {
+        tool_name: 'Write',
+        tool_input: { file_path: 'src/lib/ok.ts', content: 'ok' },
+        tool_response: { is_error: false },
+      },
+      undefined,
+      { signal: new AbortController().signal },
+    );
+
+    const allEvents = writes.map((l) => JSON.parse(l.trim()) as NDJSONEvent);
+    const applied = allEvents.find(
+      (e) =>
+        (e.data as { event?: string } | undefined)?.event ===
+        'file_change_applied',
+    );
+    expect(applied).toBeDefined();
+  });
+
+  it('PostToolUse records the tool outcome on the AgentUI accumulator (success)', async () => {
+    // PR B6: every PostToolUse (write OR read tool) records an
+    // outcome on the run-level ToolCallStats so `tool_call_summary`
+    // ships a faithful success/error breakdown.
+    const lifecycle = createInnerLifecycleHooks({ phase: 'wizard' });
+    // PreToolUse first so the stats accumulator has a pending start
+    // entry to pair against — mirrors the real SDK call order.
+    await lifecycle
+      .hooks()
+      .PreToolUse(
+        { tool_name: 'Read', tool_input: { file_path: '/tmp/a.ts' } },
+        undefined,
+        { signal: new AbortController().signal },
+      );
+    await lifecycle
+      .hooks()
+      .PostToolUse(
+        { tool_name: 'Read', tool_input: { file_path: '/tmp/a.ts' } },
+        undefined,
+        { signal: new AbortController().signal },
+      );
+    // Inspect the stats via the AgentUI accessor — no need to wait
+    // for `emitToolCallSummary` to fire.
+    const { getUI } = await import('../../ui/index.js');
+    const ui = getUI();
+    const stats = (
+      ui as unknown as { getToolCallStats?: () => { totalCalls: number } }
+    ).getToolCallStats?.();
+    expect(stats?.totalCalls).toBe(1);
+    // Trigger emission so we can read the outcome breakdown off the
+    // wire — easier than peeking at the private accumulator state.
+    (
+      ui as unknown as { emitToolCallSummary?: () => void }
+    ).emitToolCallSummary?.();
+    const summary = writes
+      .map((l) => JSON.parse(l.trim()) as NDJSONEvent)
+      .find(
+        (e) =>
+          (e.data as { event?: string } | undefined)?.event ===
+          'tool_call_summary',
+      );
+    expect(summary?.data).toMatchObject({
+      totalCalls: 1,
+      byOutcome: { success: 1, error: 0, denied: 0 },
+    });
+  });
+
+  it('PostToolUse records an error outcome when the SDK surfaces is_error', async () => {
+    const lifecycle = createInnerLifecycleHooks({ phase: 'apply' });
+    await lifecycle.hooks().PreToolUse(
+      {
+        tool_name: 'Edit',
+        tool_input: { file_path: 'src/lib/amplitude.ts' },
+      },
+      undefined,
+      { signal: new AbortController().signal },
+    );
+    await lifecycle.hooks().PostToolUse(
+      {
+        tool_name: 'Edit',
+        tool_input: { file_path: 'src/lib/amplitude.ts' },
+        tool_response: {
+          is_error: true,
+          error: 'String to replace not found',
+        },
+      },
+      undefined,
+      { signal: new AbortController().signal },
+    );
+    const { getUI } = await import('../../ui/index.js');
+    const ui = getUI();
+    (
+      ui as unknown as { emitToolCallSummary?: () => void }
+    ).emitToolCallSummary?.();
+    const summary = writes
+      .map((l) => JSON.parse(l.trim()) as NDJSONEvent)
+      .find(
+        (e) =>
+          (e.data as { event?: string } | undefined)?.event ===
+          'tool_call_summary',
+      );
+    expect(summary?.data).toMatchObject({
+      totalCalls: 1,
+      byOutcome: { success: 0, error: 1, denied: 0 },
+    });
+  });
+
   it('emitEventPlanProposed surfaces all events to NDJSON', () => {
     const lifecycle = createInnerLifecycleHooks({ phase: 'wizard' });
     lifecycle.emitEventPlanProposed([

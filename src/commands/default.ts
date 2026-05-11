@@ -262,6 +262,18 @@ export const defaultCommand: CommandModule = {
         const session = await buildSessionFromOptions(options);
         session.agent = true;
         applyOrchestratorContext(session, options, true);
+
+        // Install the SIGINT handler IMMEDIATELY after we have a session
+        // to checkpoint. Agent / CI modes have no Ink keypress fallback;
+        // without this, a Ctrl+C from an orchestrator hard-killed the
+        // process — no checkpoint, no terminal `run_completed: cancelled`
+        // NDJSON envelope, and a parent agent reading the stream saw an
+        // abrupt EOF that was indistinguishable from a crash.
+        const { installAbortSignalHandler } = await import(
+          '../lib/graceful-exit.js'
+        );
+        installAbortSignalHandler(session);
+
         await selfHealIfNeeded(session);
         await maybeResumeFromCheckpoint(session, options);
 
@@ -295,6 +307,16 @@ export const defaultCommand: CommandModule = {
       void (async () => {
         const session = await buildSessionFromOptions(options, { ci: true });
         applyOrchestratorContext(session, options, false);
+
+        // Same rationale as the agent branch: a CI orchestrator's SIGINT
+        // (timeout, manual cancel) must route through wizardAbort so the
+        // run terminates cleanly with the correct exit code and the
+        // checkpoint is saved before exit.
+        const { installAbortSignalHandler } = await import(
+          '../lib/graceful-exit.js'
+        );
+        installAbortSignalHandler(session);
+
         await selfHealIfNeeded(session);
         await maybeResumeFromCheckpoint(session, options);
 
@@ -447,6 +469,40 @@ export const defaultCommand: CommandModule = {
               (session.selectedOrgId || session.selectedProjectId)
             ) {
               session.requiresAccountConfirmation = true;
+            }
+
+            // When the resolver explicitly told us it needs the user to
+            // pick an environment (typical second-run state after
+            // `git reset --hard` wipes `<installDir>/.amplitude/`),
+            // wipe leftover env / app pre-selection from a prior run
+            // so AuthScreen's `selectedEnv` lookup can't resolve a
+            // stale name against the freshly-fetched pendingOrgs and
+            // auto-call `setCredentials()` against the wrong env. #703
+            // made the resolver outcome observable; this clamps the
+            // downstream session state so the env picker is the
+            // unambiguous next step.
+            //
+            // Note: we do NOT set `requiresAccountConfirmation` here —
+            // that flag drives the returning-user "confirm this
+            // account" UI, which is the wrong affordance for "you
+            // need to pick an env". The Auth flow gate
+            // (`s.credentials !== null`) is already false because the
+            // resolver returned `needs_user_choice`; that's what keeps
+            // the user on AuthScreen.
+            //
+            // Skipped in --agent / --ci mode — those modes emit a
+            // structured rejection elsewhere and don't render an
+            // interactive picker.
+            if (
+              credentialResolution.outcome === 'needs_user_choice' &&
+              !session.ci &&
+              !session.agent
+            ) {
+              session.selectedEnvName = null;
+              session.selectedAppId = null;
+              logToFile(
+                '[bin] needs_user_choice: cleared stale env/appId pre-selection so AuthScreen renders the env picker unambiguously',
+              );
             }
 
             // Resolve org/project display names so /whoami shows them.

@@ -93,6 +93,7 @@ const mockUIInstance = {
   setEventPlan: vi.fn(),
   setRetryState: vi.fn(),
   setCurrentActivity: vi.fn(),
+  emitAuthRetryExhausted: vi.fn(),
 };
 vi.mock('../../ui', () => ({
   getUI: () => mockUIInstance,
@@ -592,6 +593,14 @@ describe('runAgent', () => {
       expect(result.error).toBe(AgentErrorType.AUTH_ERROR);
       expect(aborted).toBe(true);
       expect(mockSpinner.stop).toHaveBeenCalledWith('Authentication failed');
+      // Lifecycle event must fire exactly once at the abort boundary so
+      // orchestrators observe exhaustion before the downstream
+      // auth_required envelope.
+      expect(mockUIInstance.emitAuthRetryExhausted).toHaveBeenCalledTimes(1);
+      expect(mockUIInstance.emitAuthRetryExhausted).toHaveBeenCalledWith({
+        attempts: AUTH_RETRY_LIMIT,
+        subkind: 'llm-gateway',
+      });
     });
 
     it('treats api_retry with auth-error pattern (no error_status) as auth retry', async () => {

@@ -94,6 +94,20 @@ export const addMCPServerToClientsStep = async ({
   // CI mode: skip MCP installation entirely
   if (ci) {
     ui.log.info('Skipping MCP installation (CI mode)');
+    // PR B7: emit `mcp_status: editor_install/install_skipped` so an
+    // orchestrator running CI can observe that the wizard chose not to
+    // touch the user's editor config (rather than infer it from
+    // silence). Wrapped — never block CI on a telemetry emit.
+    try {
+      ui.emitMcpStatus?.({
+        server: 'editor_install',
+        state: 'install_skipped',
+        transition_ts: Date.now(),
+        detail: 'CI mode — editor MCP install skipped',
+      });
+    } catch {
+      /* mcp_status emission must never block the install step */
+    }
     return [];
   }
 
@@ -103,19 +117,57 @@ export const addMCPServerToClientsStep = async ({
     ui.log.info(
       'No supported MCP clients detected. Skipping MCP installation.',
     );
+    // PR B7: emit `mcp_status: editor_install/not_applicable` so the
+    // orchestrator knows the install flow won't run at all on this
+    // machine (vs an `install_skipped` where the user actively
+    // declined). Distinct lifecycle terminal so consumers can branch.
+    try {
+      ui.emitMcpStatus?.({
+        server: 'editor_install',
+        state: 'not_applicable',
+        transition_ts: Date.now(),
+        detail: 'no supported MCP editor clients detected on this machine',
+      });
+    } catch {
+      /* mcp_status emission must never block the install step */
+    }
     return [];
   }
 
-  // Auto-install to all supported clients
-  await traceStep('adding mcp servers', async () => {
-    await addMCPServer(
-      supportedClients,
-      undefined,
-      [...ALL_FEATURE_VALUES],
-      local,
-      zone,
-    );
-  });
+  // Auto-install to all supported clients. Wrapped so a thrown
+  // write (permissions, corrupted editor config, disk full) emits a
+  // `failed` mcp_status terminal BEFORE the error propagates to the
+  // caller. Without that wrap an orchestrator sees the run abort
+  // without learning that the editor-install step was the cause.
+  try {
+    await traceStep('adding mcp servers', async () => {
+      await addMCPServer(
+        supportedClients,
+        undefined,
+        [...ALL_FEATURE_VALUES],
+        local,
+        zone,
+      );
+    });
+  } catch (err) {
+    // PR B7: write-time failure. Surface a `failed` terminal so the
+    // orchestrator can explain why no `installed` followed the
+    // (implicit) auto-install. Normalise to an Error so the thrown
+    // value is well-typed for downstream consumers (eslint
+    // `only-throw-error` enforces this).
+    const normalised = err instanceof Error ? err : new Error(String(err));
+    try {
+      ui.emitMcpStatus?.({
+        server: 'editor_install',
+        state: 'failed',
+        transition_ts: Date.now(),
+        detail: normalised.message,
+      });
+    } catch {
+      /* mcp_status emission must never block error propagation */
+    }
+    throw normalised;
+  }
 
   ui.log.success(
     `Added the MCP server to:
@@ -126,6 +178,24 @@ export const addMCPServerToClientsStep = async ({
     clients: supportedClients.map((c) => c.name),
     integration,
   });
+
+  // PR B7: terminal `installed` event after the multi-client write
+  // loop has fully succeeded. `detail` enumerates the targets so the
+  // orchestrator can render the per-client outcome without parsing
+  // the analytics events. Wrapped — emit failures never invalidate
+  // the install.
+  try {
+    ui.emitMcpStatus?.({
+      server: 'editor_install',
+      state: 'installed',
+      transition_ts: Date.now(),
+      detail: `installed into ${supportedClients
+        .map((c) => c.name)
+        .join(', ')}`,
+    });
+  } catch {
+    /* mcp_status emission must never block the install step */
+  }
 
   return supportedClients.map((c) => c.name);
 };
@@ -188,8 +258,27 @@ export const addMCPServer = async (
   local?: boolean,
   zone: CloudRegion = 'us',
 ): Promise<void> => {
+  // PR B4: surface a `progress_estimate` rollup so orchestrators can
+  // render a single progress bar for the multi-editor install. Each
+  // client install emits one bump after it completes. Errors don't
+  // bump — the caller is responsible for treating a thrown install
+  // as a halt (orchestrators infer "stuck at X/N" from the absence of
+  // further bumps + the error envelope).
+  const ui = getUI();
+  let installed = 0;
   for (const client of clients) {
     await client.addServer(personalApiKey, selectedFeatures, local, zone);
+    installed++;
+    try {
+      ui.emitProgressEstimate?.({
+        stage: 'mcp_install',
+        current: installed,
+        total: clients.length,
+      });
+    } catch {
+      // UI emit failures must never abort the install loop — the
+      // estimate is cosmetic.
+    }
   }
 };
 

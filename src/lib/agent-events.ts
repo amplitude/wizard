@@ -37,6 +37,30 @@
 export const AGENT_EVENT_WIRE_VERSION = 1 as const;
 
 /**
+ * Orchestrator-facing protocol version. Distinct from
+ * `AGENT_EVENT_WIRE_VERSION` (which gates the envelope FRAME shape)
+ * and from `EVENT_DATA_VERSIONS` (which gates per-event `data`
+ * shapes): `WIZARD_PROTOCOL_VERSION` is the SEMVER-flavoured number
+ * an orchestrator branches on to decide "do I speak this wizard's
+ * dialect at all?".
+ *
+ * Bump only on a contract change that breaks orchestrators who were
+ * happy with the previous value — adding a new event-key to the
+ * registry is non-breaking (orchestrators see it absent from their
+ * known set and ignore the envelope), while removing or renaming an
+ * existing event-key, or changing the meaning of `mode`, is.
+ *
+ * Currently `2` because this is the first version that ships the
+ * v2 event family (run_phase, decision_id, retry events,
+ * cold_start_breakdown, tool_call_summary, mcp_status, and the
+ * capability announcement itself). Wizard binaries earlier than this
+ * branch implicitly emit a v1 stream (which would not carry a
+ * `wizard_capabilities` envelope at all — capability absence IS the
+ * v1 signal).
+ */
+export const WIZARD_PROTOCOL_VERSION = 2 as const;
+
+/**
  * Per-event-type data-shape version. The key insight from orchestrator
  * feedback: pinning to envelope `v: 1` doesn't protect orchestrators
  * from breaking changes inside `data`. Adding/renaming a field on
@@ -75,7 +99,53 @@ export const EVENT_DATA_VERSIONS = {
   intro: 1,
   outro: 1,
   cancel: 1,
-  auth_required: 1,
+  /**
+   * v2 — added `midRun`, `preserveFiles`, `partialProgress`,
+   * `authSubkind`, plus the `amplitude_token_expired` /
+   * `gateway_token_expired` reason discriminators. Lets agent-mode
+   * orchestrators distinguish a pre-run credential-resolution failure
+   * (where no work has been done) from a mid-run 401 that leaves
+   * partial progress on disk. v1 callers continue to work — every new
+   * field is optional.
+   */
+  auth_required: 2,
+  /**
+   * `auth_retry_exhausted` — emitted by the SDK retry-loop boundary
+   * (`agent-interface.ts`) once the wizard has observed
+   * AUTH_RETRY_LIMIT consecutive auth-flavoured api_retry messages.
+   * Fires BEFORE the controller.abort('auth_failed') and the
+   * subsequent AUTH_ERROR routing, so orchestrators can observe the
+   * exhaustion event in the stream (rather than just inferring it
+   * from a 401-flavoured `auth_required`). Carries the attempt count
+   * and the auth subkind (`amplitude` / `llm-gateway`).
+   */
+  auth_retry_exhausted: 1,
+  /**
+   * `run_error` — anonymous-until-now `error` envelope from
+   * `AgentUI.setRunError`. Previously the `data` payload carried
+   * `{ name, recoverable, suggestedAction }` with NO `event`
+   * discriminator, breaking the convention used by every other
+   * lifecycle / progress / result event. Orchestrators relying on
+   * `data.event` to branch saw nothing for run-aborting errors and
+   * had to special-case `type === 'error'` alone — making the wire
+   * harder to filter.
+   *
+   * Bumping to v1 = the first registered version (the schema didn't
+   * carry data_version before — orchestrators treat absence as 1 by
+   * convention). Future bumps land here.
+   */
+  run_error: 1,
+  /**
+   * `run_phase` — coarse-grained progress signal emitted at the four
+   * canonical phase boundaries of an agent run (`cold_start` →
+   * `agent_running` → `finalizing` → `completed` | `error`). Lets a
+   * parent agent render a faithful progress indicator without
+   * parsing every tool_call / status / progress event in the stream.
+   * Distinct from `pushStatus` (free-form sub-line for the TUI) and
+   * `journey transitions` (fine-grained four-step journey stepper)
+   * — `run_phase` is the orchestrator-facing five-state contract.
+   */
+  run_phase: 1,
   nested_agent: 1,
   inner_agent_started: 1,
   // Project create. Discriminators must match the actual `data.event`
@@ -142,8 +212,18 @@ export const EVENT_DATA_VERSIONS = {
    * recommended pick, manual-entry hint, and pagination. The most
    * orchestrator-facing event in the wire — without this `data_version`
    * stamp consumers couldn't safely evolve schema for it.
+   *
+   * v2 — added `decisionId` (e.g. `dec_001`), a stable, monotonically
+   * numbered correlation id that lets orchestrators pair a request
+   * with its `decision_auto` resolution. Previously orchestrators had
+   * to reconstruct the pairing by timing + `code` heuristics, which
+   * fails the moment two prompts share a code (e.g. two `confirm`
+   * dialogs back-to-back). Field is optional at the consumer end —
+   * v1 readers that don't know about `decisionId` continue to work
+   * because they were already keying off `code` alone; consumers
+   * that want strict correlation branch on `data_version >= 2`.
    */
-  needs_input: 1,
+  needs_input: 2,
   /**
    * `decision_auto` — emitted alongside a `needs_input` whenever the
    * wizard auto-resolves the prompt (under `--auto-approve` /
@@ -156,8 +236,15 @@ export const EVENT_DATA_VERSIONS = {
    * Fires AFTER the corresponding `needs_input` so a single-event
    * subscriber that sees `needs_input` first is guaranteed to see the
    * auto-resolution next on the same stream.
+   *
+   * v2 — added `decisionId` mirroring the value from the preceding
+   * `needs_input`. Pair `decision_auto.decisionId` with
+   * `needs_input.decisionId` for exact correlation; this replaces
+   * the brittle "match on `code` + emission order" heuristic that
+   * broke when two prompts shared a code. Field is optional at the
+   * consumer end for v1-compat.
    */
-  decision_auto: 1,
+  decision_auto: 2,
   /**
    * `heartbeat` — periodic liveness signal emitted every ~10s while
    * the inner agent is running. Carries elapsed wall-clock time, the
@@ -205,6 +292,50 @@ export const EVENT_DATA_VERSIONS = {
    */
   transient_retry: 1,
   /**
+   * `attempt_started` — emitted at the TOP of each outer retry-loop
+   * iteration in `agent-interface.ts` so orchestrators can tell when
+   * a retry attempt actually BEGINS (vs `transient_retry`, which
+   * fires WHEN the wizard decides to retry, well before backoff has
+   * elapsed). Pair with the existing `auth_retry_exhausted` and
+   * `transient_retry` envelopes to render an accurate attempt lifecycle.
+   *
+   *   transient_retry  → "decided to retry; sleeping Ns"
+   *   attempt_started  → "attempt N now beginning"
+   *   ...inner work...
+   *   transient_retry  → "decided to retry; sleeping Ns" (if it fails)
+   *   ...
+   *   auth_retry_exhausted | run_error → terminal
+   *
+   * `reason` discriminates why we entered this attempt:
+   *   - `cold_start`    — first attempt of the run (attempt 1)
+   *   - `stall_retry`   — previous attempt hit the stall timer
+   *   - `auth_refresh`  — previous attempt failed auth and we refreshed tokens
+   *   - `network_retry` — previous attempt failed with a transient API error
+   *                       (502 / 503 / 504 / ECONNRESET / `terminated`)
+   */
+  attempt_started: 1,
+  /**
+   * `progress_estimate` — emitted at every meaningful step boundary
+   * inside a multi-item operation (post-agent step queue,
+   * multi-editor MCP install, multi-event plan write). Carries the
+   * canonical `(stage, current, total, percent)` tuple so an
+   * orchestrator can render a progress bar without re-deriving it
+   * from a stream of finer-grained events.
+   *
+   *   `stage`   — short stable id of the operation
+   *               (e.g. `'post_agent_steps'`)
+   *   `current` — items completed so far (0..total)
+   *   `total`   — total items in the operation
+   *   `percent` — `Math.round(100 * current / total)` (0..100)
+   *
+   * Distinct from `post_agent_step` / `tool_call`: those are
+   * fine-grained per-item events; `progress_estimate` is the
+   * orchestrator-facing rollup. An orchestrator that wants to render
+   * a single progress bar subscribes to `progress_estimate` and
+   * ignores the fine-grained stream.
+   */
+  progress_estimate: 1,
+  /**
    * `compaction_started` — emitted by the PreCompact hook just before
    * the SDK summarises conversation history. Lets orchestrators render
    * a "compacting…" indicator during what would otherwise be silent
@@ -218,6 +349,193 @@ export const EVENT_DATA_VERSIONS = {
    * cycle when surfacing "the agent forgot X" failures.
    */
   compaction_completed: 1,
+  /**
+   * `discovery_fact` — mirrors the TUI's cold-start "discovery feed"
+   * chips onto NDJSON so parent agents (Claude Code, Cursor, Codex)
+   * can render the same vertical / app-type / framework / package-
+   * manager / region facts the wizard surfaces in Ink. Cosmetic only
+   * (the agent already receives these values via the preflight
+   * context block), but lets orchestrators pin a "here's what we
+   * detected" header without parsing every status message. Each
+   * fact carries a stable `id` so re-publishing on a retry path is
+   * a no-op on the receiving end — orchestrators key off the id to
+   * upsert chips.
+   */
+  discovery_fact: 1,
+  /**
+   * `current_file` — coarse rollup of the file the inner agent is
+   * currently editing, debounced to ~1 emission per 250ms per
+   * (path, operation) tuple. Distinct from `tool_call` /
+   * `file_change_planned` / `file_change_applied`, which are
+   * fine-grained: orchestrators that want a single "now editing X"
+   * header subscribe to `current_file`, while audit-trail consumers
+   * keep parsing the existing fine-grained events. Debouncing
+   * happens at the wire-boundary emitter; the consumer sees one
+   * event per logical activity transition rather than one per write.
+   */
+  current_file: 1,
+  /**
+   * `stall_status` — coaching-tier mirror of the TUI's stall hints.
+   * Tiers escalate as silence grows: `noticed` at 10s, `concerning`
+   * at 30s, `critical` at 60s. Carries the duration since last
+   * activity plus an optional human-readable hint orchestrators can
+   * surface verbatim. Distinct from `heartbeat` (which fires on a
+   * fixed cadence regardless of progress) — `stall_status` only
+   * fires when the wizard has been quiet long enough to deserve
+   * escalated UX.
+   */
+  stall_status: 1,
+  /**
+   * `run_resumed` — emitted as the first envelope after `run_started`
+   * when the wizard restarts from a checkpoint (post-crash,
+   * post-SIGINT, post-token-expiry). Lets orchestrators distinguish
+   * "fresh run from cold" from "resumed run from checkpoint" without
+   * parsing the run-start status. Carries the checkpoint timestamp,
+   * the last-known phase, and a free-form summary of what state was
+   * restored (e.g. "region+org+project bound, framework=Next.js").
+   */
+  run_resumed: 1,
+  /**
+   * `file_change_failed` — emitted at PostToolUse when a write tool
+   * (Edit / Write / MultiEdit / NotebookEdit) reports an error.
+   * Distinct from a generic `tool_call` failure: pairs with the
+   * preceding `file_change_planned` (same path) so an orchestrator
+   * can show "tried to edit X, failed because Y" without parsing
+   * tool_result text. `errorClass` discriminates the common failure
+   * modes (permission, not-found, syntax, generic) so the
+   * orchestrator can branch on the kind rather than the message.
+   */
+  file_change_failed: 1,
+  /**
+   * `cold_start_breakdown` — per-phase timing rollup emitted at the
+   * END of each cold-start phase boundary. The coarse `run_phase:
+   * cold_start` envelope tells an orchestrator "the wizard is
+   * cold-starting"; this event tells them WHICH phase consumed the
+   * time. Cold start is 5-30s of perceived silence on the spinner,
+   * and the lion's share is one of a handful of identifiable
+   * phases (skill staging, package-manager probing, framework
+   * preflight, MCP bootstrap, gateway probe). Pinning each phase
+   * with a measured `durationMs` lets the parent agent:
+   *
+   *   - render which phase is CURRENTLY active during the spinner
+   *     (subscribe to the events as they fire),
+   *   - surface "your cold start is slow because phase X took Ys"
+   *     diagnostics on a hung run,
+   *   - aggregate per-phase timings across runs for performance
+   *     tracking without re-parsing log lines.
+   *
+   * Critical: each phase emits in a `try/finally` boundary inside
+   * the runner so a thrown phase still ships its timing breadcrumb
+   * — the orchestrator sees "framework_detection took 800ms" even
+   * when a later mcp_bootstrap blows up. Absence of a phase event
+   * on the wire means the runner exited before that phase ran (or
+   * before it got far enough to register a start time).
+   */
+  cold_start_breakdown: 1,
+  /**
+   * `tool_call_summary` — aggregated rollup of every tool call the inner
+   * agent made during this run. Today the wizard emits one fine-grained
+   * `tool_call` envelope per PreToolUse — a typical run produces 30-200
+   * such events, and a parent agent that wants to render a "tool usage"
+   * summary at completion time has to maintain its own running counts.
+   *
+   * `tool_call_summary` ships that aggregate from the wizard side:
+   *
+   *   { totalCalls, byTool, byOutcome, durationMsTotal, durationMsAvg,
+   *     topToolByCount? }
+   *
+   * Emitted at two boundaries:
+   *   1. Phase finalize — fires before `run_phase: finalizing` so an
+   *      orchestrator can render the inner-agent tool summary before
+   *      the post-agent steps section appears.
+   *   2. Terminal exit — fires inside `wizardSuccessExit` /
+   *      `wizardAbort` (after any finalizing steps that themselves
+   *      issue tool calls land in the accumulator), so the orchestrator
+   *      always sees a final cumulative rollup covering the WHOLE run.
+   *
+   * Dedup-safety: the emitter no-ops when the payload signature
+   * (`totalCalls` + outcome breakdown) is identical to the previous
+   * emission. A duplicate `emitToolCallSummary()` call at the same
+   * boundary doesn't double-count, and a terminal emission with no
+   * new tool calls since finalize stays off the wire entirely.
+   *
+   * `totalCalls === 0` is suppressed at the wire — orchestrators
+   * watching for this event treat absence as "no tools were called",
+   * which is cleaner than receiving a zero-valued payload.
+   */
+  tool_call_summary: 1,
+  /**
+   * `mcp_status` — MCP server lifecycle state transition. Two servers
+   * are tracked: `wizard_tools` (the in-process MCP server the inner
+   * agent calls into) and `editor_install` (the wizard-mcp install
+   * into the user's editor — Claude Code / Cursor / Codex / etc.).
+   *
+   * Today parent agents parsing the NDJSON stream have no visibility
+   * into MCP server state transitions — the wizard silently boots its
+   * in-process server, silently detects (or doesn't) supported editors,
+   * silently installs (or skips) the editor MCP config. This event
+   * fills the gap: a `{ server, state, transition_ts, detail? }`
+   * envelope at every state boundary so an orchestrator can render
+   * "MCP server: available", "Editor install: needs your choice",
+   * "Editor install: skipped", etc. without re-parsing the per-tool
+   * call stream.
+   *
+   * `state` enum covers the v2 foundation DoD list: `unavailable`,
+   * `available`, `needs_auth`, `needs_install`, `needs_user_choice`,
+   * `install_skipped`, `installed`, `failed`, `not_applicable`. Not
+   * every state fires for both servers — `needs_auth` and
+   * `needs_install` are reserved for future editor-install flavours
+   * where the wizard would otherwise be silent about a pre-install
+   * blocker.
+   */
+  mcp_status: 1,
+  /**
+   * `wizard_capabilities` — startup announcement emitted as the FIRST
+   * orchestrator-facing envelope after `run_started`, before any
+   * `run_phase: cold_start`. Lets a parent agent (Claude Code, Codex,
+   * custom orchestrator) detect what protocol the wizard speaks
+   * BEFORE any contract-shaped event lands on the stream.
+   *
+   * Why it exists: without this, orchestrators have to either
+   * hard-code feature detection ("wizard >= 0.40 speaks v2 events")
+   * or parse-and-discover at runtime ("I saw `mcp_status`, so the
+   * wizard must support it"). Both are fragile. A single up-front
+   * capability envelope lets orchestrators:
+   *   - Detect protocol version mismatches early ("wizard speaks v1,
+   *     I expect v2") and either downgrade their parser or refuse to
+   *     proceed before any user-visible state has been mutated.
+   *   - Pre-allocate UI for events they know will fire (vs the
+   *     wait-and-see pattern of allocating on first sighting).
+   *   - Gate optional UX on capability presence — e.g. only render
+   *     the per-phase cold-start sparkline if
+   *     `cold_start_breakdown` is in `supportedEvents`.
+   *
+   * Payload: `protocolVersion` (currently 2 — bump on any
+   * orchestrator-breaking contract change), `eventDataVersions` (the
+   * full `EVENT_DATA_VERSIONS` registry mirrored verbatim so
+   * orchestrators can branch per-event without a wizard upgrade),
+   * `supportedEvents` (sorted list of every event-key for cheap
+   * `has`-style lookups), `mode` (`'agent' | 'ci' | 'interactive'`
+   * — currently always `'agent'` because only AgentUI emits NDJSON,
+   * but the field is on the contract so future CI / interactive
+   * modes that learn to emit capabilities don't need a schema
+   * bump), and `paths?` (v2+).
+   *
+   * v2 — added `paths` block (`logFile`, `logFileNdjson`, `runDir`,
+   * `cacheRoot`). Addresses Agent-Mode Auditor A5 High-severity
+   * finding: CI orchestrators that wanted to upload the per-project
+   * log as an artifact had to either replicate the
+   * `sha256(installDir)` hashing logic themselves OR pass `--debug`
+   * and grep stderr. With v2, the parent agent extracts the artifact
+   * path directly from the first capabilities envelope (emitted
+   * right after `run_started`). Additive — readers that ignore the
+   * new field continue to work; readers that want the artifact paths
+   * branch on `data_version >= 2`. The block is OMITTED entirely if
+   * `installDir` is unresolvable at emit time (rather than emitting
+   * empty strings) so orchestrators can use field presence as the
+   * has-paths signal.
+   */
+  wizard_capabilities: 2,
 } as const;
 
 /** All NDJSON event-level types. */
@@ -376,6 +694,21 @@ export interface NeedsInputData<V = string> {
    *   - 'destructive_overwrite_confirm'
    */
   code: string;
+  /**
+   * Stable, monotonically-numbered correlation id paired with the
+   * subsequent `decision_auto` (or other resolution envelope) that
+   * answers this request. Format: `dec_<NNN>` zero-padded to 3
+   * digits. Generated process-locally by the emitter — orchestrators
+   * MUST NOT synthesize their own ids. Two prompts that happen to
+   * share a `code` (back-to-back `confirm` dialogs, paginated
+   * choosers) carry different `decisionId`s, which is the only
+   * sound way to pair request and response.
+   *
+   * Optional in the type signature for back-compat — `emitNeedsInput`
+   * auto-fills it when callers omit it. Always present on the wire
+   * for `data_version >= 2` consumers.
+   */
+  decisionId?: string;
   /** Short human-readable description of the question. */
   message: string;
   /** Rendering hints the outer agent can use to pick the right widget. */
@@ -418,6 +751,12 @@ export interface NeedsInputData<V = string> {
 export interface NeedsInputWireData<V = string> {
   event: 'needs_input';
   code: string;
+  /**
+   * Correlation id paired with the subsequent `decision_auto` /
+   * response envelope. See `NeedsInputData.decisionId` for the
+   * full contract. Always present on the wire for v2 consumers.
+   */
+  decisionId: string;
   ui?: UiHints;
   choices: NeedsInputChoice<V>[];
   recommended?: V;
@@ -432,6 +771,124 @@ export interface NeedsInputWireData<V = string> {
 export type NeedsInputEvent<V = string> = AgentEventEnvelope<
   NeedsInputWireData<V>
 >;
+
+// ── waiting_for_user (documented alias for `needs_input`) ───────────
+//
+// Orchestrators reading the protocol docs see two names for the same
+// concept ("needs_input" in the wire / source, "waiting for user" in
+// human-facing copy and some early design notes). PR B2 deferred
+// reconciling these because `NeedsInputData` already provides the
+// typed schema and the wire emitter was settled.
+//
+// This module re-exports the same schema under the `waiting_for_user`
+// name so orchestrator authors can import whichever spelling matches
+// their mental model. The two are intentionally type-identical — adding
+// fields to `NeedsInputData` automatically picks them up here, and we
+// never emit a second envelope for the same event.
+//
+// CRITICAL: this is a documentation + type alias only. There is NO
+// `waiting_for_user` envelope on the wire — orchestrators that want
+// to subscribe still subscribe to `type === 'needs_input'`. We do not
+// register a separate `EVENT_DATA_VERSIONS.waiting_for_user` entry
+// because there is no separate event to version.
+
+/**
+ * Type alias for `NeedsInputData`. Documented name for the same wire
+ * event — orchestrators that prefer the "waiting for user" phrasing
+ * can import this type without changing the underlying schema. See
+ * `NeedsInputData` for the full contract.
+ *
+ * Use this for prompt-handling code paths where the human-facing copy
+ * reads "waiting for user input" but you want the typed schema. The
+ * wire-format `event` discriminator on `data` remains `'needs_input'`.
+ */
+export type WaitingForUserData<V = string> = NeedsInputData<V>;
+
+/**
+ * Type alias for `NeedsInputWireData`. The wire-format shape (with
+ * `event: 'needs_input'` discriminator) read from NDJSON. There is no
+ * separate `waiting_for_user` wire event — this is purely a name
+ * orchestrators may import when the readability of their consumer
+ * code benefits from it.
+ */
+export type WaitingForUserWireData<V = string> = NeedsInputWireData<V>;
+
+/**
+ * Type alias for `NeedsInputEvent`. The full envelope shape for the
+ * NDJSON `needs_input` line under its alternate name. See
+ * `NeedsInputEvent` for the canonical export.
+ */
+export type WaitingForUserEvent<V = string> = NeedsInputEvent<V>;
+
+/**
+ * Wire shape of the `data` field on a `decision_auto` envelope.
+ * Carries the resolved value plus the `decisionId` from the matching
+ * `needs_input` so orchestrators can pair request and response
+ * exactly. See `EVENT_DATA_VERSIONS.decision_auto` for the full
+ * contract.
+ */
+export interface DecisionAutoData {
+  event: 'decision_auto';
+  /** Echoes the `code` from the matching `needs_input`. */
+  code: string;
+  /**
+   * Correlation id from the matching `needs_input`. Always present
+   * for `data_version >= 2`. Optional in the type signature for
+   * forward-compat with synthetic test fixtures.
+   */
+  decisionId?: string;
+  /** The auto-picked value. */
+  value: unknown;
+  /**
+   * Why the wizard auto-resolved instead of waiting for input.
+   * `auto_approve` — `--yes` / `--ci` / `--force` was set.
+   * `back_compat` — `--agent` implies-autoApprove path.
+   */
+  reason: 'auto_approve' | 'back_compat';
+}
+
+// ── decision_id generator ───────────────────────────────────────────
+//
+// Process-local counter used to mint a fresh correlation id for every
+// `needs_input` request. The id is the single source of truth that
+// pairs a request envelope with its `decision_auto` resolution; without
+// it, an orchestrator would have to reconstruct pairing by timing +
+// `code` heuristics, which breaks the moment two prompts share a code
+// (back-to-back `confirm` dialogs, paginated choosers).
+//
+// Why a counter and not UUID:
+//   - Stable across log replay — a transcript replayed offline reads
+//     the SAME ids it read live. UUIDs would re-randomize.
+//   - Zero-padded `dec_NNN` reads cleanly in `grep` / `jq` filters
+//     against a transcript.
+//   - Wrap at 999 isn't a concern: a single wizard run never asks
+//     hundreds of questions. (If it did, that's the real bug.)
+
+let _decisionIdCounter = 0;
+
+/**
+ * Mint the next `decision_id` for a `needs_input` request. Format:
+ * `dec_<NNN>` zero-padded to 3 digits (e.g. `dec_001`, `dec_042`).
+ * Monotonic within a single Node process; resets when the wizard
+ * restarts (orchestrators correlate per-run, not across runs).
+ *
+ * Test-only: use `__resetDecisionIdCounterForTests()` to get a
+ * deterministic sequence inside `beforeEach`.
+ */
+export function nextDecisionId(): string {
+  _decisionIdCounter += 1;
+  return `dec_${String(_decisionIdCounter).padStart(3, '0')}`;
+}
+
+/**
+ * Test helper — reset the process-local counter so each test starts
+ * from `dec_001`. NEVER call this from production code; the counter
+ * MUST be monotonic across an entire wizard run so orchestrators see
+ * stable, non-reused ids.
+ */
+export function __resetDecisionIdCounterForTests(): void {
+  _decisionIdCounter = 0;
+}
 
 // ── Inner-agent lifecycle ───────────────────────────────────────────
 //
@@ -566,15 +1023,828 @@ export interface VerificationResultData {
   failures?: string[];
 }
 
+/**
+ * `discovery_fact` — wire shape of a single cold-start discovery chip
+ * mirrored from the TUI's `DiscoveryFeed`. Stable `id` enables
+ * orchestrator-side upsert so a re-publish on retry is idempotent.
+ * `label` / `value` are pre-formatted, human-readable strings (e.g.
+ * `"Framework"` / `"Next.js (App Router)"`) — orchestrators render
+ * them verbatim. Per-fact `discoveredAt` lets orchestrators sort
+ * chips chronologically or hide stale ones.
+ */
+export interface DiscoveryFactData {
+  event: 'discovery_fact';
+  id: string;
+  label: string;
+  value: string;
+  /** Wall-clock ms when the fact was first published. */
+  discoveredAt: number;
+}
+
+/**
+ * `current_file` — coarse "now editing X" rollup emitted from the
+ * write-tool hook, debounced so that repeated edits to the same
+ * file inside a 250ms window collapse into a single event. The
+ * `relativePath` (when resolvable against `installDir`) is the
+ * orchestrator-friendly version; absolute `path` is preserved for
+ * audit. `operation` mirrors `FileChangeAppliedData['operation']`
+ * — `'create' | 'modify' | 'delete'`. Distinct from `tool_call`
+ * (which fires per write) so an orchestrator can pin a single
+ * file-focus header without parsing every tool invocation.
+ */
+export interface CurrentFileData {
+  event: 'current_file';
+  /** Raw absolute path the inner agent passed to the tool. */
+  path: string;
+  /**
+   * `path` relativized against the wizard's `installDir`, when
+   * resolvable. Falls back to `path` otherwise so the consumer
+   * always has a renderable string.
+   */
+  relativePath: string;
+  operation: 'create' | 'modify' | 'delete';
+}
+
+/**
+ * `stall_status` — coaching-tier mirror of the TUI's stall hints.
+ * Three escalating tiers fire at 10s / 30s / 60s of silence (no tool
+ * calls or status updates from the inner agent). Each tier emits at
+ * most once per stall window; activity resets the gate. Orchestrators
+ * surface `hint` verbatim when set and otherwise compose their own
+ * copy from `tier + durationMs`.
+ */
+export type StallTier = 'noticed' | 'concerning' | 'critical';
+export interface StallStatusData {
+  event: 'stall_status';
+  tier: StallTier;
+  /** Milliseconds since the last observed activity. Monotonic-ish. */
+  durationMs: number;
+  /**
+   * Wall-clock ms timestamp of the most recent observed activity
+   * the stall detector saw. Lets orchestrators reconcile against
+   * their own clock when rendering "stalled for Ns".
+   */
+  lastActivity: number;
+  /** Optional pre-composed hint string — surface verbatim when set. */
+  hint?: string;
+}
+
+/**
+ * Tier thresholds (ms since last activity). Match the TUI's stall
+ * hint banner so InkUI / AgentUI escalate in lockstep — a parent
+ * agent that subscribes to `stall_status` sees the same coaching
+ * cadence the in-terminal user would.
+ */
+export const STALL_TIER_THRESHOLDS_MS: Readonly<Record<StallTier, number>> =
+  Object.freeze({
+    noticed: 10_000,
+    concerning: 30_000,
+    critical: 60_000,
+  });
+
+/**
+ * Pure helper — derive the highest stall tier reached for a given
+ * silence duration. Returns `null` when below the `noticed` threshold,
+ * which lets callers cleanly suppress emission while the wizard is
+ * still within its expected response window.
+ */
+export function deriveStallTier(durationMs: number): StallTier | null {
+  if (durationMs >= STALL_TIER_THRESHOLDS_MS.critical) return 'critical';
+  if (durationMs >= STALL_TIER_THRESHOLDS_MS.concerning) return 'concerning';
+  if (durationMs >= STALL_TIER_THRESHOLDS_MS.noticed) return 'noticed';
+  return null;
+}
+
+/**
+ * `run_resumed` — emitted at startup, after `run_started`, when the
+ * wizard restarts from a checkpoint (post-crash, post-SIGINT,
+ * post-token-expiry). Lets orchestrators distinguish a fresh cold
+ * start from a continuation without parsing the run-start status
+ * message. Carries the checkpoint timestamp + last-known phase + a
+ * free-form summary of what state was restored.
+ */
+export interface RunResumedData {
+  event: 'run_resumed';
+  /** ISO timestamp of when the checkpoint was last persisted. */
+  from_checkpoint_at: string;
+  /** The most recent `RunPhase` recorded on the checkpoint. */
+  last_phase: RunPhase | 'unknown';
+  /**
+   * Free-form, human-readable summary of restored state (region,
+   * org, project, framework, etc.). Pre-redacted at emit time.
+   */
+  restored_state_summary: string;
+}
+
+/**
+ * `progress_estimate` — orchestrator-facing rollup for multi-item
+ * operations. See `EVENT_DATA_VERSIONS.progress_estimate` for the full
+ * contract. The `stage` strings the wizard emits today:
+ *
+ *   `'post_agent_steps'`  — post-agent queue advance (commit-events,
+ *                           create-dashboard, etc.)
+ *   `'mcp_install'`       — multi-editor MCP install loop
+ *   `'event_plan_write'`  — event-plan track() write loop
+ *
+ * Additional `stage` strings are added as new long-running operations
+ * land. Orchestrators MUST treat `stage` as opaque — branching on
+ * specific stage strings is fine, but the absence of one shouldn't
+ * change consumer behaviour.
+ */
+export interface ProgressEstimateData {
+  event: 'progress_estimate';
+  /** Stable, opaque stage id (e.g. `'post_agent_steps'`). */
+  stage: string;
+  /** Items completed so far. Monotonically non-decreasing. */
+  current: number;
+  /** Total items in this stage. Must be >= 1 (no zero-total stages). */
+  total: number;
+  /** Pre-computed `Math.round(100 * current / total)` (0..100). */
+  percent: number;
+}
+
+/**
+ * Pure helper — derive the `progress_estimate` payload from a
+ * `(stage, current, total)` triple. Clamps `current` to the
+ * `[0, total]` window so a misbehaving caller can't ship a percent
+ * outside `[0, 100]`. Returns `null` when `total < 1` (no work to
+ * do — orchestrators should not see a `progress_estimate` for a
+ * zero-item operation).
+ *
+ * Pure for unit testing — used by both the emitter and the
+ * regression suite.
+ */
+export function buildProgressEstimate(
+  stage: string,
+  current: number,
+  total: number,
+): ProgressEstimateData | null {
+  if (!Number.isFinite(total) || total < 1) return null;
+  const clamped = Math.max(0, Math.min(total, Math.floor(current)));
+  const percent = Math.round((100 * clamped) / total);
+  return {
+    event: 'progress_estimate',
+    stage,
+    current: clamped,
+    total,
+    percent,
+  };
+}
+
+/**
+ * Reason an outer-loop attempt began. Discriminates the four canonical
+ * entry paths the runner takes. See `EVENT_DATA_VERSIONS.attempt_started`
+ * for the orchestrator-facing contract.
+ */
+export type AttemptStartedReason =
+  | 'cold_start'
+  | 'stall_retry'
+  | 'auth_refresh'
+  | 'network_retry';
+
+/**
+ * `attempt_started` — emitted at the TOP of each outer retry-loop
+ * iteration, AFTER any backoff sleep has elapsed and a fresh
+ * AbortController has been wired up but BEFORE the inner SDK query
+ * actually fires. Orchestrators that subscribed to `transient_retry`
+ * (the "deciding to retry" signal) pair it with `attempt_started`
+ * (the "now actually running" signal) to render an accurate retry
+ * lifecycle banner.
+ *
+ *   transient_retry → "decided to retry in Ns"
+ *   ...backoff sleep...
+ *   attempt_started → "attempt N now running"
+ *   ...
+ *
+ * `backoffMs` carries the actual sleep that just elapsed (zero for
+ * the cold-start attempt). Useful for accounting / metrics: a
+ * stack-aware orchestrator can sum the inter-attempt sleeps without
+ * re-parsing `transient_retry` events.
+ */
+export interface AttemptStartedData {
+  event: 'attempt_started';
+  /** 1-indexed attempt number for this run. `1` on cold start. */
+  attemptNumber: number;
+  /**
+   * Total attempt budget for this run (`MAX_RETRIES + 1` in
+   * `agent-interface.ts`). Lets orchestrators render
+   * "attempt N/M" without knowing the wizard's constant.
+   */
+  totalBudget: number;
+  /** Why this attempt began. */
+  reason: AttemptStartedReason;
+  /**
+   * Backoff that just elapsed before this attempt. `0` for the
+   * cold-start attempt (no preceding sleep). Matches the value
+   * passed to `emitTransientRetry`'s `nextRetryInMs` on the
+   * decision envelope that paired with this attempt.
+   */
+  backoffMs?: number;
+}
+
+/**
+ * `file_change_failed` — emitted at PostToolUse for write tools
+ * (Edit / Write / MultiEdit / NotebookEdit) when the tool reported
+ * a failure. Pairs with the preceding `file_change_planned` for
+ * the same path so an orchestrator can label the failure on the
+ * already-rendered preview without parsing tool_result text.
+ *
+ * `errorClass` discriminates the common failure modes so an
+ * orchestrator can branch by kind:
+ *   - `permission` — EACCES / "permission denied"
+ *   - `not_found`  — ENOENT / "no such file"
+ *   - `syntax`     — agent-side string-match failure on Edit / MultiEdit
+ *   - `timeout`    — ETIMEDOUT / "operation timed out" / SDK timeout —
+ *                   transient; an orchestrator can safely re-issue the
+ *                   write without changing the input. Distinct from
+ *                   `generic` so retry-aware consumers don't burn
+ *                   budget on a permanent failure.
+ *   - `generic`    — anything else
+ *
+ * Adding a new variant is a `data_version` bump on `file_change_failed`
+ * (see `EVENT_DATA_VERSIONS`). Renaming an existing variant is also a
+ * bump because orchestrators key off the literal string.
+ */
+export type FileChangeErrorClass =
+  | 'permission'
+  | 'not_found'
+  | 'syntax'
+  | 'timeout'
+  | 'generic';
+export interface FileChangeFailedData {
+  event: 'file_change_failed';
+  path: string;
+  operation: 'create' | 'modify' | 'delete';
+  errorClass: FileChangeErrorClass;
+  /** Sanitized message — paths / URLs already redacted. */
+  errorMessage: string;
+}
+
+/**
+ * Phases of cold start the wizard times explicitly. Five discrete
+ * blocks; a single run emits each phase at most once. See
+ * `EVENT_DATA_VERSIONS.cold_start_breakdown` for the orchestrator-facing
+ * contract.
+ *
+ *   skill_staging             — bundled-skill copy + on-disk integration
+ *                                skill resolution
+ *   package_manager_detection — npm / yarn / pnpm / bun / pip probe
+ *   framework_detection       — preflight context build (project-size
+ *                                scan, framework refinement)
+ *   mcp_bootstrap             — wizard-tools MCP server boot + Amplitude
+ *                                MCP config
+ *   gateway_probe             — LLM-gateway liveness + optional AI SDK
+ *                                streaming probe
+ *
+ * Adding a new phase is a `data_version` bump on
+ * `cold_start_breakdown` (see `EVENT_DATA_VERSIONS`). Renaming an
+ * existing variant is also a bump because orchestrators key off the
+ * literal string.
+ */
+export type ColdStartPhase =
+  | 'skill_staging'
+  | 'package_manager_detection'
+  | 'framework_detection'
+  | 'mcp_bootstrap'
+  | 'gateway_probe';
+
+/**
+ * Wire shape of the `data` field on a `cold_start_breakdown` envelope.
+ * Emitted at the END of each cold-start phase boundary — see
+ * `EVENT_DATA_VERSIONS.cold_start_breakdown` for the full contract.
+ *
+ * Timing fields are in milliseconds, derived from `Date.now()` at the
+ * phase boundaries:
+ *
+ *   startedAt   — ms timestamp captured BEFORE the phase work begins
+ *   finishedAt  — ms timestamp captured in the `finally` after the phase
+ *                  exits (success OR thrown)
+ *   durationMs  — `finishedAt - startedAt`, floored at 0 (guards against
+ *                  a non-monotonic clock pushing the value negative)
+ *
+ * Orchestrators that just want the duration read `durationMs`; consumers
+ * doing cross-phase correlation (e.g. drawing a timeline) read
+ * `startedAt` / `finishedAt`.
+ */
+export interface ColdStartBreakdownData {
+  event: 'cold_start_breakdown';
+  /** Which cold-start phase this breakdown covers. */
+  phase: ColdStartPhase;
+  /**
+   * ms timestamp captured immediately before the phase began. Same
+   * epoch as `Date.now()`.
+   */
+  startedAt: number;
+  /**
+   * ms timestamp captured in the `finally` block after the phase
+   * exited (either via successful return or thrown). Same epoch as
+   * `startedAt`.
+   */
+  finishedAt: number;
+  /**
+   * `finishedAt - startedAt`, floored at 0. A non-monotonic clock can
+   * occasionally produce `finishedAt < startedAt` (NTP slew, container
+   * pause); the floor keeps the wire contract `>= 0` so consumers can
+   * safely sum durations without sentinel checks.
+   */
+  durationMs: number;
+}
+
+/**
+ * Pure helper — derive the `cold_start_breakdown` payload from a
+ * `(phase, startedAt, finishedAt)` triple. Floors `durationMs` at 0
+ * so a non-monotonic clock can't ship a negative duration.
+ *
+ * Pure for unit testing — used by both the emitter and the
+ * regression suite.
+ */
+export function buildColdStartBreakdown(
+  phase: ColdStartPhase,
+  startedAt: number,
+  finishedAt: number,
+): ColdStartBreakdownData {
+  // Floor finishedAt at startedAt so durationMs is always >= 0. Cheaper
+  // than `Math.max(0, finishedAt - startedAt)` AND preserves the
+  // invariant `finishedAt >= startedAt` on the wire (an orchestrator
+  // computing `finishedAt - startedAt` itself stays consistent with
+  // our durationMs).
+  const safeFinishedAt = Math.max(startedAt, finishedAt);
+  return {
+    event: 'cold_start_breakdown',
+    phase,
+    startedAt,
+    finishedAt: safeFinishedAt,
+    durationMs: safeFinishedAt - startedAt,
+  };
+}
+
+/**
+ * Outcome of a single tool call from the inner agent's perspective.
+ *
+ *   success — PostToolUse fired with no `is_error` / `error` surfacing.
+ *   error   — PostToolUse surfaced a tool-side failure (Edit syntax
+ *             mismatch, Bash non-zero exit, MCP tool threw, etc.).
+ *   denied  — the SDK refused the tool call before it ran (permission
+ *             gate, allowlist miss). Counted separately from `error`
+ *             because the failure mode is on the WIZARD side (policy)
+ *             rather than the TOOL side (operation).
+ *
+ * Adding a new outcome is a `data_version` bump on
+ * `tool_call_summary`.
+ */
+export type ToolCallOutcome = 'success' | 'error' | 'denied';
+
+/**
+ * Wire shape of the `data` field on a `tool_call_summary` envelope.
+ * Aggregated rollup of every tool call the inner agent made during
+ * the run. See `EVENT_DATA_VERSIONS.tool_call_summary` for the full
+ * contract.
+ *
+ * `byTool` keys are tool names exactly as the SDK reports them
+ * (`Edit`, `Write`, `Bash`, `mcp__amplitude__...`, etc.) — no
+ * normalization, so an orchestrator can render the rollup with the
+ * same labels as the per-call `tool_call` stream.
+ *
+ * `byOutcome` always includes all three outcome keys (zero-padded)
+ * so consumers can render a stable three-bar chart without checking
+ * for missing keys.
+ *
+ * `topToolByCount` is omitted entirely when `totalCalls === 0`
+ * (which is itself suppressed at the wire) OR when no tool dominates
+ * (tied counts). Optional in the type signature for safe consumer
+ * branching.
+ */
+export interface ToolCallSummaryData {
+  event: 'tool_call_summary';
+  totalCalls: number;
+  /** Per-tool counts. Keys are SDK-reported tool names. */
+  byTool: Record<string, number>;
+  /** Outcome breakdown. Always includes all three keys (zero-padded). */
+  byOutcome: Record<ToolCallOutcome, number>;
+  /**
+   * Cumulative wall-clock duration across all tool calls (ms).
+   * Floored at 0 — a tool that returns instantly contributes 0.
+   * Computed from PreToolUse / PostToolUse timestamp deltas;
+   * denied calls (no PostToolUse) contribute 0.
+   */
+  durationMsTotal: number;
+  /**
+   * `Math.round(durationMsTotal / totalCalls)`. `0` when
+   * `totalCalls === 0` — but the wire suppresses zero-total
+   * summaries entirely so a consumer reading this field can
+   * assume `totalCalls >= 1`.
+   */
+  durationMsAvg: number;
+  /**
+   * Tool with the highest count. Omitted when `totalCalls === 0` or
+   * when two or more tools tie for the top spot — orchestrators that
+   * want a deterministic tie-breaker should compute it themselves
+   * from `byTool`.
+   */
+  topToolByCount?: string;
+}
+
+/**
+ * Accumulator for tool-call telemetry across the run. Tracks per-tool
+ * counts, per-outcome counts, and cumulative wall-clock duration so
+ * `tool_call_summary` can be derived on demand at phase / terminal
+ * boundaries without re-scanning the NDJSON stream.
+ *
+ * Pure data structure — no I/O, no side effects, no throws. Safe to
+ * call from inside hook callbacks (which must never block the agent
+ * loop). Two callers wire it:
+ *
+ *   1. `AgentUI.emitToolCall` records the start of each tool call
+ *      (PreToolUse boundary).
+ *   2. The PostToolUse hook in `inner-lifecycle.ts` calls
+ *      `recordOutcome` with the resolved success / error verdict.
+ *
+ * The accumulator pairs Pre/Post by tool name in arrival order —
+ * not by an SDK-side correlation id, because the hook input doesn't
+ * carry one. This is correct under the (always-true today)
+ * invariant that the inner Claude agent runs tools sequentially:
+ * one PreToolUse, one PostToolUse, in order. If that invariant ever
+ * changes (parallel tool dispatch), the pairing must move to an id-
+ * keyed map.
+ *
+ * Pure for unit testing — used by both the emitter and the
+ * regression suite.
+ */
+export class ToolCallStats {
+  private _totalCalls = 0;
+  private _byTool: Record<string, number> = {};
+  private _byOutcome: Record<ToolCallOutcome, number> = {
+    success: 0,
+    error: 0,
+    denied: 0,
+  };
+  private _durationMsTotal = 0;
+  /** FIFO of pending PreToolUse start timestamps keyed by tool name. */
+  private _pendingStarts: Array<{ tool: string; startedAt: number }> = [];
+
+  /**
+   * Record the START of a tool call (PreToolUse boundary). Increments
+   * `totalCalls` and the per-tool count immediately so the rollup is
+   * accurate even if the tool never produces a PostToolUse (e.g. the
+   * SDK denies the call). Duration is added on `recordOutcome`.
+   */
+  recordCall(tool: string, startedAt: number = Date.now()): void {
+    this._totalCalls += 1;
+    this._byTool[tool] = (this._byTool[tool] ?? 0) + 1;
+    this._pendingStarts.push({ tool, startedAt });
+  }
+
+  /**
+   * Record the OUTCOME of the most recent PreToolUse for a given
+   * tool. Pops the matching pending entry (FIFO by tool name),
+   * accumulates the duration delta, and increments the outcome
+   * bucket. `success` / `error` are the common cases; `denied`
+   * fires when the SDK refuses a tool call pre-execution.
+   *
+   * Missing pending entry (orphaned PostToolUse) is a no-op on
+   * duration — the outcome still counts. This happens in test
+   * fixtures that simulate the post side without going through pre.
+   */
+  recordOutcome(
+    tool: string,
+    outcome: ToolCallOutcome,
+    finishedAt: number = Date.now(),
+  ): void {
+    this._byOutcome[outcome] += 1;
+    // FIFO match by tool name. Walk from the head so a long-running
+    // call doesn't get its duration stolen by a later shorter call
+    // for the same tool.
+    const idx = this._pendingStarts.findIndex((e) => e.tool === tool);
+    if (idx >= 0) {
+      const [entry] = this._pendingStarts.splice(idx, 1);
+      // Floor at 0 to guard against a non-monotonic clock — see the
+      // same pattern in `buildColdStartBreakdown`.
+      this._durationMsTotal += Math.max(0, finishedAt - entry.startedAt);
+    }
+  }
+
+  /** Total tool calls observed across the run. */
+  get totalCalls(): number {
+    return this._totalCalls;
+  }
+
+  /**
+   * Build the wire payload from the current state. Pure — does NOT
+   * reset the accumulator (terminal-exit emission re-emits the full
+   * cumulative rollup after finalize already emitted once).
+   *
+   * Returns `null` when `totalCalls === 0` so callers can skip the
+   * emission at the wire boundary entirely (a zero-valued summary
+   * is noise on the stream).
+   */
+  build(): ToolCallSummaryData | null {
+    if (this._totalCalls === 0) return null;
+    // Top-tool resolution: pick the single max-count tool. Tied
+    // counts → omit the field (orchestrators can compute their own
+    // tie-breaker from `byTool` if they care).
+    let topTool: string | undefined;
+    let topCount = -1;
+    let tied = false;
+    for (const [tool, count] of Object.entries(this._byTool)) {
+      if (count > topCount) {
+        topTool = tool;
+        topCount = count;
+        tied = false;
+      } else if (count === topCount) {
+        tied = true;
+      }
+    }
+    const durationMsAvg = Math.round(this._durationMsTotal / this._totalCalls);
+    return {
+      event: 'tool_call_summary',
+      totalCalls: this._totalCalls,
+      // Spread the maps so the wire payload is a fresh object the
+      // caller can serialize without worrying about post-emit
+      // mutation. JSON.stringify would do the same, but a defensive
+      // copy is cheap and keeps the contract explicit.
+      byTool: { ...this._byTool },
+      byOutcome: { ...this._byOutcome },
+      durationMsTotal: this._durationMsTotal,
+      durationMsAvg,
+      ...(topTool !== undefined && !tied ? { topToolByCount: topTool } : {}),
+    };
+  }
+}
+
 export type InnerAgentLifecycleData =
   | InnerAgentStartedData
   | ToolCallData
   | FileChangePlannedData
   | FileChangeAppliedData
+  | FileChangeFailedData
   | EventPlanProposedData
   | EventPlanConfirmedData
   | VerificationStartedData
-  | VerificationResultData;
+  | VerificationResultData
+  | DiscoveryFactData
+  | CurrentFileData
+  | StallStatusData
+  | RunResumedData
+  | AttemptStartedData
+  | ColdStartBreakdownData
+  | ToolCallSummaryData
+  | MCPStatusData
+  | WizardCapabilitiesData;
+
+/**
+ * Which MCP server a `mcp_status` event refers to. Two distinct
+ * lifecycles travel on the same event so an orchestrator can subscribe
+ * to a single envelope and key off `server` to branch:
+ *
+ *   wizard_tools    — the in-process MCP server the inner Claude agent
+ *                     consumes (`createWizardToolsServer`). One per run.
+ *                     Boots during cold start; transitions are
+ *                     `available` (success) or `failed` (boot threw).
+ *
+ *   editor_install  — the wizard-mcp install written into the user's
+ *                     editor config (Claude Code / Cursor / Codex /
+ *                     VS Code / Zed / Windsurf / etc.). Optional: many
+ *                     runs have no detectable editor and surface
+ *                     `not_applicable`; otherwise transitions are
+ *                     `needs_user_choice` → `installed` /
+ *                     `install_skipped` / `failed`.
+ *
+ * Adding a new server kind is a `data_version` bump on `mcp_status`.
+ */
+export type MCPStatusServer = 'wizard_tools' | 'editor_install';
+
+/**
+ * Lifecycle state the MCP server has just transitioned INTO. The full
+ * enum is the v2 foundation DoD list — not every value fires for every
+ * server kind today (see `MCPStatusServer` for the per-server cycle),
+ * but the field is shared so future flows can use the same wire
+ * contract without a schema bump.
+ *
+ *   unavailable        — server is known to exist but cannot be reached
+ *                        right now (config present, network down, etc.)
+ *   available          — server is reachable and ready to accept calls
+ *                        (used by `wizard_tools` on successful boot)
+ *   needs_auth         — server requires the user to complete an auth
+ *                        flow before it can be used
+ *   needs_install      — server is supported on this machine but not
+ *                        yet installed (config absent)
+ *   needs_user_choice  — install requires the user to pick between
+ *                        multiple detected clients (multi-editor flow)
+ *   install_skipped    — user (or CI policy) declined to install
+ *   installed          — install succeeded; server is in the user's
+ *                        editor config
+ *   failed             — terminal failure (boot threw, write errored,
+ *                        permission denied) — `detail` carries the
+ *                        operator-friendly message
+ *   not_applicable     — no supported editor detected on this machine;
+ *                        the install flow is a no-op
+ *
+ * Adding a new state is a `data_version` bump on `mcp_status` —
+ * orchestrators branch on the literal strings.
+ */
+export type MCPStatusState =
+  | 'unavailable'
+  | 'available'
+  | 'needs_auth'
+  | 'needs_install'
+  | 'needs_user_choice'
+  | 'install_skipped'
+  | 'installed'
+  | 'failed'
+  | 'not_applicable';
+
+/**
+ * Wire shape of the `data` field on a `mcp_status` envelope. Emitted
+ * at every MCP-related state transition for both the in-process
+ * `wizard_tools` server and the `editor_install` flow. See
+ * `EVENT_DATA_VERSIONS.mcp_status` for the full contract.
+ *
+ *   server         — which MCP lifecycle this transition belongs to
+ *   state          — the state the server just entered (see
+ *                    `MCPStatusState`)
+ *   transition_ts  — epoch-ms timestamp captured at the transition
+ *                    boundary. Same epoch as `Date.now()`; orchestrators
+ *                    use this to render a timeline of transitions
+ *                    across both servers without correlating against
+ *                    the envelope's ISO `@timestamp`.
+ *   detail         — optional free-form description of the transition.
+ *                    Operator-friendly, not part of the machine
+ *                    contract — orchestrators key off `(server, state)`
+ *                    for branching and surface `detail` verbatim.
+ *                    Examples: "wizard-tools server bootstrapped on
+ *                    stdio", "Claude Code config detected at
+ *                    ~/.claude/mcp.json, install skipped because user
+ *                    chose 'No'".
+ *
+ * The `transition_ts` field uses snake_case (rather than the
+ * camelCase convention used elsewhere) to match the field name called
+ * out in the PR scope document — orchestrators searching for the
+ * wire shape will find it under that literal key.
+ */
+export interface MCPStatusData {
+  event: 'mcp_status';
+  server: MCPStatusServer;
+  state: MCPStatusState;
+  transition_ts: number;
+  detail?: string;
+}
+
+/**
+ * Execution mode discriminator on the `wizard_capabilities`
+ * envelope. Mirrors `ExecutionMode` from `lib/mode-config.ts`,
+ * duplicated here so orchestrators parsing the NDJSON contract
+ * don't need to import wizard internals to type-narrow on it.
+ *
+ * `'agent'`        — NDJSON-only output via `--agent`. The only
+ *                    mode that currently emits this envelope.
+ * `'ci'`           — non-interactive batch mode. Reserved on the
+ *                    contract for a future CI emitter; today CI runs
+ *                    use `LoggingUI` which doesn't emit NDJSON.
+ * `'interactive'`  — TUI mode (`InkUI`). Reserved on the contract
+ *                    for the same reason — InkUI is a no-op for
+ *                    this event today.
+ */
+export type WizardCapabilitiesMode = 'agent' | 'ci' | 'interactive';
+
+/**
+ * Per-project artifact paths block on `wizard_capabilities` (v2+).
+ *
+ * Each entry resolves through `src/utils/storage-paths.ts` —
+ * `getLogFile`, `getStructuredLogFile`, `getRunDir`, `getCacheRoot`.
+ * The wizard hashes the install directory (sha256, 12-char prefix)
+ * to produce a per-project subdirectory under the cache root, so
+ * concurrent runs from different projects don't collide.
+ *
+ * A CI orchestrator that wants to upload the wizard's log as an
+ * artifact reads `paths.logFile` off this envelope and feeds it
+ * verbatim to its artifact-upload step — no need to replicate the
+ * sha256 hashing logic and no need to enable `--debug` and grep
+ * stderr.
+ *
+ *   logFile        — human-readable log
+ *                    (`<runDir>/log.txt`). Append-only.
+ *   logFileNdjson  — structured NDJSON mirror
+ *                    (`<runDir>/log.ndjson`). Same records, parser-
+ *                    friendly. Append-only.
+ *   runDir         — per-project run directory
+ *                    (`<cacheRoot>/runs/<hash>/`). Contains both
+ *                    log files, the session checkpoint, the apply
+ *                    lock, and any installation-error logs. Bundle
+ *                    this whole directory for a support tarball.
+ *   cacheRoot      — per-user cache root (`~/.amplitude/wizard/` by
+ *                    default; honors `AMPLITUDE_WIZARD_CACHE_DIR`).
+ *                    Contains the `runs/` subdir, OAuth tokens,
+ *                    credentials, and the plans directory. Useful
+ *                    for orchestrators that want to introspect or
+ *                    purge per-user wizard state.
+ *
+ * Every value is an absolute path. The block is OMITTED from the
+ * envelope entirely (not emitted as empty strings) when `installDir`
+ * is unresolvable at emit time, so orchestrators can use field
+ * presence as the has-paths signal.
+ */
+export interface WizardCapabilitiesPaths {
+  logFile: string;
+  logFileNdjson: string;
+  runDir: string;
+  cacheRoot: string;
+}
+
+/**
+ * Wire shape of the `data` field on a `wizard_capabilities`
+ * envelope. See `EVENT_DATA_VERSIONS.wizard_capabilities` for the
+ * full contract, the lifecycle ordering (after `run_started`, before
+ * `run_phase: cold_start`), and the bump policy.
+ *
+ *   protocolVersion    — orchestrator-facing protocol version
+ *                        (`WIZARD_PROTOCOL_VERSION` at emit time).
+ *                        Orchestrators branch on this first.
+ *   eventDataVersions  — verbatim mirror of `EVENT_DATA_VERSIONS`.
+ *                        Stable insertion order (matches the
+ *                        registry's declaration order). Orchestrators
+ *                        can pre-allocate per-event handlers from
+ *                        this map before the first contract event
+ *                        fires.
+ *   supportedEvents    — `Object.keys(EVENT_DATA_VERSIONS).sort()`.
+ *                        Pre-sorted so orchestrators can use
+ *                        binary-search / `Set`-style membership
+ *                        checks without resorting on their side.
+ *                        Identical semantically to the keys of
+ *                        `eventDataVersions`, but cheaper to
+ *                        consume when the orchestrator only cares
+ *                        about presence ("does this wizard emit
+ *                        `progress_estimate`?").
+ *   mode               — `WizardCapabilitiesMode`. Discriminator
+ *                        for execution context.
+ *   paths              — v2+ per-project artifact paths (log file,
+ *                        NDJSON log mirror, run dir, cache root).
+ *                        OMITTED entirely (rather than emitted as
+ *                        empty strings) when `installDir` is
+ *                        unresolvable at emit time — orchestrators
+ *                        can use field presence as the has-paths
+ *                        signal.
+ */
+export interface WizardCapabilitiesData {
+  event: 'wizard_capabilities';
+  protocolVersion: number;
+  eventDataVersions: Readonly<Record<string, number>>;
+  supportedEvents: readonly string[];
+  mode: WizardCapabilitiesMode;
+  paths?: WizardCapabilitiesPaths;
+}
+
+/**
+ * Coarse-grained orchestrator-facing phase boundaries for a wizard run.
+ * Five fixed states; a single run transits in order:
+ *
+ *   cold_start    -> the wizard has started bootstrapping (skill
+ *                    staging, project read, agent SDK handshake). The
+ *                    user sees the spinner; no SDK tool has been
+ *                    called yet.
+ *   agent_running -> the inner Claude agent has fired its first tool
+ *                    call or its first turn. Most of the run lives
+ *                    here.
+ *   finalizing    -> the inner agent has stopped; the wizard is
+ *                    running post-agent steps (commit events,
+ *                    MCP install, env upload, Slack, Outro).
+ *   completed     -> terminal success. Pairs with `run_completed:
+ *                    { outcome: 'success' }`.
+ *   error         -> terminal failure. Pairs with `run_completed:
+ *                    { outcome: 'error' | 'cancelled' }`.
+ *
+ * Orchestrators key off `data.phase` rather than the message string.
+ */
+export type RunPhase =
+  | 'cold_start'
+  | 'agent_running'
+  | 'finalizing'
+  | 'completed'
+  | 'error';
+
+export interface RunPhaseData {
+  event: 'run_phase';
+  phase: RunPhase;
+}
+
+/**
+ * `auth_retry_exhausted` — terminal observability event from the SDK
+ * retry-loop boundary. After AUTH_RETRY_LIMIT consecutive 401-flavoured
+ * api_retry messages the wizard short-circuits the SDK's own ~3-minute
+ * retry storm and aborts. Orchestrators watching the stream see this
+ * event BEFORE the subsequent `auth_required` envelope, so they can
+ * distinguish "single 401, transient" from "we tried twice, this is
+ * stuck" without re-parsing message strings.
+ *
+ * `subkind` is the canonical authentication source — auth retries
+ * always originate from the LLM-gateway today (the SDK only retries
+ * upstream auth failures), but the field is explicit so future
+ * Amplitude-side retry storms can be tagged without a schema bump.
+ */
+export interface AuthRetryExhaustedData {
+  event: 'auth_retry_exhausted';
+  attempts: number;
+  subkind?: 'amplitude' | 'llm-gateway';
+}
 
 // ── Tool-input summarizer ───────────────────────────────────────────
 //
@@ -1124,4 +2394,67 @@ export function classifyWriteOperation(
     default:
       return null;
   }
+}
+
+/**
+ * Best-effort classifier for write-tool failure messages. Pure, never
+ * touches I/O — safe to call from any emit path. Patterns are
+ * intentionally permissive: a `'permission denied'` substring covers
+ * both EACCES from Node and the inner agent's own "write_refused"
+ * messaging. Defaults to `'generic'` so an unrecognized failure still
+ * lands on the wire with a usable discriminator.
+ *
+ * Match order matters: `syntax` is checked BEFORE `not_found` because
+ * Edit / MultiEdit string-match failures look like "String to replace
+ * not found in file" — the more-specific "string to replace" signal
+ * wins over the generic "not found" substring.
+ */
+export function classifyFileChangeError(message: string): FileChangeErrorClass {
+  const lower = message.toLowerCase();
+  if (
+    lower.includes('permission denied') ||
+    lower.includes('eacces') ||
+    lower.includes('eperm') ||
+    lower.includes('write_refused') ||
+    lower.includes('read-only file system') ||
+    lower.includes('erofs')
+  ) {
+    return 'permission';
+  }
+  // Edit / MultiEdit string-match failures surface as
+  // "String to replace not found" or "found N matches" from the SDK.
+  // Check this BEFORE the generic 'not found' so the syntax signal
+  // wins for those Edit-specific messages.
+  if (
+    lower.includes('string to replace') ||
+    lower.includes('found multiple matches') ||
+    lower.includes('found 0 matches') ||
+    lower.includes('did not match') ||
+    lower.includes('syntaxerror') ||
+    lower.includes('unexpected token') ||
+    lower.includes('invalid json')
+  ) {
+    return 'syntax';
+  }
+  // Timeout patterns — transient by definition. Check BEFORE not_found
+  // because `ETIMEDOUT` is sometimes wrapped with secondary text that
+  // could trip the `not found` heuristic.
+  if (
+    lower.includes('etimedout') ||
+    lower.includes('timed out') ||
+    lower.includes('timeout') ||
+    lower.includes('operation timed out') ||
+    lower.includes('deadline exceeded')
+  ) {
+    return 'timeout';
+  }
+  if (
+    lower.includes('no such file') ||
+    lower.includes('enoent') ||
+    lower.includes('not found') ||
+    lower.includes('does not exist')
+  ) {
+    return 'not_found';
+  }
+  return 'generic';
 }

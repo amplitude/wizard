@@ -93,6 +93,15 @@ interface WizardAbortOptions {
    * we want to point the user at docs to recover.
    */
   cancelOptions?: { docsUrl?: string };
+  /**
+   * Stable machine-readable reason code surfaced on the `run_completed`
+   * NDJSON envelope's `reason` field. Distinct from `message`, which is
+   * the human-readable display string the Outro renders — `reason` is
+   * intended for orchestrator branching (`'sigint'`, `'lock_held'`,
+   * `'auth_required'`, etc.). When set, takes precedence over the
+   * sanitized `message` form.
+   */
+  reason?: string;
 }
 
 const cleanupFns: Array<() => void> = [];
@@ -225,6 +234,29 @@ export async function wizardSuccessExit(exitCode = 0): Promise<never> {
     }
   } catch {
     /* setup-complete emission must never block exit */
+  }
+  // PR B6: emit the cumulative `tool_call_summary` rollup at terminal
+  // exit. The phase-finalize emission already covered the inner-agent
+  // tool calls; this re-emission captures any tool calls the
+  // post-agent steps made (today these go through `executeStepQueue`
+  // and don't currently call the AgentUI tool-call emitter, so in
+  // practice the payload usually matches the finalize emission —
+  // which is why AgentUI dedups on signature). Wrapped so the rollup
+  // can never block the exit path.
+  try {
+    getUI().emitToolCallSummary?.();
+  } catch {
+    /* terminal rollup emission must not prevent exit */
+  }
+
+  // Mark the terminal `completed` run_phase BEFORE `run_completed` so
+  // an orchestrator's phase-state transitions
+  // (cold_start -> agent_running -> finalizing -> completed) close
+  // cleanly. AgentUI dedups; a no-op call here is safe.
+  try {
+    getUI().emitRunPhase?.('completed');
+  } catch {
+    /* terminal phase emission must not prevent exit */
   }
   // Emit the terminal `run_completed` NDJSON event BEFORE shutting
   // analytics down. AgentUI is the only UI that implements this; for
@@ -382,6 +414,7 @@ export async function wizardAbort(
     error,
     exitCode = 1,
     cancelOptions,
+    reason,
   } = options ?? {};
 
   // Suppress any future EPIPE-driven abort. We're already aborting —
@@ -447,6 +480,29 @@ export async function wizardAbort(
   //    Esc on the framework picker). Wrapped in try/catch so a
   //    misbehaving emitter can't block the exit.
   const outcome: 'error' | 'cancelled' = error ? 'error' : 'cancelled';
+  // PR B6: emit the cumulative `tool_call_summary` rollup on the
+  // error / cancel path too — an orchestrator that's about to render
+  // an "agent failed" panel still benefits from seeing what the
+  // inner agent attempted before the abort fired. AgentUI dedups
+  // on payload signature so a duplicate from a runner that already
+  // reached the finalize boundary is a no-op. Wrapped so the rollup
+  // can never block the abort path.
+  try {
+    getUI().emitToolCallSummary?.();
+  } catch {
+    /* terminal rollup emission must not prevent exit */
+  }
+
+  // Mark the terminal `error` run_phase BEFORE `run_completed` so an
+  // orchestrator's phase-state transitions (cold_start ->
+  // agent_running -> finalizing -> error) close cleanly. AgentUI
+  // dedups so a no-op call here is safe even when an earlier code
+  // path already emitted the same phase.
+  try {
+    getUI().emitRunPhase?.('error');
+  } catch {
+    /* terminal phase emission must not prevent exit */
+  }
   try {
     getUI().emitRunCompleted?.({
       outcome,
@@ -459,7 +515,16 @@ export async function wizardAbort(
       // RunCompletedData docstring promises sanitization. AgentUI's
       // emit() doesn't currently re-sanitize, so do it here to keep
       // the contract honest.
-      ...(message ? { reason: sanitizeReason(message) } : {}),
+      // Stable machine-readable `reason` takes precedence over the
+      // sanitized human-readable `message`. Callers that pass an
+      // explicit `reason` (SIGINT handlers, lock-collision paths) get
+      // their code straight through; everyone else falls back to a
+      // path-redacted message.
+      ...(reason
+        ? { reason }
+        : message
+        ? { reason: sanitizeReason(message) }
+        : {}),
     });
   } catch {
     /* terminal event emitter must not prevent exit */
