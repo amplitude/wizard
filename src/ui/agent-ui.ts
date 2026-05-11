@@ -36,6 +36,7 @@ import {
   TOOL_RESPONSE_CONTENT_HEAD_MAX_BYTES,
   TOOL_RESPONSE_ERROR_MESSAGE_MAX_BYTES,
   TOOL_RESPONSE_SUMMARY_MAX_CHARS,
+  appIdResponseSchema,
   buildColdStartBreakdown,
   buildProgressEstimate,
   classifyRunError,
@@ -2515,20 +2516,12 @@ export class AgentUI implements WizardUI {
           // Agents should reply on stdin with one JSON line matching this
           // JSON Schema 2020-12 fragment. Switched from `Record<string, string>`
           // English descriptions in v3 so non-Claude orchestrators
-          // (Codex, GPT-5, Mistral) can run a real validator.
-          responseSchema: {
-            $schema: 'https://json-schema.org/draft/2020-12/schema',
-            type: 'object',
-            properties: {
-              appId: {
-                type: 'string',
-                pattern: '^\\d+$',
-                description:
-                  'Numeric Amplitude app ID — must match one of choices[].appId.',
-              },
-            },
-            required: ['appId'],
-          },
+          // (Codex, GPT-5, Mistral) can run a real validator. Shared
+          // factory keeps structural parts in sync across all three
+          // env-selection emit sites.
+          responseSchema: appIdResponseSchema(
+            'Numeric Amplitude app ID — must match one of choices[].appId.',
+          ),
           // Or re-invoke with a single CLI flag:
           resumeFlags: choices.map((c) => ({
             label: c.label,
@@ -2598,22 +2591,13 @@ export class AgentUI implements WizardUI {
         })),
       // JSON Schema 2020-12 fragment — replaces the v2 English-in-JSON
       // shape so non-Claude orchestrators can run `ajv` / `jsonschema`
-      // directly. We use `pattern: '^\\d+$'` (not `enum`) because
-      // `allowManualEntry: true` lets orchestrators legitimately submit
-      // an above-cap app-id that didn't make the choices list.
-      responseSchema: {
-        $schema: 'https://json-schema.org/draft/2020-12/schema',
-        type: 'object',
-        properties: {
-          appId: {
-            type: 'string',
-            pattern: '^\\d+$',
-            description:
-              'Numeric Amplitude app ID — must match one of choices[].value, or any valid app ID when allowManualEntry is true.',
-          },
-        },
-        required: ['appId'],
-      },
+      // directly. Shared factory; `pattern: '^\\d+$'` (not `enum`)
+      // because `allowManualEntry: true` lets orchestrators
+      // legitimately submit an above-cap app-id that didn't make the
+      // choices list.
+      responseSchema: appIdResponseSchema(
+        'Numeric Amplitude app ID — must match one of choices[].value, or any valid app ID when allowManualEntry is true.',
+      ),
       // Pagination is signalled even when all choices fit so outer agents
       // can surface the total. When the wizard caps the payload at
       // MAX_ENV_SELECTION_CHOICES (currently 50), `total` carries the

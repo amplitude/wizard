@@ -1,7 +1,11 @@
 import type { CommandModule } from 'yargs';
 import chalk from 'chalk';
 import { getUI, ExitCode } from './helpers';
-import { EVENT_DATA_VERSIONS, nextDecisionId } from '../lib/agent-events.js';
+import {
+  EVENT_DATA_VERSIONS,
+  appIdResponseSchema,
+  nextDecisionId,
+} from '../lib/agent-events.js';
 
 export const projectsCommand: CommandModule = {
   command: 'projects <command>',
@@ -120,23 +124,12 @@ export const projectsCommand: CommandModule = {
                         : undefined,
                       // JSON Schema 2020-12 fragment — replaces the v2
                       // English-in-JSON shape so non-Claude orchestrators
-                      // can run `ajv` / `jsonschema` directly. `pattern`
-                      // (not `enum`) because `allowManualEntry: true`
-                      // lets orchestrators submit an app-id outside
-                      // the paginated choices.
-                      responseSchema: {
-                        $schema: 'https://json-schema.org/draft/2020-12/schema',
-                        type: 'object',
-                        properties: {
-                          appId: {
-                            type: 'string',
-                            pattern: '^\\d+$',
-                            description:
-                              'Numeric Amplitude app ID — must match one of choices[].value, or any valid app ID when allowManualEntry is true.',
-                          },
-                        },
-                        required: ['appId'],
-                      },
+                      // can run `ajv` / `jsonschema` directly. Shared
+                      // factory keeps structural parts in sync with the
+                      // two `agent-ui.ts` env-selection emit sites.
+                      responseSchema: appIdResponseSchema(
+                        'Numeric Amplitude app ID — must match one of choices[].value, or any valid app ID when allowManualEntry is true.',
+                      ),
                       pagination: {
                         total: result.total,
                         returned: result.returned,

@@ -673,6 +673,36 @@ export interface ResponseSchemaFragment {
   required?: string[];
 }
 
+/**
+ * Build an `appId`-keyed `ResponseSchemaFragment` for env-selection
+ * style `needs_input` envelopes. The exact same JSON Schema fragment
+ * is emitted by three callsites (`agent-ui.ts` env-selection prompt
+ * via `emitNeedsInput`, `agent-ui.ts` legacy `prompt` event, and
+ * `commands/projects.ts` manual envelope). Extracted to keep the
+ * structural parts in sync — only the human-facing `description`
+ * varies (legacy callsite says "from choices[].appId"; canonical
+ * says "from choices[].value, or any valid app ID when
+ * allowManualEntry is true"). A future schema bump (e.g. dropping
+ * the `pattern` once we have a real `enum` for closed-set pickers)
+ * lands in one place.
+ */
+export function appIdResponseSchema(
+  description: string,
+): ResponseSchemaFragment {
+  return {
+    $schema: 'https://json-schema.org/draft/2020-12/schema',
+    type: 'object',
+    properties: {
+      appId: {
+        type: 'string',
+        pattern: '^\\d+$',
+        description,
+      },
+    },
+    required: ['appId'],
+  };
+}
+
 /** Free-form fallback when the right answer isn't in `choices`. */
 export interface ManualEntryHint {
   /**
