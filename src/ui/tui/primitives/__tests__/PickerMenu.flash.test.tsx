@@ -108,4 +108,51 @@ describe('PickerMenu selection flash', () => {
     await vi.advanceTimersByTimeAsync(PICKER_FLASH_MS * 4);
     expect(chosen).toBeNull();
   });
+
+  it('releases the flash + input lock even when onSelect throws (Bugbot 3217078318)', async () => {
+    // Regression: before the fix, if `onSelect` threw OR was async
+    // and the picker stayed mounted, `flashingIndex` was never reset
+    // to null. The input handler reads `flashingIndex !== null` as
+    // "flash in progress, swallow all keystrokes" — so the picker
+    // became permanently unresponsive. The fix wraps `onSelect` in
+    // try/finally so the flash always clears regardless of outcome.
+    let attempts = 0;
+    let secondChoice: string | string[] | null = null;
+    const view = render(
+      <PickerMenu
+        options={OPTIONS}
+        onSelect={(v) => {
+          attempts += 1;
+          if (attempts === 1) {
+            throw new Error('simulated parent handler failure');
+          }
+          secondChoice = v;
+        }}
+      />,
+    );
+    await vi.advanceTimersByTimeAsync(0);
+
+    // First selection — onSelect throws. Without the fix this leaves
+    // `flashingIndex` set and blocks every subsequent keystroke.
+    view.stdin.write('\r');
+    await vi.advanceTimersByTimeAsync(PICKER_FLASH_MS + 5);
+    expect(attempts).toBe(1);
+
+    // Let React process the state update from the `finally` block
+    // (setFlashingIndex(null)) — the input handler reads flashingIndex
+    // via closure and only sees the new value after re-render.
+    await vi.advanceTimersByTimeAsync(10);
+
+    // After the failed onSelect, input should NOT be locked anymore.
+    // Commit a different option via its digit shortcut — this would
+    // never fire with the bug because `flashingIndex` would still be
+    // pinned to 0 and the input handler would early-return.
+    view.stdin.write('2'); // digit shortcut for Beta (idx 1)
+    await vi.advanceTimersByTimeAsync(PICKER_FLASH_MS + 5);
+
+    expect(attempts).toBe(2);
+    expect(secondChoice).toBe('b');
+
+    view.unmount();
+  });
 });
