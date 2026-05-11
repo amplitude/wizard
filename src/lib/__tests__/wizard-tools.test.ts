@@ -1207,6 +1207,29 @@ describe('confirm_event_plan tool description — instrumentation contracts', ()
       cleanup(tmpDir);
     }
   });
+
+  it('reminds the agent that plan size scales with codebase signal', async () => {
+    // Third instrumentation-quality contract: plan size MUST scale with
+    // the signal in the codebase (route count, distinct user-action
+    // callsites) and be ordered by user-impact. The agent reads the
+    // tool description right when it assembles the events array, so
+    // this is the most reliable surface to surface the anti-cap rule.
+    const tmpDir = makeTmpDir();
+    try {
+      const tools = (await getTools(tmpDir)) as Array<{
+        name: string;
+        description?: string;
+        handler: ToolDef['handler'];
+      }>;
+      const tool = tools.find((t) => t.name === 'confirm_event_plan');
+      expect(tool, 'confirm_event_plan must be registered').toBeDefined();
+      expect(tool?.description).toMatch(/scale with the codebase signal/i);
+      expect(tool?.description).toMatch(/ordered by user-impact/i);
+      expect(tool?.description).toMatch(/no artificial round-number caps/i);
+    } finally {
+      cleanup(tmpDir);
+    }
+  });
 });
 
 describe('resolveWizardAllowedToolNames', () => {

@@ -456,6 +456,83 @@ describe('Setup Report reconciliation commandment', () => {
   });
 });
 
+/**
+ * Event-plan size scaling + user-impact ordering.
+ *
+ * Live test feedback (large codebase): "for a codebase this large, it's
+ * critical to start with the highest priority events and have a fair
+ * amount of them, don't limit for no reason." The agent had a tendency
+ * to cap plans at tidy round numbers (5, 10, 12) regardless of how much
+ * signal the codebase actually surfaced. For a medium app (50+ routes,
+ * 20+ distinct user actions) that's leaving real coverage on the table;
+ * for a large monorepo it's much worse.
+ *
+ * The commandment forces the plan size to scale with discover-event-surfaces
+ * output (routes, distinct user-meaningful callsites, wrapper hits), forces
+ * the plan to be ordered by user-impact (top entries are the events users
+ * notice first and ship first), and explicitly defers the only hard-cap
+ * context (DEMO_MODE) to its existing owner — so this rule does not
+ * accidentally replicate the demo cap into normal runs.
+ *
+ * Tests pin the sentinels so a future copy edit can't quietly turn the
+ * rule into a soft suggestion.
+ */
+describe('event-plan size scaling commandment', () => {
+  const text = getWizardCommandments();
+
+  it('mandates plan size scaling with codebase signal', () => {
+    // The verb "scale with" is the durable sentinel — short, distinctive,
+    // and unlikely to false-match anywhere else in the prompt. The full
+    // phrase ties it to the live-test feedback wording.
+    expect(text).toContain('Event-plan size MUST scale with the signal');
+  });
+
+  it('explicitly forbids artificial round-number caps', () => {
+    // The anti-cap phrasing is what makes the rule actionable — without
+    // it the agent reads "scale with signal" as advisory. The concrete
+    // round numbers (5, 10, 12) come straight from the failure mode the
+    // feedback called out, so they must stay named.
+    expect(text).toContain('do NOT artificially cap');
+    expect(text).toMatch(/round numbers \(5, 10, 12\)/);
+  });
+
+  it('names discover-event-surfaces as the source of the floor', () => {
+    // The skill name is the durable sentinel — the agent matches on it
+    // exactly when calling `mcp__wizard-tools__load_skill`. If the
+    // wording around the floor drifts, the skill name keeps the rule
+    // anchored to a concrete artifact.
+    expect(text).toContain('discover-event-surfaces');
+  });
+
+  it('frames the goal as coverage, not minimal viable instrumentation', () => {
+    // The agent's prior behavior optimized for "smallest plan that
+    // shipped without complaint". Renaming the goal to COVERAGE is what
+    // moves the model off that local optimum.
+    expect(text).toContain('COVERAGE');
+    expect(text).toMatch(/not minimal viable instrumentation/i);
+  });
+
+  it('mandates ordering by user-impact, not file order or alphabetical', () => {
+    // Users review top-down and may skim — the top entries get the
+    // closest look and ship first if the reviewer taps "looks good"
+    // early. Lock the durable phrase plus the explicit negative
+    // ordering callouts so a future edit can't turn this into a vague
+    // "prioritize important events" line.
+    expect(text).toContain('ordered by user-impact');
+    expect(text).toMatch(/most-used/i);
+    expect(text).toMatch(/Do NOT sort alphabetically/);
+  });
+
+  it('defers the only hard-cap context (DEMO_MODE) to its existing owner', () => {
+    // The rule must NOT replicate the demo-mode cap into normal runs —
+    // that constraint already lives in DEMO_MODE_COMMANDMENTS and is
+    // applied by the wizard itself. Pin the cross-reference so a future
+    // edit can't accidentally lift the cap text into the universal block.
+    expect(text).toContain('DEMO_MODE_COMMANDMENTS');
+    expect(text).toMatch(/ONLY context where a hard cap is appropriate/i);
+  });
+});
+
 describe('pre-flight context commandment', () => {
   const text = getWizardCommandments();
 
