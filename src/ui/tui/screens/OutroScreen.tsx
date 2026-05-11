@@ -10,7 +10,7 @@
  */
 
 import { Box, Text } from 'ink';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import * as fs from 'fs';
 import type { WizardStore } from '../store.js';
 import { useWizardStore } from '../hooks/useWizardStore.js';
@@ -392,17 +392,17 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
   // routed half of them through autocapture. The Setup Report has
   // always distinguished these; this brings the outro into line.
   //
-  // Computed once per mount (the ledger is per-run, doesn't change
-  // after the agent finishes). When the ledger isn't initialized (e.g.
-  // tests, the synthetic full-activation success path where the agent
-  // never ran), we fall back to "everything instrumented" so legacy
-  // behavior holds.
-  const wiredClassification = (() => {
+  // Memoize on `visibleEvents` identity — the ledger is per-run and
+  // frozen post-agent, so once the agent finishes the classification is
+  // stable. Without `useMemo`, this IIFE re-walked the ledger and
+  // re-ran `TRACK_CALL_RE` against every wired file on every render
+  // (and every keypress in the outro picker drives a render). When the
+  // ledger isn't initialized (e.g. tests, the synthetic full-activation
+  // success path where the agent never ran), we fall back to
+  // "everything instrumented" so legacy behavior holds.
+  const wiredClassification = useMemo(() => {
     const ledger = getFileChangeLedger();
     if (!ledger) {
-      // No ledger → no way to distinguish. Treat the whole plan as
-      // instrumented (the previous behavior) so the picker / fallback
-      // paths render the same as before.
       return {
         instrumented: visibleEvents.map((e) => ({
           name: e.name,
@@ -413,7 +413,7 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
     }
     const wiredNames = collectWiredEventNames(ledger.getEntries());
     return classifyPlanAgainstWiredCode(visibleEvents, wiredNames);
-  })();
+  }, [visibleEvents]);
   const instrumentedEvents = wiredClassification.instrumented;
   const autocapturedEvents = wiredClassification.autocaptured;
 
