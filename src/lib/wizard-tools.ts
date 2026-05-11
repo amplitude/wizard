@@ -1918,6 +1918,8 @@ export async function createWizardToolsServer(options: WizardToolsOptions) {
 Call this tool AFTER installing the SDK and adding initialization code, but BEFORE writing any track() calls.
 The user can approve the plan, skip the review, or give feedback.
 
+BEFORE calling this tool, filter out any candidate events that are fully covered by Amplitude autocapture (element clicks, form submits / starts, page views, session start / end, file downloads, network requests, web vitals, error monitoring, rage / dead clicks). Only events that require a hand-written track() call belong in the plan. If autocapture handles it, do NOT include it — proposing an event the wizard will not implement is a bug. See the autocapture catalog in the wizard commandments for the full list of covered surfaces.
+
 You MUST NOT ask the user clarifying questions in response to feedback. Make a reasonable interpretation of their feedback, revise the plan in-process, and call this tool again with the revised events. The user can give more feedback in the next round if your interpretation was wrong — do not block the run with a chat-style follow-up question, the wizard has no surface for the user to reply mid-stream.
 
 If the user gives feedback, revise your plan and call this tool again — loop until approved or skipped.

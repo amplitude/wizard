@@ -1513,6 +1513,7 @@ interface ToolResult {
 
 interface ToolDef {
   name: string;
+  description?: string;
   handler: (args: Record<string, unknown>, extra?: unknown) => unknown;
 }
 
@@ -1746,6 +1747,49 @@ describe('wizardCanUseTool — structured deny payload', () => {
     if (result.behavior !== 'deny') return;
     const parsed = parseDeny(result.message);
     expect(parsed.suggestedTool).toBe('mcp__wizard-tools__check_env_keys');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// confirm_event_plan tool description
+//
+// The tool description is the surface the agent sees most directly when
+// deciding what arguments to pass. The Excalidraw run review surfaced a
+// failure mode where the agent proposed 14 events, 8 of which the Setup
+// Report later flagged as "covered by autocapture — no track() needed."
+// The fix is upstream: refuse to propose events that autocapture handles.
+// The wizard commandments carry the full catalog; the tool description
+// mirrors the rule so the agent sees it at the moment of decision.
+// ---------------------------------------------------------------------------
+
+describe('confirm_event_plan tool description', () => {
+  let tmpDir: string;
+  beforeEach(() => {
+    tmpDir = makeTmpDir();
+  });
+  afterEach(() => cleanup(tmpDir));
+
+  it('instructs the agent to filter out autocapture-covered events before calling', async () => {
+    const tools = await getTools(tmpDir);
+    const tool = findTool(tools, 'confirm_event_plan');
+    expect(tool.description).toBeDefined();
+    const desc = tool.description ?? '';
+    // The filter-first imperative — verbatim sentinel so a future copy
+    // edit can't quietly drop the rule and leave only the commandment.
+    expect(desc).toMatch(/BEFORE calling this tool, filter out/i);
+    // Names the families of autocaptured events so the agent has
+    // concrete examples to match against its candidate plan.
+    expect(desc).toContain('element clicks');
+    expect(desc).toContain('form submits');
+    expect(desc).toContain('page views');
+    expect(desc).toContain('session start');
+    expect(desc).toContain('rage');
+    // The "if autocapture handles it, do NOT include it" formulation is
+    // what closes the include-with-a-note loophole at the tool layer.
+    expect(desc).toMatch(/do NOT include it/);
+    // Points the agent back at the commandments for the full catalog so
+    // the tool description stays terse but the rule stays discoverable.
+    expect(desc).toMatch(/wizard commandments|autocapture catalog/i);
   });
 });
 
