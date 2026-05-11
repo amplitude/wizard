@@ -1787,11 +1787,21 @@ export function classifyFileChangeError(message: string): FileChangeErrorClass {
   }
   // Timeout patterns — transient by definition. Check BEFORE not_found
   // because `ETIMEDOUT` is sometimes wrapped with secondary text that
-  // could trip the `not found` heuristic.
+  // could trip the `not found` heuristic. Use specific tokens, NOT the
+  // bare `'timeout'` substring — that would misclassify ENOENT errors
+  // for files like `request-timeout.ts` as transient and waste retry
+  // budget on a permanent failure. The patterns below match real
+  // timeout phrasing (Node error code, HTTP/operation phrases) but
+  // never an arbitrary file path.
   if (
     lower.includes('etimedout') ||
     lower.includes('timed out') ||
-    lower.includes('timeout') ||
+    lower.includes('request timeout') ||
+    lower.includes('connection timeout') ||
+    lower.includes('operation timeout') ||
+    lower.includes('read timeout') ||
+    lower.includes('write timeout') ||
+    /timeout:\s*\d/.test(lower) || // `timeout: 30s`, `timeout: 1000ms`
     lower.includes('deadline exceeded')
   ) {
     return 'timeout';

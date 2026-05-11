@@ -467,6 +467,31 @@ describe('classifyFileChangeError', () => {
     );
   });
 
+  it('does NOT misclassify ENOENT for filenames containing the word "timeout" (Bugbot 3217634988)', () => {
+    // Regression: the broad `lower.includes('timeout')` check would
+    // fire on filenames like `request-timeout.ts`, causing ENOENT
+    // errors to be classified as 'timeout' (transient) instead of
+    // 'not_found' (permanent). Retry-aware orchestrators would burn
+    // retry budget re-issuing writes against files that genuinely
+    // don't exist. The fix swaps the bare substring for specific
+    // tokens that match real timeout phrasing but never a file path.
+    expect(
+      classifyFileChangeError(
+        'ENOENT: no such file or directory, open src/lib/request-timeout.ts',
+      ),
+    ).toBe('not_found');
+    expect(
+      classifyFileChangeError('File not found: utils/timeout-handler.js'),
+    ).toBe('not_found');
+    // Real timeout patterns must still classify correctly — these are
+    // the patterns the fix keeps after dropping the broad substring.
+    expect(classifyFileChangeError('Connection timeout: 30s')).toBe('timeout');
+    expect(classifyFileChangeError('Read timeout after 5000ms')).toBe(
+      'timeout',
+    );
+    expect(classifyFileChangeError('timeout: 1000ms')).toBe('timeout');
+  });
+
   it('defaults to generic for unrecognized failures', () => {
     expect(classifyFileChangeError('something exploded')).toBe('generic');
     expect(classifyFileChangeError('')).toBe('generic');
