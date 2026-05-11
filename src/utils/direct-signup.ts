@@ -53,7 +53,18 @@ export type LegalDocumentSource = 'server' | 'local';
 // === SPOOF — DELETE WHEN REMOVING LOCAL FALLBACK ===
 // Local URLs the parser substitutes when the BE flag is OFF. Keyed by
 // DocKind so adding a new kind propagates here via tsc.
-const LOCAL_DOC_URLS: LegalDocumentBundle = {
+//
+// Exported because non-TUI callers (CI / agent / classic modes via
+// `src/commands/helpers.ts`) need the same bundle to construct a
+// follow_up signup body — those modes never traverse the parser's
+// needs_information round-trip, so they synthesize the bundle directly.
+//
+// **Mock-fragility warning:** adding a new entry here also requires
+// adding the corresponding `lib/constants` export to any vitest mock
+// factory that includes this module. Without that, vitest's strict
+// mocker throws at module-load time and cascades unrelated tests into
+// timeout — happened once already at commit 9c47575f → 3896fa8b.
+export const LOCAL_DOC_URLS: LegalDocumentBundle = {
   terms_of_service: TERMS_OF_SERVICE_URL,
   privacy_policy: PRIVACY_POLICY_URL,
 };

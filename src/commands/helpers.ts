@@ -710,6 +710,7 @@ export const runDirectSignupIfRequested = async (
   const { performSignupOrAuth, trackSignupAttempt } = await import(
     '../utils/signup-or-auth.js'
   );
+  const { LOCAL_DOC_URLS } = await import('../utils/direct-signup.js');
   const { tryResolveZone } = await import('../lib/zone-resolution.js');
 
   // Non-TUI modes have no RegionSelect screen to disambiguate — and the
@@ -728,19 +729,25 @@ export const runDirectSignupIfRequested = async (
   }
   let tokens: Awaited<ReturnType<typeof performSignupOrAuth>>;
   try {
-    // Non-TUI callers always send the initial probe. The wizard's
-    // collection screens don't fire in CI / agent / classic modes —
-    // these paths gate on `session.signupFullName` being already
-    // populated upstream and never traverse the `needs_information`
-    // round-trip. So this is always `kind: 'initial'`.
+    // Non-TUI callers send `kind: 'follow_up'` with the user data
+    // already collected upstream (--email + --full-name + --accept-tos
+    // gated by `accountCreationProvisioningInputsReady`). They never
+    // traverse the `needs_information` round-trip because they have no
+    // in-band collection screens — sending `kind: 'initial'` would
+    // mean the BE returns needs_information and the helper routes to
+    // the OAuth fallback, breaking one-shot signup. Build the
+    // follow-up shape with local URL constants since no parser-probe
+    // has run to populate session.legalDocumentBundle.
     //
     // No `signal` here: CI / agent / classic modes have no in-band
     // cancellation surface (no Esc handler, no unmount lifecycle), so
     // there is nothing to thread through. The TUI path passes a signal
     // from SigningUpScreen's useAsyncEffect; this entry point doesn't.
     tokens = await performSignupOrAuth({
-      kind: 'initial',
+      kind: 'follow_up',
       email: session.signupEmail,
+      fullName: session.signupFullName,
+      legalDocumentBundle: LOCAL_DOC_URLS,
       zone,
     });
   } catch (err) {
