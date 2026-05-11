@@ -185,6 +185,12 @@ export function installAbortSignalHandler(session: WizardSession): void {
   process.on('SIGINT', () => {
     if (_abortInProgress) {
       process.exit(130);
+      // Defensive `return` for tests that mock `process.exit` so it
+      // returns instead of terminating. Without it, execution falls
+      // through and re-runs the entire abort sequence (saveCheckpoint,
+      // abortWizard, analytics flush, wizardAbortRunner). In production
+      // process.exit never returns so this is a no-op.
+      return;
     }
     _abortInProgress = true;
 

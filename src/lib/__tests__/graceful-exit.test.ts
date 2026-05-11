@@ -256,4 +256,27 @@ describe('installAbortSignalHandler', () => {
     installAbortSignalHandler(session);
     expect(listeners.length).toBe(1);
   });
+
+  it('second SIGINT exits 130 without re-running saveCheckpoint / abortWizard / flush', async () => {
+    // In production `process.exit(130)` terminates the worker so falling
+    // through doesn't matter. In tests where `process.exit` is mocked
+    // (above) execution would otherwise fall through to the abort body
+    // and double-execute saveCheckpoint / abortWizard / analytics.flush.
+    // The `return` guard prevents that.
+    const { installAbortSignalHandler } = await import('../graceful-exit.js');
+    const session = { installDir: '/tmp/test' } as unknown as WizardSession;
+    installAbortSignalHandler(session);
+
+    // First SIGINT: full abort sequence.
+    listeners[0]('SIGINT');
+    expect(mockSaveCheckpoint).toHaveBeenCalledTimes(1);
+    expect(mockFlush).toHaveBeenCalledTimes(1);
+
+    // Second SIGINT: must exit immediately without re-entering the body.
+    // (process.exit is mocked to no-op so we can observe the fall-through.)
+    listeners[0]('SIGINT');
+    expect(process.exit).toHaveBeenCalledWith(130);
+    expect(mockSaveCheckpoint).toHaveBeenCalledTimes(1); // no re-entry
+    expect(mockFlush).toHaveBeenCalledTimes(1); // no re-entry
+  });
 });
