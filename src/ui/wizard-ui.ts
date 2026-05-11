@@ -454,12 +454,14 @@ export interface WizardUI {
    * we already emitted it). The implementation deduplicates so
    * orchestrators see one phase-transition event per actual change.
    */
-  emitRunPhase?(phase:
-    | 'cold_start'
-    | 'agent_running'
-    | 'finalizing'
-    | 'completed'
-    | 'error'): void;
+  emitRunPhase?(
+    phase:
+      | 'cold_start'
+      | 'agent_running'
+      | 'finalizing'
+      | 'completed'
+      | 'error',
+  ): void;
 
   /**
    * Emit a `setup_context` event carrying the resolved Amplitude scope

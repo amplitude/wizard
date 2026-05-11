@@ -185,8 +185,9 @@ describe('installAbortSignalHandler', () => {
     // kill the test worker. We deliberately leave the strict
     // "unexpectedly called" guard intact for the failure modes that
     // would care.
-    vi.spyOn(process, 'exit').mockImplementation(((_code?: number) =>
-      undefined) as never);
+    vi.spyOn(process, 'exit').mockImplementation(
+      ((_code?: number) => undefined) as never,
+    );
   });
 
   afterEach(() => {

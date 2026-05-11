@@ -351,8 +351,7 @@ async function abortOnApiError(
   // is fine.
   try {
     const code =
-      errorType === AgentErrorType.RATE_LIMIT ||
-      errorSubtype === 'rate_limit'
+      errorType === AgentErrorType.RATE_LIMIT || errorSubtype === 'rate_limit'
         ? 'RATE_LIMIT'
         : 'API_ERROR';
     getUI().emitRunError?.({

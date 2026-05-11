@@ -1986,9 +1986,7 @@ describe('AgentUI — Zod envelope validation on every emit', () => {
         'error',
       ]),
       message: zod.string(),
-      level: zod
-        .enum(['info', 'warn', 'error', 'success', 'step'])
-        .optional(),
+      level: zod.enum(['info', 'warn', 'error', 'success', 'step']).optional(),
       session_id: zod.string().optional(),
       run_id: zod.string().optional(),
       data_version: zod.number().optional(),

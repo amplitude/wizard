@@ -331,9 +331,7 @@ const agentEventSchema = z.object({
   message: z.string(),
   session_id: z.string().optional(),
   run_id: z.string().optional(),
-  level: z
-    .enum(['info', 'warn', 'error', 'success', 'step'])
-    .optional(),
+  level: z.enum(['info', 'warn', 'error', 'success', 'step']).optional(),
   data_version: z.number().optional(),
   data: z.unknown().optional(),
 });
@@ -363,7 +361,9 @@ function validateEnvelopeOrLog(event: NDJSONEvent): NDJSONEvent {
         .map((i) => `${i.path.join('.')}: ${i.message}`)
         .join('; ');
       logToFileLazy(
-        `[agent-ui] NDJSON envelope failed schema validation — wire format invariant breached. issues=${issues}; event.type=${event.type}; event.message=${event.message.slice(0, 80)}`,
+        `[agent-ui] NDJSON envelope failed schema validation — wire format invariant breached. issues=${issues}; event.type=${
+          event.type
+        }; event.message=${event.message.slice(0, 80)}`,
       );
     } catch {
       // Logger may not be available; never throw from emit.
