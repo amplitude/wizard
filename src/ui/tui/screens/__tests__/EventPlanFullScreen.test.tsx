@@ -204,4 +204,63 @@ describe('EventPlanFullScreen', () => {
       expect(store.eventPlanRounds).toHaveLength(0);
     });
   });
+
+  it('renders the "Revising your plan…" state when pendingEventPlanFeedback is set', () => {
+    const events = sampleEvents(3);
+    store.session = {
+      ...store.session,
+      pendingEventPlanFeedback: 'would love to see lowercased event names',
+    };
+    const { lastFrame } = render(
+      <EventPlanFullScreen
+        store={store}
+        events={events}
+        width={120}
+        height={30}
+      />,
+    );
+    const frame = lastFrame() ?? '';
+    expect(frame).toContain('Revising your plan');
+    // The user's feedback is quoted back so the wait reads as
+    // "the agent is working on what I asked for".
+    expect(frame).toContain('would love to see lowercased event names');
+    expect(frame).toContain('agent is generating a revised plan');
+    // The normal approval UI must NOT be visible while revising —
+    // re-pressing Y/S would either be ignored (good) or sneak into a
+    // stale resolveEventPlan call (bad).
+    expect(frame).not.toContain('[Y] approve [S] skip [F] give feedback');
+    expect(frame).not.toContain('Instrumentation Plan');
+  });
+
+  it('flips back to the normal plan view when pendingEventPlanFeedback clears', () => {
+    const events = sampleEvents(2);
+    store.session = {
+      ...store.session,
+      pendingEventPlanFeedback: 'try Title Case',
+    };
+    const { lastFrame, rerender } = render(
+      <EventPlanFullScreen
+        store={store}
+        events={events}
+        width={120}
+        height={30}
+      />,
+    );
+    expect(lastFrame() ?? '').toContain('Revising your plan');
+
+    // Simulate the agent's revised plan arriving — store.setEventPlan
+    // / store.promptEventPlan clear pendingEventPlanFeedback to null.
+    store.session = { ...store.session, pendingEventPlanFeedback: null };
+    rerender(
+      <EventPlanFullScreen
+        store={store}
+        events={events}
+        width={120}
+        height={30}
+      />,
+    );
+    const frame = lastFrame() ?? '';
+    expect(frame).toContain('Instrumentation Plan (2 events)');
+    expect(frame).not.toContain('Revising your plan');
+  });
 });

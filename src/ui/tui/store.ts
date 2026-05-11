@@ -1246,6 +1246,13 @@ export class WizardStore {
       };
       this.pendingPlanFeedback = null;
       this.$eventPlanRounds.set([...this.$eventPlanRounds.get(), round]);
+      // A fresh `confirm_event_plan` call is landing — clear any
+      // in-flight "Revising your plan…" state from the previous round
+      // so EventPlanFullScreen flips back to the normal plan list
+      // (now showing the revised events) instead of the spinner.
+      if (this.$session.get().pendingEventPlanFeedback !== null) {
+        this.$session.setKey('pendingEventPlanFeedback', null);
+      }
       this.$pendingPrompt.set({ kind: 'event-plan', events, resolve });
       this.emitChange();
     });
@@ -1266,11 +1273,31 @@ export class WizardStore {
       'prompt kind': 'event-plan',
       response: typeof decision === 'object' ? 'feedback' : String(decision),
     });
+    // On feedback: stash the user's text so EventPlanFullScreen stays
+    // mounted (App.tsx checks `pendingEventPlanFeedback` alongside the
+    // pending prompt) and can render a "Revising your plan…" state
+    // while the agent re-runs `confirm_event_plan`. Cleared by
+    // `promptEventPlan` when the revised plan lands, by an explicit
+    // approve/skip below, or by the next `setEventPlan` arrival.
+    //
+    // On approve: flip `eventPlanApproved` so the Events tab in
+    // RunScreen swaps the stale "Waiting for the agent to propose
+    // events..." copy for "Approved · wiring N events…". Skipped does
+    // NOT flip the flag — the user opted out, not in.
     if (typeof decision === 'object' && decision.decision === 'revised') {
       this.pendingPlanFeedback = decision.feedback;
+      this.$session.setKey('pendingEventPlanFeedback', decision.feedback);
     } else {
       this.pendingPlanFeedback = null;
       this.$eventPlanRounds.set([]);
+      if (this.$session.get().pendingEventPlanFeedback !== null) {
+        this.$session.setKey('pendingEventPlanFeedback', null);
+      }
+      const decisionKind =
+        typeof decision === 'object' ? decision.decision : decision;
+      if (decisionKind === 'approved') {
+        this.$session.setKey('eventPlanApproved', true);
+      }
     }
     this.$pendingPrompt.set(null);
     this.emitChange();
@@ -2414,6 +2441,14 @@ export class WizardStore {
 
   setEventPlan(events: PlannedEvent[]): void {
     this.$eventPlan.set(events);
+    // A fresh event plan (typically the agent's revised plan after
+    // user feedback) — clear the in-flight "Revising your plan…"
+    // marker so EventPlanFullScreen flips back to the normal plan
+    // list. Guarded so the common no-op case (events arrive without
+    // pending feedback) doesn't churn the session map.
+    if (this.$session.get().pendingEventPlanFeedback !== null) {
+      this.$session.setKey('pendingEventPlanFeedback', null);
+    }
     this.emitChange();
   }
 

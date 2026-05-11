@@ -34,6 +34,8 @@
 import { Box, Text, useInput } from 'ink';
 import { useEffect, useState } from 'react';
 
+import { BrailleSpinner } from '../components/BrailleSpinner.js';
+import { useTimedCoaching } from '../hooks/useTimedCoaching.js';
 import { useWizardStore } from '../hooks/useWizardStore.js';
 import type { WizardStore } from '../store.js';
 import { Colors, Icons, Layout } from '../styles.js';
@@ -112,6 +114,14 @@ export const EventPlanFullScreen = ({
   // depended on a parent re-render to read the freshest pendingPrompt).
   useWizardStore(store);
 
+  // When the user just submitted feedback we keep this screen mounted
+  // (via App.tsx's showEventPlan) and render a "Revising your plan…"
+  // state instead of the plan list + input. The feedback text is
+  // quoted back so the wait reads as "the agent is working on what I
+  // asked for", not "the wizard skipped my feedback".
+  const pendingFeedback = store.session.pendingEventPlanFeedback;
+  const isRevising = pendingFeedback !== null;
+
   const [planInputMode, setPlanInputMode] = useState<'options' | 'feedback'>(
     'options',
   );
@@ -162,6 +172,16 @@ export const EventPlanFullScreen = ({
     const id = setInterval(() => setCursorVisible((v) => !v), 530);
     return () => clearInterval(id);
   }, [planInputMode]);
+
+  // Coaching escalation while we wait for the agent's revised plan.
+  // tier 0 (< 5s): just the spinner; tier 1 (>= 5s): add a "typically
+  // 10–30s" hint so the user knows the wait is normal. progressSignal
+  // pinned to the feedback text so a brand-new round-trip restarts
+  // the timer cleanly.
+  const { tier: revisingCoachingTier } = useTimedCoaching({
+    thresholds: [5],
+    progressSignal: pendingFeedback,
+  });
 
   useInput(
     (char, key) => {
@@ -218,8 +238,63 @@ export const EventPlanFullScreen = ({
         setPlanInputMode('feedback');
       }
     },
-    { isActive: true },
+    // Suppress Y/S/F + scroll input while waiting for the revised
+    // plan to land. The agent is mid-revision; another keypress here
+    // would either be ignored (good) or, worse, sneak into a stale
+    // resolveEventPlan call (bad — `pendingPrompt` is already null).
+    { isActive: !isRevising },
   );
+
+  // Revising state — replaces the plan list + Y/S/F hint with a
+  // calm "we're working on it" panel. Renders BEFORE the normal
+  // approval UI so the user never glimpses the old plan list with
+  // their feedback typed below it during the round-trip.
+  if (isRevising) {
+    return (
+      <Box
+        flexDirection="column"
+        width={width}
+        height={height}
+        paddingX={Layout.paddingX}
+        paddingY={1}
+      >
+        <Box flexDirection="column" flexShrink={0}>
+          <Text color={Colors.muted}>Updating your event plan:</Text>
+          <Text color={Colors.heading} bold>
+            Revising your plan…
+          </Text>
+        </Box>
+        <Box flexDirection="column" flexGrow={1} marginTop={1}>
+          <Text color={Colors.muted}>Your feedback:</Text>
+          <Text color={Colors.accent} wrap="wrap">
+            “{pendingFeedback}”
+          </Text>
+          <Box marginTop={1}>
+            <Text>
+              <BrailleSpinner color={Colors.accent} />
+              <Text color={Colors.secondary}>
+                {' '}
+                agent is generating a revised plan
+              </Text>
+            </Text>
+          </Box>
+          {revisingCoachingTier >= 1 && (
+            <Box marginTop={1}>
+              <Text color={Colors.muted}>
+                This typically takes 10–30s — hang tight.
+              </Text>
+            </Box>
+          )}
+        </Box>
+        <Box flexShrink={0} marginTop={1}>
+          <Text color={Colors.muted}>
+            The plan will reappear here automatically once the agent
+            finishes.
+          </Text>
+        </Box>
+      </Box>
+    );
+  }
 
   return (
     <Box
