@@ -208,8 +208,15 @@ export class WizardStore {
   /** True while the user is typing a slash command in the command bar. */
   private $commandMode = atom(false);
 
-  /** Transient feedback message shown in the command bar after a command runs. */
-  private $commandFeedback = atom<string | null>(null);
+  /**
+   * Transient feedback message shown in the command bar after a command runs.
+   *
+   * `string[]` is rendered as one line per entry — used by `/diagnostics` and
+   * `/debug` to show storage paths without hard-truncating to `/Users/…` when
+   * the line overflows the terminal. Single-line commands (`/whoami`,
+   * `/region`, etc.) keep passing a `string`.
+   */
+  private $commandFeedback = atom<string | string[] | null>(null);
 
   /** Error caught by the app error boundary — shown in ConsoleView. */
   private $screenError = atom<Error | null>(null);
@@ -274,7 +281,7 @@ export class WizardStore {
     return this.$commandMode.get();
   }
 
-  get commandFeedback(): string | null {
+  get commandFeedback(): string | string[] | null {
     return this.$commandFeedback.get();
   }
 
@@ -1250,8 +1257,14 @@ export class WizardStore {
     this.$requestedTab.set(null);
   }
 
-  /** Show a transient feedback message in the command bar. Clears after ms. */
-  setCommandFeedback(message: string, ms = 3000): void {
+  /**
+   * Show a transient feedback message in the command bar. Clears after `ms`.
+   *
+   * Pass an array of strings to render one line per entry — used by
+   * `/diagnostics` and `/debug` so multi-line path summaries don't get
+   * hard-truncated to `/Users/…` when the line overflows the terminal.
+   */
+  setCommandFeedback(message: string | string[], ms = 3000): void {
     if (this._feedbackTimer !== null) {
       clearTimeout(this._feedbackTimer);
       this._feedbackTimer = null;

@@ -31,6 +31,7 @@ import {
   COMMANDS,
   checkCommandBlockedByRun,
   getWhoamiText,
+  getDiagnosticsLines,
   getDiagnosticsText,
   isKnownCommand,
   parseFeedbackSlashInput,
@@ -211,14 +212,18 @@ function executeCommand(raw: string, store: WizardStore): string | void {
             };
             tasks_count?: number;
           };
-          const summary =
-            `flow: ${snapshot.active_flow ?? 'n/a'} | screen: ${
-              snapshot.current_screen ?? 'n/a'
-            } | ` +
-            `integration: ${snapshot.session?.integration ?? 'n/a'} | ` +
-            `zone: ${snapshot.session?.region ?? 'n/a'} | tasks: ${
-              snapshot.tasks_count ?? 0
-            }`;
+          // Multi-line summary so each row stays readable instead of being
+          // hard-truncated by the single overflow-hidden command-feedback
+          // Text element. The snapshot file on disk is the full-fidelity
+          // backup; this panel is what the user actually wanted to read.
+          const summaryLines: string[] = [
+            'Debug snapshot:',
+            `  flow:        ${snapshot.active_flow ?? 'n/a'}`,
+            `  screen:      ${snapshot.current_screen ?? 'n/a'}`,
+            `  integration: ${snapshot.session?.integration ?? 'n/a'}`,
+            `  zone:        ${snapshot.session?.region ?? 'n/a'}`,
+            `  tasks:       ${snapshot.tasks_count ?? 0}`,
+          ];
           try {
             const fs = await import('node:fs');
             const path = await import('node:path');
@@ -231,7 +236,7 @@ function executeCommand(raw: string, store: WizardStore): string | void {
               'utf8',
             );
             store.setCommandFeedback(
-              `${summary} · saved to ${snapshotPath}`,
+              [...summaryLines, '', `Saved to: ${snapshotPath}`],
               30_000,
             );
           } catch {
@@ -239,7 +244,7 @@ function executeCommand(raw: string, store: WizardStore): string | void {
             // — fall back to surfacing the summary alone. Don't write to
             // stderr; corrupting the TUI mid-render is the original bug.
             store.setCommandFeedback(
-              `${summary} · (could not save full snapshot to disk)`,
+              [...summaryLines, '', '(could not save full snapshot to disk)'],
               30_000,
             );
           }
@@ -257,9 +262,14 @@ function executeCommand(raw: string, store: WizardStore): string | void {
       break;
     }
     case '/diagnostics': {
-      // Print the wizard's storage layout to a file so the user can read
-      // it AFTER the wizard exits. Same rationale as /debug: writing to
-      // stderr while Ink owns the terminal corrupts the live frame.
+      // Render the full storage layout INLINE in the feedback panel as
+      // multiple rows so each absolute path stays readable. Previously this
+      // packed everything into a single feedback string, which the
+      // overflow-hidden Text element truncated to "/Users/…" — the user
+      // could see the summary path but not the log path they actually
+      // needed to copy. The on-disk diagnostics.txt is still written as a
+      // shareable backup.
+      const lines = getDiagnosticsLines(store.session.installDir);
       const text = getDiagnosticsText(store.session.installDir);
       void (async () => {
         try {
@@ -270,16 +280,12 @@ function executeCommand(raw: string, store: WizardStore): string | void {
           const diagPath = path.join(runDir, 'diagnostics.txt');
           fs.writeFileSync(diagPath, text + '\n', 'utf8');
           store.setCommandFeedback(
-            `Storage paths saved to ${diagPath} · log file: ${getLogFile(
-              store.session.installDir,
-            )}`,
+            [...lines, '', `Saved to: ${diagPath}`],
             30_000,
           );
         } catch {
           store.setCommandFeedback(
-            `Could not write diagnostics file. Log file: ${getLogFile(
-              store.session.installDir,
-            )}`,
+            [...lines, '', '(could not write diagnostics file)'],
             30_000,
           );
         }
@@ -363,7 +369,15 @@ export const ConsoleView = ({
 
   const feedback = store.commandFeedback;
   const screenError = store.screenError;
-  const showFeedback = !loading && !!feedback;
+  // Multi-line feedback (e.g. `/diagnostics`, `/debug`) arrives as an array
+  // so each path renders on its own row instead of being hard-truncated to
+  // `/Users/…`. Normalize to `string[]` here so the render code is uniform.
+  const feedbackLines: string[] = Array.isArray(feedback)
+    ? feedback
+    : feedback != null
+      ? [feedback]
+      : [];
+  const showFeedback = !loading && feedbackLines.length > 0;
   const innerWidth = width;
   const separator = Layout.separatorChar.repeat(Math.max(0, innerWidth - 2));
   const pendingPrompt = store.pendingPrompt;
@@ -704,11 +718,19 @@ export const ConsoleView = ({
         <Text color={Colors.border}>{separator}</Text>
       </Box>
 
-      {/* Feedback line */}
+      {/* Feedback line(s) — multi-line for `/diagnostics` / `/debug` so the
+        full storage paths print on their own rows. Single-line commands like
+        `/whoami` render as one row (feedbackLines has length 1). */}
       {showFeedback && (
-        <Box paddingX={Layout.paddingX}>
-          <Text color={Colors.accent}>{Icons.prompt} </Text>
-          <Text color={Colors.secondary}>{feedback}</Text>
+        <Box paddingX={Layout.paddingX} flexDirection="column">
+          {feedbackLines.map((line, idx) => (
+            <Box key={idx}>
+              <Text color={Colors.accent}>
+                {idx === 0 ? `${Icons.prompt} ` : '  '}
+              </Text>
+              <Text color={Colors.secondary}>{line}</Text>
+            </Box>
+          ))}
         </Box>
       )}
 
