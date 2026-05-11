@@ -1371,6 +1371,41 @@ export class AgentUI implements WizardUI {
     this._lastStallTier = null;
   }
 
+  // ── v2 protocol: run_resumed checkpoint signal ──────────────────────
+  //
+  // When the wizard restarts from a checkpoint (post-crash, post-SIGINT,
+  // post-token-expiry), the first envelope after `run_started` should be
+  // `run_resumed` so an orchestrator can render "continuing from where
+  // we left off" instead of "fresh run". Distinct from
+  // `checkpoint_loaded` (which fires only when `--resume` finds a fresh
+  // file): `run_resumed` carries the orchestrator-facing summary needed
+  // to drive UX, not just the load event.
+
+  emitRunResumed(data: {
+    fromCheckpointAt: string;
+    lastPhase:
+      | 'cold_start'
+      | 'agent_running'
+      | 'finalizing'
+      | 'completed'
+      | 'error'
+      | 'unknown';
+    restoredStateSummary: string;
+  }): void {
+    emit(
+      'lifecycle',
+      `run_resumed (last_phase=${data.lastPhase}, from=${data.fromCheckpointAt})`,
+      {
+        data: {
+          event: 'run_resumed',
+          from_checkpoint_at: data.fromCheckpointAt,
+          last_phase: data.lastPhase,
+          restored_state_summary: data.restoredStateSummary,
+        },
+      },
+    );
+  }
+
   // Security: stack traces redacted from NDJSON output to prevent path/secret leakage
   setRunError(error: Error): Promise<boolean> {
     let sanitized: string;

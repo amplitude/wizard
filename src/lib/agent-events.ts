@@ -300,6 +300,16 @@ export const EVENT_DATA_VERSIONS = {
    * escalated UX.
    */
   stall_status: 1,
+  /**
+   * `run_resumed` — emitted as the first envelope after `run_started`
+   * when the wizard restarts from a checkpoint (post-crash,
+   * post-SIGINT, post-token-expiry). Lets orchestrators distinguish
+   * "fresh run from cold" from "resumed run from checkpoint" without
+   * parsing the run-start status. Carries the checkpoint timestamp,
+   * the last-known phase, and a free-form summary of what state was
+   * restored (e.g. "region+org+project bound, framework=Next.js").
+   */
+  run_resumed: 1,
 } as const;
 
 /** All NDJSON event-level types. */
@@ -741,6 +751,27 @@ export function deriveStallTier(durationMs: number): StallTier | null {
   return null;
 }
 
+/**
+ * `run_resumed` — emitted at startup, after `run_started`, when the
+ * wizard restarts from a checkpoint (post-crash, post-SIGINT,
+ * post-token-expiry). Lets orchestrators distinguish a fresh cold
+ * start from a continuation without parsing the run-start status
+ * message. Carries the checkpoint timestamp + last-known phase + a
+ * free-form summary of what state was restored.
+ */
+export interface RunResumedData {
+  event: 'run_resumed';
+  /** ISO timestamp of when the checkpoint was last persisted. */
+  from_checkpoint_at: string;
+  /** The most recent `RunPhase` recorded on the checkpoint. */
+  last_phase: RunPhase | 'unknown';
+  /**
+   * Free-form, human-readable summary of restored state (region,
+   * org, project, framework, etc.). Pre-redacted at emit time.
+   */
+  restored_state_summary: string;
+}
+
 export type InnerAgentLifecycleData =
   | InnerAgentStartedData
   | ToolCallData
@@ -752,7 +783,8 @@ export type InnerAgentLifecycleData =
   | VerificationResultData
   | DiscoveryFactData
   | CurrentFileData
-  | StallStatusData;
+  | StallStatusData
+  | RunResumedData;
 
 /**
  * Coarse-grained orchestrator-facing phase boundaries for a wizard run.

@@ -263,6 +263,45 @@ describe('AgentUI.emitStallStatus (v2: coaching tiers)', () => {
   });
 });
 
+describe('AgentUI.emitRunResumed (v2: checkpoint restart signal)', () => {
+  let writes: string[];
+  let restore: () => void;
+
+  beforeEach(() => {
+    ({ writes, restore } = setupStdoutSpy());
+  });
+  afterEach(() => restore());
+
+  it('emits a lifecycle: run_resumed with from_checkpoint_at / last_phase / summary', () => {
+    const ui = new AgentUI();
+    ui.emitRunResumed?.({
+      fromCheckpointAt: '2026-05-11T00:00:00.000Z',
+      lastPhase: 'agent_running',
+      restoredStateSummary: 'region=us, org=foo, project=bar',
+    });
+    const event = lastEvent(writes);
+    expect(event.type).toBe('lifecycle');
+    expect(event.data).toMatchObject({
+      event: 'run_resumed',
+      from_checkpoint_at: '2026-05-11T00:00:00.000Z',
+      last_phase: 'agent_running',
+      restored_state_summary: 'region=us, org=foo, project=bar',
+    });
+    expect(event.data_version).toBe(EVENT_DATA_VERSIONS.run_resumed);
+  });
+
+  it('accepts the "unknown" last_phase fallback', () => {
+    const ui = new AgentUI();
+    ui.emitRunResumed?.({
+      fromCheckpointAt: '2026-05-11T00:00:00.000Z',
+      lastPhase: 'unknown',
+      restoredStateSummary: '',
+    });
+    const event = lastEvent(writes);
+    expect(event.data?.last_phase).toBe('unknown');
+  });
+});
+
 // ── EVENT_DATA_VERSIONS registry coherence ─────────────────────────
 //
 // Every new v2 event MUST appear in `EVENT_DATA_VERSIONS`. Asserting
@@ -275,6 +314,7 @@ describe('EVENT_DATA_VERSIONS (v2 entries registered)', () => {
     ['discovery_fact', 1],
     ['current_file', 1],
     ['stall_status', 1],
+    ['run_resumed', 1],
   ] as const)('registers %s at version %d', (event, version) => {
     expect(
       (EVENT_DATA_VERSIONS as Readonly<Record<string, number>>)[event],

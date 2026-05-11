@@ -698,4 +698,26 @@ export interface WizardUI {
    * next stall window starts fresh.
    */
   resetStallStatus?(): void;
+
+  /**
+   * Emitted as the first envelope after `run_started` when the wizard
+   * restarts from a checkpoint (post-crash, post-SIGINT, post-token-
+   * expiry). Lets orchestrators distinguish a fresh cold start from
+   * a resumed run without parsing the run-start status. Carries the
+   * checkpoint timestamp + last-known phase + a free-form summary of
+   * restored state (region, org, project, framework — pre-redacted).
+   *
+   * Optional — only AgentUI emits.
+   */
+  emitRunResumed?(data: {
+    fromCheckpointAt: string;
+    lastPhase:
+      | 'cold_start'
+      | 'agent_running'
+      | 'finalizing'
+      | 'completed'
+      | 'error'
+      | 'unknown';
+    restoredStateSummary: string;
+  }): void;
 }
