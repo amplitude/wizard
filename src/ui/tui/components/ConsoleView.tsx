@@ -32,7 +32,6 @@ import {
   checkCommandBlockedByRun,
   getWhoamiText,
   getDiagnosticsLines,
-  getDiagnosticsText,
   isKnownCommand,
   parseFeedbackSlashInput,
   parseCreateProjectSlashInput,
@@ -270,7 +269,11 @@ function executeCommand(raw: string, store: WizardStore): string | void {
       // needed to copy. The on-disk diagnostics.txt is still written as a
       // shareable backup.
       const lines = getDiagnosticsLines(store.session.installDir);
-      const text = getDiagnosticsText(store.session.installDir);
+      // Bugbot 3221826573: `getDiagnosticsText` was internally calling
+      // `getDiagnosticsLines(installDir).join('\n')`, so it walked the
+      // storage paths twice for the same install dir. `lines` is
+      // already in hand — derive text from it directly.
+      const text = lines.join('\n');
       void (async () => {
         try {
           const fs = await import('node:fs');
