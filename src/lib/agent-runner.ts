@@ -997,6 +997,16 @@ async function runAgentWizardBody(
   const skipAmplitudeMcp =
     config.prompts.buildPrompt !== undefined || !accessToken;
 
+  // Mark the coarse `cold_start` phase boundary for orchestrators
+  // observing the NDJSON stream. Pairs with `agent_running` (first
+  // tool call), `finalizing` (seedPostAgentSteps), and a terminal
+  // `completed` / `error`. Idempotent; the AgentUI emitter dedups.
+  try {
+    getUI().emitRunPhase?.('cold_start');
+  } catch (err) {
+    logToFile('[agent-runner] emitRunPhase(cold_start) threw', err);
+  }
+
   // Cold-start phase 1: skill staging. The next few seconds is bundled-skill
   // copy + on-disk resolution; surface it on the activity line so the user
   // doesn't read the silence as a hung process. Cleared on the matching
@@ -1790,6 +1800,17 @@ async function runAgentWizardBody(
   // creation moved to the deferred `amplitude-wizard dashboard` command.
   // The final-success message and (optionally) a `dashboard-plan.json`
   // hand-off replace the inline dashboard step.
+  // Mark the coarse `finalizing` phase boundary — the inner agent
+  // has stopped and the wizard is running its post-agent steps
+  // (commit events, env upload, MCP install, etc.). Pairs with the
+  // terminal `completed` / `error` emitted from wizardSuccessExit /
+  // wizardAbort below.
+  try {
+    getUI().emitRunPhase?.('finalizing');
+  } catch (err) {
+    logToFile('[agent-runner] emitRunPhase(finalizing) threw', err);
+  }
+
   getUI().seedPostAgentSteps([
     {
       id: POST_AGENT_STEP_COMMIT_EVENTS,

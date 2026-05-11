@@ -235,6 +235,15 @@ export async function wizardSuccessExit(exitCode = 0): Promise<never> {
   } catch {
     /* setup-complete emission must never block exit */
   }
+  // Mark the terminal `completed` run_phase BEFORE `run_completed` so
+  // an orchestrator's phase-state transitions
+  // (cold_start -> agent_running -> finalizing -> completed) close
+  // cleanly. AgentUI dedups; a no-op call here is safe.
+  try {
+    getUI().emitRunPhase?.('completed');
+  } catch {
+    /* terminal phase emission must not prevent exit */
+  }
   // Emit the terminal `run_completed` NDJSON event BEFORE shutting
   // analytics down. AgentUI is the only UI that implements this; for
   // InkUI / LoggingUI it's a no-op. The event has to land on stdout
@@ -457,6 +466,16 @@ export async function wizardAbort(
   //    Esc on the framework picker). Wrapped in try/catch so a
   //    misbehaving emitter can't block the exit.
   const outcome: 'error' | 'cancelled' = error ? 'error' : 'cancelled';
+  // Mark the terminal `error` run_phase BEFORE `run_completed` so an
+  // orchestrator's phase-state transitions (cold_start ->
+  // agent_running -> finalizing -> error) close cleanly. AgentUI
+  // dedups so a no-op call here is safe even when an earlier code
+  // path already emitted the same phase.
+  try {
+    getUI().emitRunPhase?.('error');
+  } catch {
+    /* terminal phase emission must not prevent exit */
+  }
   try {
     getUI().emitRunCompleted?.({
       outcome,

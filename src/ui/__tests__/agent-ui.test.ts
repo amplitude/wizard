@@ -2049,6 +2049,55 @@ describe('AgentUI — Zod envelope validation on every emit', () => {
     },
   ];
 
+  it('emitRunPhase emits a stamped envelope for each documented phase + dedups repeats', () => {
+    const ui = new AgentUI();
+    ui.emitRunPhase?.('cold_start');
+    ui.emitRunPhase?.('cold_start'); // dedup — same phase
+    ui.emitRunPhase?.('agent_running');
+    ui.emitRunPhase?.('agent_running'); // dedup
+    ui.emitRunPhase?.('agent_running'); // dedup
+    ui.emitRunPhase?.('finalizing');
+    ui.emitRunPhase?.('completed');
+
+    // Each unique phase transition should produce one envelope —
+    // dedupe is what keeps the agent_running PreToolUse hook
+    // from flooding the stream.
+    expect(writes).toHaveLength(4);
+    const phases = writes.map(
+      (l) => (JSON.parse(l.trim()).data as { phase: string }).phase,
+    );
+    expect(phases).toEqual([
+      'cold_start',
+      'agent_running',
+      'finalizing',
+      'completed',
+    ]);
+    for (const line of writes) {
+      const event = JSON.parse(line.trim());
+      expect(event.type).toBe('lifecycle');
+      expect(event.data_version).toBe(1);
+      expect(event.data).toMatchObject({ event: 'run_phase' });
+    }
+  });
+
+  it('emitRunPhase ordering invariant: cold_start <= agent_running <= finalizing <= completed', () => {
+    const ui = new AgentUI();
+    // Drive the documented happy-path sequence and assert the
+    // wire-level ordering survives. A bug that emitted finalizing
+    // before agent_running would fail here.
+    const expected = [
+      'cold_start',
+      'agent_running',
+      'finalizing',
+      'completed',
+    ] as const;
+    for (const p of expected) ui.emitRunPhase?.(p);
+    const phases = writes.map(
+      (l) => (JSON.parse(l.trim()).data as { phase: string }).phase,
+    );
+    expect(phases).toEqual([...expected]);
+  });
+
   for (const c of errorCodeCases) {
     it(`emitRunError(${c.code}) lands a typed envelope with data.code + recoverable hint`, () => {
       const ui = new AgentUI();

@@ -111,6 +111,17 @@ export const EVENT_DATA_VERSIONS = {
    * convention). Future bumps land here.
    */
   run_error: 1,
+  /**
+   * `run_phase` — coarse-grained progress signal emitted at the four
+   * canonical phase boundaries of an agent run (`cold_start` →
+   * `agent_running` → `finalizing` → `completed` | `error`). Lets a
+   * parent agent render a faithful progress indicator without
+   * parsing every tool_call / status / progress event in the stream.
+   * Distinct from `pushStatus` (free-form sub-line for the TUI) and
+   * `journey transitions` (fine-grained four-step journey stepper)
+   * — `run_phase` is the orchestrator-facing five-state contract.
+   */
+  run_phase: 1,
   nested_agent: 1,
   inner_agent_started: 1,
   // Project create. Discriminators must match the actual `data.event`
@@ -610,6 +621,39 @@ export type InnerAgentLifecycleData =
   | EventPlanConfirmedData
   | VerificationStartedData
   | VerificationResultData;
+
+/**
+ * Coarse-grained orchestrator-facing phase boundaries for a wizard run.
+ * Five fixed states; a single run transits in order:
+ *
+ *   cold_start    -> the wizard has started bootstrapping (skill
+ *                    staging, project read, agent SDK handshake). The
+ *                    user sees the spinner; no SDK tool has been
+ *                    called yet.
+ *   agent_running -> the inner Claude agent has fired its first tool
+ *                    call or its first turn. Most of the run lives
+ *                    here.
+ *   finalizing    -> the inner agent has stopped; the wizard is
+ *                    running post-agent steps (commit events,
+ *                    MCP install, env upload, Slack, Outro).
+ *   completed     -> terminal success. Pairs with `run_completed:
+ *                    { outcome: 'success' }`.
+ *   error         -> terminal failure. Pairs with `run_completed:
+ *                    { outcome: 'error' | 'cancelled' }`.
+ *
+ * Orchestrators key off `data.phase` rather than the message string.
+ */
+export type RunPhase =
+  | 'cold_start'
+  | 'agent_running'
+  | 'finalizing'
+  | 'completed'
+  | 'error';
+
+export interface RunPhaseData {
+  event: 'run_phase';
+  phase: RunPhase;
+}
 
 /**
  * `auth_retry_exhausted` — terminal observability event from the SDK

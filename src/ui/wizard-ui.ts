@@ -442,6 +442,26 @@ export interface WizardUI {
   }): void;
 
   /**
+   * Coarse-grained run-phase boundary signal. Five fixed states a
+   * wizard run transits in order: `cold_start` -> `agent_running` ->
+   * `finalizing` -> `completed` | `error`. See `RunPhase` in
+   * `agent-events.ts` for the contract. Optional — only AgentUI
+   * emits to NDJSON; InkUI / LoggingUI no-op (their UI already
+   * implies phase via the journey stepper / log lines).
+   *
+   * Idempotent — callers may invoke with the same phase multiple
+   * times (a tool call rolling into `agent_running` is fine even if
+   * we already emitted it). The implementation deduplicates so
+   * orchestrators see one phase-transition event per actual change.
+   */
+  emitRunPhase?(phase:
+    | 'cold_start'
+    | 'agent_running'
+    | 'finalizing'
+    | 'completed'
+    | 'error'): void;
+
+  /**
    * Emit a `setup_context` event carrying the resolved Amplitude scope
    * (region, org, project, app, env) at a known phase boundary.
    * Optional because only AgentUI emits to NDJSON — InkUI / LoggingUI

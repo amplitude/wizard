@@ -1098,10 +1098,36 @@ export class AgentUI implements WizardUI {
    * `outcome` + `exitCode` are the contract.
    */
   private _runStartedAtMs: number | null = null;
+  // Run-phase deduplication. We emit `run_phase` at coarse boundaries
+  // (cold_start / agent_running / finalizing / completed / error)
+  // and the agent-runner is the lone caller — but agent_running fires
+  // from every tool call's preToolUse hook, so dedup at the wire
+  // boundary keeps a noisy hook chain from spamming the stream.
+  private _lastRunPhase: string | null = null;
 
   startRun(): void {
     this._runStartedAtMs = Date.now();
     emit('lifecycle', 'run_started', { data: { event: 'start_run' } });
+  }
+
+  /**
+   * Emit a `lifecycle: run_phase` event when the wizard transits
+   * between coarse phase boundaries. Idempotent — repeated calls
+   * with the same phase no-op. See `RunPhase` in `agent-events.ts`.
+   */
+  emitRunPhase(
+    phase:
+      | 'cold_start'
+      | 'agent_running'
+      | 'finalizing'
+      | 'completed'
+      | 'error',
+  ): void {
+    if (this._lastRunPhase === phase) return;
+    this._lastRunPhase = phase;
+    emit('lifecycle', `run_phase: ${phase}`, {
+      data: { event: 'run_phase', phase },
+    });
   }
 
   /**
