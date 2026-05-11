@@ -46,7 +46,7 @@ describe('performSignupOrAuth', () => {
     const { analytics } = await import('../analytics');
 
     const result = await performSignupOrAuth({
-      kind: 'follow_up',
+      kind: 'with_required_fields',
       email: null,
       fullName: 'Ada Lovelace',
       legalDocumentBundle: {
@@ -73,7 +73,7 @@ describe('performSignupOrAuth', () => {
     });
 
     const result = await performSignupOrAuth({
-      kind: 'initial',
+      kind: 'email_only',
       email: 'ada@example.com',
       zone: 'us',
     });
@@ -110,7 +110,7 @@ describe('performSignupOrAuth', () => {
     const { analytics } = await import('../analytics');
 
     const result = await performSignupOrAuth({
-      kind: 'initial',
+      kind: 'email_only',
       email: 'ada@example.com',
       zone: 'us',
     });
@@ -136,7 +136,7 @@ describe('performSignupOrAuth', () => {
     const { analytics } = await import('../analytics');
 
     await performSignupOrAuth({
-      kind: 'initial',
+      kind: 'email_only',
       email: 'ada@example.com',
       zone: 'us',
     });
@@ -158,7 +158,7 @@ describe('performSignupOrAuth', () => {
     });
 
     const result = await performSignupOrAuth({
-      kind: 'follow_up',
+      kind: 'with_required_fields',
       email: 'ada@example.com',
       fullName: 'Ada Lovelace',
       legalDocumentBundle: {
@@ -181,7 +181,7 @@ describe('performSignupOrAuth', () => {
     const { analytics } = await import('../analytics');
 
     await performSignupOrAuth({
-      kind: 'follow_up',
+      kind: 'with_required_fields',
       email: 'ada@example.com',
       fullName: 'Ada Lovelace',
       legalDocumentBundle: {
@@ -213,7 +213,7 @@ describe('performSignupOrAuth', () => {
     });
 
     const result = await performSignupOrAuth({
-      kind: 'follow_up',
+      kind: 'with_required_fields',
       email: 'ada@example.com',
       fullName: 'Ada Lovelace',
       legalDocumentBundle: {
@@ -239,7 +239,7 @@ describe('performSignupOrAuth', () => {
     const { analytics } = await import('../analytics');
 
     await performSignupOrAuth({
-      kind: 'follow_up',
+      kind: 'with_required_fields',
       email: 'ada@example.com',
       fullName: 'Ada Lovelace',
       legalDocumentBundle: {
@@ -267,7 +267,7 @@ describe('performSignupOrAuth', () => {
     const { analytics } = await import('../analytics');
 
     await performSignupOrAuth({
-      kind: 'follow_up',
+      kind: 'with_required_fields',
       email: 'ada@example.com',
       fullName: 'Ada Lovelace',
       legalDocumentBundle: {
@@ -316,7 +316,7 @@ describe('performSignupOrAuth', () => {
     const { replaceStoredUser } = await import('../ampli-settings.js');
 
     const result = await performSignupOrAuth({
-      kind: 'follow_up',
+      kind: 'with_required_fields',
       email: 'ada@example.com',
       fullName: 'Ada Lovelace',
       legalDocumentBundle: {
@@ -359,7 +359,7 @@ describe('performSignupOrAuth', () => {
     });
 
     const result = await performSignupOrAuth({
-      kind: 'follow_up',
+      kind: 'with_required_fields',
       email: 'ada@example.com',
       fullName: 'Ada Lovelace',
       legalDocumentBundle: {
@@ -396,7 +396,7 @@ describe('performSignupOrAuth', () => {
     const { analytics } = await import('../analytics');
 
     await performSignupOrAuth({
-      kind: 'follow_up',
+      kind: 'with_required_fields',
       email: 'ada@example.com',
       fullName: 'Ada Lovelace',
       legalDocumentBundle: {
@@ -446,7 +446,7 @@ describe('performSignupOrAuth', () => {
     const { replaceStoredUser } = await import('../ampli-settings.js');
 
     await performSignupOrAuth({
-      kind: 'follow_up',
+      kind: 'with_required_fields',
       email: 'ada@example.com',
       fullName: 'Ada Lovelace',
       legalDocumentBundle: {
@@ -526,7 +526,7 @@ describe('performSignupOrAuth', () => {
       const { replaceStoredUser } = await import('../ampli-settings.js');
 
       const pending = performSignupOrAuth({
-        kind: 'follow_up',
+        kind: 'with_required_fields',
         email: 'ada@example.com',
         fullName: 'Ada Lovelace',
         legalDocumentBundle: {
@@ -568,7 +568,7 @@ describe('performSignupOrAuth', () => {
       const { analytics } = await import('../analytics');
 
       const pending = performSignupOrAuth({
-        kind: 'follow_up',
+        kind: 'with_required_fields',
         email: 'ada@example.com',
         fullName: 'Ada Lovelace',
         legalDocumentBundle: {
@@ -611,7 +611,7 @@ describe('performSignupOrAuth', () => {
     const { analytics } = await import('../analytics');
 
     const result = await performSignupOrAuth({
-      kind: 'follow_up',
+      kind: 'with_required_fields',
       email: 'ada@example.com',
       fullName: 'Ada Lovelace',
       legalDocumentBundle: {

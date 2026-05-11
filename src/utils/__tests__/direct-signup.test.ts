@@ -29,13 +29,13 @@ beforeAll(() => server.listen({ onUnhandledRequest: 'error' }));
 afterEach(() => server.resetHandlers());
 afterAll(() => server.close());
 
-// `kind: 'follow_up'` is the shape used by tests that exercise the
+// `kind: 'with_required_fields'` is the shape used by tests that exercise the
 // success/error paths after fields have been collected — they mock a
 // success/redirect/error response from the provisioning endpoint, so
 // the body the wizard would actually send doesn't matter for those
 // tests; what matters is that the input is type-valid.
 const INPUT = {
-  kind: 'follow_up',
+  kind: 'with_required_fields',
   email: 'ada@example.com',
   fullName: 'Ada Lovelace',
   legalDocumentBundle: {
@@ -48,7 +48,7 @@ const INPUT = {
 // Initial-shape input for tests that exercise the probe path
 // (needs_information / requires_redirect responses).
 const INITIAL_INPUT = {
-  kind: 'initial',
+  kind: 'email_only',
   email: 'ada@example.com',
   zone: 'us',
 } as const;
@@ -158,7 +158,7 @@ describe('performDirectSignup', () => {
     );
 
     const result = await performDirectSignup({
-      kind: 'initial',
+      kind: 'email_only',
       email: 'ada@example.com',
       zone: 'us',
     });
@@ -206,7 +206,7 @@ describe('performDirectSignup', () => {
     );
 
     const result = await performDirectSignup({
-      kind: 'initial',
+      kind: 'email_only',
       email: 'ada@example.com',
       zone: 'us',
     });
@@ -256,7 +256,7 @@ describe('performDirectSignup', () => {
       );
 
       const result = await performDirectSignup({
-        kind: 'initial',
+        kind: 'email_only',
         email: 'ada@example.com',
         zone: 'us',
       });
@@ -287,7 +287,7 @@ describe('performDirectSignup', () => {
     );
 
     const result = await performDirectSignup({
-      kind: 'initial',
+      kind: 'email_only',
       email: 'ada@example.com',
       zone: 'us',
     });
@@ -328,7 +328,7 @@ describe('performDirectSignup', () => {
     );
 
     const result = await performDirectSignup({
-      kind: 'initial',
+      kind: 'email_only',
       email: 'ada@example.com',
       zone: 'us',
     });
@@ -376,7 +376,7 @@ describe('performDirectSignup', () => {
     );
 
     const result = await performDirectSignup({
-      kind: 'initial',
+      kind: 'email_only',
       email: 'ada@example.com',
       zone: 'us',
     });
@@ -423,7 +423,7 @@ describe('performDirectSignup', () => {
     );
 
     const result = await performDirectSignup({
-      kind: 'initial',
+      kind: 'email_only',
       email: 'ada@example.com',
       zone: 'us',
     });
@@ -484,7 +484,7 @@ describe('performDirectSignup', () => {
       );
 
       const result = await performDirectSignup({
-        kind: 'initial',
+        kind: 'email_only',
         email: 'ada@example.com',
         zone: 'us',
       });
@@ -515,7 +515,7 @@ describe('performDirectSignup', () => {
     );
 
     await performDirectSignup({
-      kind: 'initial',
+      kind: 'email_only',
       email: 'ada@example.com',
       zone: 'us',
     });
@@ -539,7 +539,7 @@ describe('performDirectSignup', () => {
 
     expect(observedBody).not.toBeNull();
     expect(observedBody!.full_name).toBe('Ada Lovelace');
-    // Discriminated-union invariant: a `kind: 'follow_up'` input
+    // Discriminated-union invariant: a `kind: 'with_required_fields'` input
     // always carries a complete `terms_acceptance` slot in the body.
     // Verifies that the body-construction switch produces both
     // documents with `accepted: true`.

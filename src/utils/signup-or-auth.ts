@@ -246,13 +246,13 @@ export async function performSignupOrAuth(
 
   // Source tag for the `'legal document source'` telemetry property,
   // derived from what the attempt's body WILL carry:
-  //   - 'follow_up' input → URLs in body → use the source the parser
+  //   - 'with_required_fields' input → URLs in body → use the source the parser
   //     recorded (passed in via input.legalDocumentSource).
-  //   - 'initial' input → body has no terms_acceptance slot → 'unused'.
+  //   - 'email_only' input → body has no terms_acceptance slot → 'unused'.
   // The `needs_information` arm overrides this with `result.legalDocumentSource`
   // because that arm reports what BE produced, not what the caller sent.
   const inputSource: LegalDocumentSource | 'unused' =
-    input.kind === 'follow_up' ? input.legalDocumentSource : 'unused';
+    input.kind === 'with_required_fields' ? input.legalDocumentSource : 'unused';
 
   log.debug('attempting direct signup', { kind: input.kind });
   // performDirectSignup is contracted to catch its own network/parse errors
@@ -287,7 +287,7 @@ export async function performSignupOrAuth(
         status: 'requires_redirect',
         zone: input.zone,
         // Existing-user redirect path. For initial-kind probes, body
-        // carried no terms_acceptance → 'unused'. For follow_up calls
+        // carried no terms_acceptance → 'unused'. For with_required_fields calls
         // that get redirected (e.g. an existing-user email surfaces
         // late), body did carry terms_acceptance from the input's
         // source — pass that through.
@@ -336,7 +336,7 @@ export async function performSignupOrAuth(
         status,
         zone: input.zone,
         // Source comes from the input — `initial` calls had no
-        // terms_acceptance in the body ('unused'), `follow_up` calls
+        // terms_acceptance in the body ('unused'), `with_required_fields` calls
         // had it from whichever source the parser recorded.
         'legal document source': inputSource,
       });
@@ -389,7 +389,7 @@ export async function performSignupOrAuth(
     // tokens straight away without needing the field — fall back to an
     // empty string here.
     const fullNameForFallback =
-      input.kind === 'follow_up' ? input.fullName : '';
+      input.kind === 'with_required_fields' ? input.fullName : '';
     const parts = fullNameForFallback.trim().split(/\s+/);
     user = {
       id: 'pending',
@@ -428,7 +428,7 @@ export async function performSignupOrAuth(
       'has env with api key': fetchResult.hasEnvWithApiKey,
       'user fetch retry count': fetchResult.retryCount,
       // Source tag accurately reflects what the attempt's body carried:
-      // initial calls have no terms_acceptance ('unused'), follow_up
+      // initial calls have no terms_acceptance ('unused'), with_required_fields
       // calls have it from whichever URL source the parser recorded
       // (passed in via input.legalDocumentSource). This is what unlocks
       // adoption dashboards once the BE flag flips ON — they can slice

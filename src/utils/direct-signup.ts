@@ -56,7 +56,7 @@ export type LegalDocumentSource = 'server' | 'local';
 //
 // Exported because non-TUI callers (CI / agent / classic modes via
 // `src/commands/helpers.ts`) need the same bundle to construct a
-// follow_up signup body — those modes never traverse the parser's
+// with_required_fields signup body — those modes never traverse the parser's
 // needs_information round-trip, so they synthesize the bundle directly.
 //
 // **Mock-fragility warning:** adding a new entry here also requires
@@ -218,17 +218,17 @@ function isCallerAbort(error: unknown, signal?: AbortSignal): boolean {
  * with a one-line spread after its email-non-null guard, without any
  * risk of the two shapes silently diverging.
  *
- * - `kind: 'initial'` — the wizard hasn't heard from the BE yet during
+ * - `kind: 'email_only'` — the wizard hasn't heard from the BE yet during
  *   this ceremony. Body carries only `email` (plus envelope fields).
  *   The BE decides what's needed and responds `needs_information`,
  *   `requires_redirect` (existing user), or `oauth` (success).
  *
- * - `kind: 'follow_up'` — the wizard received `needs_information` on a
+ * - `kind: 'with_required_fields'` — the wizard received `needs_information` on a
  *   prior call, the user has now satisfied every required field, and
  *   we're submitting the complete body. `fullName` and
  *   `legalDocumentBundle` are both required at the type level — the
  *   discriminated union enforces that callers can't construct a
- *   `'follow_up'` shape without all of them.
+ *   `'with_required_fields'` shape without all of them.
  *
  * Why this is binary: the wizard's flow gate (`requiredSatisfied` in
  * `flows.ts`) prevents `SigningUp` from re-firing until every required
@@ -238,7 +238,7 @@ function isCallerAbort(error: unknown, signal?: AbortSignal): boolean {
  */
 export type SignupShape<Email extends string | null> =
   | {
-      kind: 'initial';
+      kind: 'email_only';
       email: Email;
       zone: AmplitudeZone;
       /**
@@ -253,7 +253,7 @@ export type SignupShape<Email extends string | null> =
       signal?: AbortSignal;
     }
   | {
-      kind: 'follow_up';
+      kind: 'with_required_fields';
       email: Email;
       fullName: string;
       legalDocumentBundle: LegalDocumentBundle;
@@ -323,9 +323,9 @@ export async function performDirectSignup(
     kind: input.kind,
   });
 
-  // Build the request body via discriminated switch — `'initial'` shapes
-  // produce the bare envelope, `'follow_up'` shapes add `full_name` and
-  // `terms_acceptance`. The type system enforces "follow_up always has
+  // Build the request body via discriminated switch — `'email_only'` shapes
+  // produce the bare envelope, `'with_required_fields'` shapes add `full_name` and
+  // `terms_acceptance`. The type system enforces "with_required_fields always has
   // both collected fields" at the call site, so the body construction
   // here doesn't need runtime guards on optional fields.
   const baseBody = {
@@ -337,7 +337,7 @@ export async function performDirectSignup(
   };
 
   const requestBody: Record<string, unknown> =
-    input.kind === 'initial'
+    input.kind === 'email_only'
       ? baseBody
       : {
           ...baseBody,

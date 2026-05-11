@@ -71,14 +71,14 @@ export const SigningUpScreen = ({ store }: SigningUpScreenProps) => {
       // narrowing guard below should be unreachable in production —
       // it exists to satisfy the type system without `!` non-null
       // assertions.
-      const isFollowUp = session.signupRequiredFields !== null;
+      const hasRequiredFields = session.signupRequiredFields !== null;
 
       let input: SignupOrAuthInput;
-      if (isFollowUp) {
-        // Narrow + validate the session fields a follow_up input needs.
+      if (hasRequiredFields) {
+        // Narrow + validate the session fields a with_required_fields input needs.
         // The schema's strictness matches what the prior manual null-
         // check ladder did (just non-null on each field) — centralized
-        // so the "what makes a follow_up session complete" contract
+        // so the "what makes a with_required_fields session complete" contract
         // lives next to the related ProvisioningReadySchema.
         const ready = FollowUpSessionReadySchema.safeParse(session);
         if (!ready.success) {
@@ -93,7 +93,7 @@ export const SigningUpScreen = ({ store }: SigningUpScreenProps) => {
           return;
         }
         input = {
-          kind: 'follow_up',
+          kind: 'with_required_fields',
           email,
           // Spread the schema-narrowed fields. `legalDocumentSource` is
           // the parser-recorded source, passed through so telemetry on
@@ -106,7 +106,7 @@ export const SigningUpScreen = ({ store }: SigningUpScreenProps) => {
           signal,
         };
       } else {
-        input = { kind: 'initial', email, zone, signal };
+        input = { kind: 'email_only', email, zone, signal };
       }
 
       log.debug('posting signup', { kind: input.kind });
