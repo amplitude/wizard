@@ -46,12 +46,12 @@
 
 import { Box, Text } from 'ink';
 import { useMemo, type ReactElement } from 'react';
-import path from 'path';
 import { Colors, Icons } from '../styles.js';
 import { BrailleSpinner } from './BrailleSpinner.js';
 import type { FileWriteEntry } from '../store.js';
 import { getFileChangeLedger } from '../../../lib/file-change-ledger.js';
 import { summarizeLedgerPath } from '../../../lib/file-change-diff.js';
+import { displayPath } from '../utils/display-path.js';
 
 /**
  * Per-path aggregation produced by `dedupeByPath` below. Carries the
@@ -186,25 +186,9 @@ const dedupeByPath = (
   );
 };
 
-/**
- * Relativize an absolute path against the install dir for display. Falls
- * back to the basename if the path lives outside the project (rare, but
- * possible — skill installs sometimes touch tmp dirs).
- *
- * Uses `path.sep` rather than a hardcoded `/` so the boundary check works
- * on Windows (where ledger paths use `\`).
- */
-const displayPath = (raw: string, installDir?: string): string => {
-  if (
-    installDir &&
-    raw.startsWith(installDir) &&
-    (raw.length === installDir.length || raw[installDir.length] === path.sep)
-  ) {
-    const rel = path.relative(installDir, raw);
-    return rel === '' ? path.basename(raw) : rel;
-  }
-  return path.isAbsolute(raw) ? path.basename(raw) : raw;
-};
+// `displayPath` lives in `../utils/display-path.ts` so DiffViewer,
+// FileWritesPanel, and ConsoleView all agree on the out-of-project
+// fallback (basename), not just the in-project case.
 
 export const FileWritesPanel = ({
   entries,

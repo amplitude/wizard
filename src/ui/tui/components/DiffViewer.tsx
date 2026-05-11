@@ -25,9 +25,9 @@
  */
 
 import { Box, Text } from 'ink';
-import path from 'path';
 import { Colors, Icons } from '../styles.js';
 import type { FileDiffSummary } from '../../../lib/file-change-diff.js';
+import { displayPath } from '../utils/display-path.js';
 
 interface DiffViewerProps {
   /** All file diffs from the ledger. */
@@ -52,18 +52,6 @@ const OP_COLORS: Record<FileDiffSummary['operation'], string> = {
   create: Colors.success,
   modify: Colors.warning,
   delete: Colors.error,
-};
-
-const displayPath = (raw: string, installDir?: string): string => {
-  if (
-    installDir &&
-    raw.startsWith(installDir) &&
-    (raw.length === installDir.length || raw[installDir.length] === path.sep)
-  ) {
-    const rel = path.relative(installDir, raw);
-    return rel === '' ? path.basename(raw) : rel;
-  }
-  return raw;
 };
 
 /**

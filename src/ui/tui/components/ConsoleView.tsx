@@ -44,6 +44,7 @@ import {
   summarizeLedgerPath,
 } from '../../../lib/file-change-diff.js';
 import { formatChangeCounts } from './DiffViewer.js';
+import { displayPath } from '../utils/display-path.js';
 import path from 'node:path';
 import { analytics } from '../../../utils/analytics.js';
 import { logToFile } from '../../../utils/debug.js';
@@ -308,33 +309,26 @@ function executeCommand(raw: string, store: WizardStore): string | void {
       // unrelated file in the ledger just to discard them. The summary
       // mode below still needs the full sweep for the +N/-M tree.
       if (arg) {
-        // Resolve relative paths against installDir so users can type
-        // `/diff src/amplitude.ts` instead of pasting an absolute path.
-        const target = path.isAbsolute(arg)
-          ? arg
-          : path.resolve(store.session.installDir, arg);
-        const found = summarizeLedgerPath(ledger, target);
+        // Hand the raw arg straight to `summarizeLedgerPath` — it already
+        // normalizes relative paths against the ledger's install dir, so
+        // re-resolving against `store.session.installDir` here would risk
+        // silent divergence (e.g. trailing-slash mismatch) without buying
+        // anything. The fallback below covers the user-friendly suffix
+        // case (`/diff amplitude.ts` matching `<installDir>/src/lib/
+        // amplitude.ts`) by walking entries directly.
+        let found = summarizeLedgerPath(ledger, arg);
         if (!found) {
-          // Fallback: walk the ledger entries directly so a user-friendly
-          // suffix match (e.g. `/diff amplitude.ts` matching
-          // `<installDir>/src/lib/amplitude.ts`) still works without
-          // forcing a second full diff sweep up-front.
           const entries = ledger?.getEntries() ?? [];
           const suffix = path.sep + arg;
           const suffixEntry = entries.find((e) => e.path.endsWith(suffix));
-          const suffixFound = suffixEntry
-            ? summarizeLedgerPath(ledger, suffixEntry.path)
-            : null;
-          if (!suffixFound) {
-            store.setCommandFeedback(
-              `No diff captured for "${arg}". Try /diff with no argument to see all changed files.`,
-              15_000,
-            );
-            break;
+          if (suffixEntry) {
+            found = summarizeLedgerPath(ledger, suffixEntry.path);
           }
+        }
+        if (!found) {
           store.setCommandFeedback(
-            `${suffixFound.operation.toUpperCase()} ${suffixFound.path}  ${formatChangeCounts(suffixFound.additions, suffixFound.deletions)}\n\n${suffixFound.patch}`,
-            60_000,
+            `No diff captured for "${arg}". Try /diff with no argument to see all changed files.`,
+            15_000,
           );
           break;
         }
@@ -362,11 +356,10 @@ function executeCommand(raw: string, store: WizardStore): string | void {
       const totalAdd = diffs.reduce((s, d) => s + d.additions, 0);
       const totalDel = diffs.reduce((s, d) => s + d.deletions, 0);
       const lines = diffs.map((d) => {
-        // Use path.sep so this works on Windows. Belt-and-braces: also
-        // accept the unit-test/POSIX form by checking either separator.
-        const rel = d.path.startsWith(store.session.installDir + path.sep)
-          ? path.relative(store.session.installDir, d.path)
-          : d.path;
+        // Funnel through the shared `displayPath` helper so the `/diff`
+        // summary, the live FileWritesPanel, and the outro DiffViewer all
+        // agree on the out-of-project fallback (basename, not raw path).
+        const rel = displayPath(d.path, store.session.installDir);
         return `${d.operation.toUpperCase().padEnd(6)} ${rel}  ${formatChangeCounts(d.additions, d.deletions)}`;
       });
       const summary = `${diffs.length} file${

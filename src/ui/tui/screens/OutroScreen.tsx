@@ -105,8 +105,17 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
   // render frame (Bugbot: outro is mounted post-run, ledger is frozen, so a
   // single computation per mount is correct). The ledger reference itself is
   // stable for the lifetime of the wizard run.
+  //
+  // `includePatch: false` skips the redundant `createPatch` call per entry —
+  // we only render DiffViewer in summary mode here (no `filePath` prop), and
+  // summary mode reads `additions`/`deletions`/`operation` only, never the
+  // unified-patch text. Computing the patch for every file (up to the ledger
+  // FIFO cap) doubled the diff work and could cause a visible hang on outro
+  // mount after a large run.
   const meaningfulDiffs = useMemo(() => {
-    const diffs = summarizeLedgerDiffs(getFileChangeLedger());
+    const diffs = summarizeLedgerDiffs(getFileChangeLedger(), {
+      includePatch: false,
+    });
     return diffs.filter(
       (d) => d.additions > 0 || d.deletions > 0 || d.operation !== 'modify',
     );
