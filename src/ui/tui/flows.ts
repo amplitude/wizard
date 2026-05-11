@@ -261,23 +261,19 @@ export const FLOWS: Record<Flow, FlowEntry[]> = {
         if (!isCreateAccountOnboarding(store.session)) return false;
         if (store.session.signupRequiredFields === null) return false;
         if (store.session.tosAccepted === null) return false;
-        // Reset ToS state (`tosAccepted` and the lock-step legal-doc
-        // bundle/source) BEFORE the abandonment cascade decision. Each
-        // screen's revert should fully reset its own state instead of
-        // trusting a downstream cascade — even though
-        // `_resetCeremonyKeys` would re-null these on the email step,
-        // calling `resetToS` here means correctness doesn't depend on
-        // the cascade's reach. Idempotent: the eventual
-        // `_resetCeremonyKeys` re-nulls already-null state.
-        store.resetToS();
-        // Walk past on abandonment: clearing tosAccepted alone leaves
-        // signupAbandoned=true, which still gates SigningUp.show off.
-        // The user would re-accept ToS and land back on Auth without
-        // any retry — a dead-end. Letting back-nav continue to
-        // SignupEmail.revert clears the whole ceremony via
-        // _resetCeremonyKeys (which resets signupAbandoned), giving
-        // the user a clean restart.
+        // Walk past on abandonment BEFORE touching ToS state. `resetToS`
+        // emits a 'back navigation to tos' analytics event as a side
+        // effect of clearing tosAccepted + the lock-step legal-doc
+        // bundle/source — appropriate when the user explicitly
+        // back-navigated to ToS, but misleading during an abandonment
+        // cascade (no user action targeted ToS). Letting back-nav
+        // continue to SignupEmail.revert clears the whole ceremony via
+        // _resetCeremonyKeys (which re-nulls tosAccepted +
+        // legalDocumentBundle + legalDocumentSource alongside the rest
+        // of the ceremony, and resets signupAbandoned), giving the user
+        // a clean restart without emitting the misattributed event.
         if (store.session.signupAbandoned) return false;
+        store.resetToS();
       },
       isWall: signupCommittedWall,
     },
