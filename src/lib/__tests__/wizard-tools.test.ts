@@ -1156,6 +1156,59 @@ describe('WIZARD_TOOL_NAMES', () => {
   });
 });
 
+/**
+ * confirm_event_plan tool description — must remind the agent of the
+ * two instrumentation-quality contracts the commandments pin:
+ *
+ *   1. Every `track()` call ships with 1-3 user-meaningful properties.
+ *   2. The Setup Report reconciles every approved-plan event into the
+ *      Instrumented / Autocaptured / Dropped buckets with totals matching
+ *      the plan size.
+ *
+ * The agent reads the tool description right when it assembles the
+ * events array — it's the single most reliable surface to land the
+ * reminder. Pin both contracts so a future copy edit can't silently
+ * drop one half.
+ */
+describe('confirm_event_plan tool description — instrumentation contracts', () => {
+  it('reminds the agent of the per-track property requirement', async () => {
+    const tmpDir = makeTmpDir();
+    try {
+      const tools = (await getTools(tmpDir)) as Array<{
+        name: string;
+        description?: string;
+        handler: ToolDef['handler'];
+      }>;
+      const tool = tools.find((t) => t.name === 'confirm_event_plan');
+      expect(tool, 'confirm_event_plan must be registered').toBeDefined();
+      expect(tool?.description).toContain('1-3 user-meaningful properties');
+    } finally {
+      cleanup(tmpDir);
+    }
+  });
+
+  it('reminds the agent of the Setup Report bucket reconciliation', async () => {
+    const tmpDir = makeTmpDir();
+    try {
+      const tools = (await getTools(tmpDir)) as Array<{
+        name: string;
+        description?: string;
+        handler: ToolDef['handler'];
+      }>;
+      const tool = tools.find((t) => t.name === 'confirm_event_plan');
+      expect(tool, 'confirm_event_plan must be registered').toBeDefined();
+      expect(tool?.description).toContain('Setup Report');
+      expect(tool?.description).toContain(
+        'Instrumented / Autocaptured / Dropped',
+      );
+      // The arithmetic invariant — bucket totals must match the plan size.
+      expect(tool?.description).toMatch(/totals matching the plan size/i);
+    } finally {
+      cleanup(tmpDir);
+    }
+  });
+});
+
 describe('resolveWizardAllowedToolNames', () => {
   const envKey = 'AMPLITUDE_WIZARD_SKILL_TIERS';
 

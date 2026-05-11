@@ -84,9 +84,37 @@ Do NOT add a fifth — internal steps (env var writes, Content Security Policy e
 
   'After installing the SDK and adding init code, but BEFORE writing any track() calls, you MUST call confirm_event_plan. Naming, plan sizing, funnel/async/symmetry/identify, autocapture overlap, and `.amplitude/events.json` ownership — read `.claude/skills/wizard-prompt-supplement/references/confirm-event-plan-contract.md` before the call. Invariants: confirm_event_plan owns the initial write of `.amplitude/events.json` (canonical shape `[{name, description}]`); do not pre-write a conflicting shape, do not create the legacy root `.amplitude-events.json` / `.amplitude-dashboard.json`; if skipped, do not instrument.',
 
+  `Every \`track()\` call you write MUST include 1-3 properties that capture the user-meaningful context of the action. A bare event name is not enough — the goal is for the event to answer a question in Amplitude (e.g., "what model was used for that AI generation?" "which room was joined?" "how long did the export take?"). Choose properties from information the surrounding code already has access to — local variables, function arguments, state — never invent or hand-roll property values.
+
+Property naming follows lowercase-with-spaces or snake_case based on the project's existing convention (detected via the \`discover-analytics-patterns\` skill). If no convention exists, use snake_case.
+
+Examples:
+  // GOOD — captures user-meaningful context the analyst needs
+  amplitude.track("ai diagram generated", {
+    prompt_length: prompt.length,
+    model: "claude-sonnet-4-6",
+    latency_ms: Date.now() - startedAt,
+  });
+  amplitude.track("collaboration session joined", { room_id: roomId });
+  amplitude.track("canvas exported", { format: "png", element_count: elements.length });
+
+  // BAD — bare event with no context; the chart can only count occurrences
+  amplitude.track("scene saved to backend");
+  amplitude.track("ai diagram generated");
+
+If you genuinely cannot capture any property at a callsite (e.g., a pure lifecycle event like \`app loaded\` where the only available context is \`frame_id\` and you've already captured it), prefer a single property over zero — and document the gap in the Setup Report's "Instrumented" table as "(no properties captured — context unavailable at callsite)".`,
+
   'Post-instrumentation `.amplitude/events.json` array shape — read `.claude/skills/wizard-prompt-supplement/references/post-instrumentation-events-and-dashboard.md`. This run does NOT create charts or dashboards: do NOT call `record_dashboard` / `create_chart` / `create_dashboard` / `query_dataset` / any Amplitude MCP chart/dashboard tool — those are deferred to the `amplitude-wizard dashboard` command, which runs after ingestion catches up.',
 
   'Setup report format and `<wizard-report>` tags — read `.claude/skills/wizard-prompt-supplement/references/setup-report-requirements.md`. You MUST write `amplitude-setup-report.md` at the project root before the run ends.',
+
+  `The Setup Report (\`amplitude-setup-report.md\`) MUST reconcile every event in the approved \`.amplitude/events.json\` plan. Each event lands in exactly one of three buckets:
+
+  - **Instrumented** — a \`track()\` call was wired. Show the file path. Include any properties captured.
+  - **Covered by autocapture** — no \`track()\` call needed because autocapture catches it. Name the specific autocapture surface (e.g., "element clicks via autocapture.elementInteractions" or "page views via autocapture.pageViews"). Generic "autocapture handles it" is insufficient — be specific so the user can verify.
+  - **Dropped** — intentionally not wired AND not autocaptured. Explain why (e.g., "this event would require backend instrumentation we cannot reach from the client").
+
+The sum of events across all three buckets MUST equal the count in the approved plan. A bullet count mismatch is a contract violation that hides work the user paid for from the agent (in tokens / time) and never received.`,
 
   'Prefer `report_status` (wizard-tools MCP) for progress updates and fatal errors. Use `kind="status"` for in-progress updates (appears in the spinner). Use `kind="error"` for fatal halts (codes: `MCP_MISSING`, `RESOURCE_MISSING`). Legacy `[STATUS]` / `[ERROR-MCP-MISSING]` / `[ERROR-RESOURCE-MISSING]` text markers from older bundled skills are still recognized for back-compat; new code should use `report_status`.',
 

@@ -358,6 +358,104 @@ describe('discovery parallelism commandment', () => {
  * regression — and the hallucination-prone discovery loop — comes
  * straight back.
  */
+/**
+ * track() property mandate + Setup Report reconciliation.
+ *
+ * Excalidraw live test exposed two failure modes:
+ *   1. 10 of 12 approved events were instrumented as bare `track("name")`
+ *      with no properties — analyst can only count occurrences, not slice.
+ *   2. 2 events were silently dropped; the Setup Report celebrated "10
+ *      instrumented" without explaining what happened to the other 2.
+ *
+ * These commandments raise the floor: every track() call carries 1-3
+ * properties, and the Setup Report reconciles every approved-plan event
+ * into Instrumented / Autocaptured / Dropped buckets with totals matching
+ * the plan. Tests pin the exact sentinel phrasing so a future copy edit
+ * can't quietly soften the rule.
+ */
+describe('track() property mandate commandment', () => {
+  const text = getWizardCommandments();
+
+  it('mandates 1-3 properties on every track() call', () => {
+    // Exact sentinel from the rule — keeps the property-count contract
+    // pinned across copy edits. The rule wraps `track()` in backticks
+    // so the agent renders it as code.
+    expect(text).toContain(
+      'Every `track()` call you write MUST include 1-3 properties',
+    );
+  });
+
+  it('shows the GOOD example with prompt_length / model / latency_ms', () => {
+    // The shape of the GOOD example is the durable teaching artifact —
+    // it shows the agent how to mine context from local variables
+    // without inventing values. Pin the exact track call.
+    expect(text).toContain('amplitude.track("ai diagram generated"');
+    expect(text).toContain('prompt_length: prompt.length');
+    expect(text).toContain('model: "claude-sonnet-4-6"');
+    expect(text).toContain('latency_ms: Date.now() - startedAt');
+  });
+
+  it('shows a BAD bare-event example so the failure mode is named', () => {
+    // The Excalidraw failure mode — bare `track("scene saved to backend")`
+    // with no properties. Naming it as BAD makes the contrast unmissable.
+    expect(text).toContain('// BAD');
+    expect(text).toContain('amplitude.track("scene saved to backend")');
+  });
+
+  it('carves out a single-property fallback for unavoidable lifecycle events', () => {
+    // The rule has to leave room for the rare "no useful context here"
+    // callsite. The carve-out tells the agent: prefer 1 property over 0,
+    // and document the gap in the Setup Report. Lock the carve-out
+    // language so a future edit doesn't accidentally turn the rule
+    // absolute (which would lead to invented property values).
+    expect(text).toContain('prefer a single property over zero');
+    expect(text).toContain('no properties captured — context unavailable');
+  });
+});
+
+describe('Setup Report reconciliation commandment', () => {
+  const text = getWizardCommandments();
+
+  it('mandates reconciling every approved-plan event into three buckets', () => {
+    // Exact sentinel: the rule must name the file and the reconcile verb.
+    expect(text).toContain(
+      'MUST reconcile every event in the approved `.amplitude/events.json` plan',
+    );
+  });
+
+  it('names all three buckets with the exact labels', () => {
+    // The bucket labels are the contract — they appear verbatim in the
+    // Setup Report's reconciliation section, so the agent and the
+    // downstream renderer both need a single source of truth.
+    expect(text).toContain('**Instrumented**');
+    expect(text).toContain('**Covered by autocapture**');
+    expect(text).toContain('**Dropped**');
+  });
+
+  it('forces specific autocapture-surface naming, not the generic claim', () => {
+    // The Excalidraw failure mode wasn't just dropped events — even when
+    // the agent did report autocapture coverage, it said "autocapture
+    // handles it" without naming WHICH surface. The user can't verify
+    // that. Lock the specificity requirement and the explicit
+    // counter-example phrasing in.
+    expect(text).toContain(
+      'Generic "autocapture handles it" is insufficient — be specific',
+    );
+    // Concrete examples that demonstrate the expected specificity.
+    expect(text).toContain('autocapture.elementInteractions');
+    expect(text).toContain('autocapture.pageViews');
+  });
+
+  it('mandates the bucket sum equal the approved plan size', () => {
+    // The arithmetic invariant is what catches the silent-drop bug:
+    // if the Setup Report's bucket totals don't equal the plan size,
+    // the agent has hidden work. Lock the equality requirement in.
+    expect(text).toContain(
+      'sum of events across all three buckets MUST equal the count',
+    );
+  });
+});
+
 describe('pre-flight context commandment', () => {
   const text = getWizardCommandments();
 
