@@ -38,6 +38,10 @@ export interface CommandDef {
 
 export const COMMANDS: CommandDef[] = [
   {
+    cmd: '/help',
+    desc: 'List every slash command and what it does',
+  },
+  {
     cmd: '/region',
     desc: 'Switch data-center region (US or EU)',
     requiresIdle: true,

@@ -109,6 +109,21 @@ function executeCommand(raw: string, store: WizardStore): string | void {
   }
 
   switch (cmd) {
+    case '/help': {
+      // CLAUDE.md documents `/help` as canonical but the registry was
+      // missing it — users typed `/help` and got nothing. Render a
+      // categorized list of every slash command + its description.
+      const lines = ['Slash commands:', ''];
+      for (const c of COMMANDS) {
+        if (c.cmd === '/help') continue;
+        const idleNote = c.requiresIdle ? ' [paused during runs]' : '';
+        lines.push(`  ${c.cmd.padEnd(18)} ${c.desc}${idleNote}`);
+      }
+      lines.push('');
+      lines.push('Key bindings: [/] commands · [Tab] ask · [Esc] back · [Ctrl+C] quit');
+      store.setCommandFeedback(lines.join('\n'), 30_000);
+      break;
+    }
     case '/region':
       store.setRegionForced();
       break;
