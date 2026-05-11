@@ -169,8 +169,45 @@ describe('SlashCommandInput Tab accepts highlighted suggestion', () => {
 
     const frame = sanitize(view.lastFrame());
     expect(frame).toContain('navigate');
-    expect(frame).toContain('Tab/Enter run');
+    // Tab only completes (fills the input); Enter is what actually runs.
+    // Make sure the footer spells them out separately so users don't think
+    // Tab will submit (Bugbot 3220814211).
+    expect(frame).toContain('Tab complete');
+    expect(frame).toContain('Enter run');
+    expect(frame).not.toContain('Tab/Enter run');
     expect(frame).toContain('Esc cancel');
+    view.unmount();
+  });
+
+  it('keeps the palette open after Tab inserts the trailing space', async () => {
+    // Regression for Bugbot 3220814221: Tab fills `/debug ` (with trailing
+    // space). Before the fix, `query` became "debug " which matched nothing
+    // and `filtered` emptied → palette and footer disappeared mid-completion.
+    // Filter now keys off the first whitespace-delimited word, so the
+    // completed command stays in the visible list.
+    const view = render(
+      <SlashCommandInput
+        commands={commands}
+        isActive
+        onSubmit={() => {}}
+        onDeactivate={() => {}}
+      />,
+    );
+    await waitForFrame();
+    await waitForFrame();
+
+    view.stdin.write('/d');
+    await waitForFrame();
+    view.stdin.write(TAB);
+    await waitForFrame();
+    await waitForFrame();
+
+    const frame = sanitize(view.lastFrame());
+    // Completed command still highlighted in the palette.
+    expect(frame).toContain('/debug');
+    // Footer still rendered → palette didn't collapse on trailing space.
+    expect(frame).toContain('Tab complete');
+    expect(frame).toContain('Enter run');
     view.unmount();
   });
 });

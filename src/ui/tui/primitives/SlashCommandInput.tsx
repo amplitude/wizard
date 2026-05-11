@@ -60,7 +60,16 @@ export const SlashCommandInput = ({
   }, [isActive]);
 
   const isSlashMode = computeIsSlashMode(value, commands);
-  const query = value.slice(1).toLowerCase();
+  // Match the filter against the first whitespace-delimited word, not the
+  // full value. After Tab fills `/debug ` (Raycast/Slack convention: trailing
+  // space lets the user start typing args) or once the user types
+  // `/debug arg`, the trailing chars would otherwise make `cmd.startsWith`
+  // and the description match fail, emptying `filtered` and tearing down
+  // the palette mid-completion. Slash-mode itself already keys off the
+  // first word (see `computeIsSlashMode`), so this keeps the two checks
+  // consistent.
+  const firstWord = value.split(' ')[0] ?? '';
+  const query = firstWord.slice(1).toLowerCase();
   const filtered = isSlashMode
     ? commands
         .filter(
@@ -218,12 +227,15 @@ export const SlashCommandInput = ({
                 )}
                 {/*
                  * Affordance footer: name every key the palette responds to
-                 * so users don't have to guess which of Tab/Enter submits vs.
-                 * completes. Rendered only when there's at least one match,
-                 * matching the candidate list's visibility (see outer guard).
+                 * so users don't have to guess which of Tab/Enter does what.
+                 * Tab only *completes* the highlighted suggestion (fills the
+                 * input with `<cmd> `); Enter is what actually runs the
+                 * command. Spell them out separately so the hint matches the
+                 * Tab handler at line ~118. Rendered only when there's at
+                 * least one match (see outer guard).
                  */}
                 <Text color={Colors.muted}>
-                  {'  '}↑↓ navigate · Tab/Enter run · Esc cancel
+                  {'  '}↑↓ navigate · Tab complete · Enter run · Esc cancel
                 </Text>
               </>
             );
