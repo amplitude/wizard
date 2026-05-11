@@ -741,13 +741,12 @@ export interface StallStatusData {
  * agent that subscribes to `stall_status` sees the same coaching
  * cadence the in-terminal user would.
  */
-export const STALL_TIER_THRESHOLDS_MS: Readonly<
-  Record<StallTier, number>
-> = Object.freeze({
-  noticed: 10_000,
-  concerning: 30_000,
-  critical: 60_000,
-});
+export const STALL_TIER_THRESHOLDS_MS: Readonly<Record<StallTier, number>> =
+  Object.freeze({
+    noticed: 10_000,
+    concerning: 30_000,
+    critical: 60_000,
+  });
 
 /**
  * Pure helper — derive the highest stall tier reached for a given
@@ -1442,9 +1441,7 @@ export function classifyWriteOperation(
  * not found in file" — the more-specific "string to replace" signal
  * wins over the generic "not found" substring.
  */
-export function classifyFileChangeError(
-  message: string,
-): FileChangeErrorClass {
+export function classifyFileChangeError(message: string): FileChangeErrorClass {
   const lower = message.toLowerCase();
   if (
     lower.includes('permission denied') ||

@@ -126,9 +126,12 @@ export function extractToolFailureMessage(
       return msg;
     }
     // Fallback: peek at a stringified `content[0].text` shape some SDK
-    // versions use for tool errors.
+    // versions use for tool errors. `Array.isArray` narrows `obj.content`
+    // to `any[]` because `unknown[]` isn't expressible from the runtime
+    // check — but we treat each entry as `unknown` and re-narrow before
+    // reading any property.
     if (Array.isArray(obj.content) && obj.content.length > 0) {
-      const first = obj.content[0];
+      const first: unknown = obj.content[0];
       if (
         typeof first === 'object' &&
         first !== null &&

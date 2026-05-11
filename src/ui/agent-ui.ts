@@ -1332,11 +1332,7 @@ export class AgentUI implements WizardUI {
   // orchestrators — a tier fires at most once per stall window, reset
   // by `resetStallStatus()` when activity resumes.
 
-  private _lastStallTier:
-    | 'noticed'
-    | 'concerning'
-    | 'critical'
-    | null = null;
+  private _lastStallTier: 'noticed' | 'concerning' | 'critical' | null = null;
 
   emitStallStatus(data: {
     tier: 'noticed' | 'concerning' | 'critical';

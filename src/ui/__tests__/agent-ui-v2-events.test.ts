@@ -223,9 +223,21 @@ describe('AgentUI.emitStallStatus (v2: coaching tiers)', () => {
 
   it('dedups same-tier emissions until resetStallStatus is called', () => {
     const ui = new AgentUI();
-    ui.emitStallStatus?.({ tier: 'noticed', durationMs: 10_000, lastActivity: 0 });
-    ui.emitStallStatus?.({ tier: 'noticed', durationMs: 12_000, lastActivity: 0 });
-    ui.emitStallStatus?.({ tier: 'noticed', durationMs: 15_000, lastActivity: 0 });
+    ui.emitStallStatus?.({
+      tier: 'noticed',
+      durationMs: 10_000,
+      lastActivity: 0,
+    });
+    ui.emitStallStatus?.({
+      tier: 'noticed',
+      durationMs: 12_000,
+      lastActivity: 0,
+    });
+    ui.emitStallStatus?.({
+      tier: 'noticed',
+      durationMs: 15_000,
+      lastActivity: 0,
+    });
     let events = eventsOfType(writes, 'progress').filter(
       (e) => e.data?.event === 'stall_status',
     );
@@ -233,7 +245,11 @@ describe('AgentUI.emitStallStatus (v2: coaching tiers)', () => {
 
     // After reset, the same tier can fire again (next stall window).
     ui.resetStallStatus?.();
-    ui.emitStallStatus?.({ tier: 'noticed', durationMs: 10_000, lastActivity: 0 });
+    ui.emitStallStatus?.({
+      tier: 'noticed',
+      durationMs: 10_000,
+      lastActivity: 0,
+    });
     events = eventsOfType(writes, 'progress').filter(
       (e) => e.data?.event === 'stall_status',
     );
@@ -392,9 +408,9 @@ describe('classifyFileChangeError', () => {
   });
 
   it('classifies edit syntax failures', () => {
-    expect(
-      classifyFileChangeError('String to replace not found in file'),
-    ).toBe('syntax');
+    expect(classifyFileChangeError('String to replace not found in file')).toBe(
+      'syntax',
+    );
     expect(classifyFileChangeError('Found multiple matches: 3')).toBe('syntax');
     expect(classifyFileChangeError('Found 0 matches')).toBe('syntax');
     expect(classifyFileChangeError('SyntaxError: Unexpected token')).toBe(
