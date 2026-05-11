@@ -287,7 +287,8 @@ describe('SlashCommandInput Tab accepts highlighted suggestion', () => {
     // override the user's explicit `/cmd ` typed value. Documenting the
     // choice here: trailing-space-without-args submits verbatim, not
     // palette-picked, because the presence of a space signals intent to
-    // pass args even when none are typed yet.
+    // pass args even when none are typed yet. Bugbot 3221028494: detect
+    // hasArgs on the *untrimmed* value so the trailing space survives.
     let submitted: string | null = null;
 
     const view = render(
@@ -317,6 +318,41 @@ describe('SlashCommandInput Tab accepts highlighted suggestion', () => {
     // (because `value` contained a space before trim), not the palette
     // pick branch. Either way the user-visible result is `/feedback`.
     expect(submitted).toBe('/feedback');
+    view.unmount();
+  });
+
+  it('partial command with trailing space submits verbatim (no palette-pick promotion)', async () => {
+    // Regression for Bugbot 3221028494. Before the fix, `hasArgs` was
+    // computed on the trimmed value, so `/de ` (partial cmd + space)
+    // was indistinguishable from `/de` and would silently palette-pick
+    // `/debug`. After the fix, the trailing space signals "I'm typing
+    // args" — Enter must submit `/de` verbatim (downstream will report
+    // "Unknown command: /de"), not silently expand to `/debug`.
+    let submitted: string | null = null;
+
+    const view = render(
+      <SlashCommandInput
+        commands={commands}
+        isActive
+        onSubmit={(v) => {
+          submitted = v;
+        }}
+        onDeactivate={() => {}}
+      />,
+    );
+    await waitForFrame();
+    await waitForFrame();
+
+    for (const ch of '/de ') {
+      view.stdin.write(ch);
+      await waitForFrame();
+    }
+    await waitForFrame();
+    view.stdin.write('\r');
+    await waitForFrame();
+    await waitForFrame();
+
+    expect(submitted).toBe('/de');
     view.unmount();
   });
 

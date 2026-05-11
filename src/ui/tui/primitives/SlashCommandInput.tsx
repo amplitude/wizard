@@ -111,7 +111,11 @@ export const SlashCommandInput = ({
         //     `/feedback` and silently drop the message (Bugbot
         //     3220907967).
         const trimmed = value.trim();
-        const hasArgs = trimmed.includes(' ');
+        // Detect "has args" on the *untrimmed* value so a trailing space
+        // — the universal "now I'm typing args" affordance (and the
+        // exact byte Tab completion plants) — routes to verbatim submit
+        // instead of palette-pick. Bugbot 3221028494.
+        const hasArgs = /\s/.test(value.replace(/^\s+/, ''));
         if (!hasArgs && isSlashMode && filtered.length > 0) {
           onSubmit(filtered[clampedIndex].cmd);
         } else if (trimmed) {
