@@ -520,10 +520,21 @@ export const ConsoleView = ({
           return;
         }
       }
-      if (screenError && (char === 'r' || char === 'R' || key.return)) {
-        // Accept Enter in addition to R: the banner advertises [R] retry,
-        // but users focused on a prompt below the banner often press Enter
-        // as the default action.
+      // The `R` keystrokes are safe to accept unconditionally — a `confirm`
+      // or `choice` PickerMenu's digit / arrow shortcuts won't collide with
+      // a letter. Enter is different: when `screenError` co-exists with a
+      // `pendingPrompt` (e.g. an in-flight `promptChoice` rendering a
+      // PickerMenu), the picker's own `useScreenInput` handler ALSO
+      // listens for Enter to commit the focused selection. Accepting
+      // Enter here would fire both — clearing the error AND committing
+      // an unintended picker option. Gate the Enter branch on
+      // `!pendingPrompt` so the picker keeps unambiguous ownership of
+      // Enter while a prompt is in flight.
+      if (screenError && (char === 'r' || char === 'R')) {
+        store.clearScreenError();
+        return;
+      }
+      if (screenError && key.return && !pendingPrompt) {
         store.clearScreenError();
         return;
       }
