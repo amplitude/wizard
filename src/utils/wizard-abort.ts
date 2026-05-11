@@ -282,8 +282,13 @@ export async function wizardSuccessExit(exitCode = 0): Promise<never> {
  * (TUI, CI logger), the run-start timestamp isn't tracked and we
  * report `0` — the value is only meaningful for orchestrator-facing
  * NDJSON, which only fires from AgentUI anyway.
+ *
+ * Exported so `performGracefulExit` (which lives next door in
+ * `graceful-exit.ts`) can stamp the same value on its
+ * `run_completed: cancelled` envelope instead of measuring the
+ * near-zero duration of the exit function itself.
  */
-function computeRunDurationMs(): number {
+export function computeRunDurationMs(): number {
   try {
     const ui = getUI() as { getRunStartedAtMs?: () => number | null };
     const startedAt = ui.getRunStartedAtMs?.() ?? null;
