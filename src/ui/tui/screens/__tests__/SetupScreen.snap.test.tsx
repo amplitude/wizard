@@ -3,7 +3,7 @@
  *
  * The screen runs auto-detection on mount, then asks the user to resolve
  * any unresolved questions one at a time. The first frame is always the
- * "Detecting project configuration…" spinner — that's what we snapshot.
+ * "Reading your project…" spinner — that's what we snapshot.
  *
  * Mounting with a frameworkConfig that has zero questions causes the
  * router to skip the screen via its show predicate (covered in router
@@ -52,14 +52,14 @@ function configWithQuestions(): FrameworkConfig {
 }
 
 describe('SetupScreen snapshots', () => {
-  it('renders the "Detecting project configuration" spinner on mount', () => {
+  it('renders the "Reading your project" spinner on mount', () => {
     const store = makeStoreForSnapshot({
       integration: Integration.django,
       frameworkConfig: configWithQuestions(),
     });
     const { frame } = renderSnapshot(<SetupScreen store={store} />, store);
     // First render is the spinner — useEffect hasn't resolved yet.
-    expect(frame).toContain('Detecting project configuration');
+    expect(frame).toContain('Reading your project');
     expect(frame).toMatchSnapshot();
   });
 
@@ -74,6 +74,6 @@ describe('SetupScreen snapshots', () => {
       frameworkConfig: cfg,
     });
     const { frame } = renderSnapshot(<SetupScreen store={store} />, store);
-    expect(frame).toContain('Detecting project configuration');
+    expect(frame).toContain('Reading your project');
   });
 });
