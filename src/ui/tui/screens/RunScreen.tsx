@@ -594,7 +594,12 @@ export const RunScreen = ({ store }: RunScreenProps) => {
           {
             id: 'events',
             label: 'Events',
-            component: <EventPlanViewer events={store.eventPlan} />,
+            component: (
+              <EventPlanViewer
+                events={store.eventPlan}
+                approved={store.session.eventPlanApproved}
+              />
+            ),
           },
         ]
       : []),

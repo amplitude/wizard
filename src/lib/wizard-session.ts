@@ -710,6 +710,39 @@ export interface WizardSession {
    */
   postAgentSteps: PostAgentStep[];
 
+  /**
+   * Free-form feedback text the user just submitted on the event-plan
+   * approval screen, while we're waiting for the agent to emit a revised
+   * plan. Set synchronously when the user resolves the prompt with
+   * `decision === 'revised'`; cleared when the agent's next
+   * `confirm_event_plan` call lands (a fresh `setEventPlan` + new
+   * `promptEventPlan`) OR when the user approves/skips.
+   *
+   * Drives two UX surfaces:
+   *   1. App.tsx — keeps `EventPlanFullScreen` mounted across the
+   *      feedback round-trip so the user doesn't briefly land on the
+   *      Run tab view and think their feedback was ignored.
+   *   2. EventPlanFullScreen — renders a "Revising your plan…" state
+   *      that quotes the feedback back, so the in-flight wait reads as
+   *      "the agent is working on it" instead of an unexplained pause.
+   *
+   * Null in every state except "feedback submitted, revised plan not
+   * yet emitted". Never persisted — this is purely transient session
+   * state for the live TUI.
+   */
+  pendingEventPlanFeedback: string | null;
+
+  /**
+   * True once the user has approved the agent's proposed event plan
+   * (Y on the EventPlanFullScreen). Drives the Events tab body in
+   * RunScreen — pre-approval it still says "Waiting for the agent to
+   * propose events..."; post-approval it switches to "Approved · wiring
+   * N events..." so the stale waiting copy doesn't linger for the
+   * entire instrumentation phase. Skipped / revised decisions do NOT
+   * flip this — only an explicit approve.
+   */
+  eventPlanApproved: boolean;
+
   // Lifecycle
   runPhase: RunPhase;
   /**
@@ -1248,6 +1281,8 @@ export function buildSession(args: {
     regionForced: false,
 
     postAgentSteps: [],
+    pendingEventPlanFeedback: null,
+    eventPlanApproved: false,
     runPhase: RunPhase.Idle,
     runStartedAt: null,
     discoveredFeatures: [],
