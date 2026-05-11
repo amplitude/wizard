@@ -5,6 +5,13 @@
  * handler in bin.ts. Extracting it here keeps the two paths in sync and
  * avoids the Temporal Dead Zone issue that arose when the SIGINT handler
  * referenced a `saveCheckpoint` binding before its dynamic import resolved.
+ *
+ * Also exposes `installAbortSignalHandler` — the canonical way to wire a
+ * SIGINT listener for non-TUI execution modes (agent / CI). The TUI's
+ * inline registration in `commands/default.ts` keeps its own copy because
+ * it has direct access to the Ink store; agent + CI modes route through
+ * this helper so a single user SIGINT lands on every mode's
+ * `run_completed: cancelled` envelope, not just the TUI path.
  */
 
 import { saveCheckpoint } from './session-checkpoint.js';
@@ -89,4 +96,137 @@ export function performGracefulExit(ctx: GracefulExitContext): void {
   });
 
   setTimeout(() => process.exit(130), EXIT_DELAY_MS);
+}
+
+/**
+ * Module-local re-entry guard for `installAbortSignalHandler`. Distinct
+ * from `_exitInProgress` above: that flag guards the full graceful-exit
+ * sequence (which we ONLY run in TUI mode where there's a session to
+ * checkpoint). The agent / CI path takes a thinner abort route — no
+ * checkpoint, no 2s grace timer — but we still need to be idempotent
+ * across double-SIGINT and double-install.
+ */
+let _abortHandlerInstalled = false;
+let _abortInProgress = false;
+
+/** Test-only — reset the install guard between assertions. */
+export function _resetAbortHandlerForTests(): void {
+  _abortHandlerInstalled = false;
+  _abortInProgress = false;
+}
+
+/**
+ * Install a `SIGINT` listener appropriate for non-TUI execution modes
+ * (agent / CI). The first SIGINT:
+ *   1. Best-effort saves the session checkpoint.
+ *   2. Aborts the wizard-wide AbortController so every in-flight async
+ *      operation (SDK query, MCP fetches, ingestion polls) starts
+ *      unwinding before the process exits.
+ *   3. Routes through `wizardAbort` which emits the terminal
+ *      `run_completed: { outcome: 'cancelled', exitCode: 130, reason }`
+ *      NDJSON event (AgentUI) and calls `process.exit(130)`.
+ *
+ * A second SIGINT hard-exits immediately.
+ *
+ * Idempotent: a second call (e.g. agent + CI bootstraps share the same
+ * process for tests) is a no-op.
+ *
+ * Why not just reuse the TUI's inline `performGracefulExit` path? Agent /
+ * CI modes have no Ink store, no `setCommandFeedback`, and no Outro
+ * screen to wait on — the 2s "Saving session…" timer there is dead time
+ * for an orchestrator. We still call `abortWizard` so the wizard-wide
+ * AbortController fires and any in-flight async work unwinds before
+ * `wizardAbort` lands `process.exit(130)`.
+ *
+ * Previously this handler was only installed in the TUI branch of
+ * `commands/default.ts`, meaning agent + CI runs got hard-killed by the
+ * default Node behaviour — no checkpoint, no terminal NDJSON envelope,
+ * and an orchestrator parsing the stream saw an abrupt EOF instead of a
+ * clean cancel signal.
+ *
+ * The `getUI()` call is intentionally avoided here — `wizardAbort` already
+ * emits the `run_completed` envelope before `process.exit`, so a direct
+ * call here would double-emit. Reference suppressed to discourage future
+ * duplication.
+ */
+export function installAbortSignalHandler(session: WizardSession): void {
+  if (_abortHandlerInstalled) return;
+  _abortHandlerInstalled = true;
+
+  process.on('SIGINT', () => {
+    if (_abortInProgress) {
+      process.exit(130);
+    }
+    _abortInProgress = true;
+
+    // 1. Best-effort save — checkpoint is cheap and only runs when there's
+    //    something resumable on disk. Failures are non-fatal.
+    try {
+      saveCheckpoint(session);
+    } catch {
+      // best-effort
+    }
+
+    // 2. Abort the wizard-wide controller BEFORE wizardAbort so every
+    //    in-flight subprocess / fetch / poll starts unwinding while
+    //    wizardAbort runs its own teardown (cleanup hooks + analytics
+    //    flush). Without this, agent mode's long-running tool calls
+    //    keep running until wizardAbort's process.exit pulls the rug.
+    try {
+      abortWizard('sigint');
+    } catch {
+      // best-effort
+    }
+
+    // 3. Fire-and-forget analytics flush; wizardAbort runs its own
+    //    flush under a deadline. Belt-and-suspenders here protects the
+    //    cancel breadcrumb in case wizardAbort's flush races
+    //    process.exit on a wedged network.
+    void analytics.flush().catch(() => {
+      // best-effort
+    });
+
+    // 4. Route through wizardAbort — it emits the terminal
+    //    `run_completed: { outcome: 'cancelled', exitCode: 130,
+    //    reason: 'sigint' }` envelope (AgentUI implements; LoggingUI /
+    //    InkUI no-op) and then calls process.exit(130).
+    void wizardAbortRunner({
+      message: 'cancelled by signal',
+      exitCode: 130,
+      reason: 'sigint',
+    });
+  });
+}
+
+/**
+ * Thin wrapper around `wizardAbort` that surfaces the `reason` field
+ * (which `wizardAbort` itself sanitizes onto the `run_completed`
+ * envelope via its `message` parameter). Kept inline so the SIGINT
+ * handler can pass a stable, machine-readable reason string ("sigint")
+ * without bleeding into the human-readable message argument.
+ *
+ * Lazy import avoids the wizardAbort -> graceful-exit edge in the
+ * dependency graph; both modules already import from `wizard-abort`,
+ * but loading wizardAbort eagerly at module init pulled in the entire
+ * analytics + UI graph for callers that just want the graceful-exit
+ * helpers.
+ */
+async function wizardAbortRunner(opts: {
+  message: string;
+  exitCode: number;
+  reason: string;
+}): Promise<void> {
+  // wizardAbort is `Promise<never>` — it always calls `process.exit`
+  // and never resolves in production. We deliberately don't catch its
+  // rejection here: any exception coming out of it means the test
+  // harness is stubbing `process.exit` to throw (vitest does this by
+  // default to detect unintended exits). Re-throwing the rejection
+  // lets that diagnostic surface in tests instead of swallowing it and
+  // spinning on `process.exit` again.
+  const { wizardAbort } = await import('../utils/wizard-abort.js');
+  await wizardAbort({
+    message: opts.message,
+    exitCode: opts.exitCode,
+    reason: opts.reason,
+  });
 }

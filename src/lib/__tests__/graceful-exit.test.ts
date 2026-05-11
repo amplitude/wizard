@@ -6,11 +6,18 @@ vi.mock('../session-checkpoint.js', () => ({
   saveCheckpoint: (...args: unknown[]) => mockSaveCheckpoint(...args),
 }));
 
-// Mock analytics flush.
+// Mock analytics flush + shutdown. Both are touched by the SIGINT
+// abort path (graceful-exit's own flush, wizardAbort's shutdown).
 const mockFlush = vi.fn().mockResolvedValue(undefined);
+const mockShutdown = vi.fn().mockResolvedValue(undefined);
 vi.mock('../../utils/analytics.js', () => ({
   analytics: {
     flush: () => mockFlush(),
+    shutdown: (...args: unknown[]) => mockShutdown(...args),
+    // wizardAbort's error path also touches captureException; stub as a
+    // no-op so the analytics module satisfies all callers.
+    captureException: () => undefined,
+    wizardCapture: () => undefined,
   },
 }));
 
@@ -122,5 +129,71 @@ describe('performGracefulExit', () => {
     expect(() => performGracefulExit(ctx)).not.toThrow();
     vi.advanceTimersByTime(2_000);
     expect(exitSpy).toHaveBeenCalledWith(130);
+  });
+});
+
+describe('installAbortSignalHandler', () => {
+  let listeners: NodeJS.SignalsListener[];
+
+  beforeEach(async () => {
+    const mod = await import('../graceful-exit.js');
+    mod._resetAbortHandlerForTests();
+    mockSaveCheckpoint.mockReset();
+    mockFlush.mockReset().mockResolvedValue(undefined);
+    resetWizardAbortController();
+    listeners = [];
+    // Capture SIGINT listeners without actually installing them — we
+    // never want the real Node signal infrastructure to deliver a
+    // SIGINT during the test run.
+    vi.spyOn(process, 'on').mockImplementation(((
+      event: string,
+      fn: NodeJS.SignalsListener,
+    ) => {
+      if (event === 'SIGINT') listeners.push(fn);
+      return process;
+    }) as never);
+    // Stub process.exit so wizardAbort's terminal exit doesn't actually
+    // kill the test worker. We deliberately leave the strict
+    // "unexpectedly called" guard intact for the failure modes that
+    // would care.
+    vi.spyOn(process, 'exit').mockImplementation(((_code?: number) =>
+      undefined) as never);
+  });
+
+  afterEach(() => {
+    vi.restoreAllMocks();
+  });
+
+  it('registers a SIGINT listener that aborts the wizard signal synchronously', async () => {
+    const { installAbortSignalHandler } = await import('../graceful-exit.js');
+    const session = { installDir: '/tmp/test' } as unknown as WizardSession;
+    installAbortSignalHandler(session);
+
+    expect(listeners.length).toBe(1);
+    const signal = getWizardAbortSignal();
+    expect(signal.aborted).toBe(false);
+
+    // Fire SIGINT synchronously — Node would deliver this from kernel.
+    listeners[0]('SIGINT');
+
+    // The shared abort funnel fires SYNCHRONOUSLY before the async
+    // wizardAbort dynamic import lands:
+    //   - saveCheckpoint() persists the session
+    //   - abortWizard('sigint') flips the wizard-wide AbortController
+    //   - analytics.flush() is invoked (best-effort)
+    // The terminal `run_completed` envelope + `process.exit(130)` are
+    // wired through wizardAbort itself (covered by wizard-abort tests).
+    expect(mockSaveCheckpoint).toHaveBeenCalledWith(session);
+    expect(signal.aborted).toBe(true);
+    expect(signal.reason).toBe('sigint');
+    expect(mockFlush).toHaveBeenCalledTimes(1);
+  });
+
+  it('is idempotent — a second installAbortSignalHandler call does not add a second listener', async () => {
+    const { installAbortSignalHandler } = await import('../graceful-exit.js');
+    const session = { installDir: '/tmp/test' } as unknown as WizardSession;
+    installAbortSignalHandler(session);
+    installAbortSignalHandler(session);
+    expect(listeners.length).toBe(1);
   });
 });

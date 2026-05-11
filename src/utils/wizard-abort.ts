@@ -93,6 +93,15 @@ interface WizardAbortOptions {
    * we want to point the user at docs to recover.
    */
   cancelOptions?: { docsUrl?: string };
+  /**
+   * Stable machine-readable reason code surfaced on the `run_completed`
+   * NDJSON envelope's `reason` field. Distinct from `message`, which is
+   * the human-readable display string the Outro renders — `reason` is
+   * intended for orchestrator branching (`'sigint'`, `'lock_held'`,
+   * `'auth_required'`, etc.). When set, takes precedence over the
+   * sanitized `message` form.
+   */
+  reason?: string;
 }
 
 const cleanupFns: Array<() => void> = [];
@@ -382,6 +391,7 @@ export async function wizardAbort(
     error,
     exitCode = 1,
     cancelOptions,
+    reason,
   } = options ?? {};
 
   // Suppress any future EPIPE-driven abort. We're already aborting —
@@ -459,7 +469,16 @@ export async function wizardAbort(
       // RunCompletedData docstring promises sanitization. AgentUI's
       // emit() doesn't currently re-sanitize, so do it here to keep
       // the contract honest.
-      ...(message ? { reason: sanitizeReason(message) } : {}),
+      // Stable machine-readable `reason` takes precedence over the
+      // sanitized human-readable `message`. Callers that pass an
+      // explicit `reason` (SIGINT handlers, lock-collision paths) get
+      // their code straight through; everyone else falls back to a
+      // path-redacted message.
+      ...(reason
+        ? { reason }
+        : message
+        ? { reason: sanitizeReason(message) }
+        : {}),
     });
   } catch {
     /* terminal event emitter must not prevent exit */

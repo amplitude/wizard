@@ -262,6 +262,18 @@ export const defaultCommand: CommandModule = {
         const session = await buildSessionFromOptions(options);
         session.agent = true;
         applyOrchestratorContext(session, options, true);
+
+        // Install the SIGINT handler IMMEDIATELY after we have a session
+        // to checkpoint. Agent / CI modes have no Ink keypress fallback;
+        // without this, a Ctrl+C from an orchestrator hard-killed the
+        // process — no checkpoint, no terminal `run_completed: cancelled`
+        // NDJSON envelope, and a parent agent reading the stream saw an
+        // abrupt EOF that was indistinguishable from a crash.
+        const { installAbortSignalHandler } = await import(
+          '../lib/graceful-exit.js'
+        );
+        installAbortSignalHandler(session);
+
         await selfHealIfNeeded(session);
         await maybeResumeFromCheckpoint(session, options);
 
@@ -295,6 +307,16 @@ export const defaultCommand: CommandModule = {
       void (async () => {
         const session = await buildSessionFromOptions(options, { ci: true });
         applyOrchestratorContext(session, options, false);
+
+        // Same rationale as the agent branch: a CI orchestrator's SIGINT
+        // (timeout, manual cancel) must route through wizardAbort so the
+        // run terminates cleanly with the correct exit code and the
+        // checkpoint is saved before exit.
+        const { installAbortSignalHandler } = await import(
+          '../lib/graceful-exit.js'
+        );
+        installAbortSignalHandler(session);
+
         await selfHealIfNeeded(session);
         await maybeResumeFromCheckpoint(session, options);
 
