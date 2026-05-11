@@ -33,6 +33,7 @@ import {
   getWhoamiText,
   getDiagnosticsText,
   getHelpText,
+  getVersionText,
   isKnownCommand,
   parseFeedbackSlashInput,
   parseCreateProjectSlashInput,
@@ -293,6 +294,14 @@ function executeCommand(raw: string, store: WizardStore): string | void {
       // Renders the same data `wizard orchestration status --json`
       // emits, but as a TUI-friendly view.
       store.showStatusOverlay();
+      break;
+    case '/version':
+      // Surface wizard + agent-mode protocol + Node/platform versions
+      // inline so users filing a bug report can grab them without
+      // exiting the TUI to run `amplitude-wizard --version` in a shell.
+      // Multi-line, so we render it through the same long-lived
+      // `setCommandFeedback` slot used by /help and /diagnostics.
+      store.setCommandFeedback(getVersionText(), 30_000);
       break;
     case '/help': {
       // PR 5 — print every registered slash command + one-line description.

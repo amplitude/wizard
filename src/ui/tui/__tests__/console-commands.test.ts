@@ -4,10 +4,13 @@ import {
   parseCreateProjectSlashInput,
   getWhoamiText,
   getDiagnosticsText,
+  getVersionText,
   checkCommandBlockedByRun,
   isKnownCommand,
   COMMANDS,
 } from '../console-commands.js';
+import { AGENT_EVENT_WIRE_VERSION } from '../../../lib/agent-events.js';
+import { WIZARD_VERSION } from '../../../lib/constants.js';
 import { RunPhase } from '../../../lib/wizard-session.js';
 import { CACHE_ROOT_OVERRIDE_ENV } from '../../../utils/storage-paths.js';
 
@@ -164,6 +167,14 @@ describe('COMMANDS registry', () => {
     expect(cmds).toContain('/diagnostics');
   });
 
+  it('exposes /version so users can pull versions from inside the TUI', () => {
+    const cmds = COMMANDS.map((c) => c.cmd);
+    expect(cmds).toContain('/version');
+    // Informational, runs anytime — must not be blocked mid-run.
+    const def = COMMANDS.find((c) => c.cmd === '/version');
+    expect(def?.requiresIdle).toBeFalsy();
+  });
+
   it('keeps /snake registered so the overlay is reachable from the slash bar', () => {
     // Snake is no longer in the RunScreen tab strip — it lives in the
     // overlay stack (Overlay.Snake). The /snake slash command is the
@@ -193,8 +204,8 @@ describe('COMMANDS registry', () => {
 
   it('leaves read-only / overlay commands available during a run', () => {
     // Surfacing /whoami, /mcp, /slack, /feedback, /debug, /diagnostics,
-    // /clear, /snake, /exit during a run is fine — they don't mutate the
-    // session state the agent depends on.
+    // /version, /clear, /snake, /exit during a run is fine — they don't
+    // mutate the session state the agent depends on.
     for (const cmd of [
       '/whoami',
       '/mcp',
@@ -202,6 +213,7 @@ describe('COMMANDS registry', () => {
       '/feedback',
       '/debug',
       '/diagnostics',
+      '/version',
       '/clear',
       '/snake',
       '/exit',
@@ -252,7 +264,7 @@ describe('checkCommandBlockedByRun', () => {
 
   it('returns null for non-requiresIdle commands even during Running', () => {
     // /whoami, /mcp, /slack, /feedback, /clear, /debug, /diagnostics,
-    // /snake, /exit must remain dispatchable mid-run.
+    // /version, /snake, /exit must remain dispatchable mid-run.
     for (const cmd of [
       '/whoami',
       '/mcp',
@@ -261,6 +273,7 @@ describe('checkCommandBlockedByRun', () => {
       '/clear',
       '/debug',
       '/diagnostics',
+      '/version',
       '/snake',
       '/exit',
     ]) {
@@ -350,5 +363,56 @@ describe('getDiagnosticsText', () => {
   it('includes a tar command pointing at the run dir for support bundles', () => {
     const text = getDiagnosticsText('/p');
     expect(text).toContain('tar -czf wizard-logs.tar.gz');
+  });
+});
+
+describe('getVersionText', () => {
+  it('renders wizard, protocol, Node, and platform on three lines', () => {
+    const text = getVersionText({
+      nodeVersion: 'v20.11.0',
+      platform: 'darwin',
+      arch: 'arm64',
+    });
+    expect(text).toBe(
+      [
+        `Amplitude Wizard v${WIZARD_VERSION}`,
+        `Agent-mode protocol: v${AGENT_EVENT_WIRE_VERSION}`,
+        'Node: v20.11.0 (darwin arm64)',
+      ].join('\n'),
+    );
+  });
+
+  it('reflects the live wizard version from constants', () => {
+    // If someone bumps WIZARD_VERSION without thinking, the user-facing
+    // header still shows the new value — this pin catches "version" being
+    // accidentally hardcoded to a stale string.
+    const text = getVersionText({
+      nodeVersion: 'v20.0.0',
+      platform: 'linux',
+      arch: 'x64',
+    });
+    expect(text).toContain(`Amplitude Wizard v${WIZARD_VERSION}`);
+  });
+
+  it('uses the agent-mode wire version (not a hardcoded literal)', () => {
+    // The protocol line MUST track AGENT_EVENT_WIRE_VERSION so when the
+    // wire format bumps, /version follows automatically.
+    const text = getVersionText({
+      nodeVersion: 'v20.0.0',
+      platform: 'linux',
+      arch: 'x64',
+    });
+    expect(text).toContain(`Agent-mode protocol: v${AGENT_EVENT_WIRE_VERSION}`);
+  });
+
+  it('falls back to live process.* values when no runtime is provided', () => {
+    // No-arg call path used by ConsoleView — make sure it doesn't throw
+    // and includes the real Node version string.
+    const text = getVersionText();
+    expect(text).toContain('Amplitude Wizard v');
+    expect(text).toContain('Agent-mode protocol: v');
+    expect(text).toContain(`Node: ${process.version}`);
+    expect(text).toContain(process.platform);
+    expect(text).toContain(process.arch);
   });
 });
