@@ -56,16 +56,25 @@ export const TypewriterFilename = ({
   // cheap and avoids "revealed slice belongs to a stale path" bugs if
   // path changes between an effect scheduling and its callback firing.
   const [revealedCount, setRevealedCount] = useState(0);
+  // Track the path the count belongs to, so we can detect a prop
+  // change SYNCHRONOUSLY during render and reset before slicing.
+  // Without this, a path swap leaves `revealedCount` at the previous
+  // path's length for one render, causing the new path to flash fully
+  // visible for a frame before the useEffect resets it. The
+  // setState-during-render pattern is React's canonical fix and
+  // schedules an immediate re-render before commit, so the stale
+  // frame never lands on the terminal.
+  const [prevPath, setPrevPath] = useState(path);
+  if (path !== prevPath) {
+    setPrevPath(path);
+    setRevealedCount(0);
+  }
 
   useEffect(() => {
     // Path cleared — nothing to reveal.
     if (!path) {
-      setRevealedCount(0);
       return undefined;
     }
-    // Reset to empty on path change so the new path streams from
-    // scratch rather than picking up at the old reveal length.
-    setRevealedCount(0);
 
     let cancelled = false;
     let count = 0;
@@ -93,7 +102,8 @@ export const TypewriterFilename = ({
   // Clamp on the off-chance state and prop are momentarily out of
   // sync (e.g. path shortened between renders) — substring of a
   // longer-than-length count returns the full string, but we still
-  // want exact ergonomics.
+  // want exact ergonomics. The render-phase reset above guarantees
+  // `revealedCount` is for the current `path`, not a stale prior.
   const visible = path.slice(0, Math.min(revealedCount, path.length));
   return (
     <Text color={color} wrap="truncate-end">
