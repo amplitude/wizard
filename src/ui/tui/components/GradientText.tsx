@@ -63,8 +63,8 @@ interface GradientTextProps {
   bold?: boolean;
 }
 
-export const GRADIENT_TEXT_DEFAULT_FROM = Brand.violet;
-export const GRADIENT_TEXT_DEFAULT_TO = Brand.blueOnDark;
+const GRADIENT_TEXT_DEFAULT_FROM = Brand.violet;
+const GRADIENT_TEXT_DEFAULT_TO = Brand.blueOnDark;
 
 export const GradientText = ({
   children,
