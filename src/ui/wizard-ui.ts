@@ -626,6 +626,28 @@ export interface WizardUI {
   }): void;
 
   /**
+   * Emitted at the top of each outer-loop attempt, AFTER any backoff
+   * sleep has elapsed and a fresh AbortController has been wired up
+   * but BEFORE the inner SDK query fires. Pair with `emitTransientRetry`
+   * (which fires at the DECISION point, before the sleep) to render
+   * an accurate attempt lifecycle: orchestrators see the "deciding to
+   * retry, sleeping Ns" envelope, then the matching "attempt N now
+   * running" envelope once work resumes.
+   *
+   * `backoffMs` carries the actual sleep that elapsed. Omitted on the
+   * wire for the cold-start attempt (no preceding sleep).
+   *
+   * Optional — only AgentUI emits. InkUI / LoggingUI no-op (the
+   * existing retry banner / log line already covers their UX).
+   */
+  emitAttemptStarted?(data: {
+    attemptNumber: number;
+    totalBudget: number;
+    reason: 'cold_start' | 'stall_retry' | 'auth_refresh' | 'network_retry';
+    backoffMs?: number;
+  }): void;
+
+  /**
    * Emitted just before the Claude Agent SDK runs an auto- or manual-
    * triggered context compaction. Pairs with `emitCompactionCompleted`
    * so orchestrators can render a "still working — compacting context"

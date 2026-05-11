@@ -2480,6 +2480,19 @@ export async function runAgent(
       streamPillBuffer = '';
     };
 
+    // PR B4: each pass through the loop sets `attemptStartedBackoffMs`
+    // to the sleep that just elapsed (only meaningful for attempt > 0).
+    // `attemptStartedReason` discriminates the entry path. Both are
+    // consumed by the `emitAttemptStarted` call below, AFTER the
+    // backoff sleep (so orchestrators see "decided to retry" then
+    // "attempt N actually running" in order).
+    let attemptStartedBackoffMs = 0;
+    let attemptStartedReason:
+      | 'cold_start'
+      | 'stall_retry'
+      | 'auth_refresh'
+      | 'network_retry' = 'cold_start';
+
     for (let attempt = 0; attempt <= MAX_RETRIES; attempt++) {
       attemptCount = attempt + 1;
       agentState.setAttemptId(`attempt-${attempt}`);
@@ -2571,6 +2584,16 @@ export async function runAgent(
           // UI may not be initialised in some test paths.
         }
         await new Promise((resolve) => setTimeout(resolve, backoffMs));
+        // PR B4: stash the backoff that just elapsed AND map the retry
+        // reason discriminator (`stall` / `transient_api` / `sdk_thrown`)
+        // onto the orchestrator-facing `attempt_started.reason` set
+        // (`stall_retry` / `network_retry`). `auth_refresh` is set
+        // separately at the auth-retry branch below — we keep the
+        // mapping local here so the cold-start (`attempt === 0`) path
+        // doesn't touch the variables.
+        attemptStartedBackoffMs = backoffMs;
+        attemptStartedReason =
+          lastRetryReason === 'stall' ? 'stall_retry' : 'network_retry';
         // Clear per-attempt output so stale error markers don't affect the fresh run
         collectedText.length = 0;
         recentStatuses.length = 0;
@@ -2613,6 +2636,13 @@ export async function runAgent(
       // serializes the mcpServers config once in `initializeAgent` and
       // hands it to the spawned subprocess, which keeps using those
       // exact headers until reconnection. Bugbot catch on PR #608.
+      // PR B4: when a bearer rotation actually happens on a RETRY
+      // attempt, upgrade the `attempt_started.reason` from
+      // `stall_retry` / `network_retry` to `auth_refresh` — the
+      // orchestrator wants to know this attempt is starting with a
+      // fresh credential, not just a fresh AbortController. The flag
+      // is local to this iteration; we don't carry it across attempts.
+      let bearerRotatedThisAttempt = false;
       try {
         const { refreshTokenIfStale } = await import('./agent-runner.js');
         await refreshGatewayBearer({
@@ -2625,6 +2655,7 @@ export async function runAgent(
             analytics.wizardCapture('agent inter-attempt token refresh', {
               attempt,
             });
+            bearerRotatedThisAttempt = true;
           },
         });
       } catch (err) {
@@ -2638,6 +2669,35 @@ export async function runAgent(
             err instanceof Error ? err.message : String(err)
           }`,
         );
+      }
+
+      // PR B4: emit `attempt_started` AFTER the bearer refresh ran (so
+      // `auth_refresh` reason can win when a rotation happened) and
+      // AFTER the backoff sleep (so the envelope fires when the attempt
+      // actually begins, not when the wizard decided to retry). On
+      // attempt 0 the previous branch never ran — `attemptStartedReason`
+      // is still `'cold_start'` and `attemptStartedBackoffMs` is 0,
+      // which is exactly the envelope shape we want. Guarded with a
+      // try/catch so a misbehaving emitter can never abort the attempt.
+      try {
+        const effectiveReason =
+          attempt > 0 && bearerRotatedThisAttempt
+            ? 'auth_refresh'
+            : attemptStartedReason;
+        getUI().emitAttemptStarted?.({
+          attemptNumber: attempt + 1,
+          totalBudget: MAX_RETRIES + 1,
+          reason: effectiveReason,
+          // Only forward backoffMs when > 0 — cold-start runs omit it
+          // on the wire (orchestrators read absence as "no preceding
+          // sleep"). The emitter does its own optional-omit logic, but
+          // gating here makes the cold-start contract explicit.
+          ...(attemptStartedBackoffMs > 0
+            ? { backoffMs: attemptStartedBackoffMs }
+            : {}),
+        });
+      } catch {
+        // Never let a UI emit failure abort the attempt.
       }
 
       // Fresh prompt stream per attempt — stdin stays open until result received

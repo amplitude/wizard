@@ -268,6 +268,29 @@ export const EVENT_DATA_VERSIONS = {
    */
   transient_retry: 1,
   /**
+   * `attempt_started` — emitted at the TOP of each outer retry-loop
+   * iteration in `agent-interface.ts` so orchestrators can tell when
+   * a retry attempt actually BEGINS (vs `transient_retry`, which
+   * fires WHEN the wizard decides to retry, well before backoff has
+   * elapsed). Pair with the existing `auth_retry_exhausted` and
+   * `transient_retry` envelopes to render an accurate attempt lifecycle.
+   *
+   *   transient_retry  → "decided to retry; sleeping Ns"
+   *   attempt_started  → "attempt N now beginning"
+   *   ...inner work...
+   *   transient_retry  → "decided to retry; sleeping Ns" (if it fails)
+   *   ...
+   *   auth_retry_exhausted | run_error → terminal
+   *
+   * `reason` discriminates why we entered this attempt:
+   *   - `cold_start`    — first attempt of the run (attempt 1)
+   *   - `stall_retry`   — previous attempt hit the stall timer
+   *   - `auth_refresh`  — previous attempt failed auth and we refreshed tokens
+   *   - `network_retry` — previous attempt failed with a transient API error
+   *                       (502 / 503 / 504 / ECONNRESET / `terminated`)
+   */
+  attempt_started: 1,
+  /**
    * `compaction_started` — emitted by the PreCompact hook just before
    * the SDK summarises conversation history. Lets orchestrators render
    * a "compacting…" indicator during what would otherwise be silent
@@ -939,6 +962,57 @@ export interface RunResumedData {
 }
 
 /**
+ * Reason an outer-loop attempt began. Discriminates the four canonical
+ * entry paths the runner takes. See `EVENT_DATA_VERSIONS.attempt_started`
+ * for the orchestrator-facing contract.
+ */
+export type AttemptStartedReason =
+  | 'cold_start'
+  | 'stall_retry'
+  | 'auth_refresh'
+  | 'network_retry';
+
+/**
+ * `attempt_started` — emitted at the TOP of each outer retry-loop
+ * iteration, AFTER any backoff sleep has elapsed and a fresh
+ * AbortController has been wired up but BEFORE the inner SDK query
+ * actually fires. Orchestrators that subscribed to `transient_retry`
+ * (the "deciding to retry" signal) pair it with `attempt_started`
+ * (the "now actually running" signal) to render an accurate retry
+ * lifecycle banner.
+ *
+ *   transient_retry → "decided to retry in Ns"
+ *   ...backoff sleep...
+ *   attempt_started → "attempt N now running"
+ *   ...
+ *
+ * `backoffMs` carries the actual sleep that just elapsed (zero for
+ * the cold-start attempt). Useful for accounting / metrics: a
+ * stack-aware orchestrator can sum the inter-attempt sleeps without
+ * re-parsing `transient_retry` events.
+ */
+export interface AttemptStartedData {
+  event: 'attempt_started';
+  /** 1-indexed attempt number for this run. `1` on cold start. */
+  attemptNumber: number;
+  /**
+   * Total attempt budget for this run (`MAX_RETRIES + 1` in
+   * `agent-interface.ts`). Lets orchestrators render
+   * "attempt N/M" without knowing the wizard's constant.
+   */
+  totalBudget: number;
+  /** Why this attempt began. */
+  reason: AttemptStartedReason;
+  /**
+   * Backoff that just elapsed before this attempt. `0` for the
+   * cold-start attempt (no preceding sleep). Matches the value
+   * passed to `emitTransientRetry`'s `nextRetryInMs` on the
+   * decision envelope that paired with this attempt.
+   */
+  backoffMs?: number;
+}
+
+/**
  * `file_change_failed` — emitted at PostToolUse for write tools
  * (Edit / Write / MultiEdit / NotebookEdit) when the tool reported
  * a failure. Pairs with the preceding `file_change_planned` for
@@ -989,7 +1063,8 @@ export type InnerAgentLifecycleData =
   | DiscoveryFactData
   | CurrentFileData
   | StallStatusData
-  | RunResumedData;
+  | RunResumedData
+  | AttemptStartedData;
 
 /**
  * Coarse-grained orchestrator-facing phase boundaries for a wizard run.

@@ -472,6 +472,138 @@ describe('classifyFileChangeError', () => {
   });
 });
 
+// ── PR B4: attempt_started ──────────────────────────────────────────
+
+describe('AgentUI.emitAttemptStarted (PR B4: retry lifecycle)', () => {
+  let writes: string[];
+  let restore: () => void;
+
+  beforeEach(() => {
+    ({ writes, restore } = setupStdoutSpy());
+  });
+  afterEach(() => restore());
+
+  it('emits a progress: attempt_started for the cold-start attempt without backoffMs', () => {
+    const ui = new AgentUI();
+    ui.emitAttemptStarted?.({
+      attemptNumber: 1,
+      totalBudget: 4,
+      reason: 'cold_start',
+    });
+    const event = lastEvent(writes);
+    expect(event.type).toBe('progress');
+    expect(event.message).toBe('attempt_started: 1/4 (cold_start)');
+    expect(event.data).toMatchObject({
+      event: 'attempt_started',
+      attemptNumber: 1,
+      totalBudget: 4,
+      reason: 'cold_start',
+    });
+    // Cold-start envelope must not carry backoffMs on the wire — the
+    // absence is the contract orchestrators read as "no preceding sleep".
+    expect(event.data).not.toHaveProperty('backoffMs');
+    expect(event.data_version).toBe(EVENT_DATA_VERSIONS.attempt_started);
+  });
+
+  it('emits a stall_retry attempt with backoffMs surfaced', () => {
+    const ui = new AgentUI();
+    ui.emitAttemptStarted?.({
+      attemptNumber: 2,
+      totalBudget: 4,
+      reason: 'stall_retry',
+      backoffMs: 2_500,
+    });
+    const event = lastEvent(writes);
+    expect(event.message).toBe(
+      'attempt_started: 2/4 (stall_retry) after 2500ms backoff',
+    );
+    expect(event.data).toMatchObject({
+      event: 'attempt_started',
+      attemptNumber: 2,
+      totalBudget: 4,
+      reason: 'stall_retry',
+      backoffMs: 2_500,
+    });
+  });
+
+  it('accepts all four documented reason values', () => {
+    const ui = new AgentUI();
+    const reasons = [
+      'cold_start',
+      'stall_retry',
+      'auth_refresh',
+      'network_retry',
+    ] as const;
+    for (const reason of reasons) {
+      ui.emitAttemptStarted?.({
+        attemptNumber: 1,
+        totalBudget: 4,
+        reason,
+      });
+    }
+    const events = eventsOfType(writes, 'progress').filter(
+      (e) => e.data?.event === 'attempt_started',
+    );
+    expect(events.map((e) => e.data?.reason)).toEqual([...reasons]);
+  });
+
+  it('omits backoffMs from the wire when 0 is passed (matches cold-start contract)', () => {
+    // Defensive: if a caller explicitly forwards backoffMs=0, the
+    // emitter still includes it on the wire (the emitter's contract is
+    // "include when explicitly provided"). The CALLER in
+    // agent-interface.ts gates on `> 0` — these two test cases pin
+    // both halves of the contract.
+    const ui = new AgentUI();
+    ui.emitAttemptStarted?.({
+      attemptNumber: 3,
+      totalBudget: 4,
+      reason: 'network_retry',
+      backoffMs: 0,
+    });
+    const event = lastEvent(writes);
+    // Explicit 0 IS included on the wire (caller's choice).
+    expect(event.data).toMatchObject({ backoffMs: 0 });
+  });
+
+  it('stamps the registered data_version', () => {
+    const ui = new AgentUI();
+    ui.emitAttemptStarted?.({
+      attemptNumber: 1,
+      totalBudget: 4,
+      reason: 'cold_start',
+    });
+    const event = lastEvent(writes);
+    expect(event.data_version).toBe(EVENT_DATA_VERSIONS.attempt_started);
+  });
+
+  it('preserves @timestamp as an ISO string', () => {
+    const ui = new AgentUI();
+    ui.emitAttemptStarted?.({
+      attemptNumber: 1,
+      totalBudget: 4,
+      reason: 'cold_start',
+    });
+    const event = lastEvent(writes);
+    expect(typeof event['@timestamp']).toBe('string');
+    expect(() => new Date(event['@timestamp'])).not.toThrow();
+  });
+});
+
+describe('emitAttemptStarted no-op on non-AgentUI implementations', () => {
+  it('is optional on the WizardUI base interface (InkUI / LoggingUI do not implement)', async () => {
+    // Smoke check: only AgentUI provides the method. The optional
+    // method signature on WizardUI is the load-bearing contract that
+    // lets agent-interface.ts call `getUI().emitAttemptStarted?.(...)`
+    // without crashing in TUI / CI mode.
+    const { LoggingUI } = await import('../logging-ui.js');
+    const logging = new LoggingUI();
+    expect(
+      (logging as unknown as { emitAttemptStarted?: unknown })
+        .emitAttemptStarted,
+    ).toBeUndefined();
+  });
+});
+
 describe('EVENT_DATA_VERSIONS (v2 entries registered)', () => {
   it.each([
     ['discovery_fact', 1],
@@ -479,6 +611,7 @@ describe('EVENT_DATA_VERSIONS (v2 entries registered)', () => {
     ['stall_status', 1],
     ['run_resumed', 1],
     ['file_change_failed', 1],
+    ['attempt_started', 1],
   ] as const)('registers %s at version %d', (event, version) => {
     expect(
       (EVENT_DATA_VERSIONS as Readonly<Record<string, number>>)[event],

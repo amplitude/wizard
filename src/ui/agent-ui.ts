@@ -1272,6 +1272,45 @@ export class AgentUI implements WizardUI {
     );
   }
 
+  // ── PR B4: attempt_started ──────────────────────────────────────────
+  //
+  // `transient_retry` answers "the wizard decided to retry; sleeping Ns".
+  // `attempt_started` answers "attempt N is now actually running" —
+  // emitted at the top of each outer-loop iteration AFTER the backoff
+  // sleep has elapsed and a fresh AbortController has been wired up.
+  // The two together let orchestrators render a faithful retry-lifecycle
+  // banner without timing inference.
+
+  emitAttemptStarted(data: {
+    attemptNumber: number;
+    totalBudget: number;
+    reason: 'cold_start' | 'stall_retry' | 'auth_refresh' | 'network_retry';
+    backoffMs?: number;
+  }): void {
+    const suffix =
+      data.backoffMs !== undefined && data.backoffMs > 0
+        ? ` after ${data.backoffMs}ms backoff`
+        : '';
+    emit(
+      'progress',
+      `attempt_started: ${data.attemptNumber}/${data.totalBudget} (${data.reason})${suffix}`,
+      {
+        data: {
+          event: 'attempt_started',
+          attemptNumber: data.attemptNumber,
+          totalBudget: data.totalBudget,
+          reason: data.reason,
+          // Only include backoffMs when explicitly provided — omitting
+          // it on the wire keeps the cold-start envelope minimal
+          // (orchestrators read absence as "no backoff preceded").
+          ...(data.backoffMs !== undefined
+            ? { backoffMs: data.backoffMs }
+            : {}),
+        },
+      },
+    );
+  }
+
   emitCompactionStarted(data: { trigger: 'manual' | 'auto' }): void {
     emit('progress', `compaction_started (${data.trigger})`, {
       data: { event: 'compaction_started', ...data },
