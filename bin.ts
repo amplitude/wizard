@@ -119,6 +119,32 @@ if (!Number.isFinite(nodeMajor) || nodeMajor < MIN_NODE_MAJOR) {
   process.exit(1);
 }
 
+// ── `--print-protocol` early exit ─────────────────────────────────────
+// Audit #5 finding: `AGENT_EVENT_WIRE_VERSION` had zero non-test
+// consumers — the only way to learn the wizard's wire-protocol
+// version was to spawn `--agent`, parse one NDJSON line, and read the
+// `v` field from the envelope. That handshake is fragile: spawning
+// the wizard pays observability / Sentry / OAuth cost just to learn a
+// version, and a wizard that fails at startup never emits NDJSON at
+// all. `--print-protocol` is the out-of-band probe — it prints a
+// JSON manifest describing the wire format and exits 0, BEFORE any
+// side effects (no observability, no Sentry, no analytics, no auth,
+// no shell-rc cleanup, no nested-agent sniff).
+//
+// Must run before any side-effecting import below (cleanupShellRc,
+// observability bootstrap, MSW server boot, yargs side effects from
+// .env-mapped flags) so a wizard with a broken cache / corrupted OAuth
+// store / pinned bad config can still report its protocol.
+{
+  const rawArgvForProtocol = process.argv.slice(2);
+  if (rawArgvForProtocol.includes('--print-protocol')) {
+    const {
+      printProtocolAndExit,
+    } = require('./src/lib/print-protocol') as typeof import('./src/lib/print-protocol');
+    printProtocolAndExit();
+  }
+}
+
 import { EMAIL_REGEX } from './src/lib/constants';
 import { getUI } from './src/ui';
 import { cleanupShellCompletionLine } from './src/utils/cleanup-shell-rc';
@@ -630,6 +656,22 @@ void yargs(hideBin(process.argv))
       describe: 'internal: AMPLITUDE_WIZARD_LOG_FILE env-var passthrough',
       type: 'string',
     },
+    // Audit #5 (protocol completeness): out-of-band probe for the wire
+    // protocol. When set, the wizard prints a JSON manifest
+    // (`protocolVersion`, `eventDataVersions`, `supportedEvents`,
+    // `exitCodes`, `cliVersion`, `wizardProtocolVersion`) to stdout and
+    // exits 0 — without authenticating, spawning the agent, or
+    // contacting any backend. The handler runs at the very top of
+    // bin.ts (above this yargs config) so even a broken-cache wizard
+    // can still report its protocol; this declaration exists for
+    // `--help` documentation and so `.strict()` accepts the flag if
+    // it's passed alongside other args.
+    'print-protocol': {
+      default: false,
+      describe:
+        'print the wire-protocol manifest as JSON and exit (out-of-band probe for orchestrators)',
+      type: 'boolean',
+    },
   })
   .command(defaultCommand)
   .command(loginCommand)
@@ -660,6 +702,10 @@ void yargs(hideBin(process.argv))
   .example('$0 status --json', 'Report project setup state as JSON')
   .example('$0 auth token', 'Print the stored OAuth token (for scripts/agents)')
   .example('$0 manifest', 'Dump the machine-readable CLI manifest as JSON')
+  .example(
+    '$0 --print-protocol',
+    'Print the NDJSON wire-protocol manifest as JSON and exit (no auth)',
+  )
   .epilogue(
     [
       'Environment variables:',
