@@ -648,6 +648,32 @@ export interface WizardUI {
   }): void;
 
   /**
+   * Orchestrator-facing rollup for multi-item operations. The wizard
+   * emits this at every meaningful step boundary of a long-running
+   * operation (post-agent queue advance, MCP install across editors,
+   * event-plan track() write). Carries the canonical
+   * `(stage, current, total)` triple — the emitter computes
+   * `percent` and clamps `current` to the `[0, total]` window so a
+   * misbehaving caller can't ship `percent > 100`.
+   *
+   * Distinct from the fine-grained per-item events (`post_agent_step`,
+   * `tool_call`): orchestrators that just want a single progress bar
+   * subscribe to `progress_estimate` and ignore the noisier stream.
+   *
+   * Optional — only AgentUI emits. InkUI / LoggingUI no-op (the TUI's
+   * journey stepper / panel already shows progress; CI logs the
+   * per-step lines).
+   */
+  emitProgressEstimate?(args: {
+    /** Stable, opaque stage id (e.g. `'post_agent_steps'`). */
+    stage: string;
+    /** Items completed so far. */
+    current: number;
+    /** Total items in this stage (>= 1). */
+    total: number;
+  }): void;
+
+  /**
    * Emitted just before the Claude Agent SDK runs an auto- or manual-
    * triggered context compaction. Pairs with `emitCompactionCompleted`
    * so orchestrators can render a "still working — compacting context"

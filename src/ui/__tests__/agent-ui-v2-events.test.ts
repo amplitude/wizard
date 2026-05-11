@@ -17,6 +17,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { AgentUI } from '../agent-ui.js';
 import {
   EVENT_DATA_VERSIONS,
+  buildProgressEstimate,
   classifyFileChangeError,
   deriveStallTier,
 } from '../../lib/agent-events.js';
@@ -604,6 +605,213 @@ describe('emitAttemptStarted no-op on non-AgentUI implementations', () => {
   });
 });
 
+// ── PR B4: progress_estimate ────────────────────────────────────────
+
+describe('AgentUI.emitProgressEstimate (PR B4: rollup)', () => {
+  let writes: string[];
+  let restore: () => void;
+
+  beforeEach(() => {
+    ({ writes, restore } = setupStdoutSpy());
+  });
+  afterEach(() => restore());
+
+  it('emits a progress: progress_estimate with stage/current/total/percent', () => {
+    const ui = new AgentUI();
+    ui.emitProgressEstimate?.({
+      stage: 'mcp_install',
+      current: 2,
+      total: 4,
+    });
+    const event = lastEvent(writes);
+    expect(event.type).toBe('progress');
+    expect(event.message).toBe('progress_estimate: mcp_install 2/4 (50%)');
+    expect(event.data).toMatchObject({
+      event: 'progress_estimate',
+      stage: 'mcp_install',
+      current: 2,
+      total: 4,
+      percent: 50,
+    });
+    expect(event.data_version).toBe(EVENT_DATA_VERSIONS.progress_estimate);
+  });
+
+  it('no-ops when total < 1 (no zero-item operations on the wire)', () => {
+    const ui = new AgentUI();
+    ui.emitProgressEstimate?.({
+      stage: 'event_plan_write',
+      current: 0,
+      total: 0,
+    });
+    const events = eventsOfType(writes, 'progress').filter(
+      (e) => e.data?.event === 'progress_estimate',
+    );
+    expect(events.length).toBe(0);
+  });
+
+  it('clamps current to the [0, total] window', () => {
+    const ui = new AgentUI();
+    ui.emitProgressEstimate?.({
+      stage: 'mcp_install',
+      current: 10,
+      total: 4,
+    });
+    const event = lastEvent(writes);
+    expect(event.data).toMatchObject({ current: 4, percent: 100 });
+  });
+
+  it('emits a post_agent_steps rollup at terminal-state transitions only', () => {
+    const ui = new AgentUI();
+    ui.seedPostAgentSteps([
+      {
+        id: 'commit-events',
+        label: 'Commit events',
+        activeForm: 'Committing events',
+        status: 'pending',
+      },
+      {
+        id: 'create-dashboard',
+        label: 'Create dashboard',
+        activeForm: 'Creating dashboard',
+        status: 'pending',
+      },
+    ]);
+    // in_progress is NOT terminal — must not bump the estimate.
+    ui.setPostAgentStep('commit-events', { status: 'in_progress' });
+    let progressEstimates = eventsOfType(writes, 'progress').filter(
+      (e) => e.data?.event === 'progress_estimate',
+    );
+    expect(progressEstimates.length).toBe(0);
+
+    // completed IS terminal — bumps to 1/2 (50%).
+    ui.setPostAgentStep('commit-events', { status: 'completed' });
+    progressEstimates = eventsOfType(writes, 'progress').filter(
+      (e) => e.data?.event === 'progress_estimate',
+    );
+    expect(progressEstimates.length).toBe(1);
+    expect(progressEstimates[0].data).toMatchObject({
+      stage: 'post_agent_steps',
+      current: 1,
+      total: 2,
+      percent: 50,
+    });
+
+    // skipped also counts as terminal — bumps to 2/2 (100%).
+    ui.setPostAgentStep('create-dashboard', {
+      status: 'skipped',
+      reason: 'no events',
+    });
+    progressEstimates = eventsOfType(writes, 'progress').filter(
+      (e) => e.data?.event === 'progress_estimate',
+    );
+    expect(progressEstimates.length).toBe(2);
+    expect(progressEstimates[1].data).toMatchObject({
+      current: 2,
+      total: 2,
+      percent: 100,
+    });
+  });
+
+  it('idempotent on duplicate terminal-state transitions', () => {
+    // A step that lands on `completed` twice (e.g. retry path that
+    // re-emits) must not double-count the rollup. The Set-based
+    // dedup in AgentUI guarantees the count is monotone.
+    const ui = new AgentUI();
+    ui.seedPostAgentSteps([
+      {
+        id: 'commit-events',
+        label: 'Commit events',
+        activeForm: 'Committing events',
+        status: 'pending',
+      },
+    ]);
+    ui.setPostAgentStep('commit-events', { status: 'completed' });
+    ui.setPostAgentStep('commit-events', { status: 'completed' });
+    const progressEstimates = eventsOfType(writes, 'progress').filter(
+      (e) => e.data?.event === 'progress_estimate',
+    );
+    expect(progressEstimates.length).toBe(1);
+    expect(progressEstimates[0].data).toMatchObject({ current: 1, total: 1 });
+  });
+
+  it('resets the queue on a second seedPostAgentSteps call', () => {
+    const ui = new AgentUI();
+    ui.seedPostAgentSteps([
+      {
+        id: 's1',
+        label: 'Step 1',
+        activeForm: '...',
+        status: 'pending',
+      },
+    ]);
+    ui.setPostAgentStep('s1', { status: 'completed' });
+    // Re-seed with a different queue — the old `s1` completion
+    // should not bleed into the new total.
+    ui.seedPostAgentSteps([
+      {
+        id: 'a',
+        label: 'A',
+        activeForm: '...',
+        status: 'pending',
+      },
+      {
+        id: 'b',
+        label: 'B',
+        activeForm: '...',
+        status: 'pending',
+      },
+    ]);
+    ui.setPostAgentStep('a', { status: 'completed' });
+    const progressEstimates = eventsOfType(writes, 'progress').filter(
+      (e) => e.data?.event === 'progress_estimate',
+    );
+    // First seed: 1 progress_estimate. Second seed's first step: 1 more.
+    expect(progressEstimates.length).toBe(2);
+    expect(progressEstimates[1].data).toMatchObject({ current: 1, total: 2 });
+  });
+});
+
+describe('buildProgressEstimate (pure helper)', () => {
+  it('computes percent correctly', () => {
+    expect(buildProgressEstimate('s', 0, 4)).toMatchObject({ percent: 0 });
+    expect(buildProgressEstimate('s', 1, 4)).toMatchObject({ percent: 25 });
+    expect(buildProgressEstimate('s', 2, 4)).toMatchObject({ percent: 50 });
+    expect(buildProgressEstimate('s', 3, 4)).toMatchObject({ percent: 75 });
+    expect(buildProgressEstimate('s', 4, 4)).toMatchObject({ percent: 100 });
+  });
+
+  it('rounds percent (no fractional values on the wire)', () => {
+    // 1/3 ≈ 33.333 → 33 (Math.round)
+    expect(buildProgressEstimate('s', 1, 3)).toMatchObject({ percent: 33 });
+    // 2/3 ≈ 66.667 → 67
+    expect(buildProgressEstimate('s', 2, 3)).toMatchObject({ percent: 67 });
+  });
+
+  it('clamps negative current to 0', () => {
+    expect(buildProgressEstimate('s', -5, 4)).toMatchObject({
+      current: 0,
+      percent: 0,
+    });
+  });
+
+  it('clamps current > total to total', () => {
+    expect(buildProgressEstimate('s', 99, 4)).toMatchObject({
+      current: 4,
+      percent: 100,
+    });
+  });
+
+  it('floors fractional current', () => {
+    expect(buildProgressEstimate('s', 2.9, 4)).toMatchObject({ current: 2 });
+  });
+
+  it('returns null for total < 1 (no zero-item rollups)', () => {
+    expect(buildProgressEstimate('s', 0, 0)).toBeNull();
+    expect(buildProgressEstimate('s', 0, -1)).toBeNull();
+    expect(buildProgressEstimate('s', 0, NaN)).toBeNull();
+  });
+});
+
 describe('EVENT_DATA_VERSIONS (v2 entries registered)', () => {
   it.each([
     ['discovery_fact', 1],
@@ -612,6 +820,7 @@ describe('EVENT_DATA_VERSIONS (v2 entries registered)', () => {
     ['run_resumed', 1],
     ['file_change_failed', 1],
     ['attempt_started', 1],
+    ['progress_estimate', 1],
   ] as const)('registers %s at version %d', (event, version) => {
     expect(
       (EVENT_DATA_VERSIONS as Readonly<Record<string, number>>)[event],

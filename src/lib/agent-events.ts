@@ -291,6 +291,27 @@ export const EVENT_DATA_VERSIONS = {
    */
   attempt_started: 1,
   /**
+   * `progress_estimate` — emitted at every meaningful step boundary
+   * inside a multi-item operation (post-agent step queue,
+   * multi-editor MCP install, multi-event plan write). Carries the
+   * canonical `(stage, current, total, percent)` tuple so an
+   * orchestrator can render a progress bar without re-deriving it
+   * from a stream of finer-grained events.
+   *
+   *   `stage`   — short stable id of the operation
+   *               (e.g. `'post_agent_steps'`)
+   *   `current` — items completed so far (0..total)
+   *   `total`   — total items in the operation
+   *   `percent` — `Math.round(100 * current / total)` (0..100)
+   *
+   * Distinct from `post_agent_step` / `tool_call`: those are
+   * fine-grained per-item events; `progress_estimate` is the
+   * orchestrator-facing rollup. An orchestrator that wants to render
+   * a single progress bar subscribes to `progress_estimate` and
+   * ignores the fine-grained stream.
+   */
+  progress_estimate: 1,
+  /**
    * `compaction_started` — emitted by the PreCompact hook just before
    * the SDK summarises conversation history. Lets orchestrators render
    * a "compacting…" indicator during what would otherwise be silent
@@ -959,6 +980,61 @@ export interface RunResumedData {
    * org, project, framework, etc.). Pre-redacted at emit time.
    */
   restored_state_summary: string;
+}
+
+/**
+ * `progress_estimate` — orchestrator-facing rollup for multi-item
+ * operations. See `EVENT_DATA_VERSIONS.progress_estimate` for the full
+ * contract. The `stage` strings the wizard emits today:
+ *
+ *   `'post_agent_steps'`  — post-agent queue advance (commit-events,
+ *                           create-dashboard, etc.)
+ *   `'mcp_install'`       — multi-editor MCP install loop
+ *   `'event_plan_write'`  — event-plan track() write loop
+ *
+ * Additional `stage` strings are added as new long-running operations
+ * land. Orchestrators MUST treat `stage` as opaque — branching on
+ * specific stage strings is fine, but the absence of one shouldn't
+ * change consumer behaviour.
+ */
+export interface ProgressEstimateData {
+  event: 'progress_estimate';
+  /** Stable, opaque stage id (e.g. `'post_agent_steps'`). */
+  stage: string;
+  /** Items completed so far. Monotonically non-decreasing. */
+  current: number;
+  /** Total items in this stage. Must be >= 1 (no zero-total stages). */
+  total: number;
+  /** Pre-computed `Math.round(100 * current / total)` (0..100). */
+  percent: number;
+}
+
+/**
+ * Pure helper — derive the `progress_estimate` payload from a
+ * `(stage, current, total)` triple. Clamps `current` to the
+ * `[0, total]` window so a misbehaving caller can't ship a percent
+ * outside `[0, 100]`. Returns `null` when `total < 1` (no work to
+ * do — orchestrators should not see a `progress_estimate` for a
+ * zero-item operation).
+ *
+ * Pure for unit testing — used by both the emitter and the
+ * regression suite.
+ */
+export function buildProgressEstimate(
+  stage: string,
+  current: number,
+  total: number,
+): ProgressEstimateData | null {
+  if (!Number.isFinite(total) || total < 1) return null;
+  const clamped = Math.max(0, Math.min(total, Math.floor(current)));
+  const percent = Math.round((100 * clamped) / total);
+  return {
+    event: 'progress_estimate',
+    stage,
+    current: clamped,
+    total,
+    percent,
+  };
 }
 
 /**
