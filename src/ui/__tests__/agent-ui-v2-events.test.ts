@@ -15,7 +15,10 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { AgentUI } from '../agent-ui.js';
-import { EVENT_DATA_VERSIONS } from '../../lib/agent-events.js';
+import {
+  EVENT_DATA_VERSIONS,
+  deriveStallTier,
+} from '../../lib/agent-events.js';
 
 interface NDJSONEvent {
   v: 1;
@@ -187,6 +190,79 @@ describe('AgentUI.emitCurrentFile (v2: now-editing rollup)', () => {
   });
 });
 
+describe('AgentUI.emitStallStatus (v2: coaching tiers)', () => {
+  let writes: string[];
+  let restore: () => void;
+
+  beforeEach(() => {
+    ({ writes, restore } = setupStdoutSpy());
+  });
+  afterEach(() => restore());
+
+  it('emits a progress: stall_status carrying tier + durationMs + lastActivity', () => {
+    const ui = new AgentUI();
+    const lastActivity = Date.now();
+    ui.emitStallStatus?.({
+      tier: 'noticed',
+      durationMs: 10_000,
+      lastActivity,
+      hint: 'agent has been quiet for 10s',
+    });
+    const event = lastEvent(writes);
+    expect(event.type).toBe('progress');
+    expect(event.data).toMatchObject({
+      event: 'stall_status',
+      tier: 'noticed',
+      durationMs: 10_000,
+      lastActivity,
+      hint: 'agent has been quiet for 10s',
+    });
+    expect(event.data_version).toBe(EVENT_DATA_VERSIONS.stall_status);
+  });
+
+  it('dedups same-tier emissions until resetStallStatus is called', () => {
+    const ui = new AgentUI();
+    ui.emitStallStatus?.({ tier: 'noticed', durationMs: 10_000, lastActivity: 0 });
+    ui.emitStallStatus?.({ tier: 'noticed', durationMs: 12_000, lastActivity: 0 });
+    ui.emitStallStatus?.({ tier: 'noticed', durationMs: 15_000, lastActivity: 0 });
+    let events = eventsOfType(writes, 'progress').filter(
+      (e) => e.data?.event === 'stall_status',
+    );
+    expect(events.length).toBe(1);
+
+    // After reset, the same tier can fire again (next stall window).
+    ui.resetStallStatus?.();
+    ui.emitStallStatus?.({ tier: 'noticed', durationMs: 10_000, lastActivity: 0 });
+    events = eventsOfType(writes, 'progress').filter(
+      (e) => e.data?.event === 'stall_status',
+    );
+    expect(events.length).toBe(2);
+  });
+
+  it('accepts all three documented tiers (noticed / concerning / critical)', () => {
+    const ui = new AgentUI();
+    const tiers = ['noticed', 'concerning', 'critical'] as const;
+    for (const tier of tiers) {
+      ui.emitStallStatus?.({ tier, durationMs: 1, lastActivity: 0 });
+    }
+    const events = eventsOfType(writes, 'progress').filter(
+      (e) => e.data?.event === 'stall_status',
+    );
+    expect(events.map((e) => e.data?.tier)).toEqual([...tiers]);
+  });
+
+  it('omits hint from the wire when not supplied', () => {
+    const ui = new AgentUI();
+    ui.emitStallStatus?.({
+      tier: 'critical',
+      durationMs: 60_000,
+      lastActivity: 0,
+    });
+    const event = lastEvent(writes);
+    expect(event.data).not.toHaveProperty('hint');
+  });
+});
+
 // ── EVENT_DATA_VERSIONS registry coherence ─────────────────────────
 //
 // Every new v2 event MUST appear in `EVENT_DATA_VERSIONS`. Asserting
@@ -198,9 +274,34 @@ describe('EVENT_DATA_VERSIONS (v2 entries registered)', () => {
   it.each([
     ['discovery_fact', 1],
     ['current_file', 1],
+    ['stall_status', 1],
   ] as const)('registers %s at version %d', (event, version) => {
     expect(
       (EVENT_DATA_VERSIONS as Readonly<Record<string, number>>)[event],
     ).toBe(version);
+  });
+});
+
+// ── deriveStallTier pure-helper coverage ────────────────────────────
+
+describe('deriveStallTier', () => {
+  it('returns null below the noticed threshold', () => {
+    expect(deriveStallTier(0)).toBeNull();
+    expect(deriveStallTier(9_999)).toBeNull();
+  });
+
+  it('returns "noticed" at the 10s threshold', () => {
+    expect(deriveStallTier(10_000)).toBe('noticed');
+    expect(deriveStallTier(29_999)).toBe('noticed');
+  });
+
+  it('returns "concerning" at the 30s threshold', () => {
+    expect(deriveStallTier(30_000)).toBe('concerning');
+    expect(deriveStallTier(59_999)).toBe('concerning');
+  });
+
+  it('returns "critical" at the 60s threshold', () => {
+    expect(deriveStallTier(60_000)).toBe('critical');
+    expect(deriveStallTier(120_000)).toBe('critical');
   });
 });

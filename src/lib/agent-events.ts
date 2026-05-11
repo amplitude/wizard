@@ -289,6 +289,17 @@ export const EVENT_DATA_VERSIONS = {
    * event per logical activity transition rather than one per write.
    */
   current_file: 1,
+  /**
+   * `stall_status` — coaching-tier mirror of the TUI's stall hints.
+   * Tiers escalate as silence grows: `noticed` at 10s, `concerning`
+   * at 30s, `critical` at 60s. Carries the duration since last
+   * activity plus an optional human-readable hint orchestrators can
+   * surface verbatim. Distinct from `heartbeat` (which fires on a
+   * fixed cadence regardless of progress) — `stall_status` only
+   * fires when the wizard has been quiet long enough to deserve
+   * escalated UX.
+   */
+  stall_status: 1,
 } as const;
 
 /** All NDJSON event-level types. */
@@ -679,6 +690,57 @@ export interface CurrentFileData {
   operation: 'create' | 'modify' | 'delete';
 }
 
+/**
+ * `stall_status` — coaching-tier mirror of the TUI's stall hints.
+ * Three escalating tiers fire at 10s / 30s / 60s of silence (no tool
+ * calls or status updates from the inner agent). Each tier emits at
+ * most once per stall window; activity resets the gate. Orchestrators
+ * surface `hint` verbatim when set and otherwise compose their own
+ * copy from `tier + durationMs`.
+ */
+export type StallTier = 'noticed' | 'concerning' | 'critical';
+export interface StallStatusData {
+  event: 'stall_status';
+  tier: StallTier;
+  /** Milliseconds since the last observed activity. Monotonic-ish. */
+  durationMs: number;
+  /**
+   * Wall-clock ms timestamp of the most recent observed activity
+   * the stall detector saw. Lets orchestrators reconcile against
+   * their own clock when rendering "stalled for Ns".
+   */
+  lastActivity: number;
+  /** Optional pre-composed hint string — surface verbatim when set. */
+  hint?: string;
+}
+
+/**
+ * Tier thresholds (ms since last activity). Match the TUI's stall
+ * hint banner so InkUI / AgentUI escalate in lockstep — a parent
+ * agent that subscribes to `stall_status` sees the same coaching
+ * cadence the in-terminal user would.
+ */
+export const STALL_TIER_THRESHOLDS_MS: Readonly<
+  Record<StallTier, number>
+> = Object.freeze({
+  noticed: 10_000,
+  concerning: 30_000,
+  critical: 60_000,
+});
+
+/**
+ * Pure helper — derive the highest stall tier reached for a given
+ * silence duration. Returns `null` when below the `noticed` threshold,
+ * which lets callers cleanly suppress emission while the wizard is
+ * still within its expected response window.
+ */
+export function deriveStallTier(durationMs: number): StallTier | null {
+  if (durationMs >= STALL_TIER_THRESHOLDS_MS.critical) return 'critical';
+  if (durationMs >= STALL_TIER_THRESHOLDS_MS.concerning) return 'concerning';
+  if (durationMs >= STALL_TIER_THRESHOLDS_MS.noticed) return 'noticed';
+  return null;
+}
+
 export type InnerAgentLifecycleData =
   | InnerAgentStartedData
   | ToolCallData
@@ -689,7 +751,8 @@ export type InnerAgentLifecycleData =
   | VerificationStartedData
   | VerificationResultData
   | DiscoveryFactData
-  | CurrentFileData;
+  | CurrentFileData
+  | StallStatusData;
 
 /**
  * Coarse-grained orchestrator-facing phase boundaries for a wizard run.

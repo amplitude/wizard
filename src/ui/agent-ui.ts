@@ -1322,6 +1322,55 @@ export class AgentUI implements WizardUI {
     });
   }
 
+  // ── v2 protocol: stall_status coaching tiers ────────────────────────
+  //
+  // The wizard's stall detector fires at 10s / 30s / 60s of silence.
+  // Mirror that escalation onto NDJSON so parent agents can render the
+  // same coaching tier ("the wizard's been quiet for 10s" → "concerning"
+  // → "critical, consider retrying") in lockstep with the TUI. Per-tier
+  // dedup at the wire boundary so a runaway emitter can't spam
+  // orchestrators — a tier fires at most once per stall window, reset
+  // by `resetStallStatus()` when activity resumes.
+
+  private _lastStallTier:
+    | 'noticed'
+    | 'concerning'
+    | 'critical'
+    | null = null;
+
+  emitStallStatus(data: {
+    tier: 'noticed' | 'concerning' | 'critical';
+    durationMs: number;
+    lastActivity: number;
+    hint?: string;
+  }): void {
+    if (this._lastStallTier === data.tier) {
+      // Same tier already emitted this window. Caller should invoke
+      // `resetStallStatus()` when activity resumes.
+      return;
+    }
+    this._lastStallTier = data.tier;
+    emit('progress', `stall_status: ${data.tier} (${data.durationMs}ms)`, {
+      data: {
+        event: 'stall_status',
+        tier: data.tier,
+        durationMs: data.durationMs,
+        lastActivity: data.lastActivity,
+        ...(data.hint ? { hint: data.hint } : {}),
+      },
+    });
+  }
+
+  /**
+   * Reset the per-window stall-tier guard. Callers invoke this when
+   * the inner agent resumes producing tool calls / status updates —
+   * the next stall window starts fresh and the 'noticed' tier can
+   * fire again.
+   */
+  resetStallStatus(): void {
+    this._lastStallTier = null;
+  }
+
   // Security: stack traces redacted from NDJSON output to prevent path/secret leakage
   setRunError(error: Error): Promise<boolean> {
     let sanitized: string;

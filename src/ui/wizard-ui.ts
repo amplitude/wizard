@@ -671,4 +671,31 @@ export interface WizardUI {
     relativePath: string;
     operation: 'create' | 'modify' | 'delete';
   }): void;
+
+  /**
+   * Coaching-tier mirror of the wizard's stall detector onto NDJSON.
+   * Three escalating tiers fire at 10s / 30s / 60s of silence; each
+   * tier emits at most once per stall window. Lets parent agents
+   * surface escalating UX ("the wizard's been quiet for 10s…" →
+   * "concerning…" → "consider retrying") in lockstep with the TUI's
+   * stall hints. Distinct from `heartbeat` (fixed cadence regardless
+   * of progress).
+   *
+   * Optional — only AgentUI emits. InkUI / LoggingUI no-op (the TUI
+   * has its own stall-hint banner).
+   */
+  emitStallStatus?(data: {
+    tier: 'noticed' | 'concerning' | 'critical';
+    durationMs: number;
+    lastActivity: number;
+    hint?: string;
+  }): void;
+
+  /**
+   * Reset the per-window stall-tier guard. Optional — AgentUI tracks
+   * the gate, InkUI / LoggingUI no-op. Callers invoke this when the
+   * inner agent resumes producing tool calls / status updates so the
+   * next stall window starts fresh.
+   */
+  resetStallStatus?(): void;
 }
