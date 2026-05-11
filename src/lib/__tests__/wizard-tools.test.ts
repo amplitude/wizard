@@ -20,6 +20,7 @@ import {
   archiveSetupReportFile,
   restoreSetupReportIfMissing,
   normalizeEventName,
+  looksLikeIntendedCasing,
   PREVIOUS_SETUP_REPORT_FILENAME,
   WIZARD_GITIGNORE_PATTERNS,
   WIZARD_TOOL_NAMES,
@@ -371,6 +372,70 @@ describe('normalizeEventName', () => {
   it('collapses multiple separators', () => {
     expect(normalizeEventName('user__signed___up')).toBe('User Signed Up');
     expect(normalizeEventName('user.signed.up')).toBe('User Signed Up');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// looksLikeIntendedCasing
+// ---------------------------------------------------------------------------
+//
+// Gate for the `confirm_event_plan` normalizer. The point is to let
+// deliberate human casing pass through unchanged — including the
+// lowercase variant users sometimes request via plan feedback — while
+// still rewriting clearly-programmatic fallbacks (snake_case,
+// kebab-case, camelCase, dotted) into Title Case.
+
+describe('looksLikeIntendedCasing', () => {
+  it('treats Title Case names with spaces as intended', () => {
+    expect(looksLikeIntendedCasing('Collaboration Started')).toBe(true);
+    expect(looksLikeIntendedCasing('User Signed Up')).toBe(true);
+  });
+
+  it('treats Sentence case names with spaces as intended', () => {
+    expect(looksLikeIntendedCasing('Collaboration started')).toBe(true);
+  });
+
+  it('treats all-lowercase names with spaces as intended', () => {
+    // This is the live-bug case: the user typed `lowercased` as
+    // feedback and the agent dutifully revised the plan to lowercase
+    // names. Predicate must let them through.
+    expect(looksLikeIntendedCasing('collaboration started')).toBe(true);
+    expect(looksLikeIntendedCasing('user signed up')).toBe(true);
+  });
+
+  it('treats ALL-UPPERCASE names with spaces as intended', () => {
+    // Debatable on taste — but it's intentional shouting; not the
+    // model dropping back into a programmatic shape. Don't second-guess.
+    expect(looksLikeIntendedCasing('COLLABORATION STARTED')).toBe(true);
+  });
+
+  it('rejects snake_case as programmatic', () => {
+    expect(looksLikeIntendedCasing('user_signed_up')).toBe(false);
+    expect(looksLikeIntendedCasing('collaboration_started')).toBe(false);
+  });
+
+  it('rejects kebab-case as programmatic', () => {
+    expect(looksLikeIntendedCasing('user-signed-up')).toBe(false);
+  });
+
+  it('rejects dotted names as programmatic', () => {
+    expect(looksLikeIntendedCasing('user.signed.up')).toBe(false);
+  });
+
+  it('rejects single-token camelCase / PascalCase as programmatic', () => {
+    expect(looksLikeIntendedCasing('userSignedUp')).toBe(false);
+    expect(looksLikeIntendedCasing('CollaborationStarted')).toBe(false);
+  });
+
+  it('rejects empty / whitespace-only inputs', () => {
+    expect(looksLikeIntendedCasing('')).toBe(false);
+    expect(looksLikeIntendedCasing('   ')).toBe(false);
+  });
+
+  it('accepts multi-word inputs even with stray inner whitespace', () => {
+    // Whitespace collapsing happens at the call site; the predicate
+    // just needs to recognize the shape as user-intended.
+    expect(looksLikeIntendedCasing('  Multi    Spaces  ')).toBe(true);
   });
 });
 
@@ -2012,5 +2077,110 @@ describe('isWizardPromptActive / onWizardPromptRelease', () => {
     resolve();
     await inFlight;
     expect(releaseCount).toBe(0);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// confirm_event_plan → persisted name casing (gated normalizer)
+// ---------------------------------------------------------------------------
+//
+// End-to-end pinning of the live bug. The agent calls the tool with a
+// proposed plan, the wizard prompts the user, the user approves, and the
+// canonical events.json is written. Pre-fix this path silently
+// re-Title-Cased every entry — so user feedback like "use lowercase" was
+// structurally impossible to honor. Post-fix:
+//   - intentional casing (Title, Sentence, lower, shouty) survives intact
+//   - programmatic shapes (snake_case, camelCase, etc.) still normalize.
+
+describe('confirm_event_plan name-casing flow', () => {
+  let tmpDir: string;
+  let setUI: typeof import('../../ui').setUI;
+  let LoggingUI: typeof import('../../ui/logging-ui').LoggingUI;
+
+  beforeEach(async () => {
+    tmpDir = makeTmpDir();
+    ({ setUI } = await import('../../ui'));
+    ({ LoggingUI } = await import('../../ui/logging-ui'));
+  });
+  afterEach(() => {
+    cleanup(tmpDir);
+    // Restore a fresh LoggingUI so neighbouring suites see a clean singleton.
+    setUI(new LoggingUI());
+  });
+
+  function makeAutoApproveUI(): import('../../ui').WizardUI {
+    const ui = new LoggingUI();
+    ui.promptEventPlan = async () =>
+      ({
+        decision: 'approved',
+      } as import('../../ui/wizard-ui').EventPlanDecision);
+    return ui;
+  }
+
+  async function runConfirmEventPlan(
+    events: Array<{ name: string; description: string }>,
+  ): Promise<Array<{ name: string; description: string }>> {
+    setUI(makeAutoApproveUI());
+    const tools = await getTools(tmpDir);
+    const tool = findTool(tools, 'confirm_event_plan');
+    await callTool(tool, { events, reason: 'unit test' });
+    const raw = fs.readFileSync(
+      path.join(tmpDir, '.amplitude', 'events.json'),
+      'utf8',
+    );
+    return JSON.parse(raw) as Array<{ name: string; description: string }>;
+  }
+
+  it('preserves all-lowercase names the user asked for via feedback', async () => {
+    // Pin for the Excalidraw bug: user typed `lowercased` as plan
+    // feedback, agent revised to lowercase names, normalizer used to
+    // rewrite them back to Title Case so the "revised" plan came back
+    // identical. Must survive verbatim now.
+    const persisted = await runConfirmEventPlan([
+      { name: 'collaboration started', description: 'A collab opens' },
+      { name: 'shape created', description: 'User drops a shape' },
+    ]);
+    expect(persisted).toEqual([
+      { name: 'collaboration started', description: 'A collab opens' },
+      { name: 'shape created', description: 'User drops a shape' },
+    ]);
+  });
+
+  it('still normalizes programmatic snake_case fallbacks to Title Case', async () => {
+    const persisted = await runConfirmEventPlan([
+      { name: 'user_signed_up', description: 'Signup completes' },
+    ]);
+    expect(persisted).toEqual([
+      { name: 'User Signed Up', description: 'Signup completes' },
+    ]);
+  });
+
+  it('still normalizes camelCase fallbacks to Title Case', async () => {
+    const persisted = await runConfirmEventPlan([
+      { name: 'userSignedUp', description: 'Signup completes' },
+    ]);
+    expect(persisted).toEqual([
+      { name: 'User Signed Up', description: 'Signup completes' },
+    ]);
+  });
+
+  it('preserves Title Case and Sentence case unchanged', async () => {
+    const persisted = await runConfirmEventPlan([
+      { name: 'User Signed Up', description: 'Title Case stays' },
+      { name: 'User signed up', description: 'Sentence case stays' },
+    ]);
+    expect(persisted).toEqual([
+      { name: 'User Signed Up', description: 'Title Case stays' },
+      { name: 'User signed up', description: 'Sentence case stays' },
+    ]);
+  });
+
+  it('collapses extra whitespace inside otherwise-intended names', async () => {
+    const persisted = await runConfirmEventPlan([
+      { name: '  Multi    Spaces  ', description: 'whitespace collapsed' },
+    ]);
+    expect(persisted).toEqual([
+      { name: 'Multi Spaces', description: 'whitespace collapsed' },
+    ]);
   });
 });
