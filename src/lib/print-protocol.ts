@@ -34,9 +34,10 @@
  *   - `wizardProtocolVersion`   — coarser "wizard protocol" version that
  *                                 covers the broader handshake (CLI
  *                                 flags, exit-code semantics, NDJSON
- *                                 framing). Currently `2`. When PR B8
- *                                 lands `WIZARD_PROTOCOL_VERSION` this
- *                                 module will import it directly.
+ *                                 framing). Imported from
+ *                                 `agent-events.ts` (single source of
+ *                                 truth — same value the `wizard manifest`
+ *                                 ndjsonProtocol block advertises).
  *   - `eventDataVersions`       — full registry of per-event `data_version`
  *                                 values. Mirrors `EVENT_DATA_VERSIONS`.
  *   - `supportedEvents`         — sorted list of every event discriminator
@@ -54,18 +55,13 @@
  *   - The value-shape of `eventDataVersions` may grow keys freely;
  *     consumers should treat unknown keys as "data_version 1 implied".
  */
-import { AGENT_EVENT_WIRE_VERSION, EVENT_DATA_VERSIONS } from './agent-events';
+import {
+  AGENT_EVENT_WIRE_VERSION,
+  EVENT_DATA_VERSIONS,
+  WIZARD_PROTOCOL_VERSION,
+} from './agent-events';
 import { ExitCode } from './exit-codes';
 import { WIZARD_VERSION } from '../commands/context';
-
-/**
- * Coarse-grained "wizard protocol" version. Currently hard-coded to `2`
- * — when PR B8/#724 lands `WIZARD_PROTOCOL_VERSION` as an exported
- * constant somewhere, swap this fallback for a direct import. The
- * fallback keeps `--print-protocol` shippable on its own without a
- * cross-PR dependency.
- */
-const WIZARD_PROTOCOL_VERSION_FALLBACK = 2;
 
 export interface ProtocolManifest {
   protocolVersion: number;
@@ -101,7 +97,7 @@ export function buildProtocolManifest(): ProtocolManifest {
 
   return {
     protocolVersion: AGENT_EVENT_WIRE_VERSION,
-    wizardProtocolVersion: WIZARD_PROTOCOL_VERSION_FALLBACK,
+    wizardProtocolVersion: WIZARD_PROTOCOL_VERSION,
     cliVersion: WIZARD_VERSION,
     eventDataVersions,
     supportedEvents,
