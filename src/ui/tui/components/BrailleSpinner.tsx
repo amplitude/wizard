@@ -58,13 +58,6 @@ interface BrailleSpinnerProps {
    *  and renders this frame directly — lets callers share a single timer. */
   frame?: number;
   /**
-   * When true, render three consecutive frames (offset by +1 and +2) so
-   * the spinner occupies three terminal cells instead of one. Useful for
-   * prominent positions like the RunScreen header where a single character
-   * is too easy to miss.
-   */
-  wide?: boolean;
-  /**
    * Narrative tempo for the spinner. See module header for the three
    * mood semantics. Defaults to 'thinking' so existing callsites keep
    * their original cadence.
@@ -75,7 +68,6 @@ interface BrailleSpinnerProps {
 export const BrailleSpinner = ({
   color,
   frame: frameProp,
-  wide = false,
   mood = 'thinking',
 }: BrailleSpinnerProps) => {
   const [internalFrame, setInternalFrame] = useState(0);
@@ -94,15 +86,6 @@ export const BrailleSpinner = ({
 
   const frame =
     frameProp !== undefined ? frameProp % SPINNER_FRAMES.length : internalFrame;
-
-  if (wide) {
-    const n = SPINNER_FRAMES.length;
-    const chars =
-      SPINNER_FRAMES[frame] +
-      SPINNER_FRAMES[(frame + 1) % n] +
-      SPINNER_FRAMES[(frame + 2) % n];
-    return <Text color={resolvedColor}>{chars}</Text>;
-  }
 
   return <Text color={resolvedColor}>{SPINNER_FRAMES[frame]}</Text>;
 };
