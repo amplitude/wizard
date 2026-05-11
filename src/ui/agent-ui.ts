@@ -17,6 +17,7 @@ import type {
   NeedsInputWireData,
   InnerAgentStartedData,
   ToolCallData,
+  ToolResponseData,
   FileChangePlannedData,
   FileChangeAppliedData,
   EventPlanProposedData,
@@ -32,12 +33,16 @@ import type {
 } from '../lib/agent-events';
 import {
   EVENT_DATA_VERSIONS,
+  TOOL_RESPONSE_CONTENT_HEAD_MAX_BYTES,
+  TOOL_RESPONSE_ERROR_MESSAGE_MAX_BYTES,
+  TOOL_RESPONSE_SUMMARY_MAX_CHARS,
   buildColdStartBreakdown,
   buildProgressEstimate,
   classifyRunError,
   nextDecisionId,
   ToolCallStats,
   truncateLogMessage,
+  truncateToBytes,
   type RecoverableHint,
   type SuggestedAction,
   type ToolCallOutcome,
@@ -384,6 +389,28 @@ const mcpStatusDataSchema = z.object({
   ]),
   transition_ts: z.number().int().nonnegative(),
   detail: z.string().optional(),
+});
+
+/**
+ * Per-event Zod schema for `tool_response` `data` payloads. The
+ * envelope-level `agentEventSchema` checks the outer frame only;
+ * this adds defense-in-depth on the tool-outcome event so a
+ * misbehaving caller (negative durations, invalid outcome literals,
+ * over-cap strings) gets caught at the emit boundary rather than
+ * poisoning the orchestrator's parser. Caps mirror the registry
+ * constants in `agent-events.ts` so the wire contract and the test
+ * suite share one source of truth.
+ */
+const toolResponseDataSchema = z.object({
+  tool: z.string(),
+  id: z.string().optional(),
+  outcome: z.enum(['success', 'error', 'denied']),
+  durationMs: z.number().int().nonnegative(),
+  exitCode: z.number().int().optional(),
+  contentHead: z.string().optional(),
+  isError: z.boolean(),
+  errorMessage: z.string().optional(),
+  summary: z.string().optional(),
 });
 
 /**
@@ -1361,6 +1388,93 @@ export class AgentUI implements WizardUI {
     emit('lifecycle', `mcp_status: ${data.server} -> ${data.state}`, {
       data: { event: 'mcp_status', ...data },
     });
+  }
+
+  /**
+   * Emit a `tool_response` envelope at PostToolUse for every tool
+   * the inner agent calls. Pairs with the preceding `tool_call`
+   * via the SDK `tool_use_id` correlation field (carried in
+   * `data.id`). See `EVENT_DATA_VERSIONS.tool_response` for the
+   * full contract.
+   *
+   * Truncation + sanitization happen at this boundary (not at the
+   * caller) so every emit site benefits from the same caps:
+   *   - `contentHead` → first `TOOL_RESPONSE_CONTENT_HEAD_MAX_BYTES`
+   *     bytes, then `redactString`
+   *   - `errorMessage` → first `TOOL_RESPONSE_ERROR_MESSAGE_MAX_BYTES`
+   *     bytes, then `redactString`
+   *   - `summary` → first `TOOL_RESPONSE_SUMMARY_MAX_CHARS` chars
+   *     (chars not bytes — matches the existing `tool_call.summary`
+   *     contract from `summarizeToolInput`)
+   *
+   * Validation: an out-of-bounds `outcome` literal or a negative
+   * `durationMs` is dropped at the boundary (logged to disk) so the
+   * orchestrator never sees a malformed envelope. Mirrors the
+   * `emitMcpStatus` defense-in-depth pattern above.
+   */
+  emitToolResponse(data: Omit<ToolResponseData, 'event'>): void {
+    // Truncate + redact free-form text BEFORE Zod validation so the
+    // schema sees the bounded, sanitized payload — and so a caller
+    // that passes a 50KB Bash stdout doesn't make the validator
+    // chew on the entire blob before we trim it.
+    const redactor = getNdjsonRedactor();
+    const contentHead =
+      typeof data.contentHead === 'string'
+        ? redactor(
+            truncateToBytes(
+              data.contentHead,
+              TOOL_RESPONSE_CONTENT_HEAD_MAX_BYTES,
+            ),
+          )
+        : undefined;
+    const errorMessage =
+      typeof data.errorMessage === 'string'
+        ? redactor(
+            truncateToBytes(
+              data.errorMessage,
+              TOOL_RESPONSE_ERROR_MESSAGE_MAX_BYTES,
+            ),
+          )
+        : undefined;
+    const summary =
+      typeof data.summary === 'string' &&
+      data.summary.length > TOOL_RESPONSE_SUMMARY_MAX_CHARS
+        ? data.summary.slice(0, TOOL_RESPONSE_SUMMARY_MAX_CHARS)
+        : data.summary;
+    const payload: Omit<ToolResponseData, 'event'> = {
+      tool: data.tool,
+      ...(data.id !== undefined ? { id: data.id } : {}),
+      outcome: data.outcome,
+      // Floor durationMs at 0 so a clock-skew / non-monotonic input
+      // doesn't trip the schema's nonnegative() guard.
+      durationMs: Math.max(0, Math.floor(data.durationMs)),
+      ...(typeof data.exitCode === 'number' && Number.isFinite(data.exitCode)
+        ? { exitCode: Math.floor(data.exitCode) }
+        : {}),
+      ...(contentHead !== undefined ? { contentHead } : {}),
+      isError: data.isError,
+      ...(errorMessage !== undefined ? { errorMessage } : {}),
+      ...(summary !== undefined ? { summary } : {}),
+    };
+    const parsed = toolResponseDataSchema.safeParse(payload);
+    if (!parsed.success) {
+      try {
+        const issues = parsed.error.issues
+          .map((i) => `${i.path.join('.')}: ${i.message}`)
+          .join('; ');
+        logToFileLazy(
+          `[agent-ui] tool_response payload failed schema validation — ${issues}; tool=${data.tool}; outcome=${data.outcome}`,
+        );
+      } catch {
+        // never throw from emit
+      }
+      return;
+    }
+    emit(
+      'progress',
+      `tool_response: ${payload.tool} -> ${payload.outcome} (${payload.durationMs}ms)`,
+      { data: { event: 'tool_response', ...payload } },
+    );
   }
 
   // ── Session state ───────────────────────────────────────────────────

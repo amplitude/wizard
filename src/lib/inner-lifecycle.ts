@@ -44,6 +44,7 @@ import {
   summarizeToolInput,
   type InnerAgentStartedData,
 } from './agent-events.js';
+import type { ToolCallOutcome } from './agent-events.js';
 import type { HookCallback } from './agent-hooks.js';
 import { getFileChangeLedger } from './file-change-ledger.js';
 import { formatToolCallLabel } from './tool-call-label.js';
@@ -108,6 +109,113 @@ function relativizeForCurrentFile(
  * a failure is detected, null when the tool succeeded. Pure — no
  * I/O, no throws.
  */
+/**
+ * Extract the SDK's `tool_use_id` from a hook input — the stable
+ * correlation key that pairs a PreToolUse `tool_call` with its
+ * matching PostToolUse `tool_response`. The SDK consistently surfaces
+ * the field as `tool_use_id` (snake_case) on every Pre/Post/Failure
+ * hook input shape since the SDK rev this wizard pins; the
+ * `toolUseId` (camelCase) fallback exists for robustness against
+ * older / future SDK shapes that some bridge layers normalize.
+ * Returns null when the field is missing — we ship the envelope
+ * without `id` rather than fake a synthetic one.
+ */
+export function extractToolUseId(
+  input: Record<string, unknown>,
+): string | null {
+  if (typeof input.tool_use_id === 'string' && input.tool_use_id.length > 0) {
+    return input.tool_use_id;
+  }
+  if (typeof input.toolUseId === 'string' && input.toolUseId.length > 0) {
+    return input.toolUseId;
+  }
+  return null;
+}
+
+/**
+ * Extract a stringified preview of the tool's response payload from a
+ * PostToolUse hook input. The SDK surfaces tool output via
+ * `tool_response` (newer shape) or `tool_result` (older shape), each
+ * of which can be a string, an object with a `content[]` array of
+ * `{ type: 'text', text }` chunks, or a Bash-style
+ * `{ stdout, stderr, exitCode }` shape. This helper normalizes all
+ * three into a single string the emitter can truncate + sanitize.
+ *
+ * Returns null when no extractable content is present — orchestrators
+ * see absence of `contentHead` as "no captured output" (e.g. a
+ * `TodoWrite` that returned only structural metadata). Pure — no I/O.
+ */
+export function extractToolContentHead(input: Record<string, unknown>): {
+  content: string | null;
+  exitCode: number | undefined;
+} {
+  const result =
+    typeof input.tool_response !== 'undefined'
+      ? input.tool_response
+      : typeof input.tool_result !== 'undefined'
+      ? input.tool_result
+      : null;
+  if (result === null || result === undefined) {
+    return { content: null, exitCode: undefined };
+  }
+  if (typeof result === 'string') {
+    return { content: result, exitCode: undefined };
+  }
+  if (typeof result !== 'object') {
+    return { content: null, exitCode: undefined };
+  }
+  const obj = result as Record<string, unknown>;
+  // Bash-style: `{ stdout, stderr, exitCode }`. Concatenate stderr
+  // after stdout so the consumer sees both streams; exit code is a
+  // first-class field on the wire so we don't repeat it in
+  // contentHead.
+  if (
+    typeof obj.stdout === 'string' ||
+    typeof obj.stderr === 'string' ||
+    typeof obj.interrupted === 'boolean'
+  ) {
+    const stdout = typeof obj.stdout === 'string' ? obj.stdout : '';
+    const stderr = typeof obj.stderr === 'string' ? obj.stderr : '';
+    const combined =
+      stderr.length > 0
+        ? stdout + (stdout.length > 0 ? '\n' : '') + stderr
+        : stdout;
+    const exitCode =
+      typeof obj.exitCode === 'number' && Number.isFinite(obj.exitCode)
+        ? obj.exitCode
+        : undefined;
+    return { content: combined.length > 0 ? combined : null, exitCode };
+  }
+  // SDK `content[]` shape — array of `{ type: 'text', text }` chunks.
+  // Concatenate text fields in order so a Read / Grep result reads
+  // naturally on the wire.
+  if (Array.isArray(obj.content) && obj.content.length > 0) {
+    const parts: string[] = [];
+    for (const chunk of obj.content) {
+      if (
+        typeof chunk === 'object' &&
+        chunk !== null &&
+        typeof (chunk as Record<string, unknown>).text === 'string'
+      ) {
+        parts.push((chunk as { text: string }).text);
+      }
+    }
+    return {
+      content: parts.length > 0 ? parts.join('\n') : null,
+      exitCode: undefined,
+    };
+  }
+  // Generic `text` / `output` / `error` strings — fall through to the
+  // first non-empty one.
+  for (const key of ['text', 'output', 'message']) {
+    const candidate = obj[key];
+    if (typeof candidate === 'string' && candidate.length > 0) {
+      return { content: candidate, exitCode: undefined };
+    }
+  }
+  return { content: null, exitCode: undefined };
+}
+
 export function extractToolFailureMessage(
   input: Record<string, unknown>,
 ): string | null {
@@ -180,6 +288,31 @@ export function createInnerLifecycleHooks(config: InnerLifecycleConfig): {
     fn: () => Promise<T>,
   ) => Promise<T>;
 } {
+  /**
+   * Closure-local map of `tool_use_id` -> PreToolUse wall-clock ms.
+   * Used to compute `durationMs` for the `tool_response` envelope
+   * when the SDK doesn't surface its own `duration_ms` on the
+   * PostToolUse input. Entries are deleted at the matching
+   * PostToolUse so a long-running run doesn't accumulate stale keys;
+   * a hard cap of 256 entries protects against pathological SDK
+   * inputs (e.g. PreToolUse fires without a matching PostToolUse,
+   * which would otherwise leak forever).
+   */
+  const _toolCallStartTimes = new Map<string, number>();
+  const _pruneToolCallStartTimes = (): void => {
+    const MAX_ENTRIES = 256;
+    if (_toolCallStartTimes.size <= MAX_ENTRIES) return;
+    // Drop the oldest entries (Map iteration order is insertion order)
+    // until back under the cap. Cheap and bounded.
+    const overflow = _toolCallStartTimes.size - MAX_ENTRIES;
+    let dropped = 0;
+    for (const key of _toolCallStartTimes.keys()) {
+      _toolCallStartTimes.delete(key);
+      dropped += 1;
+      if (dropped >= overflow) break;
+    }
+  };
+
   const sessionStart: HookCallback = (input) => {
     const ui = getAgentUI();
     if (ui) {
@@ -209,10 +342,26 @@ export function createInnerLifecycleHooks(config: InnerLifecycleConfig): {
         ? input.toolInput
         : null;
     const summary = summarizeToolInput(toolName, toolInput);
+    // Capture the SDK's `tool_use_id` so the PostToolUse `tool_response`
+    // envelope can correlate with this `tool_call`. Stored in a closure-
+    // local map keyed on tool_use_id so the post side can also recover
+    // the PreToolUse wall-clock timestamp (for duration math when the
+    // SDK doesn't surface its own `duration_ms`).
+    const toolUseId = extractToolUseId(input);
+    if (toolUseId !== null) {
+      _toolCallStartTimes.set(toolUseId, Date.now());
+      _pruneToolCallStartTimes();
+    }
     // `tool_call` is NDJSON-only — useful to outer agents auditing what
     // the inner agent did, but redundant in the TUI (the agent's own
     // TodoWrite items already show user-facing progress).
-    if (agentUI) agentUI.emitToolCall({ tool: toolName, summary });
+    if (agentUI) {
+      agentUI.emitToolCall({
+        tool: toolName,
+        ...(toolUseId !== null ? { id: toolUseId } : {}),
+        summary,
+      });
+    }
     // The first PreToolUse marks the `agent_running` coarse phase
     // boundary — the inner Claude agent has actually started doing
     // work (vs. still booting / handshaking MCP). The AgentUI
@@ -313,17 +462,90 @@ export function createInnerLifecycleHooks(config: InnerLifecycleConfig): {
     // probe the write-tool path uses below — non-null message means
     // the tool surfaced an error. Wrapped in try/catch so the outcome
     // probe can never block the agent loop.
+    let outcomeForResponse: ToolCallOutcome = 'success';
+    let outcomeFailureMessage: string | null = null;
+    try {
+      outcomeFailureMessage = extractToolFailureMessage(input);
+      outcomeForResponse = outcomeFailureMessage === null ? 'success' : 'error';
+    } catch {
+      // Probe must never break the loop — fall through with default
+      // 'success' outcome and let the existing accumulator drift be
+      // self-correcting.
+    }
     try {
       const agentUI = getAgentUI();
       if (agentUI) {
-        const outcomeMessage = extractToolFailureMessage(input);
-        agentUI.recordToolOutcome(
-          toolName,
-          outcomeMessage === null ? 'success' : 'error',
-        );
+        agentUI.recordToolOutcome(toolName, outcomeForResponse);
       }
     } catch {
       // Outcome accumulation must never break the agent loop.
+    }
+
+    // v2 protocol: emit `tool_response` for EVERY tool call (not just
+    // write tools). Pairs with the preceding `tool_call` via the SDK
+    // `tool_use_id` correlation field. Wrapped in try/catch so a
+    // malformed response payload never blocks the agent loop — the
+    // emit is observational, not load-bearing.
+    try {
+      const agentUI = getAgentUI();
+      if (agentUI) {
+        const toolUseIdPost = extractToolUseId(input);
+        // Duration: prefer the SDK's reported `duration_ms` (more
+        // accurate — excludes permission-prompt and hook time per the
+        // SDK docs); fall back to PreToolUse wall-clock delta when
+        // absent.
+        let durationMs = 0;
+        if (
+          typeof input.duration_ms === 'number' &&
+          Number.isFinite(input.duration_ms)
+        ) {
+          durationMs = Math.max(0, Math.floor(input.duration_ms));
+        } else if (toolUseIdPost !== null) {
+          const startedAt = _toolCallStartTimes.get(toolUseIdPost);
+          if (typeof startedAt === 'number') {
+            durationMs = Math.max(0, Date.now() - startedAt);
+          }
+        }
+        // Free the map entry now that we've consumed it. Lookup
+        // remains valid for one PostToolUse per PreToolUse — the
+        // SDK doesn't surface duplicate PostToolUse for a single
+        // tool call.
+        if (toolUseIdPost !== null) {
+          _toolCallStartTimes.delete(toolUseIdPost);
+        }
+        const { content, exitCode } = extractToolContentHead(input);
+        // Re-derive a short summary mirroring the `tool_call.summary`
+        // contract so consumers that branch only on `tool_response`
+        // still get the same human-readable preview text. Pure pass-
+        // through — `summarizeToolInput` already redacts secrets.
+        const toolInputForSummary =
+          typeof input.tool_input !== 'undefined'
+            ? input.tool_input
+            : typeof input.toolInput !== 'undefined'
+            ? input.toolInput
+            : null;
+        const responseSummary = summarizeToolInput(
+          toolName,
+          toolInputForSummary,
+        );
+        agentUI.emitToolResponse({
+          tool: toolName,
+          ...(toolUseIdPost !== null ? { id: toolUseIdPost } : {}),
+          outcome: outcomeForResponse,
+          durationMs,
+          ...(typeof exitCode === 'number' ? { exitCode } : {}),
+          ...(content !== null ? { contentHead: content } : {}),
+          isError: outcomeForResponse !== 'success',
+          ...(outcomeFailureMessage !== null
+            ? { errorMessage: outcomeFailureMessage }
+            : {}),
+          ...(responseSummary !== undefined
+            ? { summary: responseSummary }
+            : {}),
+        });
+      }
+    } catch {
+      // Emission must NEVER block tool execution. Swallow.
     }
 
     const operation = classifyWriteOperation(toolName);

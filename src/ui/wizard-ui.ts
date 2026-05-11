@@ -842,6 +842,41 @@ export interface WizardUI {
   emitToolCallSummary?(): void;
 
   /**
+   * Emitted at PostToolUse for EVERY tool the inner agent calls
+   * (not just write tools). Pairs with the preceding `tool_call`
+   * via the SDK-provided `tool_use_id` correlation field so
+   * orchestrators can render the outcome, duration, and a
+   * sanitized output preview on the already-displayed tool action.
+   *
+   * Today the wizard emits `tool_call` at PreToolUse but NOTHING
+   * at PostToolUse for non-write tools — orchestrators see "Bash:
+   * pnpm install" and then radio silence until the next
+   * `tool_call`. Three independent audit subagents flagged this
+   * as the biggest parent-agent UX cliff in the wire today.
+   *
+   * `contentHead` is bounded (1024 bytes) and sanitized via
+   * `redactString` so a misbehaving Bash command can't leak
+   * env-value secrets. `errorMessage` is bounded (256 bytes).
+   * `outcome === 'denied'` is reserved for the rare path where the
+   * SDK's permission gate rejected the call pre-execution.
+   *
+   * Optional — only AgentUI emits to NDJSON. InkUI / LoggingUI
+   * no-op (the TUI surfaces tool outcomes via TodoWrite / file
+   * panels; CI logs the stream).
+   */
+  emitToolResponse?(data: {
+    tool: string;
+    id?: string;
+    outcome: 'success' | 'error' | 'denied';
+    durationMs: number;
+    exitCode?: number;
+    contentHead?: string;
+    isError: boolean;
+    errorMessage?: string;
+    summary?: string;
+  }): void;
+
+  /**
    * MCP server lifecycle state transition. Fires at every state
    * boundary for both the in-process `wizard_tools` server (one per
    * run; transitions are `available` on successful boot, `failed`

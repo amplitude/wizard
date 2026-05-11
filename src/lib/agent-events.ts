@@ -132,7 +132,44 @@ export const EVENT_DATA_VERSIONS = {
   project_create_success: 1,
   project_create_error: 1,
   // Tool / file changes
-  tool_call: 1,
+  /**
+   * v2 — added `id` (mirrors the SDK's `tool_use_id`), a stable
+   * correlation key that pairs the PreToolUse `tool_call` envelope
+   * with the matching PostToolUse `tool_response`. Previously
+   * orchestrators had to reconstruct the pairing by timing + tool
+   * name + insertion order — fragile the moment two same-tool
+   * calls run back-to-back (or, in theory, concurrently). Field is
+   * optional at the consumer end — v1 readers continue to work
+   * because they were already keying off the per-tool stream;
+   * consumers that want strict correlation branch on
+   * `data_version >= 2`.
+   */
+  tool_call: 2,
+  /**
+   * `tool_response` — emitted at PostToolUse for EVERY tool the inner
+   * agent calls (not just write tools). Today the wizard emits
+   * `tool_call` at PreToolUse but NOTHING at PostToolUse for non-write
+   * tools — orchestrators (Claude Code, Cursor, Codex) see "Bash:
+   * pnpm install" and then radio silence until the next `tool_call`.
+   * Three independent audit subagents flagged this as the biggest
+   * parent-agent UX cliff in the wire today.
+   *
+   * Pairs with the preceding `tool_call` via the `id` correlation
+   * field (mirrors the SDK's `tool_use_id`). Carries the outcome
+   * (`success` / `error` / `denied`), the tool's reported duration,
+   * a Bash `exitCode` when applicable, a sanitized + truncated
+   * `contentHead` of the response (1024-byte cap), and the
+   * error message on failure (256-byte cap). All free-form text
+   * fields go through `redactString` at the emit boundary so a
+   * misbehaving Bash command can't leak env-value secrets.
+   *
+   * Truncation policy: outer agents that need full content can ask
+   * the user / re-run the tool themselves — the wizard's job is to
+   * keep the wire bounded so a noisy Grep / Read can't blow up a
+   * parent agent's parser. Adding fields to this event is a
+   * `data_version` bump (see this registry).
+   */
+  tool_response: 1,
   file_change_planned: 1,
   file_change_applied: 1,
   // Event plan
@@ -885,13 +922,97 @@ export interface RunCompletedData {
 /**
  * `tool_call` — emitted at PreToolUse for every tool the inner agent calls.
  * Carries a sanitized summary so secrets / large prompts don't leak.
+ *
+ * v2 — added `id` (mirrors the SDK's `tool_use_id`). Lets orchestrators
+ * correlate this envelope with the matching `tool_response` at
+ * PostToolUse without guessing by timing / tool name / insertion
+ * order. Optional in the type signature for v1-reader back-compat —
+ * older orchestrators that were already keying off the per-tool
+ * stream continue to work. Strict-correlation consumers branch on
+ * `data_version >= 2`.
  */
 export interface ToolCallData {
   event: 'tool_call';
   tool: string;
+  /**
+   * SDK `tool_use_id` — stable across the matching PreToolUse /
+   * PostToolUse pair. Optional because we ship the envelope even
+   * when the SDK input lacks the field (defensive: if a future SDK
+   * version stops surfacing it, the rest of the envelope still
+   * flows).
+   */
+  id?: string;
   /** Short summary of the input — file path for Read/Edit, command head for Bash, etc. */
   summary?: string;
 }
+
+/**
+ * Wire shape of the `data` field on a `tool_response` envelope.
+ * Emitted at PostToolUse for every tool the inner agent calls. See
+ * `EVENT_DATA_VERSIONS.tool_response` for the full contract.
+ *
+ *   tool          — same string the matching `tool_call` carried
+ *   id            — SDK `tool_use_id`; pairs with `tool_call.id`
+ *   outcome       — `success` | `error` | `denied` (denied = canUseTool
+ *                   gate rejected the call before execution)
+ *   durationMs    — SDK-reported execution time, non-negative integer
+ *   exitCode      — Bash only; absent for other tools
+ *   contentHead   — first 1024 bytes of stdout/stderr/output, sanitized
+ *                   via `redactString` so env-value secrets don't leak
+ *   isError       — mirrors `outcome !== 'success'`, kept as a separate
+ *                   boolean so orchestrators that don't enumerate the
+ *                   outcome enum can branch on a single field
+ *   errorMessage  — 256-byte sanitized error message; present when
+ *                   `outcome === 'error'`
+ *   summary       — short orchestrator-friendly summary mirroring the
+ *                   `tool_call.summary` field (120-char cap)
+ */
+export interface ToolResponseData {
+  event: 'tool_response';
+  tool: string;
+  /**
+   * SDK `tool_use_id` — pairs this envelope with the matching
+   * `tool_call.id`. Optional because some SDK paths (or future
+   * versions) may not surface it; orchestrators that want strict
+   * correlation should fall back to timing + tool name when absent.
+   */
+  id?: string;
+  outcome: 'success' | 'error' | 'denied';
+  durationMs: number;
+  /** Bash exit code; absent for non-Bash tools. */
+  exitCode?: number;
+  /**
+   * Truncated to 1024 bytes; pre-sanitized via `redactString`.
+   * For Bash, includes stderr when present.
+   */
+  contentHead?: string;
+  isError: boolean;
+  /** Truncated to 256 bytes; pre-sanitized via `redactString`. */
+  errorMessage?: string;
+  /** Truncated to 120 chars (mirrors `tool_call.summary`). */
+  summary?: string;
+}
+
+/**
+ * Byte-count cap for `ToolResponseData.contentHead`. Generous enough
+ * to preserve useful context (a short Bash stdout, a Grep header line,
+ * a Read prologue), tight enough that a noisy tool can't blow up an
+ * orchestrator's parser. Exported so the regression suite can pin
+ * the boundary value.
+ */
+export const TOOL_RESPONSE_CONTENT_HEAD_MAX_BYTES = 1024;
+/**
+ * Byte-count cap for `ToolResponseData.errorMessage`. Errors are
+ * typically short — 256 bytes is enough for the actionable line of
+ * a stderr stack trace plus a few words of context.
+ */
+export const TOOL_RESPONSE_ERROR_MESSAGE_MAX_BYTES = 256;
+/**
+ * Character-count cap for `ToolResponseData.summary`. Mirrors the
+ * existing `tool_call.summary` cap so the two envelopes carry
+ * comparable preview text.
+ */
+export const TOOL_RESPONSE_SUMMARY_MAX_CHARS = 120;
 
 /**
  * `file_change_planned` — emitted at PreToolUse for write tools (Edit /
@@ -1503,6 +1624,7 @@ export class ToolCallStats {
 export type InnerAgentLifecycleData =
   | InnerAgentStartedData
   | ToolCallData
+  | ToolResponseData
   | FileChangePlannedData
   | FileChangeAppliedData
   | FileChangeFailedData
@@ -2024,6 +2146,46 @@ export function truncateLogMessage(
   // the suffix — defensive, never happens in practice).
   const headroom = Math.max(0, max - suffix.length);
   return message.slice(0, headroom) + suffix;
+}
+
+/**
+ * Byte-bounded truncation for free-form text fields shipped on the
+ * NDJSON wire (notably `ToolResponseData.contentHead` /
+ * `errorMessage`). Distinct from `truncateLogMessage` above, which
+ * counts characters: byte-counting is the right contract here
+ * because the cap is about wire size, not display length, and a
+ * multi-byte UTF-8 codepoint can otherwise smuggle a 4x blow-up
+ * past a character-based cap.
+ *
+ * Uses `Buffer.byteLength` to measure and a single `Buffer` slice
+ * to truncate. Trailing partial codepoints are stripped (the
+ * `toString('utf8', 0, cap)` path replaces them with U+FFFD, which
+ * would still be valid UTF-8 but cosmetically ugly on the wire —
+ * we strip them so the consumer sees clean UTF-8). Pure for unit
+ * testing.
+ *
+ *   - `<= max bytes` → returned verbatim
+ *   - otherwise      → truncated to `max` bytes + `…` suffix
+ *
+ * `…` (U+2026) itself is 3 UTF-8 bytes, so the final string is at
+ * most `max + 3` bytes — slightly over-budget by intent, since the
+ * suffix is a strong signal to the consumer that truncation
+ * happened and is worth the extra bytes.
+ */
+export function truncateToBytes(input: string, max: number): string {
+  if (max <= 0) return '';
+  const byteLength = Buffer.byteLength(input, 'utf8');
+  if (byteLength <= max) return input;
+  // Walk back from the cap to find the start of the previous
+  // complete codepoint. UTF-8 continuation bytes have the high two
+  // bits `10`; we keep stepping back until we land on a byte that
+  // starts a codepoint (high bit 0 or high two bits 11).
+  const buf = Buffer.from(input, 'utf8');
+  let end = Math.min(max, buf.length);
+  while (end > 0 && (buf[end] & 0b11000000) === 0b10000000) {
+    end -= 1;
+  }
+  return buf.toString('utf8', 0, end) + '…';
 }
 
 // ── SSE-frame suppression ───────────────────────────────────────────
