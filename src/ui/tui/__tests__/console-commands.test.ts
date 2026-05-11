@@ -164,6 +164,16 @@ describe('COMMANDS registry', () => {
     expect(cmds).toContain('/diagnostics');
   });
 
+  it('keeps /snake registered so the overlay is reachable from the slash bar', () => {
+    // Snake is no longer in the RunScreen tab strip — it lives in the
+    // overlay stack (Overlay.Snake). The /snake slash command is the
+    // remaining entry point; if anyone drops it from the registry the
+    // overlay becomes unreachable.
+    const cmds = COMMANDS.map((c) => c.cmd);
+    expect(cmds).toContain('/snake');
+  });
+
+
   it('marks credential / region / org-mutating commands as requiresIdle', () => {
     // These commands swap the agent's auth, region, or project context
     // out from under it — they MUST be blocked while a run is active so

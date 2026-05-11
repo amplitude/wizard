@@ -283,10 +283,15 @@ describe('RunScreen — Progress tab dead-vertical-space invariant', () => {
     }
     expect(lastNonEmpty).toBeGreaterThan(0);
 
+    // Tab strip post-v3: Progress / Events / Logs. Snake moved to the
+    // overlay-only `/snake` path so the strip stays focused on
+    // workspaces, not easter eggs.
     const tabBarRow = lines.findIndex(
-      (l) => /Progress/.test(l) && /Logs/.test(l) && /Snake/.test(l),
+      (l) => /Progress/.test(l) && /Events/.test(l) && /Logs/.test(l),
     );
     expect(tabBarRow).toBeGreaterThan(0);
+    // Snake must NOT appear in the tab strip — it's overlay-only now.
+    expect(lines[tabBarRow]).not.toMatch(/Snake/);
 
     // Tab bar must sit AT the bottom of the bounded viewport (within
     // 3 rows). Before the fix, fillHeight=false on the Progress tab
@@ -441,6 +446,8 @@ describe('RunScreen — Progress tab dead-vertical-space invariant', () => {
     expect(frame).toMatch(/Progress/);
     expect(frame).toMatch(/Events/);
     expect(frame).toMatch(/Logs/);
+    // Snake is overlay-only — must not be in the tab strip.
+    expect(frame).not.toMatch(/Snake/);
   });
 
   it('Events tab content updates when the event plan goes from empty to populated', () => {

@@ -4,8 +4,11 @@
  * Tabs:
  *   - Progress (default): full-width ProgressList, elapsed timer, currently
  *     editing file, inline event plan, and compact conditional tips
+ *   - Events: the event plan the agent proposed (placeholder pre-plan)
  *   - Logs: LogViewer tailing the wizard log file
- *   - Snake: easter egg game
+ *
+ * Snake is reachable via the `/snake` slash command (Overlay.Snake), not
+ * the tab strip — it's an easter egg, not a workspace.
  *
  * Queued additional features (LLM, Session Replay) appear in the task list
  * as pending → in_progress → completed items as the stop hook drains the
@@ -23,7 +26,6 @@ import {
   TabContainer,
   ProgressList,
   LogViewer,
-  SnakeGame,
   EventPlanViewer,
   TerminalLink,
 } from '../primitives/index.js';
@@ -630,21 +632,13 @@ export const RunScreen = ({ store }: RunScreenProps) => {
         />
       ),
     },
-    {
-      id: 'snake',
-      label: 'Snake (WASD)',
-      component: (
-        <SnakeGame
-          music={false}
-          keybindings={{
-            up: ['w'],
-            down: ['s'],
-            left: ['a'],
-            right: ['d'],
-          }}
-        />
-      ),
-    },
+    // Snake intentionally lives in the overlay stack (Overlay.Snake)
+    // rather than the tab strip — it's an easter egg, not a primary
+    // workspace. Reach it via `/snake` (or the SnakeOverlay component
+    // already wired into screen-registry.tsx). Keeping it out of the
+    // tabs reduces the chrome's visual weight and makes ←/→ traversal
+    // through Progress / Events / Logs feel less like wading through
+    // novelty.
   ];
 
   return (
