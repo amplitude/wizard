@@ -1093,9 +1093,16 @@ export class AgentUI implements WizardUI {
    * A write tool has been requested. Emitted from PreToolUse before any
    * file change happens, so outer agents can preview and (optionally)
    * abort. Pairs with `emitFileChangeApplied` on success.
+   *
+   * v2 protocol: when the caller provides `relativePath` (resolved
+   * against the wizard's `installDir`), the envelope ships it alongside
+   * the absolute `path` so parent agents can render a privacy-safe label
+   * without leaking the user's home directory. The progress-line message
+   * prefers `relativePath` when present for the same reason.
    */
   emitFileChangePlanned(data: Omit<FileChangePlannedData, 'event'>): void {
-    emit('progress', `file_change_planned: ${data.operation} ${data.path}`, {
+    const label = data.relativePath ?? data.path;
+    emit('progress', `file_change_planned: ${data.operation} ${label}`, {
       data: { event: 'file_change_planned', ...data },
     });
   }
@@ -1104,9 +1111,15 @@ export class AgentUI implements WizardUI {
    * A write tool has succeeded. Emitted from PostToolUse with the same
    * path as the preceding `file_change_planned`. Outer agents pair these
    * to build an audit trail of what the wizard wrote.
+   *
+   * v2 protocol: when the caller provides `relativePath`, the envelope
+   * ships it alongside the absolute `path` for the same privacy reason
+   * as `emitFileChangePlanned`. Pair planned/applied on `relativePath`
+   * (when both carry it) for a home-dir-free audit trail.
    */
   emitFileChangeApplied(data: Omit<FileChangeAppliedData, 'event'>): void {
-    emit('result', `file_change_applied: ${data.operation} ${data.path}`, {
+    const label = data.relativePath ?? data.path;
+    emit('result', `file_change_applied: ${data.operation} ${label}`, {
       data: { event: 'file_change_applied', ...data },
     });
     // Mirror into the setup_complete registry so the terminal

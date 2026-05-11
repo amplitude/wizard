@@ -191,8 +191,25 @@ export const EVENT_DATA_VERSIONS = {
    * `data_version` bump (see this registry).
    */
   tool_response: 1,
-  file_change_planned: 1,
-  file_change_applied: 1,
+  /**
+   * `file_change_planned` — v1 carried absolute `path` only, which leaks
+   * the user's home directory into parent-agent transcripts (Claude Code
+   * rendering a wizard child agent's progress would surface
+   * `/Users/dev/...`). v2 ADDED optional `relativePath` (when resolvable
+   * against `installDir`) mirroring the pattern already on `current_file`.
+   * Additive — readers that ignore the new field continue to work; readers
+   * that want a privacy-safe label key off `relativePath` and fall back to
+   * `path` only when missing (file outside the install dir).
+   */
+  file_change_planned: 2,
+  /**
+   * `file_change_applied` — v1 carried absolute `path` only. v2 ADDED
+   * optional `relativePath`, same rationale as `file_change_planned`. The
+   * write-tool PreToolUse and PostToolUse hooks emit `relativePath`
+   * symmetrically so an outer agent can pair the planned/applied audit
+   * trail using the privacy-safe label.
+   */
+  file_change_applied: 2,
   // Event plan
   event_plan_proposed: 1,
   event_plan_confirmed: 1,
@@ -1280,10 +1297,27 @@ export const TOOL_RESPONSE_SUMMARY_MAX_CHARS = 120;
  * Write / MultiEdit / NotebookEdit). The change has been requested by the
  * agent but not yet executed; outer agents can stream this to a human to
  * preview before approving.
+ *
+ * v1 → v2 (additive): added optional `relativePath`. Absolute `path` is
+ * retained verbatim for audit; `relativePath` is the orchestrator- and
+ * parent-agent-friendly label. The wizard runs as a child agent under
+ * Claude Code / Cursor / Codex, and absolute paths in the wire envelope
+ * leaked the user's home directory (`/Users/<name>/...`) into the parent
+ * agent's transcript — both a privacy concern and a noise source when the
+ * parent renders progress chips. `relativePath` is `path.relative(
+ * installDir, path)` when the file lives inside `installDir`; omitted
+ * otherwise (writes outside the install dir keep `path` as the only label).
  */
 export interface FileChangePlannedData {
   event: 'file_change_planned';
   path: string;
+  /**
+   * `path` relativized against the wizard's `installDir`, when
+   * resolvable. Omitted when the file lives outside `installDir` (i.e.
+   * `path.relative` returned a `..`-prefixed result) so a renderer can
+   * trust `relativePath` to be a privacy-safe label when present.
+   */
+  relativePath?: string;
   operation: 'create' | 'modify' | 'delete';
 }
 
@@ -1291,10 +1325,22 @@ export interface FileChangePlannedData {
  * `file_change_applied` — emitted at PostToolUse for write tools that
  * succeeded. Pairs with `file_change_planned` (same path) so outer agents
  * can build an audit trail of "the wizard wrote these N files."
+ *
+ * v1 → v2 (additive): added optional `relativePath`. Same rationale as
+ * `file_change_planned` — keeps the user's home directory out of parent-
+ * agent transcripts. Pair `file_change_planned` / `file_change_applied`
+ * events on `relativePath` (privacy-safe label) when both carry it;
+ * otherwise fall back to `path`.
  */
 export interface FileChangeAppliedData {
   event: 'file_change_applied';
   path: string;
+  /**
+   * `path` relativized against the wizard's `installDir`, when
+   * resolvable. Omitted when the file lives outside `installDir`. See
+   * `FileChangePlannedData.relativePath` for the full rationale.
+   */
+  relativePath?: string;
   operation: 'create' | 'modify' | 'delete';
   /** Optional byte size of the new content for sanity checking. */
   bytes?: number;

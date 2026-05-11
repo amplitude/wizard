@@ -285,6 +285,7 @@ export class InkUI implements WizardUI {
 
   recordFileChangePlanned(data: {
     path: string;
+    relativePath?: string;
     operation: 'create' | 'modify' | 'delete';
   }): void {
     this.store.recordFileChangePlanned(data);
@@ -292,6 +293,7 @@ export class InkUI implements WizardUI {
 
   recordFileChangeApplied(data: {
     path: string;
+    relativePath?: string;
     operation: 'create' | 'modify' | 'delete';
     bytes?: number;
   }): void {
