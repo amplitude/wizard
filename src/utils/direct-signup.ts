@@ -254,6 +254,15 @@ export type SignupShape<Email extends string | null> =
       email: Email;
       fullName: string;
       legalDocumentBundle: LegalDocumentBundle;
+      /**
+       * Where `legalDocumentBundle`'s URLs originated. The body builder in
+       * `performDirectSignup` doesn't read this — the request body only
+       * needs the URLs. The field exists so the wrapper's telemetry layer
+       * can tag the `'legal document source'` event on follow-up arms
+       * (success / error / etc.) without re-deriving the source or
+       * re-threading it through session reads.
+       */
+      legalDocumentSource: LegalDocumentSource;
       zone: AmplitudeZone;
       signal?: AbortSignal;
     };

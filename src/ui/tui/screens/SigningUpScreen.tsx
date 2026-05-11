@@ -74,8 +74,13 @@ export const SigningUpScreen = ({ store }: SigningUpScreenProps) => {
 
       let input: SignupOrAuthInput;
       if (isFollowUp) {
-        const { signupFullName, legalDocumentBundle } = session;
-        if (signupFullName === null || legalDocumentBundle === null) {
+        const { signupFullName, legalDocumentBundle, legalDocumentSource } =
+          session;
+        if (
+          signupFullName === null ||
+          legalDocumentBundle === null ||
+          legalDocumentSource === null
+        ) {
           // Invariant violation: flow gate should prevent reaching
           // SigningUp in follow-up mode without complete data. If we
           // hit this branch, route to OAuth via abandonment instead
@@ -91,6 +96,10 @@ export const SigningUpScreen = ({ store }: SigningUpScreenProps) => {
           email,
           fullName: signupFullName,
           legalDocumentBundle,
+          // Pass the parser-recorded source through so telemetry on
+          // success / error arms can tag this follow-up's URL origin
+          // accurately, without re-reading from the session.
+          legalDocumentSource,
           zone,
           signal,
         };

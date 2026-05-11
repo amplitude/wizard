@@ -748,6 +748,10 @@ export const runDirectSignupIfRequested = async (
       email: session.signupEmail,
       fullName: session.signupFullName,
       legalDocumentBundle: LOCAL_DOC_URLS,
+      // Non-TUI path uses local URLs directly (no parser-probe ran to
+      // populate session.legalDocumentSource). Telemetry tag on every
+      // arm reads this directly from `input` rather than from session.
+      legalDocumentSource: 'local',
       zone,
     });
   } catch (err) {

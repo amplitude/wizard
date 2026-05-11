@@ -53,6 +53,7 @@ describe('performSignupOrAuth', () => {
         terms_of_service: 'https://amplitude.com/terms',
         privacy_policy: 'https://amplitude.com/privacy',
       },
+      legalDocumentSource: 'local',
       zone: 'us',
     });
 
@@ -164,6 +165,7 @@ describe('performSignupOrAuth', () => {
         terms_of_service: 'https://amplitude.com/terms',
         privacy_policy: 'https://amplitude.com/privacy',
       },
+      legalDocumentSource: 'local',
       zone: 'us',
     });
 
@@ -186,6 +188,7 @@ describe('performSignupOrAuth', () => {
         terms_of_service: 'https://amplitude.com/terms',
         privacy_policy: 'https://amplitude.com/privacy',
       },
+      legalDocumentSource: 'local',
       zone: 'us',
     });
 
@@ -194,7 +197,10 @@ describe('performSignupOrAuth', () => {
       {
         status: 'requires_redirect',
         zone: 'us',
-        'legal document source': 'unused',
+        // Follow-up input → body carried terms_acceptance from local URLs.
+        // Tag reflects what the attempt's body actually had, not what BE
+        // ultimately did with it (existing-user redirect).
+        'legal document source': 'local',
       },
     );
   });
@@ -214,6 +220,7 @@ describe('performSignupOrAuth', () => {
         terms_of_service: 'https://amplitude.com/terms',
         privacy_policy: 'https://amplitude.com/privacy',
       },
+      legalDocumentSource: 'local',
       zone: 'us',
     });
 
@@ -239,6 +246,7 @@ describe('performSignupOrAuth', () => {
         terms_of_service: 'https://amplitude.com/terms',
         privacy_policy: 'https://amplitude.com/privacy',
       },
+      legalDocumentSource: 'local',
       zone: 'us',
     });
 
@@ -247,7 +255,8 @@ describe('performSignupOrAuth', () => {
       {
         status: 'signup_error',
         zone: 'us',
-        'legal document source': 'unused',
+        // Follow-up input → tag reflects the source of URLs the body carried.
+        'legal document source': 'local',
       },
     );
   });
@@ -265,6 +274,7 @@ describe('performSignupOrAuth', () => {
         terms_of_service: 'https://amplitude.com/terms',
         privacy_policy: 'https://amplitude.com/privacy',
       },
+      legalDocumentSource: 'local',
       zone: 'us',
     });
 
@@ -276,7 +286,9 @@ describe('performSignupOrAuth', () => {
       {
         status: 'wrapper_exception',
         zone: 'us',
-        'legal document source': 'unused',
+        // Follow-up input → tag reflects the source the body would have
+        // carried, even though the throw happened before the request landed.
+        'legal document source': 'local',
       },
     );
   });
@@ -311,6 +323,7 @@ describe('performSignupOrAuth', () => {
         terms_of_service: 'https://amplitude.com/terms',
         privacy_policy: 'https://amplitude.com/privacy',
       },
+      legalDocumentSource: 'local',
       zone: 'us',
     });
 
@@ -353,6 +366,7 @@ describe('performSignupOrAuth', () => {
         terms_of_service: 'https://amplitude.com/terms',
         privacy_policy: 'https://amplitude.com/privacy',
       },
+      legalDocumentSource: 'local',
       zone: 'us',
     });
 
@@ -389,6 +403,7 @@ describe('performSignupOrAuth', () => {
         terms_of_service: 'https://amplitude.com/terms',
         privacy_policy: 'https://amplitude.com/privacy',
       },
+      legalDocumentSource: 'local',
       zone: 'us',
     });
 
@@ -399,7 +414,11 @@ describe('performSignupOrAuth', () => {
         zone: 'us',
         'has env with api key': true,
         'user fetch retry count': 0,
-        'legal document source': 'unused',
+        // Pinning the load-bearing telemetry contract: follow-up success
+        // arms emit the source the parser recorded on the prior probe
+        // (passed through as `input.legalDocumentSource`). Adoption
+        // dashboards slice success outcomes by this tag.
+        'legal document source': 'local',
       },
     );
   });
@@ -434,6 +453,7 @@ describe('performSignupOrAuth', () => {
         terms_of_service: 'https://amplitude.com/terms',
         privacy_policy: 'https://amplitude.com/privacy',
       },
+      legalDocumentSource: 'local',
       zone: 'us',
     });
 
@@ -513,6 +533,7 @@ describe('performSignupOrAuth', () => {
           terms_of_service: 'https://amplitude.com/terms',
           privacy_policy: 'https://amplitude.com/privacy',
         },
+        legalDocumentSource: 'local',
         zone: 'us',
       });
       await vi.runAllTimersAsync();
@@ -554,6 +575,7 @@ describe('performSignupOrAuth', () => {
           terms_of_service: 'https://amplitude.com/terms',
           privacy_policy: 'https://amplitude.com/privacy',
         },
+        legalDocumentSource: 'local',
         zone: 'us',
       });
       await vi.runAllTimersAsync();
@@ -565,7 +587,8 @@ describe('performSignupOrAuth', () => {
           status: 'user_fetch_failed',
           zone: 'us',
           'user fetch retry count': 3,
-          'legal document source': 'unused',
+          // Follow-up input → source reflects what the body carried.
+          'legal document source': 'local',
         },
       );
     } finally {
@@ -595,6 +618,7 @@ describe('performSignupOrAuth', () => {
         terms_of_service: 'https://amplitude.com/terms',
         privacy_policy: 'https://amplitude.com/privacy',
       },
+      legalDocumentSource: 'local',
       zone: 'us',
     });
 

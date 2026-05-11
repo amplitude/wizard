@@ -244,6 +244,16 @@ export async function performSignupOrAuth(
   // email — performDirectSignup builds the body via its own switch.
   const directSignupInput: DirectSignupInput = { ...input, email: input.email };
 
+  // Source tag for the `'legal document source'` telemetry property,
+  // derived from what the attempt's body WILL carry:
+  //   - 'follow_up' input → URLs in body → use the source the parser
+  //     recorded (passed in via input.legalDocumentSource).
+  //   - 'initial' input → body has no terms_acceptance slot → 'unused'.
+  // The `needs_information` arm overrides this with `result.legalDocumentSource`
+  // because that arm reports what BE produced, not what the caller sent.
+  const inputSource: LegalDocumentSource | 'unused' =
+    input.kind === 'follow_up' ? input.legalDocumentSource : 'unused';
+
   log.debug('attempting direct signup', { kind: input.kind });
   // performDirectSignup is contracted to catch its own network/parse errors
   // and return { kind: 'error' }. The try/catch here is belt-and-suspenders
@@ -258,7 +268,7 @@ export async function performSignupOrAuth(
     trackSignupAttempt({
       status: 'wrapper_exception',
       zone: input.zone,
-      'legal document source': 'unused',
+      'legal document source': inputSource,
     });
     return { kind: 'error', message };
   }
@@ -276,9 +286,12 @@ export async function performSignupOrAuth(
       trackSignupAttempt({
         status: 'requires_redirect',
         zone: input.zone,
-        // Existing-user redirect path; this attempt's body carried no
-        // `terms_acceptance` (no probe-and-collect cycle happens here).
-        'legal document source': 'unused',
+        // Existing-user redirect path. For initial-kind probes, body
+        // carried no terms_acceptance → 'unused'. For follow_up calls
+        // that get redirected (e.g. an existing-user email surfaces
+        // late), body did carry terms_acceptance from the input's
+        // source — pass that through.
+        'legal document source': inputSource,
       });
       return { kind: 'redirect' };
     case 'needs_information':
@@ -322,11 +335,10 @@ export async function performSignupOrAuth(
       trackSignupAttempt({
         status,
         zone: input.zone,
-        // Error arms can fire either before or after a needs_information
-        // round-trip; the wrapper doesn't know which. Tag as 'unused' here
-        // and revisit in the discriminated-union refactor (next commit),
-        // which surfaces the source via `input.kind` directly.
-        'legal document source': 'unused',
+        // Source comes from the input — `initial` calls had no
+        // terms_acceptance in the body ('unused'), `follow_up` calls
+        // had it from whichever source the parser recorded.
+        'legal document source': inputSource,
       });
       return { kind: 'error', message: result.message };
     }
@@ -415,19 +427,20 @@ export async function performSignupOrAuth(
       zone: input.zone,
       'has env with api key': fetchResult.hasEnvWithApiKey,
       'user fetch retry count': fetchResult.retryCount,
-      // The success-arm tag is set to 'unused' here pending the
-      // discriminated-union refactor (next commit), which surfaces the
-      // source of the body's `terms_acceptance` slot via `input.kind`
-      // so we can tag 'server' / 'local' on follow-up successes
-      // accurately.
-      'legal document source': 'unused',
+      // Source tag accurately reflects what the attempt's body carried:
+      // initial calls have no terms_acceptance ('unused'), follow_up
+      // calls have it from whichever URL source the parser recorded
+      // (passed in via input.legalDocumentSource). This is what unlocks
+      // adoption dashboards once the BE flag flips ON — they can slice
+      // success outcomes by URL provenance.
+      'legal document source': inputSource,
     });
   } else {
     trackSignupAttempt({
       status: 'user_fetch_failed',
       zone: input.zone,
       'user fetch retry count': fetchResult.retryCount,
-      'legal document source': 'unused',
+      'legal document source': inputSource,
     });
   }
 
