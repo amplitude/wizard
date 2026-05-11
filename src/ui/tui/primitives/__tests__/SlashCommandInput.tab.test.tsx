@@ -179,6 +179,147 @@ describe('SlashCommandInput Tab accepts highlighted suggestion', () => {
     view.unmount();
   });
 
+  it('preserves args when submitting a command with arguments', async () => {
+    // Regression for Bugbot 3220907967: typing `/feedback hello world`
+    // and pressing Enter previously submitted just `/feedback` because
+    // the filter keyed off the first word and the Enter handler
+    // preferred `filtered[clampedIndex].cmd` whenever it was non-empty.
+    // Argv was silently dropped for `/feedback` and `/create-project`.
+    // The fix: Enter distinguishes command-only (no space) from
+    // command-with-args (space present) — the latter submits verbatim.
+    let submitted: string | null = null;
+
+    const view = render(
+      <SlashCommandInput
+        commands={commands}
+        isActive
+        onSubmit={(v) => {
+          submitted = v;
+        }}
+        onDeactivate={() => {}}
+      />,
+    );
+    await waitForFrame();
+    await waitForFrame();
+
+    // Type the whole command + args, then Enter.
+    for (const ch of '/feedback hello world') {
+      view.stdin.write(ch);
+      await waitForFrame();
+    }
+    // Extra frame between the last character and Enter so ink commits
+    // the final 'd' before the '\r' is processed (otherwise they coalesce
+    // and the submitted value is the value-before-last-keystroke).
+    await waitForFrame();
+    view.stdin.write('\r');
+    await waitForFrame();
+    await waitForFrame();
+
+    expect(submitted).toBe('/feedback hello world');
+    view.unmount();
+  });
+
+  it('palette-picks when Enter is pressed on a partial command (no args)', async () => {
+    // Companion to the regression test above: typing `/he` and pressing
+    // Enter should still submit the highlighted match (`/help`).
+    let submitted: string | null = null;
+
+    const view = render(
+      <SlashCommandInput
+        commands={commands}
+        isActive
+        onSubmit={(v) => {
+          submitted = v;
+        }}
+        onDeactivate={() => {}}
+      />,
+    );
+    await waitForFrame();
+    await waitForFrame();
+
+    for (const ch of '/he') {
+      view.stdin.write(ch);
+      await waitForFrame();
+    }
+    await waitForFrame();
+    view.stdin.write('\r');
+    await waitForFrame();
+    await waitForFrame();
+
+    expect(submitted).toBe('/help');
+    view.unmount();
+  });
+
+  it('submits exact command verbatim when Enter is pressed (no args)', async () => {
+    let submitted: string | null = null;
+
+    const view = render(
+      <SlashCommandInput
+        commands={commands}
+        isActive
+        onSubmit={(v) => {
+          submitted = v;
+        }}
+        onDeactivate={() => {}}
+      />,
+    );
+    await waitForFrame();
+    await waitForFrame();
+
+    for (const ch of '/help') {
+      view.stdin.write(ch);
+      await waitForFrame();
+    }
+    await waitForFrame();
+    view.stdin.write('\r');
+    await waitForFrame();
+    await waitForFrame();
+
+    expect(submitted).toBe('/help');
+    view.unmount();
+  });
+
+  it('submits trailing-space command verbatim (treated as command-with-empty-args)', async () => {
+    // After Tab completion fills `/feedback ` (trailing space), pressing
+    // Enter immediately should submit `/feedback` verbatim (the trailing
+    // space is trimmed by `value.trim()`). The downstream parser handles
+    // "missing required arg" UX — we don't want the palette pick to
+    // override the user's explicit `/cmd ` typed value. Documenting the
+    // choice here: trailing-space-without-args submits verbatim, not
+    // palette-picked, because the presence of a space signals intent to
+    // pass args even when none are typed yet.
+    let submitted: string | null = null;
+
+    const view = render(
+      <SlashCommandInput
+        commands={commands}
+        isActive
+        onSubmit={(v) => {
+          submitted = v;
+        }}
+        onDeactivate={() => {}}
+      />,
+    );
+    await waitForFrame();
+    await waitForFrame();
+
+    for (const ch of '/feedback ') {
+      view.stdin.write(ch);
+      await waitForFrame();
+    }
+    await waitForFrame();
+    view.stdin.write('\r');
+    await waitForFrame();
+    await waitForFrame();
+
+    // `value.trim()` strips the trailing space, so the submitted value
+    // is `/feedback` — but it took the "command-with-args" branch
+    // (because `value` contained a space before trim), not the palette
+    // pick branch. Either way the user-visible result is `/feedback`.
+    expect(submitted).toBe('/feedback');
+    view.unmount();
+  });
+
   it('keeps the palette open after Tab inserts the trailing space', async () => {
     // Regression for Bugbot 3220814221: Tab fills `/debug ` (with trailing
     // space). Before the fix, `query` became "debug " which matched nothing
