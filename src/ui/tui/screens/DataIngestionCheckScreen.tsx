@@ -992,10 +992,13 @@ export const DataIngestionCheckScreen = ({
         </Box>
       )}
 
-      {/* Spinner / polling indicator */}
+      {/* Spinner / polling indicator. Mood = 'listening' here because
+          the copy literally says "Listening for events" — the faster
+          tempo matches the wizard's narrative state (actively
+          watching the inbound stream, not idling). */}
       {!apiUnavailable && (
         <Box marginTop={1} gap={1} alignItems="center">
-          <BrailleSpinner color={Colors.accent} />
+          <BrailleSpinner color={Colors.accent} mood="listening" />
           <Text color={Colors.secondary}>
             Listening for events{Icons.ellipsis}
             {lastChecked && (
@@ -1073,10 +1076,13 @@ export const DataIngestionCheckScreen = ({
         </Box>
       )}
 
-      {/* API unavailable: no events yet */}
+      {/* API unavailable: no events yet. Mood = 'waiting' — the
+          fallback path has nothing to listen to (the catalog returned
+          empty), so we're sitting on a polled retry. The slower tempo
+          reads as 'patient' rather than 'stalled'. */}
       {apiUnavailable && eventTypes !== null && eventTypes.length === 0 && (
         <Box marginTop={1} gap={1} alignItems="center">
-          <BrailleSpinner color={Colors.accent} />
+          <BrailleSpinner color={Colors.accent} mood="waiting" />
           <Text color={Colors.secondary}>
             Waiting for events{Icons.ellipsis}
           </Text>
