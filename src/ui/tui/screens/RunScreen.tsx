@@ -594,23 +594,22 @@ export const RunScreen = ({ store }: RunScreenProps) => {
   // See `resolveRunScreenStatus` and ProgressTab for the resolution
   // and rendering details.
 
-  const hasEvents = store.eventPlan.length > 0;
-
+  // Events tab is always rendered so the tab strip's index doesn't shuffle
+  // mid-run (the agent's first event plan landing would otherwise insert a
+  // new tab between Progress and Logs, surprising any user already navigated
+  // to Logs). EventPlanViewer itself surfaces an empty-state placeholder
+  // when the event plan is empty.
   const tabs = [
     {
       id: 'progress',
       label: 'Progress',
       component: <ProgressTab store={store} />,
     },
-    ...(hasEvents
-      ? [
-          {
-            id: 'events',
-            label: 'Events',
-            component: <EventPlanViewer events={store.eventPlan} />,
-          },
-        ]
-      : []),
+    {
+      id: 'events',
+      label: 'Events',
+      component: <EventPlanViewer events={store.eventPlan} />,
+    },
     {
       id: 'logs',
       label: 'Logs',

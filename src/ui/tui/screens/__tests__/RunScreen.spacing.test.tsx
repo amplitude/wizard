@@ -410,6 +410,65 @@ describe('RunScreen — Progress tab dead-vertical-space invariant', () => {
     expect(discoveredRow).toBeGreaterThanOrEqual(headerRow);
   });
 
+  // ─────────────────────────────────────────────────────────────────
+  // Events tab stability — always present, regardless of plan size.
+  //
+  // Pre-fix: the Events tab was conditionally spread only when
+  // `eventPlan.length > 0`. The agent's first event plan landing
+  // would re-order the tab strip mid-run (insert a new tab between
+  // Progress and Logs), so any user already navigated to "Logs"
+  // would see Logs shift to a new index and the highlight drift.
+  // The placeholder copy lives inside EventPlanViewer, which already
+  // handles the empty-state case.
+  // ─────────────────────────────────────────────────────────────────
+
+  it('Events tab is always rendered, even when the event plan is empty', () => {
+    mockedDims = [120, 40];
+    const store = seedColdStartProgressStore();
+    // The cold-start store seeds no events. The Events tab label must
+    // still render in the tab strip.
+    expect(store.eventPlan.length).toBe(0);
+
+    const { lastFrame, unmount } = render(
+      <Box width={120} height={30} flexDirection="column">
+        <RunScreen store={store} />
+      </Box>,
+    );
+    const frame = stripAnsi(lastFrame() ?? '');
+    unmount();
+
+    // Tab strip contains all three of Progress / Events / Logs.
+    expect(frame).toMatch(/Progress/);
+    expect(frame).toMatch(/Events/);
+    expect(frame).toMatch(/Logs/);
+  });
+
+  it('Events tab content updates when the event plan goes from empty to populated', () => {
+    mockedDims = [120, 40];
+
+    // Switch to the Events tab via the store's requestedTab hook, then
+    // populate the plan and assert the agent's events appear.
+    const store = seedColdStartProgressStore();
+    expect(store.eventPlan.length).toBe(0);
+    store.setEventPlan([
+      { name: 'Signup Complete', description: 'User finished onboarding' },
+      { name: 'Purchase', description: 'Order placed' },
+    ]);
+    store.setRequestedTab('events');
+
+    const { lastFrame, unmount } = render(
+      <Box width={120} height={30} flexDirection="column">
+        <RunScreen store={store} />
+      </Box>,
+    );
+    const frame = stripAnsi(lastFrame() ?? '');
+    unmount();
+
+    // The events render inside the EventPlanViewer.
+    expect(frame).toMatch(/Signup Complete/);
+    expect(frame).toMatch(/Purchase/);
+  });
+
   it('DiscoveryFeed collapses to the top of the content area on narrow terminals', () => {
     // Below the wide-column threshold (110 cols) the right column
     // disappears and DiscoveryFeed renders ABOVE the task list instead.
