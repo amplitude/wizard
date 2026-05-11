@@ -115,7 +115,24 @@ export const SlashCommandInput = ({
         if (next === '') onDeactivate();
         return;
       }
-      if (key.ctrl || key.meta || key.tab) return;
+      if (key.tab) {
+        // Raycast/Slack convention: Tab accepts the currently highlighted
+        // suggestion, filling the input with `<cmd> ` (trailing space so the
+        // user can keep typing arguments — e.g. `/feedback ` then a message).
+        // The palette stays open; Enter is still needed to submit.
+        //
+        // No filtered options → swallow Tab (don't fall through to the
+        // ConsoleView Tab handler, which would tear down slash mode to open
+        // Ask). Outside slash mode this handler doesn't fire at all, so the
+        // ConsoleView's pre-activation Tab still opens Ask as before.
+        if (isSlashMode && filtered.length > 0) {
+          const completion = filtered[clampedIndex].cmd + ' ';
+          setValue(completion);
+          setSelectedIndex(0);
+        }
+        return;
+      }
+      if (key.ctrl || key.meta) return;
       if (char) {
         setValue((v) => v + char);
         setSelectedIndex(0);
@@ -199,6 +216,15 @@ export const SlashCommandInput = ({
                     {'  '}↓ {total - startIdx - MAX_VISIBLE} more
                   </Text>
                 )}
+                {/*
+                 * Affordance footer: name every key the palette responds to
+                 * so users don't have to guess which of Tab/Enter submits vs.
+                 * completes. Rendered only when there's at least one match,
+                 * matching the candidate list's visibility (see outer guard).
+                 */}
+                <Text color={Colors.muted}>
+                  {'  '}↑↓ navigate · Tab/Enter run · Esc cancel
+                </Text>
               </>
             );
           })()}
