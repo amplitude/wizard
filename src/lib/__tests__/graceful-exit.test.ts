@@ -130,6 +130,35 @@ describe('performGracefulExit', () => {
     vi.advanceTimersByTime(2_000);
     expect(exitSpy).toHaveBeenCalledWith(130);
   });
+
+  it('emits run_completed: cancelled on the active UI before the grace timer fires', async () => {
+    // Swap in a fake UI that captures the emitRunCompleted call. The
+    // performGracefulExit helper must invoke this BEFORE the 2s timer
+    // so an agent-mode parser sees the terminal envelope (rather than
+    // an abrupt EOF when process.exit lands).
+    const { setUI, getUI: realGetUI } = await import('../../ui/index.js');
+    const previousUI = realGetUI();
+    const emitRunCompleted = vi.fn();
+    setUI({
+      ...previousUI,
+      emitRunCompleted,
+    } as typeof previousUI);
+
+    const ctx = makeCtx();
+    performGracefulExit(ctx);
+
+    expect(emitRunCompleted).toHaveBeenCalledTimes(1);
+    expect(emitRunCompleted).toHaveBeenCalledWith(
+      expect.objectContaining({
+        outcome: 'cancelled',
+        exitCode: 130,
+        reason: 'sigint',
+      }),
+    );
+
+    // Restore the original UI so subsequent tests see a clean slate.
+    setUI(previousUI);
+  });
 });
 
 describe('installAbortSignalHandler', () => {

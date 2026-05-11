@@ -17,6 +17,7 @@
 import { saveCheckpoint } from './session-checkpoint.js';
 import { analytics } from '../utils/analytics.js';
 import { abortWizard } from '../utils/wizard-abort.js';
+import { getUI } from '../ui/index.js';
 import type { WizardSession } from './wizard-session';
 
 const EXIT_DELAY_MS = 2_000;
@@ -65,6 +66,7 @@ export function _isGracefulExitInProgressForTests(): boolean {
 export function performGracefulExit(ctx: GracefulExitContext): void {
   if (_exitInProgress) return;
   _exitInProgress = true;
+  const startedAt = Date.now();
 
   try {
     ctx.setCommandFeedback(
@@ -94,6 +96,25 @@ export function performGracefulExit(ctx: GracefulExitContext): void {
   void analytics.flush().catch(() => {
     // best-effort
   });
+
+  // Emit the terminal `run_completed: cancelled` NDJSON envelope BEFORE
+  // the 2s grace timer + process.exit so an orchestrator reading the
+  // stream sees a clean cancel signal instead of an abrupt EOF.
+  // Previously this funnel called `process.exit(130)` with no terminal
+  // event — a parent agent could not distinguish "user pressed Ctrl+C"
+  // from "wizard crashed mid-stream". AgentUI implements
+  // `emitRunCompleted`; InkUI / LoggingUI no-op. Wrapped in try/catch
+  // so a misbehaving emitter can't block the exit.
+  try {
+    getUI().emitRunCompleted?.({
+      outcome: 'cancelled',
+      exitCode: 130,
+      durationMs: Date.now() - startedAt,
+      reason: 'sigint',
+    });
+  } catch {
+    // best-effort — never let UI emission block the grace timer
+  }
 
   setTimeout(() => process.exit(130), EXIT_DELAY_MS);
 }
