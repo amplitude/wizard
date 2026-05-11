@@ -98,6 +98,21 @@ export const EVENT_DATA_VERSIONS = {
   run_completed: 1,
   intro: 1,
   outro: 1,
+  /**
+   * `outro_data` — companion lifecycle event emitted by `setOutroData`
+   * just before the TUI's Outro screen renders. Carries the structured
+   * outcome kind (`success` / `error` / `cancel`) so an orchestrator can
+   * branch on the terminal disposition without parsing the message
+   * string. Distinct from the bare `outro` event (which just signals
+   * "we're done") — `outro_data` is the structured payload.
+   *
+   * Missing from the registry until the emit/registry-sync invariant
+   * test landed: orchestrators saw the `event: 'outro_data'`
+   * discriminator on the wire but no `data_version` stamp, breaking
+   * the same contract `project_created` (now `project_create_success`)
+   * tripped over previously.
+   */
+  outro_data: 1,
   cancel: 1,
   /**
    * v2 — added `midRun`, `preserveFiles`, `partialProgress`,
@@ -120,6 +135,18 @@ export const EVENT_DATA_VERSIONS = {
    * and the auth subkind (`amplitude` / `llm-gateway`).
    */
   auth_retry_exhausted: 1,
+  /**
+   * `signup_input_required` — emitted when the wizard's signup flow
+   * needs additional CLI-flag inputs (e.g. `--org-name`, `--email`) it
+   * can't auto-derive in non-interactive mode. Carries the list of
+   * missing flags + the `resumeCommand` an orchestrator should re-issue
+   * once it has the values. Sibling of `auth_required` for the
+   * pre-run signup-credentials gap.
+   *
+   * Missing from the registry until the emit/registry-sync invariant
+   * landed.
+   */
+  signup_input_required: 1,
   /**
    * `run_error` — anonymous-until-now `error` envelope from
    * `AgentUI.setRunError`. Previously the `data` payload carried
@@ -170,6 +197,64 @@ export const EVENT_DATA_VERSIONS = {
   // Other results
   events_detected: 1,
   dashboard_created: 1,
+  /**
+   * `post_agent_seeded` — emitted by `seedPostAgentSteps` when the
+   * post-agent step queue is published to the orchestrator. Carries the
+   * full ordered list of step ids + labels so a parent agent can
+   * pre-allocate a checklist UI before any individual step transitions.
+   * Pairs with `post_agent_step` per-item updates and the
+   * `progress_estimate` rollup the queue feeds.
+   *
+   * Missing from the registry until the emit/registry-sync invariant
+   * landed.
+   */
+  post_agent_seeded: 1,
+  /**
+   * `post_agent_step` — fine-grained per-step state transition inside
+   * the post-agent step queue (e.g. `commit-events: in_progress`,
+   * `create-dashboard: completed`). One envelope per status change.
+   * Pairs with `post_agent_seeded` (the up-front queue manifest) and
+   * `progress_estimate` (the rollup). Orchestrators that want a
+   * single progress bar subscribe to `progress_estimate`; ones that
+   * want a step-by-step checklist subscribe to `post_agent_step`.
+   *
+   * Missing from the registry until the emit/registry-sync invariant
+   * landed.
+   */
+  post_agent_step: 1,
+  /**
+   * `journey_transition` — orchestrator-facing mirror of the TUI's
+   * four-step journey stepper (`setup` / `events` / `verify` /
+   * `dashboard`). Emitted as the journey state advances so a parent
+   * agent can render an equivalent stepper without duplicating the
+   * derivation logic. Distinct from `run_phase` (the five-state
+   * orchestrator-coarse signal) and from `current_activity` (which
+   * surfaces ongoing-task subtitles).
+   *
+   * Missing from the registry until the emit/registry-sync invariant
+   * landed.
+   */
+  journey_transition: 1,
+  /**
+   * `current_activity` — orchestrator-facing rollup of the TUI's
+   * "what is the wizard doing right now?" subtitle. Mirrors the
+   * lib-layer `WizardActivity` payload (kind, message, startedAt,
+   * optional duration estimate). Distinct from `heartbeat`
+   * (fixed-cadence liveness regardless of progress) and
+   * `current_file` (specifically about file edits); `current_activity`
+   * is the catch-all "task in flight" indicator so an orchestrator can
+   * render a subtitle without parsing every `status` line.
+   *
+   * Until the emit/registry-sync invariant test landed, this event
+   * shipped on the wire WITHOUT an `event:` discriminator at all —
+   * just a `kind: 'current_activity'` field. That made the registry
+   * key unreachable from `validateEnvelopeOrLog`'s coherence check
+   * and from `wizard_capabilities.supportedEvents`. The fix added
+   * an explicit `event: 'current_activity'` to the emitter so the
+   * discriminator-driven version stamp works the same way it does
+   * for every other event on the contract.
+   */
+  current_activity: 1,
   /**
    * `setup_context` — emitted by `plan` (in the JSON envelope) and at
    * `apply_started`, before any work happens. Carries the resolved
