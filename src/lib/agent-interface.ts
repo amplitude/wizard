@@ -2098,6 +2098,19 @@ export async function runAgent(
     // hit of each (noticed / concerning / critical) lands on the wire
     // per stall window. InkUI / LoggingUI no-op via the optional
     // method shape.
+    //
+    // Mirror the guard the stall-abort timer at line ~2751 already
+    // applies: when a wizard-tools blocking prompt is active
+    // (`confirm`, `choose`, `confirm_event_plan`), the inner agent
+    // intentionally produces no SDK messages while the human reads
+    // the prompt. Without this guard, `lastActivityAt` grows stale
+    // and the heartbeat fires `stall_status: critical` ("Likely
+    // stalled — retry imminent") to orchestrators while the user
+    // is just thinking. An orchestrator acting on that false signal
+    // might abort or restart a healthy run.
+    if (isWizardPromptActive()) {
+      return;
+    }
     const stallMs = Date.now() - lastActivityAt;
     const tier = deriveStallTier(stallMs);
     if (tier) {
