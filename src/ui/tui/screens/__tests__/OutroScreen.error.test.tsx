@@ -105,8 +105,7 @@ describe('OutroScreen — error variants', () => {
   });
 
   it('prefers signupMagicLinkUrl over checklist dashboard open URL', () => {
-    const canonicalDashboard =
-      'https://app.amplitude.com/analytics/d/abc123';
+    const canonicalDashboard = 'https://app.amplitude.com/analytics/d/abc123';
     const magic = 'https://app.amplitude.com/provision/magic?token=test';
     const store = makeStoreForSnapshot({
       outroData: {
@@ -390,12 +389,14 @@ describe('OutroScreen — error variants', () => {
       vi.mocked(isInteractiveOutro).mockReturnValue(true);
     });
 
-    it('renders the "Press R to retry" hint on error outros', () => {
+    it('renders the [R] Retry hotkey pill on error outros', () => {
       const store = makeStoreForSnapshot({
         outroData: { kind: OutroKind.Error, message: 'Setup failed.' },
       });
       const { frame } = renderSnapshot(<OutroScreen store={store} />, store);
-      expect(frame).toMatch(/Press\s+R\s+to retry/i);
+      // Error path renders hotkeys as accent-coloured pills in a single
+      // row at the foot of the screen instead of inline "Press X" prose.
+      expect(frame).toMatch(/\[R\]\s+Retry/);
     });
 
     it('renders the retry hint on cancel outros too', () => {
@@ -413,7 +414,10 @@ describe('OutroScreen — error variants', () => {
       });
       const { frame } = renderSnapshot(<OutroScreen store={store} />, store);
       expect(frame).toContain('Setup failed');
-      expect(frame).not.toMatch(/Press\s+R\s+to retry/i);
+      // No retry pill in either the error pill bar or the cancel "press R
+      // now to resume" line — non-interactive mode suppresses both.
+      expect(frame).not.toMatch(/\[R\]\s+Retry/);
+      expect(frame).not.toMatch(/Press\s+R\s+now/i);
     });
 
     it('does NOT render the retry hint on auth-failure error outros', () => {
@@ -429,10 +433,10 @@ describe('OutroScreen — error variants', () => {
       });
       const { frame } = renderSnapshot(<OutroScreen store={store} />, store);
       expect(frame).toContain('Setup failed');
-      expect(frame).not.toMatch(/Press\s+R\s+to retry/i);
+      expect(frame).not.toMatch(/\[R\]\s+Retry/);
     });
 
-    it('renders the retry hint on non-auth error outros (promptLogin missing)', () => {
+    it('renders the [R] Retry pill on non-auth error outros (promptLogin missing)', () => {
       const store = makeStoreForSnapshot({
         outroData: {
           kind: OutroKind.Error,
@@ -440,7 +444,7 @@ describe('OutroScreen — error variants', () => {
         },
       });
       const { frame } = renderSnapshot(<OutroScreen store={store} />, store);
-      expect(frame).toMatch(/Press\s+R\s+to retry/i);
+      expect(frame).toMatch(/\[R\]\s+Retry/);
     });
 
     it('does NOT render the retry hint on success outros', () => {
@@ -449,7 +453,8 @@ describe('OutroScreen — error variants', () => {
       });
       const { frame } = renderSnapshot(<OutroScreen store={store} />, store);
       expect(frame).toContain('Amplitude is live');
-      expect(frame).not.toMatch(/Press\s+R\s+to retry/i);
+      // No retry pill on success — the success view uses PickerMenu.
+      expect(frame).not.toMatch(/\[R\]\s+Retry/);
     });
   });
 

@@ -43,6 +43,7 @@ import {
 } from '../../../utils/wizard-abort.js';
 import { getLogFilePath } from '../../../lib/observability/index.js';
 import { writeBugReport } from '../../../lib/bug-report.js';
+import { HotkeyPills, type HotkeyPill } from '../components/HotkeyPills.js';
 import { toWizardDashboardOpenUrl } from '../../../utils/dashboard-open-url.js';
 import {
   getDashboardFile,
@@ -920,19 +921,8 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
               {Icons.arrowRight} Run the wizard again with{' '}
               <Text bold>--debug</Text> for more detail
             </Text>
-            {showRetryHint && (
-              <Text color={Colors.secondary}>
-                {Icons.arrowRight} Press <Text bold>R</Text> to retry from where
-                we left off
-              </Text>
-            )}
             <Text color={Colors.secondary}>
-              {Icons.arrowRight} Full log: <Text bold>{getLogFilePath()}</Text>{' '}
-              <Text color={Colors.muted}>(press L to open)</Text>
-            </Text>
-            <Text color={Colors.secondary}>
-              {Icons.arrowRight} Press <Text bold>C</Text> to write a sanitized
-              bug report
+              {Icons.arrowRight} Full log: <Text bold>{getLogFilePath()}</Text>
             </Text>
             {bugReportPathState && (
               <Text color={Colors.success}>
@@ -949,6 +939,33 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
               </Text>
             )}
           </Box>
+
+          {/* Hotkey pill bar — high-contrast, accent-coloured `[K] label`
+              row so users scanning the screen for "what can I press?"
+              find the action surface in one glance. Replaces the
+              previous inline "(press L to open)" / "Press C to …"
+              hints, which were rendered in muted secondary text inside
+              the troubleshooting bullets above and easy to miss.
+
+              Pill keys are gated on the same conditions as their input
+              handlers (above) so the bar never advertises a hotkey that
+              would be a no-op. `showPreservePrompt` suppresses the
+              standard bar entirely — the K/R prompt below has its own
+              dedicated affordances and a second pill row would
+              compete with it. */}
+          {!showPreservePrompt && (
+            <Box marginTop={1}>
+              <HotkeyPills
+                pills={(() => {
+                  const pills: HotkeyPill[] = [];
+                  if (showRetryHint) pills.push({ key: 'R', label: 'Retry' });
+                  pills.push({ key: 'L', label: 'Open log' });
+                  pills.push({ key: 'C', label: 'Write bug report' });
+                  return pills;
+                })()}
+              />
+            </Box>
+          )}
 
           {/* Preserve-files prompt — only when the failure class is one
               where the agent's writes are demonstrably consistent (e.g.
