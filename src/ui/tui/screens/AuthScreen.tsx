@@ -576,10 +576,14 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
       if (key.escape) {
         // Cancel auth — gracefully exit. The OAuth callback server is
         // owned by the outer oauth.ts; unwinding requires SIGINT-style
-        // exit. process.exit(0) matches the convention used elsewhere
-        // (OutageScreen onCancel) and produces a clean shutdown.
+        // exit. Route through `wizardSuccessExit` (see the
+        // account-confirm Esc handler below for the same pattern) so
+        // the analytics SDK has a chance to flush — a bare
+        // `process.exit(0)` silently dropped the
+        // 'auth cancelled by user' event because the SDK queues on a
+        // timer and the queue dies with the process.
         analytics.wizardCapture('auth cancelled by user');
-        process.exit(0);
+        void wizardSuccessExit(ExitCode.USER_CANCELLED);
       }
     },
     { isActive: oauthWaiting },
