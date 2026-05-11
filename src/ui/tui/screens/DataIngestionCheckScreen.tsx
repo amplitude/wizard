@@ -150,7 +150,8 @@ const BROWSER_FRAMEWORKS = new Set<Integration>(
 );
 
 /**
- * Backend / server-side SDKs. For these integrations the App API
+ * Backend / server-side SDKs, derived from each framework config's
+ * `metadata.targetsBackend` flag. For these integrations the App API
  * activation endpoint is unreliable as a success signal — autocapture is
  * irrelevant and the user has no browser tab to "click around" in. We
  * fall back to the data-API event catalog (taxonomy entries), which is
@@ -163,15 +164,11 @@ const BROWSER_FRAMEWORKS = new Set<Integration>(
  * engine integrations are excluded too: the PR's coaching tips are the
  * primary unblock path for them and we don't want to over-trigger.
  */
-export const BACKEND_SDK_INTEGRATIONS: ReadonlySet<Integration> = new Set([
-  Integration.django,
-  Integration.flask,
-  Integration.fastapi,
-  Integration.go,
-  Integration.java,
-  Integration.javascriptNode,
-  Integration.python,
-]);
+export const BACKEND_SDK_INTEGRATIONS: ReadonlySet<Integration> = new Set(
+  Object.values(FRAMEWORK_REGISTRY)
+    .filter((config) => config.metadata.targetsBackend)
+    .map((config) => config.metadata.integration),
+);
 
 interface DataIngestionCheckScreenProps {
   store: WizardStore;

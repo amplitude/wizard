@@ -67,6 +67,16 @@ export interface FrameworkMetadata<
    */
   targetsBrowser?: boolean;
 
+  /**
+   * Whether this framework runs in a backend / server-side runtime.
+   * Used by `DataIngestionCheckScreen` to enable the data-API event catalog
+   * fallback for activation checks (autocapture is irrelevant for these
+   * SDKs and the user has no browser tab to "click around" in). Mutually
+   * exclusive with `targetsBrowser` in practice — mobile/native/game-engine
+   * integrations leave both flags unset.
+   */
+  targetsBackend?: boolean;
+
   /** URL to framework-specific Amplitude docs */
   docsUrl: string;
 
