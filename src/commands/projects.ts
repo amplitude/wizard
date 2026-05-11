@@ -103,8 +103,24 @@ export const projectsCommand: CommandModule = {
                       recommendedReason: result.choices[0]
                         ? `Highest-ranked environment in the first matching workspace (${result.choices[0].description}).`
                         : undefined,
+                      // JSON Schema 2020-12 fragment — replaces the v2
+                      // English-in-JSON shape so non-Claude orchestrators
+                      // can run `ajv` / `jsonschema` directly. `pattern`
+                      // (not `enum`) because `allowManualEntry: true`
+                      // lets orchestrators submit an app-id outside
+                      // the paginated choices.
                       responseSchema: {
-                        appId: 'string (required, from choices[].value)',
+                        $schema: 'https://json-schema.org/draft/2020-12/schema',
+                        type: 'object',
+                        properties: {
+                          appId: {
+                            type: 'string',
+                            pattern: '^\\d+$',
+                            description:
+                              'Numeric Amplitude app ID — must match one of choices[].value, or any valid app ID when allowManualEntry is true.',
+                          },
+                        },
+                        required: ['appId'],
                       },
                       pagination: {
                         total: result.total,

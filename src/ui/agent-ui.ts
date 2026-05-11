@@ -2512,9 +2512,22 @@ export class AgentUI implements WizardUI {
           // unambiguous selector.
           hierarchy: ['org', 'project', 'app', 'environment'],
           choices,
-          // Agents should reply on stdin with one JSON line matching this shape:
+          // Agents should reply on stdin with one JSON line matching this
+          // JSON Schema 2020-12 fragment. Switched from `Record<string, string>`
+          // English descriptions in v3 so non-Claude orchestrators
+          // (Codex, GPT-5, Mistral) can run a real validator.
           responseSchema: {
-            appId: 'string (required, from choices[].appId)',
+            $schema: 'https://json-schema.org/draft/2020-12/schema',
+            type: 'object',
+            properties: {
+              appId: {
+                type: 'string',
+                pattern: '^\\d+$',
+                description:
+                  'Numeric Amplitude app ID — must match one of choices[].appId.',
+              },
+            },
+            required: ['appId'],
           },
           // Or re-invoke with a single CLI flag:
           resumeFlags: choices.map((c) => ({
@@ -2583,8 +2596,23 @@ export class AgentUI implements WizardUI {
           value: String(c.appId),
           flags: ['--app-id', String(c.appId)],
         })),
+      // JSON Schema 2020-12 fragment — replaces the v2 English-in-JSON
+      // shape so non-Claude orchestrators can run `ajv` / `jsonschema`
+      // directly. We use `pattern: '^\\d+$'` (not `enum`) because
+      // `allowManualEntry: true` lets orchestrators legitimately submit
+      // an above-cap app-id that didn't make the choices list.
       responseSchema: {
-        appId: 'string (required, from choices[].value)',
+        $schema: 'https://json-schema.org/draft/2020-12/schema',
+        type: 'object',
+        properties: {
+          appId: {
+            type: 'string',
+            pattern: '^\\d+$',
+            description:
+              'Numeric Amplitude app ID — must match one of choices[].value, or any valid app ID when allowManualEntry is true.',
+          },
+        },
+        required: ['appId'],
       },
       // Pagination is signalled even when all choices fit so outer agents
       // can surface the total. When the wizard caps the payload at

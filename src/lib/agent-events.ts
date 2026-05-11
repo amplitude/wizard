@@ -235,8 +235,22 @@ export const EVENT_DATA_VERSIONS = {
    * v1 readers that don't know about `decisionId` continue to work
    * because they were already keying off `code` alone; consumers
    * that want strict correlation branch on `data_version >= 2`.
+   *
+   * v3 — replaced `responseSchema: Record<string, string>` (English
+   * descriptions like `"appId: 'string (required, from choices[].value)'"`)
+   * with a proper JSON Schema 2020-12 fragment (`ResponseSchemaFragment`)
+   * so non-Claude orchestrators (Codex, GPT-5, Mistral) can
+   * programmatically validate stdin payloads instead of running an LLM
+   * over English. This is a BREAKING shape change for `responseSchema`
+   * only — the value type changed from `string` to a structured object
+   * (`JsonSchemaProperty`). Consumers that ignored `responseSchema`
+   * (the common case — most orchestrators round-trip values via
+   * `resumeFlags` instead) keep working. Consumers that parsed the
+   * English strings MUST switch to JSON Schema validators (`ajv`,
+   * `jsonschema`, etc.) — see `ResponseSchemaFragment` for the typed
+   * shape. Field remains optional.
    */
-  needs_input: 2,
+  needs_input: 3,
   /**
    * `decision_auto` — emitted alongside a `needs_input` whenever the
    * wizard auto-resolves the prompt (under `--auto-approve` /
@@ -601,6 +615,64 @@ export interface PaginationInfo {
   query?: string;
 }
 
+/**
+ * Sensible subset of a JSON Schema 2020-12 property definition.
+ *
+ * Used inside `ResponseSchemaFragment.properties` to declare the shape
+ * of each field the wizard accepts on stdin. We keep the subset narrow
+ * on purpose — every field here is something at least one orchestrator
+ * picker actually validates (string `pattern`, numeric `enum`, etc.) —
+ * so the wire contract stays small enough to hand-write into a Codex /
+ * GPT-5 / Mistral prompt without dragging in a full JSON Schema dialect.
+ *
+ * If a future prompt genuinely needs `array` / nested `object` /
+ * `oneOf`, extend this type (and bump `EVENT_DATA_VERSIONS.needs_input`)
+ * rather than smuggling extra shapes through `Record<string, unknown>`.
+ */
+export interface JsonSchemaProperty {
+  type: 'string' | 'number' | 'boolean';
+  /** Human-readable description, kept short. Optional. */
+  description?: string;
+  /** Regex (ECMAScript flavour) the value MUST match. Only meaningful for `type: 'string'`. */
+  pattern?: string;
+  /** Closed set of allowed values. Mutually exclusive with `pattern` in practice. */
+  enum?: (string | number)[];
+  /** Single allowed value — sugar for `enum: [x]`. */
+  const?: string | number | boolean;
+}
+
+/**
+ * JSON Schema 2020-12 fragment describing the shape the wizard accepts
+ * on stdin in response to a `needs_input` prompt.
+ *
+ * Replaces the v2 `Record<string, string>` shape (English-in-JSON like
+ * `{ appId: 'string (required, from choices[].value)' }`) so non-Claude
+ * orchestrators (Codex, GPT-5, Mistral) can run a real JSON Schema
+ * validator over the response envelope instead of asking an LLM to
+ * interpret the English descriptions.
+ *
+ * Intentionally a narrow subset of the full 2020-12 dialect — see
+ * `JsonSchemaProperty` for the supported keywords. The top level is
+ * always `type: 'object'` with named `properties` and an optional
+ * `required` allowlist; that covers every existing wizard prompt and
+ * keeps the schema small enough to hand-write into orchestrator prompts.
+ *
+ * Orchestrators that don't validate the envelope can ignore this field
+ * entirely — `resumeFlags` is the primary round-trip path.
+ */
+export interface ResponseSchemaFragment {
+  /**
+   * Pinned to the 2020-12 dialect so orchestrators using `ajv` / similar
+   * validators know which meta-schema to load. Optional on the wire so
+   * envelopes stay compact for the common case where the dialect is
+   * implied by `data_version`.
+   */
+  $schema?: 'https://json-schema.org/draft/2020-12/schema';
+  type: 'object';
+  properties: Record<string, JsonSchemaProperty>;
+  required?: string[];
+}
+
 /** Free-form fallback when the right answer isn't in `choices`. */
 export interface ManualEntryHint {
   /**
@@ -692,10 +764,20 @@ export interface NeedsInputData<V = string> {
    */
   resumeFlags?: { value: V; flags: string[] }[];
   /**
-   * Optional JSON shape the wizard accepts on stdin instead of a re-invoke.
-   * Documents the round-trip format for stdin-driven orchestrators.
+   * Optional JSON Schema 2020-12 fragment describing the JSON shape the
+   * wizard accepts on stdin instead of a re-invoke. Documents the
+   * round-trip format for stdin-driven orchestrators.
+   *
+   * v3 — was `Record<string, string>` (English descriptions like
+   * `{ appId: 'string (required, from choices[].value)' }`). Non-Claude
+   * orchestrators (Codex, GPT-5, Mistral) couldn't programmatically
+   * validate stdin payloads against the English strings; the v3 shape
+   * is a real JSON Schema fragment so they can run `ajv` / `jsonschema`
+   * directly. See `ResponseSchemaFragment` for the supported keywords.
+   * Field is optional — orchestrators that prefer `resumeFlags` can
+   * ignore it.
    */
-  responseSchema?: Record<string, string>;
+  responseSchema?: ResponseSchemaFragment;
   /** Pagination metadata for long choice lists. */
   pagination?: PaginationInfo;
   /**
@@ -728,7 +810,11 @@ export interface NeedsInputWireData<V = string> {
   recommended?: V;
   recommendedReason?: string;
   resumeFlags?: { value: V; flags: string[] }[];
-  responseSchema?: Record<string, string>;
+  /**
+   * JSON Schema 2020-12 fragment — see `NeedsInputData.responseSchema`
+   * for the migration notes from the v2 English-in-JSON shape.
+   */
+  responseSchema?: ResponseSchemaFragment;
   pagination?: PaginationInfo;
   allowManualEntry?: boolean;
   manualEntry?: ManualEntryHint;

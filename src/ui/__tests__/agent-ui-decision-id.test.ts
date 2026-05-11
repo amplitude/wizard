@@ -9,9 +9,11 @@
  *   - Ids are monotonic across a single wizard run, so two prompts that
  *     reuse a `code` (back-to-back `confirm`, paginated env pickers) are
  *     still uniquely pairable by their id.
- *   - Both event types stamp `data_version: 2` (bumped from 1 to add
+ *   - decision_auto stamps `data_version: 2` (bumped from 1 to add
  *     `decisionId` — orchestrators branch on `data_version >= 2` if they
- *     want strict correlation).
+ *     want strict correlation). needs_input stamps `data_version: 3`
+ *     (bumped again in PR B12 for the JSON Schema responseSchema
+ *     migration; the decisionId contract is unchanged).
  *
  * Why pin this: the previous wire shape forced orchestrators to
  * reconstruct request/response pairing by timing + `code` heuristics,
@@ -191,17 +193,22 @@ describe('data_version bump for decisionId fields', () => {
     spy.mockRestore();
   });
 
-  it('registers needs_input and decision_auto at v=2 in EVENT_DATA_VERSIONS', () => {
-    expect(EVENT_DATA_VERSIONS.needs_input).toBe(2);
+  // needs_input was bumped to v3 in PR B12 — replaced
+  // `responseSchema: Record<string, string>` (English-in-JSON) with a
+  // proper JSON Schema 2020-12 fragment so non-Claude orchestrators
+  // (Codex, GPT-5, Mistral) can programmatically validate stdin
+  // payloads. decision_auto stayed at v2 — its shape didn't change.
+  it('registers needs_input at v=3 (responseSchema JSON Schema migration) and decision_auto at v=2', () => {
+    expect(EVENT_DATA_VERSIONS.needs_input).toBe(3);
     expect(EVENT_DATA_VERSIONS.decision_auto).toBe(2);
   });
 
-  it('stamps data_version=2 on the needs_input envelope', () => {
+  it('stamps data_version=3 on the needs_input envelope', () => {
     const ui = new AgentUI();
     void ui.promptConfirm('Stamp?');
     const events = writes.map((l) => JSON.parse(l.trim()) as NDJSONEvent);
     const needsInput = events.find((e) => e.data?.event === 'needs_input');
-    expect(needsInput?.data_version).toBe(2);
+    expect(needsInput?.data_version).toBe(3);
   });
 
   it('stamps data_version=2 on the decision_auto envelope', () => {
