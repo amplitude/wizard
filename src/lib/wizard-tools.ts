@@ -885,6 +885,50 @@ export function mergeEnvValues(
 // ---------------------------------------------------------------------------
 
 /**
+ * Decide whether an event name looks like it carries deliberate, human-
+ * meaningful casing that the wizard should preserve verbatim — versus a
+ * programmatic shape (snake_case / kebab-case / dotted / camelCase) that
+ * the agent fell back to when it conflated conflicting guidance.
+ *
+ * This predicate gates {@link normalizeEventName} at the
+ * `confirm_event_plan` call site. Without it, the normalizer fired
+ * unconditionally and silently re-Title-Cased every name — making
+ * user-driven feedback like "use lowercase" structurally impossible to
+ * honor, because the revised plan came right back through the same
+ * un-gated rewriter.
+ *
+ * Returns `true` (preserve as-is, modulo whitespace collapse) when:
+ *   - the string has at least one non-whitespace character, AND
+ *   - it contains no `_`, `-`, or `.` separators, AND
+ *   - if it's a single token (no whitespace), it isn't camelCase /
+ *     PascalCase (i.e. no lowercase-then-uppercase boundary).
+ *
+ * Returns `false` (hand off to {@link normalizeEventName}) when the
+ * input is clearly programmatic — so model fallbacks like
+ * `user_signed_up` or `userSignedUp` still get rewritten to the
+ * canonical Title Case shape the rest of the wizard expects.
+ *
+ * Intentional shouting (`COLLABORATION STARTED`), Sentence case
+ * (`Collaboration started`), and explicit lowercase
+ * (`collaboration started`) all pass the predicate — none of those are
+ * the model dropping into a programmatic format; they're casing choices
+ * a human (or an agent that listened to a human) made.
+ *
+ * Exported for unit testing.
+ */
+export function looksLikeIntendedCasing(raw: string): boolean {
+  const trimmed = raw.trim();
+  if (!trimmed) return false;
+  // Programmatic separators — never user-intended in an event name.
+  if (/[_\-.]/.test(trimmed)) return false;
+  // Single-token camelCase / PascalCase — also programmatic.
+  if (!/\s/.test(trimmed) && /[a-z][A-Z]/.test(trimmed)) return false;
+  // Space-separated, no embedded camelCase boundaries — the casing
+  // (Title, Sentence, lower, or shouty) is what someone meant.
+  return true;
+}
+
+/**
  * Normalize an event name to the canonical Title Case shape mandated by
  * the wizard commandments ("[Noun] [Past-Tense Verb]", 2–5 words, ≤50
  * chars).
@@ -900,6 +944,11 @@ export function mergeEnvValues(
  * Soft normalization — never throws, never rejects. Returns the name
  * unchanged if it's already correctly shaped; converts snake_case,
  * kebab-case, camelCase, and ALL-LOWERCASE inputs into Title Case.
+ *
+ * At the `confirm_event_plan` call site this is gated by
+ * {@link looksLikeIntendedCasing} so user-meaningful casing (including
+ * deliberate lowercase requested via plan feedback) is preserved
+ * verbatim.
  *
  * Exported for unit testing.
  */
@@ -1949,14 +1998,18 @@ Returns: "approved", "skipped", or "feedback: <user message>"`,
       const { DEMO_MODE } = await import('./constants.js');
       // Soft-gate the name format. Agents historically saw conflicting
       // guidance (commandments said Title Case, the tool schema said
-      // lowercase) and emitted mixed shapes. Normalize forgivingly here
-      // so the persisted plan AND the user-facing prompt always match
-      // the canonical Title Case shape — no second prompt round-trip
-      // needed when the model gets it slightly wrong.
+      // lowercase) and emitted mixed shapes — so we still want to
+      // rewrite obvious programmatic fallbacks. BUT: when a name looks
+      // like deliberate human casing (e.g. the agent honored "use
+      // lowercase" feedback from the user), preserve it. Otherwise the
+      // normalizer becomes a structural block on user-driven overrides
+      // and a "revised plan" comes back identical to the rejected one.
       let normalizationCount = 0;
       const normalizedEvents = args.events.map((e) => {
         const original = e.name.trim();
-        const normalized = normalizeEventName(original);
+        const normalized = looksLikeIntendedCasing(original)
+          ? original.replace(/\s+/g, ' ')
+          : normalizeEventName(original);
         if (normalized !== original) normalizationCount += 1;
         return {
           name: normalized,
@@ -1965,7 +2018,7 @@ Returns: "approved", "skipped", or "feedback: <user message>"`,
       });
       if (normalizationCount > 0) {
         logToFile(
-          `confirm_event_plan: normalized ${normalizationCount}/${args.events.length} event name(s) to Title Case`,
+          `confirm_event_plan: normalized ${normalizationCount}/${args.events.length} event name(s)`,
         );
       }
       const events =
