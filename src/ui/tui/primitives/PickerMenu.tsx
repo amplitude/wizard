@@ -300,12 +300,19 @@ const SinglePickerMenu = <T,>({
     }
   });
 
+  // When showDigits is false (options.length > DIGIT_SHORTCUT_LIMIT),
+  // we render an extra "Use arrows + Enter to pick" hint row below
+  // the option list. The constrained-mode chrome reserve must account
+  // for it — otherwise the hint pushes total rendered height to
+  // `availableRows + 1` and the parent's `overflow="hidden"` clips
+  // the bottom indicator (or the hint itself).
+  const hintRows = showDigits ? 0 : 1;
   const chromeRows =
     availableRows !== undefined
-      ? CONSTRAINED_CHROME_RESERVE_ROWS
+      ? CONSTRAINED_CHROME_RESERVE_ROWS + hintRows
       : measuredHeader !== null
-      ? measuredHeader + CHROME_FOOTER_RESERVE_ROWS
-      : PICKER_CHROME_ROWS_FALLBACK;
+      ? measuredHeader + CHROME_FOOTER_RESERVE_ROWS + hintRows
+      : PICKER_CHROME_ROWS_FALLBACK + hintRows;
   const maxVisible =
     columns === 1
       ? computeVisibleCount(visibleRowsBudget, rowsPerCol, chromeRows)
