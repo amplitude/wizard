@@ -1,6 +1,7 @@
 import type { CommandModule } from 'yargs';
 import chalk from 'chalk';
 import { getUI, ExitCode } from './helpers';
+import { EVENT_DATA_VERSIONS } from '../lib/agent-events.js';
 
 export const projectsCommand: CommandModule = {
   command: 'projects <command>',
@@ -61,6 +62,14 @@ export const projectsCommand: CommandModule = {
                     v: 1,
                     '@timestamp': new Date().toISOString(),
                     type: 'needs_input',
+                    // Manual envelope construction bypasses the
+                    // `emit()` helper's auto-stamp. Pull from the
+                    // registry so future bumps (v4, v5…) stay in
+                    // sync without touching this file. Orchestrators
+                    // branch on `data_version >= 3` for the JSON
+                    // Schema 2020-12 `responseSchema` shape; pre-v3
+                    // shipped English-in-JSON.
+                    data_version: EVENT_DATA_VERSIONS.needs_input,
                     message: result.warning
                       ? result.warning
                       : `${result.total} project${
