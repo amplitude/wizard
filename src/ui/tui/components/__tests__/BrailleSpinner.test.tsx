@@ -27,10 +27,6 @@ import {
   SPINNER_MOOD_INTERVAL,
 } from '../BrailleSpinner.js';
 
-// eslint-disable-next-line no-control-regex
-const ANSI_CSI_REGEX = /\x1b\[[0-9;]*[A-Za-z]/g;
-const strip = (s: string) => s.replace(ANSI_CSI_REGEX, '');
-
 describe('BrailleSpinner moods', () => {
   beforeEach(() => {
     vi.useFakeTimers();
