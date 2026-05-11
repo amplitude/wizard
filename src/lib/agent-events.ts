@@ -574,6 +574,54 @@ export type NeedsInputEvent<V = string> = AgentEventEnvelope<
   NeedsInputWireData<V>
 >;
 
+// ── waiting_for_user (documented alias for `needs_input`) ───────────
+//
+// Orchestrators reading the protocol docs see two names for the same
+// concept ("needs_input" in the wire / source, "waiting for user" in
+// human-facing copy and some early design notes). PR B2 deferred
+// reconciling these because `NeedsInputData` already provides the
+// typed schema and the wire emitter was settled.
+//
+// This module re-exports the same schema under the `waiting_for_user`
+// name so orchestrator authors can import whichever spelling matches
+// their mental model. The two are intentionally type-identical — adding
+// fields to `NeedsInputData` automatically picks them up here, and we
+// never emit a second envelope for the same event.
+//
+// CRITICAL: this is a documentation + type alias only. There is NO
+// `waiting_for_user` envelope on the wire — orchestrators that want
+// to subscribe still subscribe to `type === 'needs_input'`. We do not
+// register a separate `EVENT_DATA_VERSIONS.waiting_for_user` entry
+// because there is no separate event to version.
+
+/**
+ * Type alias for `NeedsInputData`. Documented name for the same wire
+ * event — orchestrators that prefer the "waiting for user" phrasing
+ * can import this type without changing the underlying schema. See
+ * `NeedsInputData` for the full contract.
+ *
+ * Use this for prompt-handling code paths where the human-facing copy
+ * reads "waiting for user input" but you want the typed schema. The
+ * wire-format `event` discriminator on `data` remains `'needs_input'`.
+ */
+export type WaitingForUserData<V = string> = NeedsInputData<V>;
+
+/**
+ * Type alias for `NeedsInputWireData`. The wire-format shape (with
+ * `event: 'needs_input'` discriminator) read from NDJSON. There is no
+ * separate `waiting_for_user` wire event — this is purely a name
+ * orchestrators may import when the readability of their consumer
+ * code benefits from it.
+ */
+export type WaitingForUserWireData<V = string> = NeedsInputWireData<V>;
+
+/**
+ * Type alias for `NeedsInputEvent`. The full envelope shape for the
+ * NDJSON `needs_input` line under its alternate name. See
+ * `NeedsInputEvent` for the canonical export.
+ */
+export type WaitingForUserEvent<V = string> = NeedsInputEvent<V>;
+
 /**
  * Wire shape of the `data` field on a `decision_auto` envelope.
  * Carries the resolved value plus the `decisionId` from the matching
