@@ -334,9 +334,16 @@ function executeCommand(raw: string, store: WizardStore): string | void {
         }
         // Surface the patch body in the feedback channel. The slash console
         // can't easily render syntax-coloured diffs inline, but the unified
-        // patch text is itself readable and copy-pasteable.
+        // patch text is itself readable and copy-pasteable. Relativize the
+        // header path through the same `displayPath` helper the summary
+        // mode + FileWritesPanel + DiffViewer use, so detail mode doesn't
+        // leak the user's absolute home-directory path.
+        const detailRel = displayPath(found.path, store.session.installDir);
         store.setCommandFeedback(
-          `${found.operation.toUpperCase()} ${found.path}  ${formatChangeCounts(found.additions, found.deletions)}\n\n${found.patch}`,
+          `${found.operation.toUpperCase()} ${detailRel}  ${formatChangeCounts(
+            found.additions,
+            found.deletions,
+          )}\n\n${found.patch}`,
           60_000,
         );
         break;
@@ -360,7 +367,9 @@ function executeCommand(raw: string, store: WizardStore): string | void {
         // summary, the live FileWritesPanel, and the outro DiffViewer all
         // agree on the out-of-project fallback (basename, not raw path).
         const rel = displayPath(d.path, store.session.installDir);
-        return `${d.operation.toUpperCase().padEnd(6)} ${rel}  ${formatChangeCounts(d.additions, d.deletions)}`;
+        return `${d.operation
+          .toUpperCase()
+          .padEnd(6)} ${rel}  ${formatChangeCounts(d.additions, d.deletions)}`;
       });
       const summary = `${diffs.length} file${
         diffs.length === 1 ? '' : 's'
@@ -840,8 +849,8 @@ export const ConsoleView = ({
                   ? eventPlanPromptShowing
                     ? 'Finish the plan above ([Y]/[S]/[F]) — / and Tab resume after.'
                     : visibleHistory.length > 0
-                      ? 'Press / for commands · Tab to ask · Esc to hide answer'
-                      : 'Press / for commands or Tab to ask a question'
+                    ? 'Press / for commands · Tab to ask · Esc to hide answer'
+                    : 'Press / for commands or Tab to ask a question'
                   : 'Press / for commands'}
               </Text>
             )}
