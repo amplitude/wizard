@@ -252,7 +252,9 @@ export async function performSignupOrAuth(
   // The `needs_information` arm overrides this with `result.legalDocumentSource`
   // because that arm reports what BE produced, not what the caller sent.
   const inputSource: LegalDocumentSource | 'unused' =
-    input.kind === 'with_required_fields' ? input.legalDocumentSource : 'unused';
+    input.kind === 'with_required_fields'
+      ? input.legalDocumentSource
+      : 'unused';
 
   log.debug('attempting direct signup', { kind: input.kind });
   // performDirectSignup is contracted to catch its own network/parse errors
