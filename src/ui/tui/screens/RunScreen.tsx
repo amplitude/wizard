@@ -150,6 +150,18 @@ export function resolveRunScreenStatus(store: WizardStore): string | undefined {
 const MIN_COLS_FOR_RIGHT_COLUMN = 110;
 const MIN_ROWS_FOR_RIGHT_COLUMN = 22;
 
+/**
+ * Grace window before the sticky "currently editing X" pill clears
+ * itself when the most recent file write is in a terminal state. After
+ * this much wall-clock time with no new write activity, the pill goes
+ * blank — the agent has plainly moved on, so claiming it's still
+ * editing the last file would be a lie.
+ *
+ * Exported for tests so they can pin the threshold without relying on
+ * fake-timer advances longer than necessary.
+ */
+export const STALE_FILE_WRITE_MS = 10_000;
+
 const ProgressTab = ({ store }: { store: WizardStore }) => {
   const [cols, rows] = useStdoutDimensions();
   const showRightColumn =
@@ -247,8 +259,59 @@ const ProgressTab = ({ store }: { store: WizardStore }) => {
     store.fileWrites,
     store.session.installDir,
   );
+  // Sticky "currently editing X" pill — must reflect honest agent activity.
+  //
+  // Before this fix the pill never cleared: `lastFileRef` only ever
+  // received a new value when `rawFile` was truthy, so after the inner
+  // agent finished its last write the pill kept showing that file for
+  // the duration of the Finalizing phase and beyond. The header lied
+  // about what the wizard was doing.
+  //
+  // We clear the sticky value when either condition holds:
+  //   1. The most recent `fileWrites` entry is older than
+  //      STALE_FILE_WRITE_MS AND its status is terminal
+  //      (`applied` / `failed`) — quiet enough that "currently editing"
+  //      is no longer true.
+  //   2. `postAgentSteps.length > 0` — the agent has moved past the
+  //      file-write phase entirely (commit events, create dashboard,
+  //      …). Clear immediately, no grace period needed.
+  //
+  // Re-evaluation cadence: the `tick` setInterval above re-renders the
+  // tab on every SPINNER_INTERVAL, so the stale-time check naturally
+  // picks up the clock advancing without us having to mount a second
+  // timer. We derive the displayed value directly during render rather
+  // than through a useEffect — the latter would only re-fire when its
+  // dependencies changed, which during a quiet stretch they don't
+  // (rawFile stays null, the latest fileWrites entry's timestamps
+  // don't move). Computing inline ties the stale check to the render
+  // cadence the spinner already drives.
+  const hasPostAgentSteps = store.session.postAgentSteps.length > 0;
+  const mostRecentWrite =
+    store.fileWrites.length > 0
+      ? store.fileWrites[store.fileWrites.length - 1]
+      : null;
+  const isMostRecentWriteStaleAndTerminal =
+    mostRecentWrite !== null &&
+    (mostRecentWrite.status === 'applied' ||
+      mostRecentWrite.status === 'failed') &&
+    Date.now() - (mostRecentWrite.completedAt ?? mostRecentWrite.startedAt) >
+      STALE_FILE_WRITE_MS;
   const lastFileRef = useRef<string | null>(null);
-  if (rawFile) lastFileRef.current = rawFile;
+  if (hasPostAgentSteps || isMostRecentWriteStaleAndTerminal) {
+    // Either the agent has moved past the file-write phase entirely
+    // (postAgentSteps seeded) or its last write finished long enough
+    // ago that calling it "currently editing" would be a lie. Drop
+    // the sticky value — TypewriterFilename renders null on null
+    // path, so the slot goes blank.
+    lastFileRef.current = null;
+  } else if (rawFile) {
+    lastFileRef.current = rawFile;
+  }
+  // NB: the spinner `tick` setInterval already re-renders this
+  // component on every SPINNER_INTERVAL, so the `Date.now()` check
+  // above re-evaluates on its own cadence — no extra subscription
+  // needed here. The `void tick` further down keeps that subscription
+  // explicit for the lint rule.
   const currentFile = lastFileRef.current;
 
   const completed = progressItems.filter(
