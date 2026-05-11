@@ -950,12 +950,22 @@ export interface RunResumedData {
  *   - `permission` — EACCES / "permission denied"
  *   - `not_found`  — ENOENT / "no such file"
  *   - `syntax`     — agent-side string-match failure on Edit / MultiEdit
+ *   - `timeout`    — ETIMEDOUT / "operation timed out" / SDK timeout —
+ *                   transient; an orchestrator can safely re-issue the
+ *                   write without changing the input. Distinct from
+ *                   `generic` so retry-aware consumers don't burn
+ *                   budget on a permanent failure.
  *   - `generic`    — anything else
+ *
+ * Adding a new variant is a `data_version` bump on `file_change_failed`
+ * (see `EVENT_DATA_VERSIONS`). Renaming an existing variant is also a
+ * bump because orchestrators key off the literal string.
  */
 export type FileChangeErrorClass =
   | 'permission'
   | 'not_found'
   | 'syntax'
+  | 'timeout'
   | 'generic';
 export interface FileChangeFailedData {
   event: 'file_change_failed';
@@ -1602,7 +1612,10 @@ export function classifyFileChangeError(message: string): FileChangeErrorClass {
   if (
     lower.includes('permission denied') ||
     lower.includes('eacces') ||
-    lower.includes('write_refused')
+    lower.includes('eperm') ||
+    lower.includes('write_refused') ||
+    lower.includes('read-only file system') ||
+    lower.includes('erofs')
   ) {
     return 'permission';
   }
@@ -1614,14 +1627,30 @@ export function classifyFileChangeError(message: string): FileChangeErrorClass {
     lower.includes('string to replace') ||
     lower.includes('found multiple matches') ||
     lower.includes('found 0 matches') ||
-    lower.includes('syntaxerror')
+    lower.includes('did not match') ||
+    lower.includes('syntaxerror') ||
+    lower.includes('unexpected token') ||
+    lower.includes('invalid json')
   ) {
     return 'syntax';
+  }
+  // Timeout patterns — transient by definition. Check BEFORE not_found
+  // because `ETIMEDOUT` is sometimes wrapped with secondary text that
+  // could trip the `not found` heuristic.
+  if (
+    lower.includes('etimedout') ||
+    lower.includes('timed out') ||
+    lower.includes('timeout') ||
+    lower.includes('operation timed out') ||
+    lower.includes('deadline exceeded')
+  ) {
+    return 'timeout';
   }
   if (
     lower.includes('no such file') ||
     lower.includes('enoent') ||
-    lower.includes('not found')
+    lower.includes('not found') ||
+    lower.includes('does not exist')
   ) {
     return 'not_found';
   }

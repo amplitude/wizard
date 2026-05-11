@@ -25,6 +25,7 @@ import type {
   VerificationResultData,
   SetupContextData,
   SetupCompleteData,
+  FileChangeErrorClass,
 } from '../lib/agent-events';
 import {
   EVENT_DATA_VERSIONS,
@@ -1437,7 +1438,7 @@ export class AgentUI implements WizardUI {
   emitFileChangeFailed(data: {
     path: string;
     operation: 'create' | 'modify' | 'delete';
-    errorClass: 'permission' | 'not_found' | 'syntax' | 'generic';
+    errorClass: FileChangeErrorClass;
     errorMessage: string;
   }): void {
     emit(

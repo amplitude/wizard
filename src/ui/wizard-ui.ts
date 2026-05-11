@@ -728,7 +728,9 @@ export interface WizardUI {
    * orchestrator can label the failed write on the already-rendered
    * preview without parsing tool_result text. `errorClass`
    * discriminates the common failure modes (permission / not_found /
-   * syntax / generic) so the orchestrator can branch by kind.
+   * syntax / timeout / generic) so the orchestrator can branch by kind
+   * — `timeout` callers can retry without changing input, `permission`
+   * callers should escalate to the user, etc.
    *
    * Optional — only AgentUI emits. InkUI / LoggingUI no-op (the TUI
    * surfaces tool failures via the existing FileWritesPanel; CI logs
@@ -737,7 +739,7 @@ export interface WizardUI {
   emitFileChangeFailed?(data: {
     path: string;
     operation: 'create' | 'modify' | 'delete';
-    errorClass: 'permission' | 'not_found' | 'syntax' | 'generic';
+    errorClass: 'permission' | 'not_found' | 'syntax' | 'timeout' | 'generic';
     errorMessage: string;
   }): void;
 }

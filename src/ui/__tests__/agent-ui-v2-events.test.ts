@@ -355,9 +355,15 @@ describe('AgentUI.emitFileChangeFailed (v2: write-failure event)', () => {
     expect(event.data_version).toBe(EVENT_DATA_VERSIONS.file_change_failed);
   });
 
-  it('accepts all four documented errorClass values', () => {
+  it('accepts all five documented errorClass values', () => {
     const ui = new AgentUI();
-    const classes = ['permission', 'not_found', 'syntax', 'generic'] as const;
+    const classes = [
+      'permission',
+      'not_found',
+      'syntax',
+      'timeout',
+      'generic',
+    ] as const;
     for (const errorClass of classes) {
       ui.emitFileChangeFailed?.({
         path: '/abs/a',
@@ -398,6 +404,13 @@ describe('classifyFileChangeError', () => {
       'permission',
     );
     expect(classifyFileChangeError('Permission Denied')).toBe('permission');
+    // PR B4 — extended patterns
+    expect(classifyFileChangeError('EPERM: operation not permitted')).toBe(
+      'permission',
+    );
+    expect(classifyFileChangeError('EROFS: read-only file system')).toBe(
+      'permission',
+    );
   });
 
   it('classifies not-found failures', () => {
@@ -405,6 +418,8 @@ describe('classifyFileChangeError', () => {
       'not_found',
     );
     expect(classifyFileChangeError('file not found')).toBe('not_found');
+    // PR B4 — extended pattern
+    expect(classifyFileChangeError('Path does not exist')).toBe('not_found');
   });
 
   it('classifies edit syntax failures', () => {
@@ -415,6 +430,39 @@ describe('classifyFileChangeError', () => {
     expect(classifyFileChangeError('Found 0 matches')).toBe('syntax');
     expect(classifyFileChangeError('SyntaxError: Unexpected token')).toBe(
       'syntax',
+    );
+    // PR B4 — extended patterns
+    expect(classifyFileChangeError('Old string did not match in file')).toBe(
+      'syntax',
+    );
+    expect(classifyFileChangeError('Unexpected token } in JSON')).toBe(
+      'syntax',
+    );
+    expect(classifyFileChangeError('Invalid JSON: trailing comma')).toBe(
+      'syntax',
+    );
+  });
+
+  it('classifies timeout failures (PR B4)', () => {
+    // ETIMEDOUT from Node fs / network — transient, retry-safe.
+    expect(classifyFileChangeError('ETIMEDOUT: operation timed out')).toBe(
+      'timeout',
+    );
+    expect(classifyFileChangeError('Operation timed out after 30s')).toBe(
+      'timeout',
+    );
+    expect(classifyFileChangeError('Request timeout')).toBe('timeout');
+    expect(classifyFileChangeError('deadline exceeded')).toBe('timeout');
+  });
+
+  it('prefers timeout over not_found when both signals appear', () => {
+    // The SDK occasionally surfaces ETIMEDOUT wrapped with secondary
+    // text that mentions "not found" — we want the timeout signal to
+    // win so retry-aware consumers don't treat a transient as a
+    // permanent failure. Tests the explicit ordering in the
+    // classifier.
+    expect(classifyFileChangeError('ETIMEDOUT (path not found in cache)')).toBe(
+      'timeout',
     );
   });
 
