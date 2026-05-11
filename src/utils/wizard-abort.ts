@@ -399,6 +399,22 @@ export function _resetWizardAbortInProgressForTests(): void {
 export async function wizardAbort(
   options?: WizardAbortOptions,
 ): Promise<never> {
+  // Re-entry guard. The SIGINT handler installed by
+  // `installAbortSignalHandler` calls into `wizardAbort` via
+  // `wizardAbortRunner`; if the agent-runner's error path has already
+  // initiated abort, a second call from SIGINT would double-execute
+  // cleanup, double-emit `run_completed`, and race `process.exit`.
+  // The async gap between entry and the terminal `process.exit`
+  // (the `await getUI().cancel(...)` + analytics-flush awaits) is
+  // the window where SIGINT delivery hits while the first abort is
+  // still draining. Block the second entry by parking it on an
+  // unresolved promise — the first call's `process.exit` will
+  // terminate the process before this promise ever needs to resolve.
+  if (_wizardAbortInProgress) {
+    return new Promise<never>(() => {
+      /* deliberately never resolve — first abort owns the exit */
+    });
+  }
   _wizardAbortInProgress = true;
   const {
     message = 'Wizard setup cancelled.',
