@@ -101,10 +101,21 @@ export const SlashCommandInput = ({
         return;
       }
       if (key.return) {
-        if (isSlashMode && filtered.length > 0) {
+        // Distinguish "command-only" from "command-with-args":
+        //   - `/he` + Enter (no space) → submit the highlighted palette
+        //     match (`/help`), so partial typing acts like a picker.
+        //   - `/feedback hello world` + Enter (space present) → submit
+        //     the value verbatim so argv survives. Before this split,
+        //     `query` keyed off only the first word, which left
+        //     `filtered` non-empty and caused us to submit the bare
+        //     `/feedback` and silently drop the message (Bugbot
+        //     3220907967).
+        const trimmed = value.trim();
+        const hasArgs = trimmed.includes(' ');
+        if (!hasArgs && isSlashMode && filtered.length > 0) {
           onSubmit(filtered[clampedIndex].cmd);
-        } else if (value.trim()) {
-          onSubmit(value.trim());
+        } else if (trimmed) {
+          onSubmit(trimmed);
         }
         setValue('');
         setSelectedIndex(0);
