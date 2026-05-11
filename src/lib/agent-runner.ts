@@ -1841,6 +1841,21 @@ async function runAgentWizardBody(
   // creation moved to the deferred `amplitude-wizard dashboard` command.
   // The final-success message and (optionally) a `dashboard-plan.json`
   // hand-off replace the inline dashboard step.
+  // PR B6: emit the `tool_call_summary` rollup BEFORE the
+  // `run_phase: finalizing` envelope so an orchestrator can render
+  // the inner-agent tool usage summary before the post-agent steps
+  // section appears in their UI. The terminal-exit emission in
+  // `wizardSuccessExit` / `wizardAbort` re-emits a cumulative rollup
+  // (covering any post-agent step tool calls), with dedup on the
+  // payload signature so we don't ship identical envelopes back-to-
+  // back. Wrapped so the rollup can never block the phase transition
+  // or the post-agent step queue from running.
+  try {
+    getUI().emitToolCallSummary?.();
+  } catch (err) {
+    logToFile('[agent-runner] emitToolCallSummary(finalize) threw', err);
+  }
+
   // Mark the coarse `finalizing` phase boundary — the inner agent
   // has stopped and the wizard is running its post-agent steps
   // (commit events, env upload, MCP install, etc.). Pairs with the

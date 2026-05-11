@@ -34,9 +34,11 @@ import {
   buildProgressEstimate,
   classifyRunError,
   nextDecisionId,
+  ToolCallStats,
   truncateLogMessage,
   type RecoverableHint,
   type SuggestedAction,
+  type ToolCallOutcome,
 } from '../lib/agent-events';
 import { registerSetupComplete } from '../lib/setup-complete-registry';
 import { createInterface } from 'readline';
@@ -906,11 +908,39 @@ export class AgentUI implements WizardUI {
   }
 
   /**
+   * Cumulative tool-call telemetry across the run. Populated on every
+   * `emitToolCall` (PreToolUse boundary) and `recordToolOutcome`
+   * (PostToolUse boundary, called from `inner-lifecycle.ts`). Read at
+   * phase / terminal boundaries by `emitToolCallSummary` to build the
+   * rollup envelope. Private — outer callers go through the
+   * `emitToolCall` / `recordToolOutcome` / `emitToolCallSummary` API.
+   */
+  private _toolCallStats: ToolCallStats = new ToolCallStats();
+
+  /**
+   * Last-emitted `tool_call_summary` signature. Used to dedup
+   * back-to-back emissions at the same boundary (phase finalize then
+   * terminal exit with no intervening tool calls) so an orchestrator
+   * doesn't see an identical payload twice on the wire. Comparing
+   * the signature string is sufficient because the payload is fully
+   * value-typed.
+   */
+  private _lastToolCallSummarySignature: string | null = null;
+
+  /**
    * The inner agent is about to call a tool. Use the helper
    * `summarizeToolInput` from `agent-events` to build a privacy-safe
    * `summary` rather than passing the raw input through.
+   *
+   * Side effect: increments the run-level `ToolCallStats` accumulator
+   * so `emitToolCallSummary` can build a rollup at phase / terminal
+   * boundaries. The increment happens here (rather than in the
+   * inner-lifecycle hook) so any path that calls `emitToolCall`
+   * directly (today: none; tomorrow: future probe-call shims) is
+   * counted automatically.
    */
   emitToolCall(data: Omit<ToolCallData, 'event'>): void {
+    this._toolCallStats.recordCall(data.tool);
     emit(
       'progress',
       data.summary
@@ -918,6 +948,62 @@ export class AgentUI implements WizardUI {
         : `tool: ${data.tool}`,
       { data: { event: 'tool_call', ...data } },
     );
+  }
+
+  /**
+   * Record the outcome of the most recent tool call for the given
+   * tool. Called from the PostToolUse hook in `inner-lifecycle.ts`
+   * — kept on the AgentUI surface (rather than on the
+   * `ToolCallStats` directly) so the inner-lifecycle hook has a
+   * stable seam for future telemetry without reaching into the
+   * accumulator's internals.
+   *
+   * `denied` is reserved for the rare path where the SDK refuses a
+   * tool call pre-execution (permission gate, allowlist miss). The
+   * common case is `success` / `error` keyed off PostToolUse
+   * `is_error`.
+   */
+  recordToolOutcome(tool: string, outcome: ToolCallOutcome): void {
+    this._toolCallStats.recordOutcome(tool, outcome);
+  }
+
+  /**
+   * Emit the aggregated `tool_call_summary` rollup. See
+   * `EVENT_DATA_VERSIONS.tool_call_summary` for the full contract.
+   *
+   *   - No-op when `totalCalls === 0` — orchestrators key off
+   *     absence of this event to render "no tools were called".
+   *   - No-op when the current payload signature matches the last
+   *     emitted one (duplicate boundary call, or a terminal
+   *     emission with no new tool calls since finalize). Keeps the
+   *     wire free of identical back-to-back rollups.
+   */
+  emitToolCallSummary(): void {
+    const payload = this._toolCallStats.build();
+    if (!payload) return;
+    // Stable signature — JSON.stringify gives a deterministic
+    // ordering on the value-typed payload because the keys are
+    // inserted in a fixed order by `build()`. Cheap and explicit.
+    const signature = JSON.stringify(payload);
+    if (signature === this._lastToolCallSummarySignature) return;
+    this._lastToolCallSummarySignature = signature;
+    emit(
+      'progress',
+      `tool_call_summary: ${payload.totalCalls} calls (${payload.durationMsTotal}ms)`,
+      { data: payload },
+    );
+  }
+
+  /**
+   * Read-only accessor for the live `ToolCallStats` accumulator.
+   * Exposed so the inner-lifecycle PostToolUse hook can record
+   * outcomes without going through a per-tool method, and so the
+   * regression suite can assert intermediate state. Returns the
+   * actual instance, not a copy — callers must not mutate it
+   * directly (use `recordToolOutcome` instead).
+   */
+  getToolCallStats(): ToolCallStats {
+    return this._toolCallStats;
   }
 
   /**

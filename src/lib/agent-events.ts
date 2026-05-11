@@ -408,6 +408,38 @@ export const EVENT_DATA_VERSIONS = {
    * before it got far enough to register a start time).
    */
   cold_start_breakdown: 1,
+  /**
+   * `tool_call_summary` — aggregated rollup of every tool call the inner
+   * agent made during this run. Today the wizard emits one fine-grained
+   * `tool_call` envelope per PreToolUse — a typical run produces 30-200
+   * such events, and a parent agent that wants to render a "tool usage"
+   * summary at completion time has to maintain its own running counts.
+   *
+   * `tool_call_summary` ships that aggregate from the wizard side:
+   *
+   *   { totalCalls, byTool, byOutcome, durationMsTotal, durationMsAvg,
+   *     topToolByCount? }
+   *
+   * Emitted at two boundaries:
+   *   1. Phase finalize — fires before `run_phase: finalizing` so an
+   *      orchestrator can render the inner-agent tool summary before
+   *      the post-agent steps section appears.
+   *   2. Terminal exit — fires inside `wizardSuccessExit` /
+   *      `wizardAbort` (after any finalizing steps that themselves
+   *      issue tool calls land in the accumulator), so the orchestrator
+   *      always sees a final cumulative rollup covering the WHOLE run.
+   *
+   * Dedup-safety: the emitter no-ops when the payload signature
+   * (`totalCalls` + outcome breakdown) is identical to the previous
+   * emission. A duplicate `emitToolCallSummary()` call at the same
+   * boundary doesn't double-count, and a terminal emission with no
+   * new tool calls since finalize stays off the wire entirely.
+   *
+   * `totalCalls === 0` is suppressed at the wire — orchestrators
+   * watching for this event treat absence as "no tools were called",
+   * which is cleaner than receiving a zero-valued payload.
+   */
+  tool_call_summary: 1,
 } as const;
 
 /** All NDJSON event-level types. */
@@ -1250,6 +1282,199 @@ export function buildColdStartBreakdown(
   };
 }
 
+/**
+ * Outcome of a single tool call from the inner agent's perspective.
+ *
+ *   success — PostToolUse fired with no `is_error` / `error` surfacing.
+ *   error   — PostToolUse surfaced a tool-side failure (Edit syntax
+ *             mismatch, Bash non-zero exit, MCP tool threw, etc.).
+ *   denied  — the SDK refused the tool call before it ran (permission
+ *             gate, allowlist miss). Counted separately from `error`
+ *             because the failure mode is on the WIZARD side (policy)
+ *             rather than the TOOL side (operation).
+ *
+ * Adding a new outcome is a `data_version` bump on
+ * `tool_call_summary`.
+ */
+export type ToolCallOutcome = 'success' | 'error' | 'denied';
+
+/**
+ * Wire shape of the `data` field on a `tool_call_summary` envelope.
+ * Aggregated rollup of every tool call the inner agent made during
+ * the run. See `EVENT_DATA_VERSIONS.tool_call_summary` for the full
+ * contract.
+ *
+ * `byTool` keys are tool names exactly as the SDK reports them
+ * (`Edit`, `Write`, `Bash`, `mcp__amplitude__...`, etc.) — no
+ * normalization, so an orchestrator can render the rollup with the
+ * same labels as the per-call `tool_call` stream.
+ *
+ * `byOutcome` always includes all three outcome keys (zero-padded)
+ * so consumers can render a stable three-bar chart without checking
+ * for missing keys.
+ *
+ * `topToolByCount` is omitted entirely when `totalCalls === 0`
+ * (which is itself suppressed at the wire) OR when no tool dominates
+ * (tied counts). Optional in the type signature for safe consumer
+ * branching.
+ */
+export interface ToolCallSummaryData {
+  event: 'tool_call_summary';
+  totalCalls: number;
+  /** Per-tool counts. Keys are SDK-reported tool names. */
+  byTool: Record<string, number>;
+  /** Outcome breakdown. Always includes all three keys (zero-padded). */
+  byOutcome: Record<ToolCallOutcome, number>;
+  /**
+   * Cumulative wall-clock duration across all tool calls (ms).
+   * Floored at 0 — a tool that returns instantly contributes 0.
+   * Computed from PreToolUse / PostToolUse timestamp deltas;
+   * denied calls (no PostToolUse) contribute 0.
+   */
+  durationMsTotal: number;
+  /**
+   * `Math.round(durationMsTotal / totalCalls)`. `0` when
+   * `totalCalls === 0` — but the wire suppresses zero-total
+   * summaries entirely so a consumer reading this field can
+   * assume `totalCalls >= 1`.
+   */
+  durationMsAvg: number;
+  /**
+   * Tool with the highest count. Omitted when `totalCalls === 0` or
+   * when two or more tools tie for the top spot — orchestrators that
+   * want a deterministic tie-breaker should compute it themselves
+   * from `byTool`.
+   */
+  topToolByCount?: string;
+}
+
+/**
+ * Accumulator for tool-call telemetry across the run. Tracks per-tool
+ * counts, per-outcome counts, and cumulative wall-clock duration so
+ * `tool_call_summary` can be derived on demand at phase / terminal
+ * boundaries without re-scanning the NDJSON stream.
+ *
+ * Pure data structure — no I/O, no side effects, no throws. Safe to
+ * call from inside hook callbacks (which must never block the agent
+ * loop). Two callers wire it:
+ *
+ *   1. `AgentUI.emitToolCall` records the start of each tool call
+ *      (PreToolUse boundary).
+ *   2. The PostToolUse hook in `inner-lifecycle.ts` calls
+ *      `recordOutcome` with the resolved success / error verdict.
+ *
+ * The accumulator pairs Pre/Post by tool name in arrival order —
+ * not by an SDK-side correlation id, because the hook input doesn't
+ * carry one. This is correct under the (always-true today)
+ * invariant that the inner Claude agent runs tools sequentially:
+ * one PreToolUse, one PostToolUse, in order. If that invariant ever
+ * changes (parallel tool dispatch), the pairing must move to an id-
+ * keyed map.
+ *
+ * Pure for unit testing — used by both the emitter and the
+ * regression suite.
+ */
+export class ToolCallStats {
+  private _totalCalls = 0;
+  private _byTool: Record<string, number> = {};
+  private _byOutcome: Record<ToolCallOutcome, number> = {
+    success: 0,
+    error: 0,
+    denied: 0,
+  };
+  private _durationMsTotal = 0;
+  /** FIFO of pending PreToolUse start timestamps keyed by tool name. */
+  private _pendingStarts: Array<{ tool: string; startedAt: number }> = [];
+
+  /**
+   * Record the START of a tool call (PreToolUse boundary). Increments
+   * `totalCalls` and the per-tool count immediately so the rollup is
+   * accurate even if the tool never produces a PostToolUse (e.g. the
+   * SDK denies the call). Duration is added on `recordOutcome`.
+   */
+  recordCall(tool: string, startedAt: number = Date.now()): void {
+    this._totalCalls += 1;
+    this._byTool[tool] = (this._byTool[tool] ?? 0) + 1;
+    this._pendingStarts.push({ tool, startedAt });
+  }
+
+  /**
+   * Record the OUTCOME of the most recent PreToolUse for a given
+   * tool. Pops the matching pending entry (FIFO by tool name),
+   * accumulates the duration delta, and increments the outcome
+   * bucket. `success` / `error` are the common cases; `denied`
+   * fires when the SDK refuses a tool call pre-execution.
+   *
+   * Missing pending entry (orphaned PostToolUse) is a no-op on
+   * duration — the outcome still counts. This happens in test
+   * fixtures that simulate the post side without going through pre.
+   */
+  recordOutcome(
+    tool: string,
+    outcome: ToolCallOutcome,
+    finishedAt: number = Date.now(),
+  ): void {
+    this._byOutcome[outcome] += 1;
+    // FIFO match by tool name. Walk from the head so a long-running
+    // call doesn't get its duration stolen by a later shorter call
+    // for the same tool.
+    const idx = this._pendingStarts.findIndex((e) => e.tool === tool);
+    if (idx >= 0) {
+      const [entry] = this._pendingStarts.splice(idx, 1);
+      // Floor at 0 to guard against a non-monotonic clock — see the
+      // same pattern in `buildColdStartBreakdown`.
+      this._durationMsTotal += Math.max(0, finishedAt - entry.startedAt);
+    }
+  }
+
+  /** Total tool calls observed across the run. */
+  get totalCalls(): number {
+    return this._totalCalls;
+  }
+
+  /**
+   * Build the wire payload from the current state. Pure — does NOT
+   * reset the accumulator (terminal-exit emission re-emits the full
+   * cumulative rollup after finalize already emitted once).
+   *
+   * Returns `null` when `totalCalls === 0` so callers can skip the
+   * emission at the wire boundary entirely (a zero-valued summary
+   * is noise on the stream).
+   */
+  build(): ToolCallSummaryData | null {
+    if (this._totalCalls === 0) return null;
+    // Top-tool resolution: pick the single max-count tool. Tied
+    // counts → omit the field (orchestrators can compute their own
+    // tie-breaker from `byTool` if they care).
+    let topTool: string | undefined;
+    let topCount = -1;
+    let tied = false;
+    for (const [tool, count] of Object.entries(this._byTool)) {
+      if (count > topCount) {
+        topTool = tool;
+        topCount = count;
+        tied = false;
+      } else if (count === topCount) {
+        tied = true;
+      }
+    }
+    const durationMsAvg = Math.round(this._durationMsTotal / this._totalCalls);
+    return {
+      event: 'tool_call_summary',
+      totalCalls: this._totalCalls,
+      // Spread the maps so the wire payload is a fresh object the
+      // caller can serialize without worrying about post-emit
+      // mutation. JSON.stringify would do the same, but a defensive
+      // copy is cheap and keeps the contract explicit.
+      byTool: { ...this._byTool },
+      byOutcome: { ...this._byOutcome },
+      durationMsTotal: this._durationMsTotal,
+      durationMsAvg,
+      ...(topTool !== undefined && !tied ? { topToolByCount: topTool } : {}),
+    };
+  }
+}
+
 export type InnerAgentLifecycleData =
   | InnerAgentStartedData
   | ToolCallData
@@ -1265,7 +1490,8 @@ export type InnerAgentLifecycleData =
   | StallStatusData
   | RunResumedData
   | AttemptStartedData
-  | ColdStartBreakdownData;
+  | ColdStartBreakdownData
+  | ToolCallSummaryData;
 
 /**
  * Coarse-grained orchestrator-facing phase boundaries for a wizard run.
