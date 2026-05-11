@@ -75,7 +75,16 @@ export const EVENT_DATA_VERSIONS = {
   intro: 1,
   outro: 1,
   cancel: 1,
-  auth_required: 1,
+  /**
+   * v2 — added `midRun`, `preserveFiles`, `partialProgress`,
+   * `authSubkind`, plus the `amplitude_token_expired` /
+   * `gateway_token_expired` reason discriminators. Lets agent-mode
+   * orchestrators distinguish a pre-run credential-resolution failure
+   * (where no work has been done) from a mid-run 401 that leaves
+   * partial progress on disk. v1 callers continue to work — every new
+   * field is optional.
+   */
+  auth_required: 2,
   nested_agent: 1,
   inner_agent_started: 1,
   // Project create. Discriminators must match the actual `data.event`

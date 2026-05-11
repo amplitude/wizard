@@ -393,7 +393,9 @@ export class AgentUI implements WizardUI {
       | 'no_stored_credentials'
       | 'token_expired'
       | 'refresh_failed'
-      | 'env_selection_failed';
+      | 'env_selection_failed'
+      | 'amplitude_token_expired'
+      | 'gateway_token_expired';
     instruction: string;
     loginCommand: string[];
     resumeCommand?: string[];
@@ -432,6 +434,39 @@ export class AgentUI implements WizardUI {
       rank: number;
       label: string;
     }>;
+    /**
+     * `true` when the auth failure happened DURING an in-flight agent
+     * run (vs the pre-run credential resolution path). Distinct because
+     * mid-run failures often have partial side effects (files written,
+     * events instrumented) and the orchestrator should advertise
+     * `--resume` instead of suggesting a clean restart.
+     */
+    midRun?: boolean;
+    /**
+     * `true` when the wizard has decided to preserve any files written
+     * before the auth failure. Mirrors the OutroScreen's "Keep" choice
+     * in the TUI — an orchestrator should communicate the same intent
+     * to the human ("your changes were kept; re-run to resume").
+     */
+    preserveFiles?: boolean;
+    /**
+     * Coarse-grained partial-progress flags so the orchestrator can
+     * render an honest "X done, Y partial" status to the human without
+     * shelling out to inspect the filesystem.
+     */
+    partialProgress?: {
+      eventsInstrumented?: boolean;
+      dashboardComplete?: boolean;
+    };
+    /**
+     * Distinguishes the upstream that surfaced the failure: `amplitude`
+     * (Amplitude OAuth bearer) vs `llm-gateway` (the Amplitude-hosted
+     * LLM gateway's session token). Both manifest as a 401 but their
+     * remediation differs — re-running the wizard refreshes the
+     * gateway token automatically, while an Amplitude OAuth failure
+     * requires `amplitude-wizard login`.
+     */
+    authSubkind?: 'amplitude' | 'llm-gateway';
   }): void {
     emit('lifecycle', data.instruction, {
       level: 'error',
@@ -444,6 +479,12 @@ export class AgentUI implements WizardUI {
           ? { previousAttempt: data.previousAttempt }
           : {}),
         ...(data.choices ? { choices: data.choices } : {}),
+        ...(data.midRun ? { midRun: true } : {}),
+        ...(data.preserveFiles ? { preserveFiles: true } : {}),
+        ...(data.partialProgress
+          ? { partialProgress: data.partialProgress }
+          : {}),
+        ...(data.authSubkind ? { authSubkind: data.authSubkind } : {}),
       },
     });
   }

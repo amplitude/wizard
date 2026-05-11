@@ -364,6 +364,39 @@ export interface WizardUI {
   }): void;
 
   /**
+   * Emit a structured `auth_required` event whenever the wizard
+   * decides the user's credentials are no longer usable — either at
+   * pre-run resolution (no stored creds, expired token, refresh
+   * failure) or mid-run when the LLM-gateway / Amplitude bearer
+   * expires while a long agent run was in flight.
+   *
+   * Optional because only AgentUI emits to NDJSON — InkUI / LoggingUI
+   * no-op, since their UI already shows the equivalent failure via
+   * `setOutroData`. Mid-run callers MUST pass `midRun: true` plus the
+   * `partialProgress` flags so the orchestrator can advertise
+   * `--resume` instead of suggesting a clean restart.
+   */
+  emitAuthRequired?(data: {
+    reason:
+      | 'no_stored_credentials'
+      | 'token_expired'
+      | 'refresh_failed'
+      | 'env_selection_failed'
+      | 'amplitude_token_expired'
+      | 'gateway_token_expired';
+    instruction: string;
+    loginCommand: string[];
+    resumeCommand?: string[];
+    midRun?: boolean;
+    preserveFiles?: boolean;
+    partialProgress?: {
+      eventsInstrumented?: boolean;
+      dashboardComplete?: boolean;
+    };
+    authSubkind?: 'amplitude' | 'llm-gateway';
+  }): void;
+
+  /**
    * Emit a `setup_context` event carrying the resolved Amplitude scope
    * (region, org, project, app, env) at a known phase boundary.
    * Optional because only AgentUI emits to NDJSON — InkUI / LoggingUI

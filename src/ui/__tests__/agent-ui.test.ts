@@ -165,6 +165,56 @@ describe('AgentUI.emitAuthRequired', () => {
     expect(event.data).not.toHaveProperty('previousAttempt');
     expect(event.data).not.toHaveProperty('choices');
   });
+
+  it('emits midRun + preserveFiles + partialProgress on a mid-run AUTH_ERROR', () => {
+    // Regression: mid-run 401s (LLM gateway token expiry after the agent
+    // already wrote files) must signal to the orchestrator that there's
+    // partial progress on disk so it advertises `--resume` instead of a
+    // clean restart. Previously the auth_required envelope had no way
+    // to distinguish pre-run vs mid-run failures.
+    const ui = new AgentUI();
+    ui.emitAuthRequired({
+      reason: 'gateway_token_expired',
+      instruction: 'LLM gateway token expired mid-run.',
+      loginCommand: ['amplitude-wizard', 'login'],
+      resumeCommand: ['amplitude-wizard', '--agent'],
+      midRun: true,
+      preserveFiles: true,
+      partialProgress: {
+        eventsInstrumented: true,
+        dashboardComplete: false,
+      },
+      authSubkind: 'llm-gateway',
+    });
+
+    const event = JSON.parse(writes[0].trim()) as NDJSONEvent;
+    expect(event.data_version).toBe(2);
+    expect(event.data).toMatchObject({
+      event: 'auth_required',
+      reason: 'gateway_token_expired',
+      midRun: true,
+      preserveFiles: true,
+      partialProgress: {
+        eventsInstrumented: true,
+        dashboardComplete: false,
+      },
+      authSubkind: 'llm-gateway',
+    });
+  });
+
+  it('omits midRun/preserveFiles/partialProgress when not provided (pre-run failures stay v1-compatible)', () => {
+    const ui = new AgentUI();
+    ui.emitAuthRequired({
+      reason: 'no_stored_credentials',
+      instruction: 'Run wizard login.',
+      loginCommand: ['amplitude-wizard', 'login'],
+    });
+    const event = JSON.parse(writes[0].trim()) as NDJSONEvent;
+    expect(event.data).not.toHaveProperty('midRun');
+    expect(event.data).not.toHaveProperty('preserveFiles');
+    expect(event.data).not.toHaveProperty('partialProgress');
+    expect(event.data).not.toHaveProperty('authSubkind');
+  });
 });
 
 describe('AgentUI.emitNestedAgent', () => {
@@ -747,7 +797,7 @@ describe('AgentUI — per-event data_version', () => {
       .map((w) => JSON.parse(w.trim()) as NDJSONEvent)
       .filter((e) => e.type === type);
 
-  it('stamps data_version=1 on auth_required (registered event)', () => {
+  it('stamps data_version=2 on auth_required (bumped to add midRun fields)', () => {
     const ui = new AgentUI();
     ui.emitAuthRequired({
       reason: 'no_stored_credentials',
@@ -755,7 +805,7 @@ describe('AgentUI — per-event data_version', () => {
       loginCommand: ['npx', '@amplitude/wizard', 'login'],
     });
     const event = eventsOfType('lifecycle').at(-1)!;
-    expect((event as unknown as { data_version: number }).data_version).toBe(1);
+    expect((event as unknown as { data_version: number }).data_version).toBe(2);
   });
 
   it('stamps data_version on dashboard_created (result event)', () => {
@@ -1105,7 +1155,7 @@ describe('EVENT_DATA_VERSIONS registry covers every emitted discriminator', () =
   // whose `data.event` discriminator must be in the registry. This
   // test exercises the public methods that carry a discriminator and
   // asserts every resulting event is stamped with `data_version`.
-  it('every documented emit method stamps data_version', () => {
+  it('every documented emit method stamps data_version', async () => {
     const ui = new AgentUI();
     ui.emitAuthRequired({
       reason: 'no_stored_credentials',
@@ -1155,13 +1205,20 @@ describe('EVENT_DATA_VERSIONS registry covers every emitted discriminator', () =
         typeof (e.data as { event?: unknown }).event === 'string',
     );
     expect(versioned.length).toBeGreaterThan(0);
+    // Look up each event's expected data_version from the registry so a
+    // bump in `EVENT_DATA_VERSIONS` (e.g. auth_required v1 -> v2 when
+    // mid-run fields landed) doesn't require touching this test every
+    // time. The invariant is just "every registered event lands on the
+    // wire with its registered version" — not "every event is on v1".
+    const { EVENT_DATA_VERSIONS } = await import('../../lib/agent-events.js');
+    const registry = EVENT_DATA_VERSIONS as Readonly<Record<string, number>>;
     for (const e of versioned) {
+      const eventName = (e.data as { event: string }).event;
+      const expected = registry[eventName];
       expect(
         (e as unknown as { data_version?: number }).data_version,
-        `Event ${
-          (e.data as { event: string }).event
-        } should have data_version stamped — registry key may be missing or misnamed`,
-      ).toBe(1);
+        `Event ${eventName} should have data_version stamped — registry key may be missing or misnamed`,
+      ).toBe(expected);
     }
   });
 });

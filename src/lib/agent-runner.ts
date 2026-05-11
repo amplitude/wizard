@@ -1407,6 +1407,32 @@ async function runAgentWizardBody(
     if (!isLlmGateway) {
       session.credentials = null;
     }
+
+    // Emit the structured `auth_required` envelope BEFORE wizardAbort so
+    // an agent-mode orchestrator has the machine-readable payload (mid-run
+    // discriminator, partial-progress flags, resume command) before the
+    // terminal `run_completed` envelope lands. Previously only the TUI
+    // flow surfaced this via the keep/revert prompt; agent mode silently
+    // aborted with a generic error event.
+    try {
+      const { dashboardComplete, eventsInstrumented } =
+        classifyAgentOutcome(session);
+      getUI().emitAuthRequired?.({
+        reason: isLlmGateway
+          ? 'gateway_token_expired'
+          : 'amplitude_token_expired',
+        instruction: authMessage,
+        loginCommand: ['amplitude-wizard', 'login'],
+        resumeCommand: ['amplitude-wizard', '--agent'],
+        midRun: true,
+        preserveFiles: true,
+        partialProgress: { eventsInstrumented, dashboardComplete },
+        authSubkind: isLlmGateway ? 'llm-gateway' : 'amplitude',
+      });
+    } catch (err) {
+      logToFile('[agent-runner] emitAuthRequired threw', err);
+    }
+
     await wizardAbort({
       message: authMessage,
       error: new WizardError('Authentication failed during agent run', {
