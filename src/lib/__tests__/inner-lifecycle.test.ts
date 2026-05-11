@@ -142,8 +142,18 @@ describe('createInnerLifecycleHooks (with AgentUI)', () => {
     expect(started).toBeDefined();
     expect(started?.data).toMatchObject({
       event: 'inner_agent_started',
-      // explicit `model` takes precedence over the SDK-provided one
-      model: 'claude-sonnet-4-5',
+      // explicit `model` takes precedence over the SDK-provided one.
+      // v2 — `model` is a structured ModelDescriptor; the raw SDK
+      // alias is preserved on `model.alias`, structured fields let
+      // orchestrators branch on tier/family/vendor without
+      // string-matching.
+      model: {
+        vendor: 'anthropic',
+        family: 'claude',
+        alias: 'claude-sonnet-4-5',
+        tier: 'sonnet',
+        displayName: 'Sonnet 4.5',
+      },
       phase: 'apply',
       planId: 'a0eebc99-9c0b-4ef8-bb6d-6bb9bd380a11',
     });
