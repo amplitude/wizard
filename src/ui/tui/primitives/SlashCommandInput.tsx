@@ -10,7 +10,6 @@
 import { Box, Text, useInput } from 'ink';
 import { useState, useEffect } from 'react';
 import { Colors, Icons } from '../styles.js';
-import { longestCommonPrefix } from '../components/PathInput.js';
 
 export interface SlashCommand {
   cmd: string;
@@ -117,34 +116,19 @@ export const SlashCommandInput = ({
         return;
       }
       if (key.tab) {
-        // CLI convention: Tab autocompletes the slash command to the
-        // longest common prefix of the currently filtered candidates.
-        // No filtered options → no-op. One option → autocomplete it
-        // fully. Multiple options → extend to LCP (often a no-op when
-        // the user is already at the branch point, e.g. `/d` for
-        // /debug + /diagnostics, but the picker stays open so they can
-        // disambiguate with the next keystroke).
+        // Raycast/Slack convention: Tab accepts the currently highlighted
+        // suggestion, filling the input with `<cmd> ` (trailing space so the
+        // user can keep typing arguments — e.g. `/feedback ` then a message).
+        // The palette stays open; Enter is still needed to submit.
         //
-        // IMPORTANT: only consider commands whose `cmd` starts with the
-        // current input — `filtered` ALSO includes description-text
-        // matches (line 64-76 above), which would dilute the LCP. E.g.
-        // typing `/diag` matches both /diagnostics (cmd-prefix) AND
-        // /debug (description contains "diag"); naive LCP across both
-        // is `/d`, shorter than `/diag` itself — so Tab would be a
-        // no-op when the user explicitly wants /diagnostics filled in.
+        // No filtered options → swallow Tab (don't fall through to the
+        // ConsoleView Tab handler, which would tear down slash mode to open
+        // Ask). Outside slash mode this handler doesn't fire at all, so the
+        // ConsoleView's pre-activation Tab still opens Ask as before.
         if (isSlashMode && filtered.length > 0) {
-          const lcpCandidates = filtered.filter((c) =>
-            c.cmd.startsWith(value),
-          );
-          if (lcpCandidates.length > 0) {
-            const lcp = longestCommonPrefix(
-              lcpCandidates.map((c) => c.cmd),
-            );
-            if (lcp.length > value.length) {
-              setValue(lcp);
-              setSelectedIndex(0);
-            }
-          }
+          const completion = filtered[clampedIndex].cmd + ' ';
+          setValue(completion);
+          setSelectedIndex(0);
         }
         return;
       }
@@ -232,6 +216,15 @@ export const SlashCommandInput = ({
                     {'  '}↓ {total - startIdx - MAX_VISIBLE} more
                   </Text>
                 )}
+                {/*
+                 * Affordance footer: name every key the palette responds to
+                 * so users don't have to guess which of Tab/Enter submits vs.
+                 * completes. Rendered only when there's at least one match,
+                 * matching the candidate list's visibility (see outer guard).
+                 */}
+                <Text color={Colors.muted}>
+                  {'  '}↑↓ navigate · Tab/Enter run · Esc cancel
+                </Text>
               </>
             );
           })()}

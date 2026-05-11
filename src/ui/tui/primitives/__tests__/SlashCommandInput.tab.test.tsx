@@ -1,17 +1,22 @@
 /**
- * SlashCommandInput Tab-autocomplete pinning test.
+ * SlashCommandInput Tab-accept tests.
  *
- * Pre-fix behavior: pressing Tab inside the slash-command picker was
- * silently ignored (`if (key.tab) return;`). The KeyHintBar advertises
- * Tab as "Ask a question", but inside the picker we want CLI-style
- * autocomplete instead: extend the input to the longest common prefix
- * of the currently filtered candidates.
+ * Pre-change behavior: Tab in the slash palette extended the input to
+ * the longest common prefix of the currently filtered candidates
+ * (`/diag` + Tab → `/diagnostics`). That was a useful but uncommon
+ * affordance — Raycast, Slack, and most modern command palettes treat
+ * Tab as "accept the highlighted suggestion".
+ *
+ * Post-change behavior (this file): Tab replaces the input with the
+ * currently highlighted command + a trailing space, leaving the
+ * palette open so the user can keep typing arguments or hit Enter to
+ * submit.
  *
  * Asserts:
- *   - `/d` + Tab is a no-op (no common prefix beyond `/d` exists across
- *     /debug + /diagnostics).
- *   - `/diag` + Tab extends to `/diagnostics` (single candidate).
- *   - Tab with no filtered options is a no-op (no commands match).
+ *   - `/d` + Tab fills in the first highlighted match (`/debug`) + space.
+ *   - Selecting a different match with ↓ then Tab completes that match.
+ *   - Tab with no filtered matches is swallowed (no-op).
+ *   - Enter after Tab submits the completed command.
  */
 
 import React from 'react';
@@ -24,6 +29,7 @@ import { waitForFrame } from '../../__tests__/ink-stdin.js';
 const commands = COMMANDS.map((c) => ({ cmd: c.cmd, desc: c.desc }));
 
 const TAB = '\t';
+const DOWN = '[B';
 
 // eslint-disable-next-line no-control-regex
 const ANSI_REGEX = /\x1b\[[0-9;]*[A-Za-z]/g;
@@ -38,10 +44,8 @@ const sanitize = (frame: string | undefined): string =>
     .map((line) => line.replace(/[ \t]+$/, ''))
     .join('\n');
 
-describe('SlashCommandInput Tab autocomplete', () => {
-  it('extends input to the longest common prefix when ambiguous', async () => {
-    // Capture submitted value so we can confirm Enter still fires the
-    // expected command after autocomplete.
+describe('SlashCommandInput Tab accepts highlighted suggestion', () => {
+  it('fills the input with the highlighted command + space', async () => {
     let submitted: string | null = null;
 
     const view = render(
@@ -57,59 +61,32 @@ describe('SlashCommandInput Tab autocomplete', () => {
     await waitForFrame();
     await waitForFrame();
 
+    // `/d` filters to /debug + /diagnostics. The first match is
+    // highlighted by default — Tab should accept it.
     view.stdin.write('/d');
     await waitForFrame();
-
-    // Tab with `/d`: ambiguous between /debug + /diagnostics; LCP is
-    // already `/d`, so the input should be unchanged.
     view.stdin.write(TAB);
     await waitForFrame();
 
-    const frameAfterFirstTab = sanitize(view.lastFrame());
-    expect(frameAfterFirstTab).toContain('/d');
-    // We should still see at least two filtered candidates.
-    expect(frameAfterFirstTab).toContain('/debug');
-    expect(frameAfterFirstTab).toContain('/diagnostics');
-
-    // Keep typing — `/diag` filters to /diagnostics only. Tab now
-    // completes to `/diagnostics`.
-    view.stdin.write('iag');
-    await waitForFrame();
-    view.stdin.write(TAB);
-    await waitForFrame();
-
-    const frameAfterSecondTab = sanitize(view.lastFrame());
-    expect(frameAfterSecondTab).toContain('/diagnostics');
-
-    // Hit Enter — the picker submits the highlighted command.
+    const frameAfterTab = sanitize(view.lastFrame());
+    // The first cmd-prefix match for `/d` is /debug (matches before
+    // /diagnostics in the COMMANDS array).
+    expect(frameAfterTab).toContain('/debug');
+    // Palette stays open so the user can keep typing args. Enter
+    // submits the completed value.
     view.stdin.write('\r');
     await waitForFrame();
 
-    expect(submitted).toBe('/diagnostics');
+    expect(submitted).toBe('/debug');
     view.unmount();
   });
 
-  it('ignores description-text matches when computing the LCP (Bugbot fix)', async () => {
-    // Regression for the Bugbot finding on PR #713 / #712: `filtered`
-    // includes commands whose description text contains the query,
-    // not just commands whose `cmd` starts with it. Pre-fix, `/diag`
-    // + Tab was a no-op because /debug's description contained
-    // "diag…" and the LCP across [/diagnostics, /debug] collapsed to
-    // `/d` — shorter than the input `/diag`. The fix filters LCP
-    // candidates to commands whose `cmd` starts with the current
-    // input.
-    const cmdsWithCollidingDesc = [
-      { cmd: '/debug', desc: 'Print a diagnostic snapshot (safe to share)' },
-      {
-        cmd: '/diagnostics',
-        desc: 'Show wizard storage paths (log file, cache, project meta dir)',
-      },
-    ];
+  it('completes the second match when the user navigates to it', async () => {
     let submitted: string | null = null;
 
     const view = render(
       <SlashCommandInput
-        commands={cmdsWithCollidingDesc}
+        commands={commands}
         isActive
         onSubmit={(v) => {
           submitted = v;
@@ -120,13 +97,24 @@ describe('SlashCommandInput Tab autocomplete', () => {
     await waitForFrame();
     await waitForFrame();
 
-    view.stdin.write('/diag');
+    // Each keystroke gets its own frame so ink commits and re-renders
+    // before the next stdin chunk lands — otherwise the DOWN sequence
+    // can race with the trailing Tab and the highlight never moves.
+    view.stdin.write('/');
+    await waitForFrame();
+    view.stdin.write('d');
+    await waitForFrame();
+    await waitForFrame();
+    // Move highlight from /debug → /diagnostics.
+    view.stdin.write(DOWN);
+    await waitForFrame();
     await waitForFrame();
     view.stdin.write(TAB);
     await waitForFrame();
+    await waitForFrame();
 
-    const frame = sanitize(view.lastFrame());
-    expect(frame).toContain('/diagnostics');
+    const frameAfterTab = sanitize(view.lastFrame());
+    expect(frameAfterTab).toContain('/diagnostics');
 
     view.stdin.write('\r');
     await waitForFrame();
@@ -161,6 +149,28 @@ describe('SlashCommandInput Tab autocomplete', () => {
     expect(frame).toContain('/zzz');
 
     expect(submitted).toBeNull();
+    view.unmount();
+  });
+
+  it('renders the palette footer hint when matches exist', async () => {
+    const view = render(
+      <SlashCommandInput
+        commands={commands}
+        isActive
+        onSubmit={() => {}}
+        onDeactivate={() => {}}
+      />,
+    );
+    await waitForFrame();
+    await waitForFrame();
+
+    view.stdin.write('/');
+    await waitForFrame();
+
+    const frame = sanitize(view.lastFrame());
+    expect(frame).toContain('navigate');
+    expect(frame).toContain('Tab/Enter run');
+    expect(frame).toContain('Esc cancel');
     view.unmount();
   });
 });
