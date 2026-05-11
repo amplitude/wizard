@@ -310,6 +310,17 @@ export const EVENT_DATA_VERSIONS = {
    * restored (e.g. "region+org+project bound, framework=Next.js").
    */
   run_resumed: 1,
+  /**
+   * `file_change_failed` — emitted at PostToolUse when a write tool
+   * (Edit / Write / MultiEdit / NotebookEdit) reports an error.
+   * Distinct from a generic `tool_call` failure: pairs with the
+   * preceding `file_change_planned` (same path) so an orchestrator
+   * can show "tried to edit X, failed because Y" without parsing
+   * tool_result text. `errorClass` discriminates the common failure
+   * modes (permission, not-found, syntax, generic) so the
+   * orchestrator can branch on the kind rather than the message.
+   */
+  file_change_failed: 1,
 } as const;
 
 /** All NDJSON event-level types. */
@@ -772,11 +783,40 @@ export interface RunResumedData {
   restored_state_summary: string;
 }
 
+/**
+ * `file_change_failed` — emitted at PostToolUse for write tools
+ * (Edit / Write / MultiEdit / NotebookEdit) when the tool reported
+ * a failure. Pairs with the preceding `file_change_planned` for
+ * the same path so an orchestrator can label the failure on the
+ * already-rendered preview without parsing tool_result text.
+ *
+ * `errorClass` discriminates the common failure modes so an
+ * orchestrator can branch by kind:
+ *   - `permission` — EACCES / "permission denied"
+ *   - `not_found`  — ENOENT / "no such file"
+ *   - `syntax`     — agent-side string-match failure on Edit / MultiEdit
+ *   - `generic`    — anything else
+ */
+export type FileChangeErrorClass =
+  | 'permission'
+  | 'not_found'
+  | 'syntax'
+  | 'generic';
+export interface FileChangeFailedData {
+  event: 'file_change_failed';
+  path: string;
+  operation: 'create' | 'modify' | 'delete';
+  errorClass: FileChangeErrorClass;
+  /** Sanitized message — paths / URLs already redacted. */
+  errorMessage: string;
+}
+
 export type InnerAgentLifecycleData =
   | InnerAgentStartedData
   | ToolCallData
   | FileChangePlannedData
   | FileChangeAppliedData
+  | FileChangeFailedData
   | EventPlanProposedData
   | EventPlanConfirmedData
   | VerificationStartedData
@@ -1387,4 +1427,50 @@ export function classifyWriteOperation(
     default:
       return null;
   }
+}
+
+/**
+ * Best-effort classifier for write-tool failure messages. Pure, never
+ * touches I/O — safe to call from any emit path. Patterns are
+ * intentionally permissive: a `'permission denied'` substring covers
+ * both EACCES from Node and the inner agent's own "write_refused"
+ * messaging. Defaults to `'generic'` so an unrecognized failure still
+ * lands on the wire with a usable discriminator.
+ *
+ * Match order matters: `syntax` is checked BEFORE `not_found` because
+ * Edit / MultiEdit string-match failures look like "String to replace
+ * not found in file" — the more-specific "string to replace" signal
+ * wins over the generic "not found" substring.
+ */
+export function classifyFileChangeError(
+  message: string,
+): FileChangeErrorClass {
+  const lower = message.toLowerCase();
+  if (
+    lower.includes('permission denied') ||
+    lower.includes('eacces') ||
+    lower.includes('write_refused')
+  ) {
+    return 'permission';
+  }
+  // Edit / MultiEdit string-match failures surface as
+  // "String to replace not found" or "found N matches" from the SDK.
+  // Check this BEFORE the generic 'not found' so the syntax signal
+  // wins for those Edit-specific messages.
+  if (
+    lower.includes('string to replace') ||
+    lower.includes('found multiple matches') ||
+    lower.includes('found 0 matches') ||
+    lower.includes('syntaxerror')
+  ) {
+    return 'syntax';
+  }
+  if (
+    lower.includes('no such file') ||
+    lower.includes('enoent') ||
+    lower.includes('not found')
+  ) {
+    return 'not_found';
+  }
+  return 'generic';
 }

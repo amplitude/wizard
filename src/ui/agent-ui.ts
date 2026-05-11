@@ -1406,6 +1406,37 @@ export class AgentUI implements WizardUI {
     );
   }
 
+  // ── v2 protocol: file_change_failed (write-tool error) ──────────────
+  //
+  // PostToolUse hooks see `is_error: true` on the tool_response object.
+  // Today the generic `tool_call` event captures the input but not the
+  // outcome. `file_change_failed` pairs with the preceding
+  // `file_change_planned` so an orchestrator can label "tried to edit
+  // X, failed because Y" on the already-rendered preview without
+  // parsing tool_result text.
+
+  emitFileChangeFailed(data: {
+    path: string;
+    operation: 'create' | 'modify' | 'delete';
+    errorClass: 'permission' | 'not_found' | 'syntax' | 'generic';
+    errorMessage: string;
+  }): void {
+    emit(
+      'error',
+      `file_change_failed: ${data.operation} ${data.path} (${data.errorClass})`,
+      {
+        level: 'error',
+        data: {
+          event: 'file_change_failed',
+          path: data.path,
+          operation: data.operation,
+          errorClass: data.errorClass,
+          errorMessage: data.errorMessage,
+        },
+      },
+    );
+  }
+
   // Security: stack traces redacted from NDJSON output to prevent path/secret leakage
   setRunError(error: Error): Promise<boolean> {
     let sanitized: string;

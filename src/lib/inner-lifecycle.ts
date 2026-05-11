@@ -39,6 +39,7 @@ import nodePath from 'node:path';
 import { getUI } from '../ui/index.js';
 import { AgentUI } from '../ui/agent-ui.js';
 import {
+  classifyFileChangeError,
   classifyWriteOperation,
   summarizeToolInput,
   type InnerAgentStartedData,
@@ -97,6 +98,49 @@ function relativizeForCurrentFile(
   } catch {
     return abs;
   }
+}
+
+/**
+ * Inspect a PostToolUse hook input for a tool-result error. The SDK
+ * surfaces failures via either `tool_response.is_error` /
+ * `tool_response.error` (newer hook shape) or a stringified result
+ * containing common error markers. Returns the sanitized message when
+ * a failure is detected, null when the tool succeeded. Pure — no
+ * I/O, no throws.
+ */
+export function extractToolFailureMessage(
+  input: Record<string, unknown>,
+): string | null {
+  const result =
+    typeof input.tool_response !== 'undefined'
+      ? input.tool_response
+      : typeof input.tool_result !== 'undefined'
+      ? input.tool_result
+      : null;
+  if (result === null || result === undefined) return null;
+  if (typeof result === 'object') {
+    const obj = result as Record<string, unknown>;
+    // Newer SDK shape: `{ is_error: true, error: 'msg' }` or `{ error: 'msg' }`.
+    if (obj.is_error === true || (obj.error && typeof obj.error === 'string')) {
+      const msg = typeof obj.error === 'string' ? obj.error : 'tool error';
+      return msg;
+    }
+    // Fallback: peek at a stringified `content[0].text` shape some SDK
+    // versions use for tool errors.
+    if (Array.isArray(obj.content) && obj.content.length > 0) {
+      const first = obj.content[0];
+      if (
+        typeof first === 'object' &&
+        first !== null &&
+        typeof (first as Record<string, unknown>).text === 'string' &&
+        ((first as Record<string, unknown>).type === 'tool_result_error' ||
+          obj.is_error === true)
+      ) {
+        return (first as { text: string }).text;
+      }
+    }
+  }
+  return null;
 }
 
 /**
@@ -277,6 +321,27 @@ export function createInnerLifecycleHooks(config: InnerLifecycleConfig): {
         ? obj.path
         : null;
     if (path) {
+      // v2 protocol: gate on tool_result outcome. If the write tool
+      // surfaced an error, emit `file_change_failed` and SKIP
+      // `recordFileChangeApplied` — which would falsely advertise a
+      // successful write to the orchestrator's audit trail. The
+      // pre-write entry stays in the rollback ledger so a cancelled
+      // run can still restore the original on-disk state.
+      const failureMessage = extractToolFailureMessage(input);
+      if (failureMessage !== null) {
+        try {
+          getUI().emitFileChangeFailed?.({
+            path,
+            operation,
+            errorClass: classifyFileChangeError(failureMessage),
+            errorMessage: failureMessage,
+          });
+        } catch {
+          // See preToolUse — same defensive swallow.
+        }
+        return Promise.resolve({});
+      }
+
       const content = typeof obj.content === 'string' ? obj.content : null;
       // Use `content !== null` not `content` — empty string `''` is falsy
       // and would drop `bytes` from the event. Outer agents need to

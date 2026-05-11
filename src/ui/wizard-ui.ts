@@ -720,4 +720,24 @@ export interface WizardUI {
       | 'unknown';
     restoredStateSummary: string;
   }): void;
+
+  /**
+   * Emitted at PostToolUse for write tools (Edit / Write / MultiEdit
+   * / NotebookEdit) when the tool reports a failure. Pairs with the
+   * preceding `recordFileChangePlanned` for the same path so an
+   * orchestrator can label the failed write on the already-rendered
+   * preview without parsing tool_result text. `errorClass`
+   * discriminates the common failure modes (permission / not_found /
+   * syntax / generic) so the orchestrator can branch by kind.
+   *
+   * Optional — only AgentUI emits. InkUI / LoggingUI no-op (the TUI
+   * surfaces tool failures via the existing FileWritesPanel; CI logs
+   * the stderr stream).
+   */
+  emitFileChangeFailed?(data: {
+    path: string;
+    operation: 'create' | 'modify' | 'delete';
+    errorClass: 'permission' | 'not_found' | 'syntax' | 'generic';
+    errorMessage: string;
+  }): void;
 }

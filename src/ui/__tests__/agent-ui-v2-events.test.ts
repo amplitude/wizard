@@ -17,6 +17,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { AgentUI } from '../agent-ui.js';
 import {
   EVENT_DATA_VERSIONS,
+  classifyFileChangeError,
   deriveStallTier,
 } from '../../lib/agent-events.js';
 
@@ -309,12 +310,111 @@ describe('AgentUI.emitRunResumed (v2: checkpoint restart signal)', () => {
 // update fails the test rather than silently shipping an unversioned
 // envelope.
 
+describe('AgentUI.emitFileChangeFailed (v2: write-failure event)', () => {
+  let writes: string[];
+  let restore: () => void;
+
+  beforeEach(() => {
+    ({ writes, restore } = setupStdoutSpy());
+  });
+  afterEach(() => restore());
+
+  it('emits an error: file_change_failed with path/op/errorClass/errorMessage', () => {
+    const ui = new AgentUI();
+    ui.emitFileChangeFailed?.({
+      path: '/abs/secret.env',
+      operation: 'create',
+      errorClass: 'permission',
+      errorMessage: 'EACCES: permission denied',
+    });
+    const event = lastEvent(writes);
+    expect(event.type).toBe('error');
+    expect(event.data).toMatchObject({
+      event: 'file_change_failed',
+      path: '/abs/secret.env',
+      operation: 'create',
+      errorClass: 'permission',
+      errorMessage: 'EACCES: permission denied',
+    });
+    expect(event.data_version).toBe(EVENT_DATA_VERSIONS.file_change_failed);
+  });
+
+  it('accepts all four documented errorClass values', () => {
+    const ui = new AgentUI();
+    const classes = ['permission', 'not_found', 'syntax', 'generic'] as const;
+    for (const errorClass of classes) {
+      ui.emitFileChangeFailed?.({
+        path: '/abs/a',
+        operation: 'modify',
+        errorClass,
+        errorMessage: `class=${errorClass}`,
+      });
+    }
+    const events = eventsOfType(writes, 'error').filter(
+      (e) => e.data?.event === 'file_change_failed',
+    );
+    expect(events.map((e) => e.data?.errorClass)).toEqual([...classes]);
+  });
+
+  it('truncates pathologically long envelope messages (defense in depth)', () => {
+    const ui = new AgentUI();
+    const huge = 'x'.repeat(10_000);
+    ui.emitFileChangeFailed?.({
+      path: '/abs/a',
+      operation: 'modify',
+      errorClass: 'generic',
+      errorMessage: huge,
+    });
+    const event = lastEvent(writes);
+    // `error` type messages are truncated to MAX_LOG_MESSAGE_LENGTH (2048).
+    expect(event.message.length).toBeLessThanOrEqual(2048);
+  });
+});
+
+// ── classifyFileChangeError pure-helper coverage ────────────────────
+
+describe('classifyFileChangeError', () => {
+  it('classifies permission failures', () => {
+    expect(classifyFileChangeError('EACCES: permission denied')).toBe(
+      'permission',
+    );
+    expect(classifyFileChangeError('write_refused by canUseTool')).toBe(
+      'permission',
+    );
+    expect(classifyFileChangeError('Permission Denied')).toBe('permission');
+  });
+
+  it('classifies not-found failures', () => {
+    expect(classifyFileChangeError('ENOENT: no such file or directory')).toBe(
+      'not_found',
+    );
+    expect(classifyFileChangeError('file not found')).toBe('not_found');
+  });
+
+  it('classifies edit syntax failures', () => {
+    expect(
+      classifyFileChangeError('String to replace not found in file'),
+    ).toBe('syntax');
+    expect(classifyFileChangeError('Found multiple matches: 3')).toBe('syntax');
+    expect(classifyFileChangeError('Found 0 matches')).toBe('syntax');
+    expect(classifyFileChangeError('SyntaxError: Unexpected token')).toBe(
+      'syntax',
+    );
+  });
+
+  it('defaults to generic for unrecognized failures', () => {
+    expect(classifyFileChangeError('something exploded')).toBe('generic');
+    expect(classifyFileChangeError('')).toBe('generic');
+  });
+});
+
 describe('EVENT_DATA_VERSIONS (v2 entries registered)', () => {
   it.each([
     ['discovery_fact', 1],
     ['current_file', 1],
     ['stall_status', 1],
     ['run_resumed', 1],
+    ['file_change_failed', 1],
   ] as const)('registers %s at version %d', (event, version) => {
     expect(
       (EVENT_DATA_VERSIONS as Readonly<Record<string, number>>)[event],
