@@ -96,6 +96,21 @@ export const EVENT_DATA_VERSIONS = {
    * and the auth subkind (`amplitude` / `llm-gateway`).
    */
   auth_retry_exhausted: 1,
+  /**
+   * `run_error` — anonymous-until-now `error` envelope from
+   * `AgentUI.setRunError`. Previously the `data` payload carried
+   * `{ name, recoverable, suggestedAction }` with NO `event`
+   * discriminator, breaking the convention used by every other
+   * lifecycle / progress / result event. Orchestrators relying on
+   * `data.event` to branch saw nothing for run-aborting errors and
+   * had to special-case `type === 'error'` alone — making the wire
+   * harder to filter.
+   *
+   * Bumping to v1 = the first registered version (the schema didn't
+   * carry data_version before — orchestrators treat absence as 1 by
+   * convention). Future bumps land here.
+   */
+  run_error: 1,
   nested_agent: 1,
   inner_agent_started: 1,
   // Project create. Discriminators must match the actual `data.event`

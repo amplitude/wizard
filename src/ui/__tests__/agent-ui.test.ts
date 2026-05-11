@@ -1927,3 +1927,92 @@ describe('AgentUI reliability events (transient_retry, compaction)', () => {
     expect(data.durationMs).toBeUndefined();
   });
 });
+
+describe('AgentUI — Zod envelope validation on every emit', () => {
+  let writes: string[];
+  let spy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    writes = [];
+    spy = vi
+      .spyOn(process.stdout, 'write')
+      .mockImplementation((chunk: string | Uint8Array): boolean => {
+        writes.push(typeof chunk === 'string' ? chunk : chunk.toString());
+        return true;
+      });
+  });
+
+  afterEach(() => {
+    spy.mockRestore();
+  });
+
+  it('every documented emit method produces an envelope that passes the wire schema', async () => {
+    // Regression: a single bad envelope (missing `v`, mistyped `type`,
+    // non-string `message`) silently corrupted the stream for any
+    // orchestrator strictly parsing the wire format. The Zod
+    // validator at the emit boundary logs the issue to the on-disk
+    // log instead of throwing — this test asserts NO emit method
+    // produces a bad envelope in steady state.
+    const ui = new AgentUI();
+    ui.emitAuthRequired({
+      reason: 'no_stored_credentials',
+      instruction: 'login',
+      loginCommand: ['x'],
+    });
+    ui.emitProjectCreateStart({ orgId: 'o', name: 'n' });
+    ui.emitInnerAgentStarted({ model: 'm', phase: 'wizard' });
+    ui.emitToolCall({ tool: 'Edit', summary: 'e' });
+    ui.emitFileChangePlanned({ operation: 'create', path: 'p' });
+    ui.emitFileChangeApplied({ operation: 'create', path: 'p' });
+    ui.startRun();
+    ui.setEventIngestionDetected(['Sign Up']);
+    ui.setDashboardUrl('https://example.com');
+    await ui.setRunError(new Error('boom'));
+
+    const { z: zod } = await import('zod');
+    const schema = zod.object({
+      v: zod.literal(1),
+      '@timestamp': zod.string(),
+      type: zod.enum([
+        'lifecycle',
+        'log',
+        'status',
+        'progress',
+        'session_state',
+        'prompt',
+        'needs_input',
+        'diagnostic',
+        'result',
+        'error',
+      ]),
+      message: zod.string(),
+      level: zod
+        .enum(['info', 'warn', 'error', 'success', 'step'])
+        .optional(),
+      session_id: zod.string().optional(),
+      run_id: zod.string().optional(),
+      data_version: zod.number().optional(),
+      data: zod.unknown().optional(),
+    });
+
+    expect(writes.length).toBeGreaterThan(0);
+    for (const line of writes) {
+      const event = JSON.parse(line.trim());
+      const result = schema.safeParse(event);
+      expect(result.success, `bad envelope on ${line.trim()}`).toBe(true);
+    }
+  });
+
+  it('setRunError emits the new event=run_error discriminator with data_version stamped', async () => {
+    const ui = new AgentUI();
+    await ui.setRunError(new Error('boom'));
+    const event = JSON.parse(writes[0].trim());
+    expect(event.type).toBe('error');
+    expect(event.data).toMatchObject({
+      event: 'run_error',
+      name: 'Error',
+      recoverable: expect.any(String),
+    });
+    expect(event.data_version).toBe(1);
+  });
+});
