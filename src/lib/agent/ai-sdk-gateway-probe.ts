@@ -15,6 +15,8 @@
  * gate short-circuits well before any AI SDK code is touched.
  */
 import { logToFile } from '../../utils/debug.js';
+import { getUI } from '../../ui/index.js';
+import { classifyModelTier, formatModelDisplay } from '../agent-events.js';
 import { resolveAnthropicAuth } from './anthropic-auth.js';
 import { selectModel } from './model-config.js';
 
@@ -87,6 +89,22 @@ export async function maybeRunAiSdkGatewayProbe(args: {
       baseURL: ensureV1Suffix(baseURL),
     });
     const probeModel = selectModel('oneshot', args.useDirectApiKey);
+
+    // PR B9: announce the classifier-tier model the probe is about
+    // to run. Pure observability — emitter dedups on (model, context)
+    // so a repeat probe in the same wizard run is a no-op on the
+    // wire. try/catch so a misbehaving emitter never blocks the
+    // probe.
+    try {
+      getUI().emitModelUsed?.({
+        model: probeModel,
+        modelDisplay: formatModelDisplay(probeModel),
+        modelTier: classifyModelTier(probeModel),
+        context: 'classifier',
+      });
+    } catch {
+      // observational; never block probe.
+    }
 
     const result = streamText({
       model: provider(probeModel),

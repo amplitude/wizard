@@ -913,4 +913,40 @@ export interface WizardUI {
    * observational.
    */
   emitWizardCapabilities?(): void;
+
+  /**
+   * Announce which Claude model a wizard subsystem is running. Fires
+   * once per unique `(model, context)` pair per run — orchestrators
+   * branch on `context` to attribute the model to the right
+   * subsystem (inner agent, classifier, taxonomy) and on `modelTier`
+   * for capability / cost tiering without parsing the raw alias.
+   *
+   * Payload (see `ModelUsedData` in `agent-events.ts`):
+   *   - `model`        — resolved Claude alias the subsystem runs
+   *                      (e.g. `'claude-sonnet-4-6'`,
+   *                      `'anthropic/claude-haiku-4-5-20251001'`).
+   *   - `modelDisplay` — short human-readable label
+   *                      (`'Sonnet 4.6'`, `'Haiku 4.5'`).
+   *   - `modelTier`    — `'haiku' | 'sonnet' | 'opus' | 'other'`.
+   *   - `context`      — `'inner_agent' | 'classifier' | 'taxonomy'`.
+   *
+   * Lifecycle: emitted at each subsystem's first message boundary
+   * (inner agent: first attempt; classifier: each Haiku one-shot
+   * call site). The emitter dedups on the `(model, context)` pair
+   * so a long run doesn't spam the wire with duplicates.
+   *
+   * Optional — only AgentUI emits to NDJSON. InkUI / LoggingUI
+   * no-op (TUI has no machine consumer; CI logs lifecycle events
+   * inline rather than via NDJSON).
+   *
+   * Each call site wraps the emit in try/catch so a misbehaving
+   * emitter never blocks the actual work — model_used is purely
+   * observational.
+   */
+  emitModelUsed?(data: {
+    model: string;
+    modelDisplay: string;
+    modelTier: 'haiku' | 'sonnet' | 'opus' | 'other';
+    context: 'inner_agent' | 'classifier' | 'taxonomy';
+  }): void;
 }
