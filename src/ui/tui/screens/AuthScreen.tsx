@@ -117,7 +117,6 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
   const [savedKeySource, setSavedKeySource] = useState<'cache' | 'env' | null>(
     null,
   );
-  const [pickerNotice, setPickerNotice] = useState<string | null>(null);
   const completedStepsRef = useRef<DOMElement>(null);
   const orgChromeRef = useRef<DOMElement>(null);
   const projectChromeRef = useRef<DOMElement>(null);
@@ -427,7 +426,6 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
     analytics.wizardCapture('create project link opened', {
       'from screen': fromScreen,
     });
-    setPickerNotice(null);
     store.startCreateProject(fromScreen);
   };
 
@@ -436,7 +434,6 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
     setSelectedOrg(null);
     setSelectedProject(null);
     setSelectedEnv(null);
-    setPickerNotice(null);
     store.setOrgAndProject(
       { id: '', name: '' },
       { id: '', name: '' },
@@ -890,11 +887,6 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
             <Text color={Colors.secondary}>
               in <Text color={Colors.body}>{effectiveOrg.name}</Text>
             </Text>
-            {pickerNotice && (
-              <Box marginTop={1}>
-                <Text color={Colors.warning}>{pickerNotice}</Text>
-              </Box>
-            )}
             <Box marginTop={1} />
           </Box>
           <Box>
@@ -929,7 +921,6 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
                   return;
                 }
                 if (isPickerAction(picked)) return;
-                setPickerNotice(null);
                 setSelectedProject(picked);
                 store.setOrgAndProject(
                   effectiveOrg,
@@ -949,11 +940,6 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
             <Text bold color={Colors.heading}>
               Select an environment
             </Text>
-            {pickerNotice && (
-              <Box marginTop={1}>
-                <Text color={Colors.warning}>{pickerNotice}</Text>
-              </Box>
-            )}
             <Box marginTop={1} />
           </Box>
           <Box>
@@ -984,7 +970,6 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
                   return;
                 }
                 if (isPickerAction(picked)) return;
-                setPickerNotice(null);
                 setSelectedEnv(picked);
                 store.setSelectedEnvName(picked.name);
               }}
