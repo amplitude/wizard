@@ -29,8 +29,8 @@ import type {
   ColdStartPhase,
   MCPStatusServer,
   MCPStatusState,
+  ModelCapabilityTier,
   ModelContext,
-  ModelTier,
 } from '../lib/agent-events';
 import {
   EVENT_DATA_VERSIONS,
@@ -1437,7 +1437,7 @@ export class AgentUI implements WizardUI {
   emitModelUsed(data: {
     model: string;
     modelDisplay: string;
-    modelTier: ModelTier;
+    modelTier: ModelCapabilityTier;
     context: ModelContext;
   }): void {
     const dedupKey = `${data.context}\0${data.model}`;

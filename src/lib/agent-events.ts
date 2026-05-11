@@ -1774,7 +1774,7 @@ export interface WizardCapabilitiesData {
  *            should treat `'other'` as "unknown capability — don't
  *            assume any particular tier".
  */
-export type ModelTier = 'haiku' | 'sonnet' | 'opus' | 'other';
+export type ModelCapabilityTier = 'haiku' | 'sonnet' | 'opus' | 'other';
 
 /**
  * Which wizard subsystem is announcing the model it's running. The
@@ -1812,7 +1812,7 @@ export type ModelContext = 'inner_agent' | 'classifier' | 'taxonomy';
  *                  `'Haiku 4.5'`). Operator-friendly — orchestrators
  *                  can surface this verbatim instead of un-aliasing
  *                  the raw model string.
- *   modelTier    — capability bucket (see {@link ModelTier}).
+ *   modelTier    — capability bucket (see {@link ModelCapabilityTier}).
  *   context      — wizard subsystem (see {@link ModelContext}).
  *
  * Bumping a field here is a `data_version` bump on `model_used`.
@@ -1821,7 +1821,7 @@ export interface ModelUsedData {
   event: 'model_used';
   model: string;
   modelDisplay: string;
-  modelTier: ModelTier;
+  modelTier: ModelCapabilityTier;
   context: ModelContext;
 }
 
@@ -1840,9 +1840,9 @@ export interface ModelUsedData {
  *
  * @param model - Claude model alias (with or without `anthropic/`
  *                gateway prefix).
- * @returns The {@link ModelTier} bucket the alias belongs to.
+ * @returns The {@link ModelCapabilityTier} bucket the alias belongs to.
  */
-export function classifyModelTier(model: string): ModelTier {
+export function classifyModelTier(model: string): ModelCapabilityTier {
   // Strip the gateway prefix so `anthropic/claude-sonnet-4-6` and
   // `claude-sonnet-4-6` classify identically. Lowercase so a stray
   // mixed-case override doesn't fall through to `'other'`.
