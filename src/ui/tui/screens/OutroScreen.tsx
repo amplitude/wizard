@@ -432,17 +432,12 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
     ? toWizardDashboardOpenUrl(dashboardCanonicalUrl)
     : null;
 
-  if (!outroData) {
-    return (
-      <Box flexDirection="column" flexGrow={1}>
-        <Text color={Colors.muted}>Finishing up{Icons.ellipsis}</Text>
-      </Box>
-    );
-  }
-
   // Build the report file path from the install directory. `installDir`
   // is already declared above for the dashboard-URL effect; reuse it
-  // rather than redeclaring.
+  // rather than redeclaring. Computed BEFORE the `outroData == null`
+  // early return so the useEffect below can reference it without
+  // violating the rules of hooks (effect order must be stable across
+  // renders, including renders that bail out early on null outroData).
   const reportPath = installDir.endsWith(path.sep)
     ? `${installDir}${REPORT_FILE}`
     : `${installDir}${path.sep}${REPORT_FILE}`;
@@ -450,7 +445,13 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
   // One-shot existence check — see `reportExists` declaration above for
   // why this isn't done inline in render. Re-runs only when the install
   // dir or report path changes, which is effectively never within a
-  // single mount of this screen.
+  // single mount of this screen. Hoisted above the early return below
+  // (rules of hooks): React requires the same hook call order on every
+  // render, even renders that short-circuit on `outroData == null`. The
+  // pre-fix ordering put this useEffect AFTER the early return, so the
+  // 'Finishing up…' fallback render called one fewer hook than the
+  // happy path — React would log "Rendered fewer hooks than expected"
+  // on the transition.
   useEffect(() => {
     try {
       setReportExists(fs.existsSync(reportPath));
@@ -460,6 +461,14 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
       setReportExists(false);
     }
   }, [reportPath]);
+
+  if (!outroData) {
+    return (
+      <Box flexDirection="column" flexGrow={1}>
+        <Text color={Colors.muted}>Finishing up{Icons.ellipsis}</Text>
+      </Box>
+    );
+  }
 
   // ── Changed files (peeked, not consumed) ─────────────────────────────
   // We peek the registry rather than consume so the downstream
