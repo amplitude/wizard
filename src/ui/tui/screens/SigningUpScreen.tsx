@@ -36,6 +36,7 @@ import { DEFAULT_AMPLITUDE_ZONE } from '../../../lib/constants.js';
 import { createLogger } from '../../../lib/observability/logger.js';
 import { assertNever } from '../../../utils/assert-never.js';
 import type { SignupOrAuthInput } from '../../../utils/signup-or-auth.js';
+import { FollowUpSessionReadySchema } from '../../../lib/account-creation-flow.js';
 
 const log = createLogger('signing-up-screen');
 
@@ -74,13 +75,13 @@ export const SigningUpScreen = ({ store }: SigningUpScreenProps) => {
 
       let input: SignupOrAuthInput;
       if (isFollowUp) {
-        const { signupFullName, legalDocumentBundle, legalDocumentSource } =
-          session;
-        if (
-          signupFullName === null ||
-          legalDocumentBundle === null ||
-          legalDocumentSource === null
-        ) {
+        // Narrow + validate the session fields a follow_up input needs.
+        // The schema's strictness matches what the prior manual null-
+        // check ladder did (just non-null on each field) — centralized
+        // so the "what makes a follow_up session complete" contract
+        // lives next to the related ProvisioningReadySchema.
+        const ready = FollowUpSessionReadySchema.safeParse(session);
+        if (!ready.success) {
           // Invariant violation: flow gate should prevent reaching
           // SigningUp in follow-up mode without complete data. If we
           // hit this branch, route to OAuth via abandonment instead
@@ -94,12 +95,13 @@ export const SigningUpScreen = ({ store }: SigningUpScreenProps) => {
         input = {
           kind: 'follow_up',
           email,
-          fullName: signupFullName,
-          legalDocumentBundle,
-          // Pass the parser-recorded source through so telemetry on
+          // Spread the schema-narrowed fields. `legalDocumentSource` is
+          // the parser-recorded source, passed through so telemetry on
           // success / error arms can tag this follow-up's URL origin
           // accurately, without re-reading from the session.
-          legalDocumentSource,
+          fullName: ready.data.signupFullName,
+          legalDocumentBundle: ready.data.legalDocumentBundle,
+          legalDocumentSource: ready.data.legalDocumentSource,
           zone,
           signal,
         };
