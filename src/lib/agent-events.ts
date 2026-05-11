@@ -264,6 +264,19 @@ export const EVENT_DATA_VERSIONS = {
    * cycle when surfacing "the agent forgot X" failures.
    */
   compaction_completed: 1,
+  /**
+   * `discovery_fact` — mirrors the TUI's cold-start "discovery feed"
+   * chips onto NDJSON so parent agents (Claude Code, Cursor, Codex)
+   * can render the same vertical / app-type / framework / package-
+   * manager / region facts the wizard surfaces in Ink. Cosmetic only
+   * (the agent already receives these values via the preflight
+   * context block), but lets orchestrators pin a "here's what we
+   * detected" header without parsing every status message. Each
+   * fact carries a stable `id` so re-publishing on a retry path is
+   * a no-op on the receiving end — orchestrators key off the id to
+   * upsert chips.
+   */
+  discovery_fact: 1,
 } as const;
 
 /** All NDJSON event-level types. */
@@ -612,6 +625,24 @@ export interface VerificationResultData {
   failures?: string[];
 }
 
+/**
+ * `discovery_fact` — wire shape of a single cold-start discovery chip
+ * mirrored from the TUI's `DiscoveryFeed`. Stable `id` enables
+ * orchestrator-side upsert so a re-publish on retry is idempotent.
+ * `label` / `value` are pre-formatted, human-readable strings (e.g.
+ * `"Framework"` / `"Next.js (App Router)"`) — orchestrators render
+ * them verbatim. Per-fact `discoveredAt` lets orchestrators sort
+ * chips chronologically or hide stale ones.
+ */
+export interface DiscoveryFactData {
+  event: 'discovery_fact';
+  id: string;
+  label: string;
+  value: string;
+  /** Wall-clock ms when the fact was first published. */
+  discoveredAt: number;
+}
+
 export type InnerAgentLifecycleData =
   | InnerAgentStartedData
   | ToolCallData
@@ -620,7 +651,8 @@ export type InnerAgentLifecycleData =
   | EventPlanProposedData
   | EventPlanConfirmedData
   | VerificationStartedData
-  | VerificationResultData;
+  | VerificationResultData
+  | DiscoveryFactData;
 
 /**
  * Coarse-grained orchestrator-facing phase boundaries for a wizard run.

@@ -1451,10 +1451,27 @@ export class AgentUI implements WizardUI {
     }
   }
 
-  pushDiscoveryFact(): void {
-    // No-op for NDJSON consumers — discovery facts are a TUI-only
-    // cosmetic feed; the same values are already surfaced via the
-    // preflight context block and existing `progress` events.
+  /**
+   * Emit a `progress: discovery_fact` event mirroring the TUI's
+   * cold-start "discovery feed" chip. Lets parent agents render the
+   * same vertical / app-type / framework / package-manager / region
+   * facts the wizard surfaces in Ink. Idempotent on the receiving
+   * end via the stable `id` — orchestrators upsert chips keyed off
+   * it. Cosmetic only; the values are already on the wire via the
+   * preflight context block and session_state events.
+   */
+  pushDiscoveryFact(
+    fact: import('../lib/wizard-session.js').DiscoveryFact,
+  ): void {
+    emit('progress', `discovery_fact: ${fact.label} = ${fact.value}`, {
+      data: {
+        event: 'discovery_fact',
+        id: fact.id,
+        label: fact.label,
+        value: fact.value,
+        discoveredAt: fact.discoveredAt,
+      },
+    });
   }
 
   // ── Prompts (auto-approve) ──────────────────────────────────────────
