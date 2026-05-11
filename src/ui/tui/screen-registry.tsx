@@ -84,7 +84,6 @@ export function createScreens(
     [Screen.ToS]: <ToSScreen store={store} />,
     [Screen.DataSetup]: <DataSetupScreen store={store} />,
     [Screen.ActivationOptions]: <ActivationOptionsScreen store={store} />,
-    [Screen.Options]: null,
     [Screen.Run]: <RunScreen store={store} />,
     [Screen.Mcp]: <McpScreen store={store} installer={services.mcpInstaller} />,
     [Screen.DataIngestionCheck]: <DataIngestionCheckScreen store={store} />,
