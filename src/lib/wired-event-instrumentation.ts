@@ -140,7 +140,7 @@ const TRACK_CALL_RE = /\btrack\s*\(\s*(['"])((?:\\.|(?!\1).)*?)\1/g;
  * We DON'T strip punctuation — `Form: Submit` vs `Form Submit` are
  * meaningfully different to Amplitude. Whitespace collapse is enough.
  */
-function eventKey(name: string): string {
+export function eventKey(name: string): string {
   return name.trim().replace(/\s+/g, ' ').toLowerCase();
 }
 

@@ -30,7 +30,10 @@ import { Box, Text } from 'ink';
 import type { PlannedEvent } from '../store.js';
 import { Colors, Icons } from '../styles.js';
 import { getFileChangeLedger } from '../../../lib/file-change-ledger.js';
-import { collectWiredEventNames } from '../../../lib/wired-event-instrumentation.js';
+import {
+  collectWiredEventNames,
+  eventKey,
+} from '../../../lib/wired-event-instrumentation.js';
 
 interface EventPlanViewerProps {
   events: PlannedEvent[];
@@ -44,17 +47,6 @@ interface EventPlanViewerProps {
    * ledger.
    */
   refreshKey?: number;
-}
-
-/**
- * Lowercase + collapse-whitespace key for fuzzy plan/wired matching.
- * Mirrors the `eventKey` helper inside wired-event-instrumentation —
- * kept private there, replicated here so we don't widen that module's
- * surface area for a single consumer. If a third caller ever needs it
- * we can export the shared helper.
- */
-function eventKey(name: string): string {
-  return name.trim().replace(/\s+/g, ' ').toLowerCase();
 }
 
 export const EventPlanViewer = ({
