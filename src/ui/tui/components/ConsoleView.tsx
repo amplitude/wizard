@@ -520,7 +520,10 @@ export const ConsoleView = ({
           return;
         }
       }
-      if (screenError && (char === 'r' || char === 'R')) {
+      if (screenError && (char === 'r' || char === 'R' || key.return)) {
+        // Accept Enter in addition to R: the banner advertises [R] retry,
+        // but users focused on a prompt below the banner often press Enter
+        // as the default action.
         store.clearScreenError();
         return;
       }
