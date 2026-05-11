@@ -1,7 +1,7 @@
 import type { CommandModule } from 'yargs';
 import chalk from 'chalk';
 import { getUI, ExitCode } from './helpers';
-import { EVENT_DATA_VERSIONS } from '../lib/agent-events.js';
+import { EVENT_DATA_VERSIONS, nextDecisionId } from '../lib/agent-events.js';
 
 export const projectsCommand: CommandModule = {
   command: 'projects <command>',
@@ -80,6 +80,12 @@ export const projectsCommand: CommandModule = {
                     ...(result.warning && { level: 'warn' }),
                     data: {
                       event: 'needs_input',
+                      // `decisionId` is required since data_version 2 —
+                      // orchestrators correlate this envelope with its
+                      // `decision_auto` / `user_input_received` partner
+                      // via the matching id. Manual envelope construction
+                      // bypasses `emitNeedsInput` so we mint our own.
+                      decisionId: nextDecisionId(),
                       code: 'project_selection',
                       ui: {
                         component: 'searchable_select',
