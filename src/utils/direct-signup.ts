@@ -196,7 +196,13 @@ function isCallerAbort(error: unknown, signal?: AbortSignal): boolean {
 }
 
 /**
- * Discriminated input to `performDirectSignup`.
+ * Shared shape of the signup request payload, parameterized by email
+ * nullability. Both `DirectSignupInput` (`email: string`) and
+ * `signup-or-auth.ts`'s `SignupOrAuthInput` (`email: string | null`)
+ * instantiate this — keeping them structurally identical except for
+ * email lets `performSignupOrAuth` pass through to `performDirectSignup`
+ * with a one-line spread after its email-non-null guard, without any
+ * risk of the two shapes silently diverging.
  *
  * - `kind: 'initial'` — the wizard hasn't heard from the BE yet during
  *   this ceremony. Body carries only `email` (plus envelope fields).
@@ -216,10 +222,10 @@ function isCallerAbort(error: unknown, signal?: AbortSignal): boolean {
  * terms_acceptance" intermediate state that hits the network — re-fires
  * only happen after all required fields are filled.
  */
-export type DirectSignupInput =
+export type SignupShape<Email extends string | null> =
   | {
       kind: 'initial';
-      email: string;
+      email: Email;
       zone: AmplitudeZone;
       /**
        * Aborts both the provisioning POST and the token-exchange POST
@@ -234,12 +240,14 @@ export type DirectSignupInput =
     }
   | {
       kind: 'follow_up';
-      email: string;
+      email: Email;
       fullName: string;
       legalDocumentBundle: LegalDocumentBundle;
       zone: AmplitudeZone;
       signal?: AbortSignal;
     };
+
+export type DirectSignupInput = SignupShape<string>;
 
 export type DirectSignupResult =
   | {

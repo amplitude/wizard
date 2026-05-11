@@ -5,6 +5,7 @@ import {
   type RequiredKey,
   type LegalDocumentBundle,
   type LegalDocumentSource,
+  type SignupShape,
 } from './direct-signup.js';
 import { replaceStoredUser, type StoredUser } from './ampli-settings.js';
 import { fetchAmplitudeUser, type AmplitudeUserInfo } from '../lib/api.js';
@@ -147,10 +148,14 @@ export const trackSignupAttempt = (
 };
 
 /**
- * Wrapper input — mirrors `DirectSignupInput`'s discriminated union with
- * one accommodation: `email` may be `null` here. The wrapper short-circuits
- * to a `'missing email'` error before reaching `performDirectSignup`, so
- * the underlying call always sees a non-null email.
+ * Wrapper input — same shape as `DirectSignupInput`, only `email` may be
+ * `null`. Both types instantiate `SignupShape<Email>` so the relationship
+ * is structural: a future field added to one auto-applies to the other,
+ * and the `{ ...input, email: input.email }` pass-through in
+ * `performSignupOrAuth` stays sound by construction. The wrapper
+ * short-circuits to a `'missing email'` error before reaching
+ * `performDirectSignup`, so the underlying call always sees a non-null
+ * email.
  *
  * The screen at the call site (`SigningUpScreen.tsx`) decides which kind
  * to build based on `session.signupRequiredFields !== null` (BE-driven:
@@ -159,29 +164,7 @@ export const trackSignupAttempt = (
  * (`requiredSatisfied` in `flows.ts`) — by the time SigningUp re-fires,
  * every required field is collected.
  */
-export type SignupOrAuthInput =
-  | {
-      kind: 'initial';
-      email: string | null;
-      zone: AmplitudeZone;
-      /**
-       * Threaded from the screen's `useAsyncEffect`. Aborts the in-flight
-       * provisioning + token-exchange POSTs and gates the post-success
-       * persistence (`replaceStoredUser`) so a cancelled ceremony doesn't
-       * leak tokens to disk. Without this, `/exit` mid-POST would still
-       * persist tokens and the next launch would think the user is
-       * signed in.
-       */
-      signal?: AbortSignal;
-    }
-  | {
-      kind: 'follow_up';
-      email: string | null;
-      fullName: string;
-      legalDocumentBundle: LegalDocumentBundle;
-      zone: AmplitudeZone;
-      signal?: AbortSignal;
-    };
+export type SignupOrAuthInput = SignupShape<string | null>;
 
 /**
  * Discriminated-union result of {@link performSignupOrAuth}.

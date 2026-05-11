@@ -286,11 +286,21 @@ When('I decline the Terms of Service', function () {
 When(
   'the signup probe returns needs_information for {string}',
   function (field: string) {
-    // Mirror the parser's spoof block (`src/utils/direct-signup.ts`):
+    // === MIRRORS PARSER SPOOF — UPDATE WHEN REMOVING LOCAL FALLBACK ===
+    // Mirrors the parser's spoof block in `src/utils/direct-signup.ts`:
     // when BE flag is OFF and `terms_acceptance` isn't in `required`,
     // the parser injects it and populates the legal-doc bundle from
     // local constants. Downstream code (router, screens) sees the
     // same shape it will see when the BE flag flips ON.
+    //
+    // Cleanup pairing: the spoof's `else` branch in direct-signup.ts is
+    // tagged with the same DELETE marker. When that branch is removed
+    // (Phase C, after the BE flag is ON across env tiers), THIS step
+    // also needs to be updated — most likely to drive through the
+    // parser with a mock BE response instead of hand-constructing
+    // session state. Failing to update this step won't break the build
+    // but will make these BDD scenarios assert against state the live
+    // code path no longer produces.
     session.signupRequiredFields =
       field === 'terms_acceptance' ? [field] : [field, 'terms_acceptance'];
     session.legalDocumentBundle = {
@@ -298,6 +308,7 @@ When(
       privacy_policy: 'https://amplitude.com/privacy',
     };
     session.legalDocumentSource = 'local';
+    // === END MIRROR ===
   },
 );
 
