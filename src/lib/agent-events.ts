@@ -574,6 +574,33 @@ export const EVENT_DATA_VERSIONS = {
    * schema bump).
    */
   wizard_capabilities: 1,
+  /**
+   * `model_used` — orchestrator-facing observability event announcing
+   * which Claude model the wizard is running for a particular
+   * subsystem (inner agent, classifier, taxonomy). Today parent
+   * agents have NO visibility into the wizard's model selection —
+   * the inner agent might be on Sonnet 4.6, the Haiku one-shot
+   * classifier on Haiku 4.5, and an orchestrator wanting to render
+   * "wizard is using model X" or attribute cost / latency to a tier
+   * has to either parse the wizard binary version or guess.
+   *
+   * Lifecycle: fires when each subsystem starts its first message —
+   * the inner agent's first attempt boundary (after the SDK has
+   * settled on the resolved model alias) and at each classifier
+   * call-site (today the Haiku gateway probe and the slash-console
+   * AI-SDK path). The emitter de-dups on the `(model, context)`
+   * pair so a long run doesn't spam the wire with duplicate
+   * announcements — orchestrators see exactly one envelope per
+   * unique (model, context) combination.
+   *
+   * Distinct from `wizard_capabilities`: capabilities pins what the
+   * wizard CAN emit (protocol contract), while `model_used` pins
+   * what the wizard IS RUNNING (operational state). Parent agents
+   * branch on `data.context` to attribute the model to the right
+   * subsystem and on `data.modelTier` for cost / capability tiering
+   * without parsing the raw `data.model` alias.
+   */
+  model_used: 1,
 } as const;
 
 /** All NDJSON event-level types. */
@@ -1836,7 +1863,8 @@ export type InnerAgentLifecycleData =
   | ColdStartBreakdownData
   | ToolCallSummaryData
   | MCPStatusData
-  | WizardCapabilitiesData;
+  | WizardCapabilitiesData
+  | ModelUsedData;
 
 /**
  * Which MCP server a `mcp_status` event refers to. Two distinct
@@ -1986,6 +2014,131 @@ export interface WizardCapabilitiesData {
   eventDataVersions: Readonly<Record<string, number>>;
   supportedEvents: readonly string[];
   mode: WizardCapabilitiesMode;
+}
+
+/**
+ * Capability tier the resolved `data.model` belongs to. Substring-based
+ * classification (see {@link classifyModelTier}) maps a raw alias to one
+ * of four buckets so an orchestrator can branch on capability / cost
+ * without parsing the dated alias string itself.
+ *
+ *   haiku  — fastest, cheapest tier. Used for one-shot LLM calls
+ *            (gateway probe, slash-console Q&A, classifier paths)
+ *            where reasoning depth doesn't matter.
+ *   sonnet — balanced tier. The wizard's default inner-agent
+ *            model (`claude-sonnet-4-6`) lives here.
+ *   opus   — most capable tier. Selected via `--mode thorough` for
+ *            complex multi-file instrumentation runs.
+ *   other  — model alias didn't match a known prefix. Future tiers,
+ *            custom aliases, or `WIZARD_CLAUDE_MODEL` overrides that
+ *            point at a non-Claude model land here. Parent agents
+ *            should treat `'other'` as "unknown capability — don't
+ *            assume any particular tier".
+ */
+export type ModelTier = 'haiku' | 'sonnet' | 'opus' | 'other';
+
+/**
+ * Which wizard subsystem is announcing the model it's running. The
+ * wizard fires several distinct LLM workloads in a single run and
+ * orchestrators want to attribute model selection to the right one
+ * (e.g. "the inner agent is on Sonnet but the classifier is on
+ * Haiku" is a meaningful operational state).
+ *
+ *   inner_agent — the main Claude Agent SDK tool loop in
+ *                 `agent-interface.ts`. One announcement per run on
+ *                 the first attempt boundary.
+ *   classifier  — low-stakes one-shot LLM calls (gateway probe,
+ *                 slash-console Q&A, future discovered-facts
+ *                 inference). Today these route through Haiku via
+ *                 `selectModel('oneshot', …)`.
+ *   taxonomy    — taxonomy / instrumentation agent. Reserved on the
+ *                 contract for future taxonomy paths that route to a
+ *                 separately-selected model; today taxonomy work
+ *                 rides on the inner agent.
+ */
+export type ModelContext = 'inner_agent' | 'classifier' | 'taxonomy';
+
+/**
+ * Wire shape of the `data` field on a `model_used` envelope. Emitted
+ * once per unique `(model, context)` pair per run — orchestrators key
+ * off `data.context` to attribute the model to a subsystem and on
+ * `data.modelTier` for capability / cost tiering.
+ *
+ *   model        — resolved Claude model alias the subsystem is
+ *                  running (e.g. `'claude-sonnet-4-6'`, `'anthropic/
+ *                  claude-haiku-4-5-20251001'`). Includes the
+ *                  `anthropic/` gateway prefix when present so a
+ *                  parent agent can branch on the routing path.
+ *   modelDisplay — short human-readable label (`'Sonnet 4.6'`,
+ *                  `'Haiku 4.5'`). Operator-friendly — orchestrators
+ *                  can surface this verbatim instead of un-aliasing
+ *                  the raw model string.
+ *   modelTier    — capability bucket (see {@link ModelTier}).
+ *   context      — wizard subsystem (see {@link ModelContext}).
+ *
+ * Bumping a field here is a `data_version` bump on `model_used`.
+ */
+export interface ModelUsedData {
+  event: 'model_used';
+  model: string;
+  modelDisplay: string;
+  modelTier: ModelTier;
+  context: ModelContext;
+}
+
+/**
+ * Substring-based classifier mapping a Claude model alias to its
+ * capability tier. Defensive: strips any `anthropic/` gateway prefix,
+ * lowercases the input so a stray `Claude-Sonnet` doesn't slip
+ * through, and falls back to `'other'` for anything that doesn't
+ * match a known prefix.
+ *
+ * Match order matters — `'opus'` is checked before `'sonnet'` /
+ * `'haiku'` because a hypothetical `'claude-opus-haiku-blend'` (we
+ * don't ship one, but defensive) would otherwise miscategorize as
+ * Haiku. Pure (no I/O, no env reads) so it's safe to call from any
+ * emit path.
+ *
+ * @param model - Claude model alias (with or without `anthropic/`
+ *                gateway prefix).
+ * @returns The {@link ModelTier} bucket the alias belongs to.
+ */
+export function classifyModelTier(model: string): ModelTier {
+  // Strip the gateway prefix so `anthropic/claude-sonnet-4-6` and
+  // `claude-sonnet-4-6` classify identically. Lowercase so a stray
+  // mixed-case override doesn't fall through to `'other'`.
+  const normalized = model.toLowerCase().replace(/^anthropic\//, '');
+  if (normalized.includes('opus')) return 'opus';
+  if (normalized.includes('sonnet')) return 'sonnet';
+  if (normalized.includes('haiku')) return 'haiku';
+  return 'other';
+}
+
+/**
+ * Best-effort human-readable label for a Claude model alias. Used
+ * by `emitModelUsed` to populate `data.modelDisplay` so orchestrators
+ * can surface a friendly name without un-aliasing the raw string
+ * themselves.
+ *
+ * Heuristic-only: matches the `<family>-<major>-<minor>[-<datestamp>]`
+ * shape the Claude aliases follow and falls back to the original
+ * alias when the shape doesn't match. Pure (no env reads, no I/O).
+ *
+ *   'claude-sonnet-4-6'              → 'Sonnet 4.6'
+ *   'claude-haiku-4-5-20251001'      → 'Haiku 4.5'
+ *   'claude-opus-4-7'                → 'Opus 4.7'
+ *   'anthropic/claude-sonnet-4-6'    → 'Sonnet 4.6'
+ *   'gpt-4o'                         → 'gpt-4o'  (unknown shape)
+ */
+export function formatModelDisplay(model: string): string {
+  const normalized = model.toLowerCase().replace(/^anthropic\//, '');
+  const match = /^claude-(opus|sonnet|haiku)-(\d+)-(\d+)/.exec(normalized);
+  if (!match) return model;
+  const family = match[1];
+  const major = match[2];
+  const minor = match[3];
+  const capitalized = family.charAt(0).toUpperCase() + family.slice(1);
+  return `${capitalized} ${major}.${minor}`;
 }
 
 /**

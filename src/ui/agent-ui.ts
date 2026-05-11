@@ -31,6 +31,8 @@ import type {
   ColdStartPhase,
   MCPStatusServer,
   MCPStatusState,
+  ModelContext,
+  ModelTier,
 } from '../lib/agent-events';
 import {
   EVENT_DATA_VERSIONS,
@@ -1531,6 +1533,55 @@ export class AgentUI implements WizardUI {
           eventDataVersions,
           supportedEvents,
           mode: 'agent',
+        },
+      },
+    );
+  }
+
+  // ── PR B9: model_used (subsystem model-awareness) ──────────────────
+  //
+  // Parent agents have no visibility into which Claude model the
+  // wizard's inner agent and one-shot classifiers are actually
+  // running. `model_used` fires once per unique `(model, context)`
+  // pair per run so an orchestrator can render "inner agent: Sonnet
+  // 4.6, classifier: Haiku 4.5" or attribute cost / latency to the
+  // right tier without parsing the wizard binary version.
+  //
+  // Dedup is intentionally per `(model, context)` rather than per
+  // `model` — the same alias firing in two contexts (e.g. a Haiku
+  // probe at startup and a Haiku classifier mid-run) is a meaningful
+  // signal the orchestrator wants to see; only EXACT pair-repeats
+  // get suppressed. The dedup set lives on the AgentUI instance so
+  // it survives across the run but resets cleanly per `new AgentUI()`
+  // (e.g. in tests).
+
+  /**
+   * Dedup set for `model_used` emissions. Keyed on `${context}\0${model}`
+   * (NUL separator so a model alias containing a delimiter — e.g. a
+   * test fixture with a `:` in it — can't collide with another
+   * context's key by accident).
+   */
+  private _modelUsedEmitted = new Set<string>();
+
+  emitModelUsed(data: {
+    model: string;
+    modelDisplay: string;
+    modelTier: ModelTier;
+    context: ModelContext;
+  }): void {
+    const dedupKey = `${data.context}\0${data.model}`;
+    if (this._modelUsedEmitted.has(dedupKey)) return;
+    this._modelUsedEmitted.add(dedupKey);
+    emit(
+      'lifecycle',
+      `model_used: ${data.context}=${data.modelDisplay} (${data.modelTier})`,
+      {
+        data: {
+          event: 'model_used',
+          model: data.model,
+          modelDisplay: data.modelDisplay,
+          modelTier: data.modelTier,
+          context: data.context,
         },
       },
     );
