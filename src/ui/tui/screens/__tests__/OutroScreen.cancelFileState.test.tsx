@@ -6,12 +6,20 @@
  * out. Mirrors the explicitness the error+preserveFiles path already
  * has.
  *
- *   - Empty ledger    → "No files were changed."
- *   - N > 0 entries   → "Reverted N file(s) the wizard had started
- *                        writing." (rollback already ran in the
- *                        agent-runner's cleanup hook; we just report
- *                        the count.)
- *   - Ledger absent   → line is omitted (we don't know either way).
+ *   - Empty ledger              → "No files were changed."
+ *   - N entries, rollback ran   → "Reverted N file(s) the wizard had
+ *                                  started writing." (Ctrl+C
+ *                                  / wizardAbort path: cleanup hook
+ *                                  ran synchronously before mount.)
+ *   - N entries, rollback NOT
+ *     yet run                   → "N file(s) will be reverted before
+ *                                  exit." (screen-initiated /exit path:
+ *                                  outro mounts BEFORE cleanup hooks
+ *                                  fire — they run later when
+ *                                  `wizardSuccessExit` iterates the
+ *                                  registry. Bugbot #3220961624.)
+ *   - Ledger absent             → line is omitted (we don't know
+ *                                  either way).
  *
  * Success / error outros are covered by their own tests; this file
  * only asserts behaviour scoped to the cancel branch.
@@ -23,7 +31,10 @@ import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
-import { OutroScreen } from '../OutroScreen.js';
+import {
+  OutroScreen,
+  renderCancelFileStateLine,
+} from '../OutroScreen.js';
 import {
   makeStoreForSnapshot,
   renderSnapshot,
@@ -69,12 +80,11 @@ describe('OutroScreen — cancel file-state line', () => {
     expect(frame).not.toMatch(/Reverted \d+ file/);
   });
 
-  it('renders the reverted-file count when the ledger has entries', () => {
-    // Seed two tracked writes. The agent-runner's cleanup hook would
-    // have already rolled these back by the time the cancel outro
-    // mounts in production; the ledger's entries persist, only its
-    // `rolledBack` flag flips. The outro reads `size()` to surface the
-    // count.
+  it('renders past-tense "Reverted N" when rollback has already run', () => {
+    // Ctrl+C / wizardAbort path — agent-runner's cleanup hook fires
+    // `ledger.rollback()` BEFORE the outro mounts. Entries persist on
+    // the ledger but `hasRolledBack()` is true, so the past-tense
+    // message is honest.
     const ledger = initFileChangeLedger(installDir, () => undefined);
 
     const a = join(installDir, 'src', 'a.ts');
@@ -86,6 +96,8 @@ describe('OutroScreen — cancel file-state line', () => {
     ledger.recordPreWrite(b);
     writeFileSync(b, 'bbb\n');
     ledger.recordPostWrite(b, 'bbb\n');
+    // Simulate cleanup-hook rollback fired before mount.
+    ledger.rollback();
 
     const store = makeStoreForSnapshot({
       installDir,
@@ -97,15 +109,49 @@ describe('OutroScreen — cancel file-state line', () => {
     const { frame } = renderSnapshot(<OutroScreen store={store} />, store);
     expect(frame).toContain('Setup cancelled');
     expect(frame).toContain('Reverted 2 files the wizard had started writing.');
+    expect(frame).not.toMatch(/will be reverted before exit/);
     expect(frame).not.toContain('No files were changed.');
   });
 
-  it('uses singular "file" when exactly one entry was reverted', () => {
+  it('renders future-tense "N will be reverted" when rollback is still pending', () => {
+    // `/exit` / IntroScreen back-out / SetupScreen back-out paths —
+    // `setOutroData` is called directly, so the outro mounts BEFORE
+    // any cleanup hook fires. Entries are on the ledger, rolled-back
+    // flag is false. Bugbot #3220961624: previously this lied with
+    // past-tense "Reverted N" while files were still on disk.
+    const ledger = initFileChangeLedger(installDir, () => undefined);
+    const a = join(installDir, 'src', 'a.ts');
+    const b = join(installDir, 'src', 'b.ts');
+    mkdirSync(join(installDir, 'src'), { recursive: true });
+    ledger.recordPreWrite(a);
+    writeFileSync(a, 'aaa\n');
+    ledger.recordPostWrite(a, 'aaa\n');
+    ledger.recordPreWrite(b);
+    writeFileSync(b, 'bbb\n');
+    ledger.recordPostWrite(b, 'bbb\n');
+    // NOTE: ledger.rollback() intentionally NOT called.
+
+    const store = makeStoreForSnapshot({
+      installDir,
+      outroData: {
+        kind: OutroKind.Cancel,
+        message: 'Setup cancelled.',
+      },
+    });
+    const { frame } = renderSnapshot(<OutroScreen store={store} />, store);
+    expect(frame).toContain('Setup cancelled');
+    expect(frame).toContain('2 files will be reverted before exit.');
+    expect(frame).not.toMatch(/Reverted \d+ file/);
+    expect(frame).not.toContain('No files were changed.');
+  });
+
+  it('uses singular "file" when exactly one entry is on the ledger', () => {
     const ledger = initFileChangeLedger(installDir, () => undefined);
     const a = join(installDir, 'only.ts');
     ledger.recordPreWrite(a);
     writeFileSync(a, 'x\n');
     ledger.recordPostWrite(a, 'x\n');
+    ledger.rollback();
 
     const store = makeStoreForSnapshot({
       installDir,
@@ -118,6 +164,26 @@ describe('OutroScreen — cancel file-state line', () => {
     expect(frame).toContain('Reverted 1 file the wizard had started writing.');
     // Defensive: don't accidentally pluralise.
     expect(frame).not.toContain('Reverted 1 files');
+  });
+
+  it('uses singular "file" in the future-tense path when exactly one entry is pending revert', () => {
+    const ledger = initFileChangeLedger(installDir, () => undefined);
+    const a = join(installDir, 'only.ts');
+    ledger.recordPreWrite(a);
+    writeFileSync(a, 'x\n');
+    ledger.recordPostWrite(a, 'x\n');
+    // NOTE: no rollback() — `/exit` cancel path timing.
+
+    const store = makeStoreForSnapshot({
+      installDir,
+      outroData: {
+        kind: OutroKind.Cancel,
+        message: 'Setup cancelled.',
+      },
+    });
+    const { frame } = renderSnapshot(<OutroScreen store={store} />, store);
+    expect(frame).toContain('1 file will be reverted before exit.');
+    expect(frame).not.toContain('1 files will be reverted');
   });
 
   it('omits the line entirely when no ledger has been initialised', () => {
@@ -179,5 +245,38 @@ describe('OutroScreen — cancel file-state line', () => {
     const { frame } = renderSnapshot(<OutroScreen store={store} />, store);
     expect(frame).not.toContain('No files were changed.');
     expect(frame).not.toMatch(/^.*Reverted \d+ file.* the wizard had started writing/m);
+  });
+});
+
+describe('renderCancelFileStateLine', () => {
+  // Pure-helper unit tests so the branching logic is exercised without
+  // the Ink render harness. Covers the three branches and singular /
+  // plural in each.
+
+  it('returns the empty message when size is 0', () => {
+    expect(renderCancelFileStateLine({ size: 0, rolledBack: false })).toBe(
+      'No files were changed.',
+    );
+    expect(renderCancelFileStateLine({ size: 0, rolledBack: true })).toBe(
+      'No files were changed.',
+    );
+  });
+
+  it('returns past-tense when rolledBack is true', () => {
+    expect(renderCancelFileStateLine({ size: 1, rolledBack: true })).toBe(
+      'Reverted 1 file the wizard had started writing.',
+    );
+    expect(renderCancelFileStateLine({ size: 3, rolledBack: true })).toBe(
+      'Reverted 3 files the wizard had started writing.',
+    );
+  });
+
+  it('returns future-tense when rolledBack is false', () => {
+    expect(renderCancelFileStateLine({ size: 1, rolledBack: false })).toBe(
+      '1 file will be reverted before exit.',
+    );
+    expect(renderCancelFileStateLine({ size: 5, rolledBack: false })).toBe(
+      '5 files will be reverted before exit.',
+    );
   });
 });

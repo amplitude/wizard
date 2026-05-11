@@ -86,6 +86,30 @@ export function exitCodeForOutroKind(kind: OutroKind | undefined): number {
   return ExitCode.SUCCESS;
 }
 
+/**
+ * Format the cancel-outro file-state line from a snapshot of the
+ * ledger's `{ size, rolledBack }` state captured at mount. Pulled out
+ * as a pure helper so the branching (no entries / pending revert /
+ * already reverted) is unit-testable without rendering Ink.
+ *
+ * The wording branches on `rolledBack` because the timing of cleanup
+ * differs between the `wizardAbort` (Ctrl+C, cleanup runs before mount)
+ * and screen-initiated (`/exit`, IntroScreen back-out, etc. — cleanup
+ * runs AFTER any-key) cancel paths. Bugbot caught the past-tense lie
+ * for the latter path on PR #741.
+ */
+export function renderCancelFileStateLine(state: {
+  size: number;
+  rolledBack: boolean;
+}): string {
+  if (state.size === 0) return 'No files were changed.';
+  const noun = state.size === 1 ? 'file' : 'files';
+  if (state.rolledBack) {
+    return `Reverted ${state.size} ${noun} the wizard had started writing.`;
+  }
+  return `${state.size} ${noun} will be reverted before exit.`;
+}
+
 interface OutroScreenProps {
   store: WizardStore;
 }
@@ -145,18 +169,37 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
   // mount so the count reflects the ledger as of the moment we render,
   // not the moment a stray re-render happens.
   //
+  // We capture BOTH the entry count and whether rollback has already
+  // run. Two cancel paths reach this screen and they differ in timing:
+  //
+  //   1. `wizardAbort` (Ctrl+C) — agent-runner's cleanup hook calls
+  //      `ledger.rollback()` synchronously BEFORE the outro mounts. So
+  //      `hasRolledBack` is true and the past-tense "Reverted N files"
+  //      message is honest.
+  //   2. `/exit` / IntroScreen back-out / SetupScreen back-out — these
+  //      call `setOutroData` directly without going through
+  //      `wizardAbort`. The outro mounts BEFORE any cleanup hook fires
+  //      (those fire later, when `wizardSuccessExit` iterates the hook
+  //      registry after the user presses a key). So `hasRolledBack` is
+  //      false and we must promise future-tense ("will be reverted
+  //      before exit") instead of lying past-tense. Bugbot caught the
+  //      lie on PR #741.
+  //
+  // Meanings of `cancelLedgerState`:
   //   null  → ledger absent (pre-agent cancel, or test fixture with no
   //           ledger init). We omit the file-state line entirely rather
   //           than asserting "0 files" with uncertainty.
-  //   0     → ledger initialised but no writes were tracked. Render
-  //           "No files were changed."
-  //   N > 0 → agent-runner's cleanup rollback already reverted N entries
-  //           by the time we mount (cleanup hook fires synchronously
-  //           before the outro renders). Render the exact count so the
-  //           user doesn't have to `git status` to find out.
-  const [cancelLedgerSize] = useState<number | null>(() => {
+  //   { size: 0, … }        → no writes tracked. Render
+  //                            "No files were changed."
+  //   { size: N, rolledBack: true }  → rollback already ran → past tense.
+  //   { size: N, rolledBack: false } → rollback pending → future tense.
+  const [cancelLedgerState] = useState<{
+    size: number;
+    rolledBack: boolean;
+  } | null>(() => {
     const ledger = getFileChangeLedger();
-    return ledger ? ledger.size() : null;
+    if (!ledger) return null;
+    return { size: ledger.size(), rolledBack: ledger.hasRolledBack() };
   });
 
   // `isSuccess` / `isError` drive input handling and the action picker.
@@ -932,15 +975,15 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
               tone (not warning / not success) so it informs without
               shouting. Omitted entirely when the ledger is absent — we
               don't have evidence either way, so asserting "0 files"
-              would be the same uncertainty the audit flagged. */}
-          {cancelLedgerSize !== null && (
+              would be the same uncertainty the audit flagged.
+
+              Past- vs future-tense depends on whether the cleanup hook
+              has already reverted the ledger (see the `cancelLedgerState`
+              capture above and Bugbot finding on PR #741). */}
+          {cancelLedgerState !== null && (
             <Box marginTop={1}>
               <Text color={Colors.muted}>
-                {cancelLedgerSize === 0
-                  ? 'No files were changed.'
-                  : `Reverted ${cancelLedgerSize} file${
-                      cancelLedgerSize === 1 ? '' : 's'
-                    } the wizard had started writing.`}
+                {renderCancelFileStateLine(cancelLedgerState)}
               </Text>
             </Box>
           )}
