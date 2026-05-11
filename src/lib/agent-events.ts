@@ -277,6 +277,18 @@ export const EVENT_DATA_VERSIONS = {
    * upsert chips.
    */
   discovery_fact: 1,
+  /**
+   * `current_file` — coarse rollup of the file the inner agent is
+   * currently editing, debounced to ~1 emission per 250ms per
+   * (path, operation) tuple. Distinct from `tool_call` /
+   * `file_change_planned` / `file_change_applied`, which are
+   * fine-grained: orchestrators that want a single "now editing X"
+   * header subscribe to `current_file`, while audit-trail consumers
+   * keep parsing the existing fine-grained events. Debouncing
+   * happens at the wire-boundary emitter; the consumer sees one
+   * event per logical activity transition rather than one per write.
+   */
+  current_file: 1,
 } as const;
 
 /** All NDJSON event-level types. */
@@ -643,6 +655,30 @@ export interface DiscoveryFactData {
   discoveredAt: number;
 }
 
+/**
+ * `current_file` — coarse "now editing X" rollup emitted from the
+ * write-tool hook, debounced so that repeated edits to the same
+ * file inside a 250ms window collapse into a single event. The
+ * `relativePath` (when resolvable against `installDir`) is the
+ * orchestrator-friendly version; absolute `path` is preserved for
+ * audit. `operation` mirrors `FileChangeAppliedData['operation']`
+ * — `'create' | 'modify' | 'delete'`. Distinct from `tool_call`
+ * (which fires per write) so an orchestrator can pin a single
+ * file-focus header without parsing every tool invocation.
+ */
+export interface CurrentFileData {
+  event: 'current_file';
+  /** Raw absolute path the inner agent passed to the tool. */
+  path: string;
+  /**
+   * `path` relativized against the wizard's `installDir`, when
+   * resolvable. Falls back to `path` otherwise so the consumer
+   * always has a renderable string.
+   */
+  relativePath: string;
+  operation: 'create' | 'modify' | 'delete';
+}
+
 export type InnerAgentLifecycleData =
   | InnerAgentStartedData
   | ToolCallData
@@ -652,7 +688,8 @@ export type InnerAgentLifecycleData =
   | EventPlanConfirmedData
   | VerificationStartedData
   | VerificationResultData
-  | DiscoveryFactData;
+  | DiscoveryFactData
+  | CurrentFileData;
 
 /**
  * Coarse-grained orchestrator-facing phase boundaries for a wizard run.

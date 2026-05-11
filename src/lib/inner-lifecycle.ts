@@ -35,6 +35,7 @@
  * ```
  */
 
+import nodePath from 'node:path';
 import { getUI } from '../ui/index.js';
 import { AgentUI } from '../ui/agent-ui.js';
 import {
@@ -67,6 +68,35 @@ export interface InnerLifecycleConfig {
   model?: string;
   /** Optional plan ID when running under `apply --plan-id`. */
   planId?: string;
+  /**
+   * Wizard install directory — when supplied, used to relativize the
+   * absolute `path` the inner agent passes to write tools so the
+   * `current_file` event ships a renderable `relativePath`. Falls back
+   * to basename when the file lives outside `installDir`. Optional
+   * because hook factories that don't have it (probe calls, tests) can
+   * still emit the raw path safely.
+   */
+  installDir?: string;
+}
+
+/**
+ * Best-effort relativization for the `current_file` event. Returns
+ * `path.relative(installDir, abs)` when `abs` lives inside `installDir`,
+ * otherwise falls back to the basename so orchestrators still see a
+ * renderable short label. Pure — no I/O, no throws.
+ */
+function relativizeForCurrentFile(
+  abs: string,
+  installDir: string | undefined,
+): string {
+  if (!installDir) return abs;
+  try {
+    const rel = nodePath.relative(installDir, abs);
+    if (!rel || rel.startsWith('..')) return nodePath.basename(abs);
+    return rel;
+  } catch {
+    return abs;
+  }
 }
 
 /**
@@ -193,6 +223,20 @@ export function createInnerLifecycleHooks(config: InnerLifecycleConfig): {
           // getUI() throws before the wizard has bootstrapped a UI (e.g.
           // when inner-lifecycle hooks fire from a probe call). Swallow —
           // a missing pre-event is harmless, the apply-side handles it.
+        }
+        // v2 protocol: coarser `current_file` rollup. AgentUI debounces
+        // repeated edits to the same (path, op) inside 250ms, so a tight
+        // edit chain collapses into one orchestrator-facing event. InkUI
+        // / LoggingUI no-op — they already have their own "active file"
+        // surfaces via `recordFileChangePlanned`.
+        try {
+          getUI().emitCurrentFile?.({
+            path,
+            relativePath: relativizeForCurrentFile(path, config.installDir),
+            operation,
+          });
+        } catch {
+          // Same swallow rationale as recordFileChangePlanned above.
         }
         // Capture the pre-write content into the rollback ledger so a
         // cancelled / errored run can revert this file. No-op when no

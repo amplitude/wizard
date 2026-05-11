@@ -102,6 +102,91 @@ describe('AgentUI.pushDiscoveryFact (v2: discovery_fact wire emission)', () => {
   });
 });
 
+const eventsOfType = (writes: string[], type: string): NDJSONEvent[] =>
+  writes
+    .map((w) => JSON.parse(w.trim()) as NDJSONEvent)
+    .filter((e) => e.type === type);
+
+describe('AgentUI.emitCurrentFile (v2: now-editing rollup)', () => {
+  let writes: string[];
+  let restore: () => void;
+
+  beforeEach(() => {
+    ({ writes, restore } = setupStdoutSpy());
+  });
+  afterEach(() => restore());
+
+  it('emits a progress: current_file with path/relativePath/operation', () => {
+    const ui = new AgentUI();
+    ui.emitCurrentFile?.({
+      path: '/Users/dev/app/src/index.ts',
+      relativePath: 'src/index.ts',
+      operation: 'modify',
+    });
+    const event = lastEvent(writes);
+    expect(event.type).toBe('progress');
+    expect(event.data).toMatchObject({
+      event: 'current_file',
+      path: '/Users/dev/app/src/index.ts',
+      relativePath: 'src/index.ts',
+      operation: 'modify',
+    });
+    expect(event.data_version).toBe(EVENT_DATA_VERSIONS.current_file);
+  });
+
+  it('debounces repeated emissions for the same (path, op) within 250ms', () => {
+    const ui = new AgentUI();
+    const args = {
+      path: '/abs/foo.ts',
+      relativePath: 'foo.ts',
+      operation: 'modify' as const,
+    };
+    ui.emitCurrentFile?.(args);
+    ui.emitCurrentFile?.(args);
+    ui.emitCurrentFile?.(args);
+    const events = eventsOfType(writes, 'progress').filter(
+      (e) => e.data?.event === 'current_file',
+    );
+    expect(events.length).toBe(1);
+  });
+
+  it('does NOT debounce when the path changes', () => {
+    const ui = new AgentUI();
+    ui.emitCurrentFile?.({
+      path: '/abs/a.ts',
+      relativePath: 'a.ts',
+      operation: 'modify',
+    });
+    ui.emitCurrentFile?.({
+      path: '/abs/b.ts',
+      relativePath: 'b.ts',
+      operation: 'modify',
+    });
+    const events = eventsOfType(writes, 'progress').filter(
+      (e) => e.data?.event === 'current_file',
+    );
+    expect(events.length).toBe(2);
+  });
+
+  it('does NOT debounce when the operation changes', () => {
+    const ui = new AgentUI();
+    ui.emitCurrentFile?.({
+      path: '/abs/a.ts',
+      relativePath: 'a.ts',
+      operation: 'modify',
+    });
+    ui.emitCurrentFile?.({
+      path: '/abs/a.ts',
+      relativePath: 'a.ts',
+      operation: 'create',
+    });
+    const events = eventsOfType(writes, 'progress').filter(
+      (e) => e.data?.event === 'current_file',
+    );
+    expect(events.length).toBe(2);
+  });
+});
+
 // ── EVENT_DATA_VERSIONS registry coherence ─────────────────────────
 //
 // Every new v2 event MUST appear in `EVENT_DATA_VERSIONS`. Asserting
@@ -110,9 +195,12 @@ describe('AgentUI.pushDiscoveryFact (v2: discovery_fact wire emission)', () => {
 // envelope.
 
 describe('EVENT_DATA_VERSIONS (v2 entries registered)', () => {
-  it('registers discovery_fact at version 1', () => {
+  it.each([
+    ['discovery_fact', 1],
+    ['current_file', 1],
+  ] as const)('registers %s at version %d', (event, version) => {
     expect(
-      (EVENT_DATA_VERSIONS as Readonly<Record<string, number>>).discovery_fact,
-    ).toBe(1);
+      (EVENT_DATA_VERSIONS as Readonly<Record<string, number>>)[event],
+    ).toBe(version);
   });
 });

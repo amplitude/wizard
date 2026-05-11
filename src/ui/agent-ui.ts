@@ -1270,6 +1270,58 @@ export class AgentUI implements WizardUI {
     );
   }
 
+  // ── v2 protocol: current_file rollup ────────────────────────────────
+  //
+  // Today every Edit / Write tool call emits its own fine-grained
+  // `tool_call` + `file_change_planned` / `file_change_applied`. That's
+  // great for an audit log but noisy for an orchestrator that just wants
+  // a "now editing X" header. `current_file` is the coarse rollup —
+  // debounced so repeated edits to the same file inside a 250ms window
+  // collapse into a single event. Pinning a per-(path, op) tuple at the
+  // emitter rather than wire-side gives parent agents a stable signal
+  // they can subscribe to without bookkeeping.
+
+  private _lastCurrentFile: {
+    path: string;
+    operation: 'create' | 'modify' | 'delete';
+    at: number;
+  } | null = null;
+  /** Debounce window — same (path, operation) inside this window no-ops. */
+  private static readonly CURRENT_FILE_DEBOUNCE_MS = 250;
+
+  emitCurrentFile(data: {
+    path: string;
+    relativePath: string;
+    operation: 'create' | 'modify' | 'delete';
+  }): void {
+    const now = Date.now();
+    const last = this._lastCurrentFile;
+    if (
+      last &&
+      last.path === data.path &&
+      last.operation === data.operation &&
+      now - last.at < AgentUI.CURRENT_FILE_DEBOUNCE_MS
+    ) {
+      // Same file + op inside the debounce window — drop. The
+      // orchestrator already has a chip for this file; the duplicate
+      // would just churn rendering.
+      return;
+    }
+    this._lastCurrentFile = {
+      path: data.path,
+      operation: data.operation,
+      at: now,
+    };
+    emit('progress', `current_file: ${data.operation} ${data.relativePath}`, {
+      data: {
+        event: 'current_file',
+        path: data.path,
+        relativePath: data.relativePath,
+        operation: data.operation,
+      },
+    });
+  }
+
   // Security: stack traces redacted from NDJSON output to prevent path/secret leakage
   setRunError(error: Error): Promise<boolean> {
     let sanitized: string;

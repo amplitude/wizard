@@ -652,4 +652,23 @@ export interface WizardUI {
     postTokens?: number;
     durationMs?: number;
   }): void;
+
+  /**
+   * Coarse-grained "now editing X" rollup mirroring write-tool calls
+   * onto a single NDJSON event. Distinct from the fine-grained
+   * `tool_call` / `file_change_planned` / `file_change_applied`
+   * series — orchestrators that want a single "active file" header
+   * subscribe to `current_file`; audit-trail consumers keep parsing
+   * the fine-grained events. Debounced to ~1 emission per 250ms per
+   * (path, operation) tuple at the wire boundary.
+   *
+   * Optional — only AgentUI emits to NDJSON. InkUI / LoggingUI no-op
+   * (the TUI already renders an active-file row; CI logs the
+   * per-file plan/apply pair).
+   */
+  emitCurrentFile?(data: {
+    path: string;
+    relativePath: string;
+    operation: 'create' | 'modify' | 'delete';
+  }): void;
 }

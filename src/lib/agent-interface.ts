@@ -2993,7 +2993,10 @@ export async function runAgent(
               // are observers — they never deny or alter SDK behavior. We
               // chain them with our authoritative gates below so the
               // allowlist still runs for every tool call.
-              const inner = createInnerLifecycleHooks({ phase: 'wizard' });
+              const inner = createInnerLifecycleHooks({
+                phase: 'wizard',
+                installDir: agentConfig.workingDirectory,
+              });
               const innerHooks = inner.hooks();
               const gatedPreToolUse = createPreToolUseHook({
                 onCircuitBreakerTripped: config?.onCircuitBreakerTripped,
