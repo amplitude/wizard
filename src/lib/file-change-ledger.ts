@@ -300,6 +300,23 @@ export class FileChangeLedger {
   }
 
   /**
+   * True when {@link rollback} has already run on this ledger.
+   *
+   * Surfaced for the cancel-outro file-state line: the agent-runner's
+   * cleanup hook runs `rollback()` synchronously on the Ctrl+C
+   * (`wizardAbort`) path BEFORE the outro mounts — so the past-tense
+   * "Reverted N files" message is honest there. But screen-initiated
+   * cancels (`/exit`, IntroScreen back-out, etc.) call `setOutroData`
+   * directly without going through `wizardAbort`, so the outro mounts
+   * BEFORE any cleanup fires. In that case the entries are still on
+   * disk; the message must be future-tense ("N files will be reverted
+   * before exit"). Bugbot caught the past-tense lie on PR #741.
+   */
+  hasRolledBack(): boolean {
+    return this.rolledBack;
+  }
+
+  /**
    * Reverse the ledger. Walks entries in last-in-first-out order so a
    * file written then edited is restored from its first-recorded
    * `beforeContent`.
