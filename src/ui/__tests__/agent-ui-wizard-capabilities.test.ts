@@ -325,12 +325,15 @@ describe('wizard_capabilities — emit ordering on the stream', () => {
     expect(capabilitiesIdx).toBeLessThan(coldStartIdx);
   });
 
-  it('only fires once even when called twice (contract is exactly-once but emit is idempotent at the wire)', () => {
-    // The runner wraps the call in try/catch and calls it once.
-    // Defensive: the emitter itself doesn't dedup — a future
-    // double-call from a refactor would double-emit. This test
-    // documents that behaviour so the runner-level invariant
-    // (one call per run) stays the load-bearing contract.
+  it('does not dedup at the wire — a double-call double-emits (runner-level exactly-once is the load-bearing contract)', () => {
+    // The agent-runner wraps the call in try/catch and calls it
+    // exactly once per run. The emitter itself deliberately does NOT
+    // dedup — a future refactor that accidentally added a second
+    // call site would double-emit, and we want that to surface in
+    // an orchestrator's parser instead of being silently swallowed.
+    // This test pins the no-dedup behaviour so a reader who scans
+    // the test name doesn't assume built-in idempotency and then
+    // add a second call site believing it's safe.
     const ui = new AgentUI();
     ui.emitWizardCapabilities();
     ui.emitWizardCapabilities();
