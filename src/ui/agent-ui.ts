@@ -27,6 +27,8 @@ import type {
   SetupCompleteData,
   FileChangeErrorClass,
   ColdStartPhase,
+  MCPStatusServer,
+  MCPStatusState,
 } from '../lib/agent-events';
 import {
   EVENT_DATA_VERSIONS,
@@ -352,6 +354,36 @@ const agentEventSchema = z.object({
   level: z.enum(['info', 'warn', 'error', 'success', 'step']).optional(),
   data_version: z.number().optional(),
   data: z.unknown().optional(),
+});
+
+/**
+ * Per-event Zod schema for `mcp_status` `data` payloads. The
+ * envelope-level `agentEventSchema` checks the outer frame only; this
+ * adds defense-in-depth to the MCP lifecycle event so a misbehaving
+ * caller that ships an invalid `(server, state)` pair gets caught at
+ * the emit boundary rather than poisoning the orchestrator's parser.
+ *
+ * Kept in the AgentUI file (not in `agent-events.ts`) because the
+ * shared types module is import-cycle-sensitive — adding zod usage
+ * there pulls the SDK dependency into every consumer of the agent-
+ * events type bag, including the lightweight TUI screens that don't
+ * need it.
+ */
+const mcpStatusDataSchema = z.object({
+  server: z.enum(['wizard_tools', 'editor_install']),
+  state: z.enum([
+    'unavailable',
+    'available',
+    'needs_auth',
+    'needs_install',
+    'needs_user_choice',
+    'install_skipped',
+    'installed',
+    'failed',
+    'not_applicable',
+  ]),
+  transition_ts: z.number().int().nonnegative(),
+  detail: z.string().optional(),
 });
 
 /**
@@ -1285,6 +1317,50 @@ export class AgentUI implements WizardUI {
         data: payload,
       },
     );
+  }
+
+  // ── PR B7: mcp_status (MCP server lifecycle observability) ─────────
+  //
+  // Today parent agents have no visibility into the wizard's MCP
+  // server state — the in-process `wizard_tools` server boots
+  // silently during cold start, and the `editor_install` flow
+  // silently detects (or doesn't) supported editors and silently
+  // installs (or skips) the editor MCP config. `mcp_status` fires
+  // at every state transition with a `{ server, state,
+  // transition_ts, detail? }` payload so an orchestrator can render
+  // both lifecycles in real time. See `EVENT_DATA_VERSIONS.mcp_status`
+  // and `MCPStatusData` for the full contract.
+
+  emitMcpStatus(data: {
+    server: MCPStatusServer;
+    state: MCPStatusState;
+    transition_ts: number;
+    detail?: string;
+  }): void {
+    // Defense-in-depth: validate the payload before it leaves the
+    // wizard. The envelope-level `agentEventSchema` only checks the
+    // outer frame; this Zod check catches a misbehaving caller that
+    // would otherwise ship a malformed `(server, state)` pair the
+    // orchestrator can't branch on. Failures land in the on-disk
+    // log (same routing as `validateEnvelopeOrLog`); the emit still
+    // proceeds so we don't drop the signal on a typo in `detail`.
+    const parsed = mcpStatusDataSchema.safeParse(data);
+    if (!parsed.success) {
+      try {
+        const issues = parsed.error.issues
+          .map((i) => `${i.path.join('.')}: ${i.message}`)
+          .join('; ');
+        logToFileLazy(
+          `[agent-ui] mcp_status payload failed schema validation — ${issues}; server=${data.server}; state=${data.state}`,
+        );
+      } catch {
+        // never throw from emit
+      }
+      return;
+    }
+    emit('lifecycle', `mcp_status: ${data.server} -> ${data.state}`, {
+      data: { event: 'mcp_status', ...data },
+    });
   }
 
   // ── Session state ───────────────────────────────────────────────────

@@ -440,6 +440,31 @@ export const EVENT_DATA_VERSIONS = {
    * which is cleaner than receiving a zero-valued payload.
    */
   tool_call_summary: 1,
+  /**
+   * `mcp_status` — MCP server lifecycle state transition. Two servers
+   * are tracked: `wizard_tools` (the in-process MCP server the inner
+   * agent calls into) and `editor_install` (the wizard-mcp install
+   * into the user's editor — Claude Code / Cursor / Codex / etc.).
+   *
+   * Today parent agents parsing the NDJSON stream have no visibility
+   * into MCP server state transitions — the wizard silently boots its
+   * in-process server, silently detects (or doesn't) supported editors,
+   * silently installs (or skips) the editor MCP config. This event
+   * fills the gap: a `{ server, state, transition_ts, detail? }`
+   * envelope at every state boundary so an orchestrator can render
+   * "MCP server: available", "Editor install: needs your choice",
+   * "Editor install: skipped", etc. without re-parsing the per-tool
+   * call stream.
+   *
+   * `state` enum covers the v2 foundation DoD list: `unavailable`,
+   * `available`, `needs_auth`, `needs_install`, `needs_user_choice`,
+   * `install_skipped`, `installed`, `failed`, `not_applicable`. Not
+   * every state fires for both servers — `needs_auth` and
+   * `needs_install` are reserved for future editor-install flavours
+   * where the wizard would otherwise be silent about a pre-install
+   * blocker.
+   */
+  mcp_status: 1,
 } as const;
 
 /** All NDJSON event-level types. */
@@ -1491,7 +1516,106 @@ export type InnerAgentLifecycleData =
   | RunResumedData
   | AttemptStartedData
   | ColdStartBreakdownData
-  | ToolCallSummaryData;
+  | ToolCallSummaryData
+  | MCPStatusData;
+
+/**
+ * Which MCP server a `mcp_status` event refers to. Two distinct
+ * lifecycles travel on the same event so an orchestrator can subscribe
+ * to a single envelope and key off `server` to branch:
+ *
+ *   wizard_tools    — the in-process MCP server the inner Claude agent
+ *                     consumes (`createWizardToolsServer`). One per run.
+ *                     Boots during cold start; transitions are
+ *                     `available` (success) or `failed` (boot threw).
+ *
+ *   editor_install  — the wizard-mcp install written into the user's
+ *                     editor config (Claude Code / Cursor / Codex /
+ *                     VS Code / Zed / Windsurf / etc.). Optional: many
+ *                     runs have no detectable editor and surface
+ *                     `not_applicable`; otherwise transitions are
+ *                     `needs_user_choice` → `installed` /
+ *                     `install_skipped` / `failed`.
+ *
+ * Adding a new server kind is a `data_version` bump on `mcp_status`.
+ */
+export type MCPStatusServer = 'wizard_tools' | 'editor_install';
+
+/**
+ * Lifecycle state the MCP server has just transitioned INTO. The full
+ * enum is the v2 foundation DoD list — not every value fires for every
+ * server kind today (see `MCPStatusServer` for the per-server cycle),
+ * but the field is shared so future flows can use the same wire
+ * contract without a schema bump.
+ *
+ *   unavailable        — server is known to exist but cannot be reached
+ *                        right now (config present, network down, etc.)
+ *   available          — server is reachable and ready to accept calls
+ *                        (used by `wizard_tools` on successful boot)
+ *   needs_auth         — server requires the user to complete an auth
+ *                        flow before it can be used
+ *   needs_install      — server is supported on this machine but not
+ *                        yet installed (config absent)
+ *   needs_user_choice  — install requires the user to pick between
+ *                        multiple detected clients (multi-editor flow)
+ *   install_skipped    — user (or CI policy) declined to install
+ *   installed          — install succeeded; server is in the user's
+ *                        editor config
+ *   failed             — terminal failure (boot threw, write errored,
+ *                        permission denied) — `detail` carries the
+ *                        operator-friendly message
+ *   not_applicable     — no supported editor detected on this machine;
+ *                        the install flow is a no-op
+ *
+ * Adding a new state is a `data_version` bump on `mcp_status` —
+ * orchestrators branch on the literal strings.
+ */
+export type MCPStatusState =
+  | 'unavailable'
+  | 'available'
+  | 'needs_auth'
+  | 'needs_install'
+  | 'needs_user_choice'
+  | 'install_skipped'
+  | 'installed'
+  | 'failed'
+  | 'not_applicable';
+
+/**
+ * Wire shape of the `data` field on a `mcp_status` envelope. Emitted
+ * at every MCP-related state transition for both the in-process
+ * `wizard_tools` server and the `editor_install` flow. See
+ * `EVENT_DATA_VERSIONS.mcp_status` for the full contract.
+ *
+ *   server         — which MCP lifecycle this transition belongs to
+ *   state          — the state the server just entered (see
+ *                    `MCPStatusState`)
+ *   transition_ts  — epoch-ms timestamp captured at the transition
+ *                    boundary. Same epoch as `Date.now()`; orchestrators
+ *                    use this to render a timeline of transitions
+ *                    across both servers without correlating against
+ *                    the envelope's ISO `@timestamp`.
+ *   detail         — optional free-form description of the transition.
+ *                    Operator-friendly, not part of the machine
+ *                    contract — orchestrators key off `(server, state)`
+ *                    for branching and surface `detail` verbatim.
+ *                    Examples: "wizard-tools server bootstrapped on
+ *                    stdio", "Claude Code config detected at
+ *                    ~/.claude/mcp.json, install skipped because user
+ *                    chose 'No'".
+ *
+ * The `transition_ts` field uses snake_case (rather than the
+ * camelCase convention used elsewhere) to match the field name called
+ * out in the PR scope document — orchestrators searching for the
+ * wire shape will find it under that literal key.
+ */
+export interface MCPStatusData {
+  event: 'mcp_status';
+  server: MCPStatusServer;
+  state: MCPStatusState;
+  transition_ts: number;
+  detail?: string;
+}
 
 /**
  * Coarse-grained orchestrator-facing phase boundaries for a wizard run.

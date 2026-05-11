@@ -1512,6 +1512,40 @@ export async function initializeAgent(
         skillsBaseUrl: config.skillsBaseUrl,
         statusReporter: () => _activeStatusReporter,
       });
+      // PR B7: emit `mcp_status: wizard_tools/available` once the in-
+      // process server is up. Orchestrators key off this to confirm the
+      // wizard-tools surface is callable; absence of an `available`
+      // event paired with a `failed` event below means the boot threw.
+      // Wrapped so emitter failures never block the actual boot.
+      try {
+        getUI().emitMcpStatus?.({
+          server: 'wizard_tools',
+          state: 'available',
+          transition_ts: Date.now(),
+          detail: 'wizard-tools server bootstrapped on stdio',
+        });
+      } catch {
+        /* mcp_status emission must never block agent bootstrap */
+      }
+    } catch (bootErr) {
+      // PR B7: emit `mcp_status: wizard_tools/failed` BEFORE rethrowing
+      // so the lifecycle event lands on the wire alongside (and
+      // before) any subsequent `run_error` envelope. Without this an
+      // orchestrator would see the run abort without ever knowing the
+      // wizard-tools server was the cause.
+      try {
+        const msg =
+          bootErr instanceof Error ? bootErr.message : String(bootErr);
+        getUI().emitMcpStatus?.({
+          server: 'wizard_tools',
+          state: 'failed',
+          transition_ts: Date.now(),
+          detail: msg,
+        });
+      } catch {
+        /* mcp_status emission must never block error propagation */
+      }
+      throw bootErr;
     } finally {
       emitColdStartPhase('mcp_bootstrap', mcpBootstrapStartedAt);
     }

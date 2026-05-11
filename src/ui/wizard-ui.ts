@@ -840,4 +840,48 @@ export interface WizardUI {
    * stream).
    */
   emitToolCallSummary?(): void;
+
+  /**
+   * MCP server lifecycle state transition. Fires at every state
+   * boundary for both the in-process `wizard_tools` server (one per
+   * run; transitions are `available` on successful boot, `failed`
+   * on boot error) and the `editor_install` flow (zero-or-more per
+   * run; transitions include `not_applicable` when no editor is
+   * detected, `needs_user_choice` when the user is asked to pick a
+   * client, `install_skipped` when they decline, `installed` /
+   * `failed` on the terminal outcome).
+   *
+   * Today parent agents (Claude Code, Codex, Cursor) parsing the
+   * NDJSON stream have no visibility into MCP server state
+   * transitions — the wizard silently boots its in-process server
+   * and silently installs (or skips) editor MCP configs. This event
+   * fills the gap with a `{ server, state, transition_ts, detail? }`
+   * envelope so an orchestrator can render "MCP server: available",
+   * "Editor install: needs your choice", etc.
+   *
+   * `detail` is optional, operator-friendly free text. Orchestrators
+   * branch on `(server, state)` for machine contract and surface
+   * `detail` verbatim to the human. Each call site wraps the emit in
+   * try/catch so a misbehaving emitter never blocks the actual MCP
+   * work — the lifecycle event is observational, not load-bearing.
+   *
+   * Optional — only AgentUI emits to NDJSON. InkUI / LoggingUI no-op
+   * (the TUI shows MCP install state via McpScreen; CI logs the
+   * install / skip messages inline).
+   */
+  emitMcpStatus?(data: {
+    server: 'wizard_tools' | 'editor_install';
+    state:
+      | 'unavailable'
+      | 'available'
+      | 'needs_auth'
+      | 'needs_install'
+      | 'needs_user_choice'
+      | 'install_skipped'
+      | 'installed'
+      | 'failed'
+      | 'not_applicable';
+    transition_ts: number;
+    detail?: string;
+  }): void;
 }
