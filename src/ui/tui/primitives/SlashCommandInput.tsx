@@ -146,11 +146,26 @@ export const SlashCommandInput = ({
         // the user is already at the branch point, e.g. `/d` for
         // /debug + /diagnostics, but the picker stays open so they can
         // disambiguate with the next keystroke).
+        //
+        // IMPORTANT: only consider commands whose `cmd` starts with the
+        // current input — `filtered` ALSO includes description-text
+        // matches (line 64-76 above), which would dilute the LCP. E.g.
+        // typing `/diag` matches both /diagnostics (cmd-prefix) AND
+        // /debug (description contains "diag"); naive LCP across both
+        // is `/d`, shorter than `/diag` itself — so Tab would be a
+        // no-op when the user explicitly wants /diagnostics filled in.
         if (isSlashMode && filtered.length > 0) {
-          const lcp = longestCommonPrefix(filtered.map((c) => c.cmd));
-          if (lcp.length > value.length) {
-            setValue(lcp);
-            setSelectedIndex(0);
+          const lcpCandidates = filtered.filter((c) =>
+            c.cmd.startsWith(value),
+          );
+          if (lcpCandidates.length > 0) {
+            const lcp = longestCommonPrefix(
+              lcpCandidates.map((c) => c.cmd),
+            );
+            if (lcp.length > value.length) {
+              setValue(lcp);
+              setSelectedIndex(0);
+            }
           }
         }
         return;

@@ -89,6 +89,51 @@ describe('SlashCommandInput Tab autocomplete', () => {
     view.unmount();
   });
 
+  it('ignores description-text matches when computing the LCP (Bugbot fix)', async () => {
+    // Regression for the Bugbot finding on PR #713 / #712: `filtered`
+    // includes commands whose description text contains the query,
+    // not just commands whose `cmd` starts with it. Pre-fix, `/diag`
+    // + Tab was a no-op because /debug's description contained
+    // "diag…" and the LCP across [/diagnostics, /debug] collapsed to
+    // `/d` — shorter than the input `/diag`. The fix filters LCP
+    // candidates to commands whose `cmd` starts with the current
+    // input.
+    const cmdsWithCollidingDesc = [
+      { cmd: '/debug', desc: 'Print a diagnostic snapshot (safe to share)' },
+      {
+        cmd: '/diagnostics',
+        desc: 'Show wizard storage paths (log file, cache, project meta dir)',
+      },
+    ];
+    let submitted: string | null = null;
+
+    const view = render(
+      <SlashCommandInput
+        commands={cmdsWithCollidingDesc}
+        isActive
+        onSubmit={(v) => {
+          submitted = v;
+        }}
+        onDeactivate={() => {}}
+      />,
+    );
+    await waitForFrame();
+    await waitForFrame();
+
+    view.stdin.write('/diag');
+    await waitForFrame();
+    view.stdin.write(TAB);
+    await waitForFrame();
+
+    const frame = sanitize(view.lastFrame());
+    expect(frame).toContain('/diagnostics');
+
+    view.stdin.write('\r');
+    await waitForFrame();
+    expect(submitted).toBe('/diagnostics');
+    view.unmount();
+  });
+
   it('is a no-op when no filtered options match', async () => {
     let submitted: string | null = null;
 
