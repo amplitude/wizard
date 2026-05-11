@@ -182,3 +182,47 @@ describe('ConsoleView slash command dispatch — /version', () => {
     unmount();
   });
 });
+
+describe('ConsoleView screenError key handling', () => {
+  it('R clears screenError (existing shortcut still works)', async () => {
+    const store = makeStore();
+    store.setScreenError(new Error('boom'));
+
+    const { stdin, unmount } = render(
+      <ConsoleView store={store} width={80} height={24} />,
+    );
+    // Yield so the dormant useInput handler mounts and sees screenError.
+    await new Promise((r) => setTimeout(r, 10));
+
+    expect(store.screenError).not.toBeNull();
+
+    stdin.write('r');
+    await new Promise((r) => setTimeout(r, 20));
+
+    expect(store.screenError).toBeNull();
+    unmount();
+  });
+
+  it('Enter clears screenError (regression: banner shows [R] retry but users press Enter)', async () => {
+    // PR A13 / audit iteration #10: the screen-error banner advertises
+    // [R] retry, but the keyboard handler only matched 'r'/'R'. Users
+    // focused on a prompt below the banner often try Enter as the
+    // default action — accept it as a retry trigger.
+    const store = makeStore();
+    store.setScreenError(new Error('boom'));
+
+    const { stdin, unmount } = render(
+      <ConsoleView store={store} width={80} height={24} />,
+    );
+    await new Promise((r) => setTimeout(r, 10));
+
+    expect(store.screenError).not.toBeNull();
+
+    // `\r` is what ink-testing-library maps to key.return.
+    stdin.write('\r');
+    await new Promise((r) => setTimeout(r, 20));
+
+    expect(store.screenError).toBeNull();
+    unmount();
+  });
+});
