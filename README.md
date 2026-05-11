@@ -140,20 +140,75 @@ npx @amplitude/wizard --agent             # run the full wizard in NDJSON mode
 > globally installed (`npm install -g @amplitude/wizard`), the shorter
 > `amplitude-wizard` bin resolves to the same entry point.
 
-**Authentication in-the-loop.** OAuth login requires a browser click — that's
-the one moment a human has to step in. Everything else is scriptable:
+**Authentication in-the-loop.** Pick the mode that matches how much
+human-in-the-loop you can tolerate. Only Option 2 requires a browser click;
+Options 1, 3, and 4 are fully scriptable:
 
 ```bash
-# Option 1: inline project API key (preferred for CI / full automation)
+# Option 1: inline project API key (preferred for CI / full automation
+# against an existing Amplitude project)
 npx @amplitude/wizard --agent --install-dir . --api-key <key>
 
-# Option 2: prior login on the same machine, then run
+# Option 2: prior interactive login on the same machine, then run
 npx @amplitude/wizard login                 # one-time browser click
 npx @amplitude/wizard --agent --install-dir .
 
 # Option 3: read the stored OAuth token for other scripts
 npx @amplitude/wizard auth token            # stdout: <access-token>
+
+# Option 4: zero-touch — create a brand-new Amplitude account and app
+# inline, no browser click, no prior login. Suitable for AI coding agents
+# bootstrapping a project from scratch.
+#
+# ⚠️ --accept-tos programmatically accepts Amplitude's Terms of Service
+#    on the user's behalf. AI agents MUST confirm consent with the human
+#    before passing it — do not default it on.
+# ⚠️ --region picks the data-center region (US or EU) for the new
+#    account and has data-residency implications. AI agents MUST ask the
+#    human which region they want — do not default to us or eu on their
+#    behalf.
+npx @amplitude/wizard --agent \
+  --auth-onboarding create-account \
+  --email <new-account-email> \
+  --full-name "<Full Name>" \
+  --accept-tos \
+  --region <us|eu> \
+  --app-name "<app name>" \
+  -y
 ```
+
+Option 4 notes:
+
+- `--auth-onboarding create-account` switches OAuth from sign-in to a
+  direct signup path; the wizard logs `Direct signup succeeded; using
+  newly created account.` on success.
+- `--email`, `--full-name`, `--accept-tos`, and `--region` are all
+  **required** when combining `create-account` with `--agent` / `--ci`
+  (the wizard has no TTY to prompt for them).
+- `--app-name` triggers app creation under the new account in agent
+  mode. Omit it only if you intend to bind to an existing app via
+  `--app-id`.
+- ⚠️ **`--accept-tos` programmatically accepts Amplitude's
+  [Terms of Service](https://amplitude.com/terms) on the user's behalf.**
+  AI coding agents and orchestrators **must not** pass this flag without
+  explicit consent from the human whose account is being created — the
+  ToS acceptance is legally binding on them, not on the agent. Treat it
+  the same as a click-through "I agree" checkbox: ask first, pass the
+  flag only after the user has confirmed they've read and accepted the
+  terms. Omitting the flag in `--agent` / `--ci` mode is a hard error,
+  which is the intended safeguard.
+- ⚠️ **`--region` (`us` or `eu`) selects the data center for the new
+  account and has data-residency implications.** AI coding agents and
+  orchestrators **must not** default this flag on the human's behalf —
+  ask the human which region applies to them (regulatory requirements,
+  internal data-handling policies, or simply where their other Amplitude
+  data already lives) and pass the chosen value verbatim.
+- `--agent` already implies `--auto-approve`; `-y` is still needed to
+  grant the inner agent write capability.
+- **Do not pipe `--agent` output through `head`, `tail`, or `grep`** —
+  SIGPIPE will kill the inner setup agent mid-run. Redirect to a file
+  (`> wizard.log 2>&1`) and tail it separately. If a run is interrupted,
+  resume with `npx @amplitude/wizard --agent --resume -y`.
 
 **Agent-friendly verbs:**
 
@@ -242,6 +297,14 @@ surface the instruction to the human, trigger the login, then re-run:
 
 Reason values: `no_stored_credentials`, `token_expired`, `refresh_failed`,
 `env_selection_failed`.
+
+> **Tip for orchestrators:** on `no_stored_credentials`, an alternative
+> to surfacing the `loginCommand` to the human is to re-invoke with the
+> Option 4 flags above (`--auth-onboarding create-account` + `--email`,
+> `--full-name`, `--accept-tos`, `--region`, `--app-name`) to create a
+> fresh account inline. Note this is not zero-prompt: `--accept-tos` and
+> `--region` are user-facing decisions (ToS consent, data residency) —
+> ask the human for both before passing them.
 
 **Nested-invocation signal.** Running the wizard from inside another AI
 coding agent session is supported. The wizard spawns its own agent
@@ -367,11 +430,18 @@ project — handy for filing bug reports.
 |------|---------|-------------|
 | `--debug` | `AMPLITUDE_WIZARD_DEBUG` | Enable verbose logging |
 | `--verbose` | `AMPLITUDE_WIZARD_VERBOSE` | Print diagnostic info to the log |
-| `--auth-onboarding` | `AMPLITUDE_WIZARD_AUTH_ONBOARDING` | **Interactive TUI:** pick “Continue — sign in” or “Continue — create…” on Intro (writes the same `authOnboardingPath` as this flag). **CI / `--agent` / no TTY:** pass `sign-in` (default) or `create-account` so OAuth follows the right path. Legacy env `AMPLITUDE_WIZARD_SIGNUP=1` maps to `create-account`. |
+| `--auth-onboarding` | `AMPLITUDE_WIZARD_AUTH_ONBOARDING` | **Interactive TUI:** pick “Continue — sign in” or “Continue — create…” on Intro (writes the same `authOnboardingPath` as this flag). **CI / `--agent` / no TTY:** pass `sign-in` (default) or `create-account` so OAuth follows the right path. `create-account` enables a direct signup (no browser click) when paired with the four flags below. Legacy env `AMPLITUDE_WIZARD_SIGNUP=1` maps to `create-account`. |
+| `--email <addr>` | — | Email for the new account. Required with `--auth-onboarding create-account` in `--ci` / `--agent`. |
+| `--full-name "<name>"` | — | Full name for the new account. Required with `--auth-onboarding create-account` in `--ci` / `--agent`. |
+| `--accept-tos` | — | **Programmatically accepts Amplitude's [Terms of Service](https://amplitude.com/terms) on the user's behalf.** Required with `--auth-onboarding create-account` in `--ci` / `--agent`. AI agents must not pass this flag without explicit user consent — ToS acceptance is legally binding on the human, not the agent. Treat it as a click-through "I agree" checkbox: confirm with the user first. |
+| `--region` / `--zone` | — | **Data-center region (`us` or `eu`) for the new account — has data-residency implications.** Required with `--auth-onboarding create-account` in `--ci` / `--agent`. AI agents must not default this flag on the human's behalf — ask the human which region applies to them and pass the chosen value verbatim. |
+| `--app-name <name>` | — | Name for a new Amplitude app. Creates one when no apps exist, or whenever used with `--ci` / `--agent`. |
+| `--app-id <id>` | — | Numeric Amplitude app ID (e.g. `769610`). The only scope flag agents need against an existing app — org, project, and env are derived automatically. |
 | `--local-mcp` | `AMPLITUDE_WIZARD_LOCAL_MCP` | Use local MCP server at `http://localhost:8787/mcp` |
 | `--ci` | `AMPLITUDE_WIZARD_CI` | Non-interactive execution |
 | `--api-key <key>` | `AMPLITUDE_WIZARD_API_KEY` | Amplitude API key (skips OAuth) |
 | `--project-id <id>` | `AMPLITUDE_WIZARD_PROJECT_ID` | Amplitude project ID |
+| `--resume` | — | Load the saved checkpoint and skip already-completed setup steps (useful after a SIGPIPE or interrupted run). |
 
 ### Wizard options
 
