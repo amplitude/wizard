@@ -612,6 +612,42 @@ export class AgentUI implements WizardUI {
   }
 
   /**
+   * Emit a structured `error` envelope with a machine-readable `code`
+   * discriminator. Used by the explicit AgentErrorType branches in
+   * `agent-runner.ts` (GATEWAY_DOWN, RATE_LIMIT, MCP_MISSING, etc.) to
+   * give the orchestrator a precise next-step hint without parsing the
+   * sanitized message string. Pairs with the subsequent `run_completed`
+   * envelope from `wizardAbort`. Wire shape mirrors `setRunError` plus
+   * the typed `code` + optional `mcpServer` discriminator.
+   */
+  emitRunError(data: {
+    message: string;
+    code:
+      | 'GATEWAY_DOWN'
+      | 'GATEWAY_INVALID_REQUEST'
+      | 'RATE_LIMIT'
+      | 'API_ERROR'
+      | 'MCP_MISSING'
+      | 'RESOURCE_MISSING';
+    mcpServer?: 'wizard-tools' | 'amplitude-wizard';
+    recoverable?: RecoverableHint;
+    suggestedAction?: SuggestedAction;
+  }): void {
+    emit('error', data.message, {
+      level: 'error',
+      data: {
+        event: 'run_error',
+        code: data.code,
+        ...(data.mcpServer ? { mcpServer: data.mcpServer } : {}),
+        recoverable: data.recoverable ?? 'fatal',
+        ...(data.suggestedAction
+          ? { suggestedAction: data.suggestedAction }
+          : {}),
+      },
+    });
+  }
+
+  /**
    * Emit a `lifecycle: auth_retry_exhausted` event at the SDK
    * retry-loop boundary. Pairs with the eventual AUTH_ERROR /
    * `auth_required` follow-on — sees that exhaustion happened BEFORE

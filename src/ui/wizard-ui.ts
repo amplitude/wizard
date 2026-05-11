@@ -415,6 +415,33 @@ export interface WizardUI {
   }): void;
 
   /**
+   * Emit a structured `error` envelope tagged with a machine-readable
+   * `code` discriminator (`GATEWAY_DOWN`, `RATE_LIMIT`, `MCP_MISSING`,
+   * etc.). Distinct from `setRunError`, which classifies arbitrary
+   * caught Errors via pattern match — `emitRunError` is for the
+   * runner's explicit AgentErrorType branches where we know the kind
+   * upfront and can hand the orchestrator a precise remediation hint
+   * without parsing the message string.
+   *
+   * Optional — only AgentUI emits. InkUI / LoggingUI no-op since the
+   * Outro / log path already covers their UX. The eventual
+   * `run_completed` envelope still lands via `wizardAbort` regardless.
+   */
+  emitRunError?(data: {
+    message: string;
+    code:
+      | 'GATEWAY_DOWN'
+      | 'GATEWAY_INVALID_REQUEST'
+      | 'RATE_LIMIT'
+      | 'API_ERROR'
+      | 'MCP_MISSING'
+      | 'RESOURCE_MISSING';
+    mcpServer?: 'wizard-tools' | 'amplitude-wizard';
+    recoverable?: 'retry' | 'reinvoke_with_flag' | 'human_required' | 'fatal';
+    suggestedAction?: { command?: string[]; docsUrl?: string };
+  }): void;
+
+  /**
    * Emit a `setup_context` event carrying the resolved Amplitude scope
    * (region, org, project, app, env) at a known phase boundary.
    * Optional because only AgentUI emits to NDJSON — InkUI / LoggingUI

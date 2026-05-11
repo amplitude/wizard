@@ -2015,4 +2015,63 @@ describe('AgentUI — Zod envelope validation on every emit', () => {
     });
     expect(event.data_version).toBe(1);
   });
+
+  // Parameterized over the typed `code` discriminators surfaced by
+  // `emitRunError`. Lets orchestrators key off `data.code` instead of
+  // pattern-matching message text to disambiguate "back off"
+  // (RATE_LIMIT) from "retry" (GATEWAY_DOWN) from "upgrade wizard"
+  // (GATEWAY_INVALID_REQUEST) from "fix permission" (MCP_MISSING /
+  // RESOURCE_MISSING).
+  const errorCodeCases: Array<{
+    code:
+      | 'GATEWAY_DOWN'
+      | 'GATEWAY_INVALID_REQUEST'
+      | 'RATE_LIMIT'
+      | 'API_ERROR'
+      | 'MCP_MISSING'
+      | 'RESOURCE_MISSING';
+    recoverable: 'retry' | 'reinvoke_with_flag' | 'human_required' | 'fatal';
+    mcpServer?: 'wizard-tools' | 'amplitude-wizard';
+  }> = [
+    { code: 'GATEWAY_DOWN', recoverable: 'retry' },
+    { code: 'GATEWAY_INVALID_REQUEST', recoverable: 'fatal' },
+    { code: 'RATE_LIMIT', recoverable: 'retry' },
+    { code: 'API_ERROR', recoverable: 'retry' },
+    {
+      code: 'MCP_MISSING',
+      recoverable: 'retry',
+      mcpServer: 'amplitude-wizard',
+    },
+    {
+      code: 'RESOURCE_MISSING',
+      recoverable: 'retry',
+      mcpServer: 'wizard-tools',
+    },
+  ];
+
+  for (const c of errorCodeCases) {
+    it(`emitRunError(${c.code}) lands a typed envelope with data.code + recoverable hint`, () => {
+      const ui = new AgentUI();
+      ui.emitRunError({
+        message: `${c.code} boom`,
+        code: c.code,
+        ...(c.mcpServer ? { mcpServer: c.mcpServer } : {}),
+        recoverable: c.recoverable,
+      });
+      const event = JSON.parse(writes[0].trim());
+      expect(event.type).toBe('error');
+      expect(event.data).toMatchObject({
+        event: 'run_error',
+        code: c.code,
+        recoverable: c.recoverable,
+      });
+      if (c.mcpServer) {
+        expect(event.data.mcpServer).toBe(c.mcpServer);
+      } else {
+        expect(event.data).not.toHaveProperty('mcpServer');
+      }
+      // Registry stamp shared with setRunError's run_error.
+      expect(event.data_version).toBe(1);
+    });
+  }
 });
