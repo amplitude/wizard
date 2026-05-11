@@ -288,7 +288,24 @@ export const applyCommand: CommandModule = {
         } else {
           getUI().log.error(msg);
         }
-        process.exit(ExitCode.INVALID_ARGS);
+        // Emit the terminal `run_completed` envelope BEFORE the
+        // process.exit so an orchestrator parsing the NDJSON stream
+        // sees the canonical lock-collision signal instead of an
+        // abrupt EOF. Previously this path silently exited with code
+        // 2 (INVALID_ARGS), which orchestrators routinely interpret
+        // as "you passed bad flags" — false positive for lock
+        // contention, which is automatically retryable.
+        try {
+          getUI().emitRunCompleted?.({
+            outcome: 'error',
+            exitCode: ExitCode.LOCK_HELD,
+            durationMs: 0,
+            reason: 'lock_held',
+          });
+        } catch {
+          // best-effort — never block process.exit on terminal-event emission.
+        }
+        process.exit(ExitCode.LOCK_HELD);
       }
       // Release the lock on any exit path. Both `process.on('exit')`
       // and the explicit `child.on('exit')` below cover the spawn-
