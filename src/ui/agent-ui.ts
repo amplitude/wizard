@@ -42,12 +42,19 @@ import {
   type RecoverableHint,
   type SuggestedAction,
   type ToolCallOutcome,
+  type WizardCapabilitiesPaths,
 } from '../lib/agent-events';
 import { registerSetupComplete } from '../lib/setup-complete-registry';
 import { createInterface } from 'readline';
 import { z } from 'zod';
 import { installPipeErrorHandlers, safePipeWrite } from '../utils/pipe-errors';
 import { toWizardDashboardOpenUrl } from '../utils/dashboard-open-url';
+import {
+  getCacheRoot,
+  getLogFile,
+  getRunDir,
+  getStructuredLogFile,
+} from '../utils/storage-paths';
 
 // Belt-and-suspenders: bin.ts also installs these. Idempotent, so a
 // second call from this module covers test harnesses and any other
@@ -1364,7 +1371,7 @@ export class AgentUI implements WizardUI {
     });
   }
 
-  // ── PR B8: wizard_capabilities (startup announcement) ───────────────
+  // ── PR B17: wizard_capabilities (startup announcement + paths) ────
   //
   // Emitted exactly once per run, as the FIRST orchestrator-facing
   // envelope after `run_started` and BEFORE `run_phase: cold_start`.
@@ -1382,8 +1389,18 @@ export class AgentUI implements WizardUI {
   // only `WizardUI` implementation that emits NDJSON. The field is
   // on the contract (see `WizardCapabilitiesMode`) so future CI /
   // interactive emitters don't need a schema bump.
+  //
+  // `paths` (v2) carries the per-project artifact paths derived
+  // from `src/utils/storage-paths.ts` so a CI orchestrator can
+  // upload `~/.amplitude/wizard/runs/<hash>/log.txt` as a build
+  // artifact without replicating the `sha256(installDir)` hashing
+  // logic. Closes Agent-Mode Auditor A5 High-severity finding. The
+  // block is OMITTED from the envelope when `installDir` is
+  // unresolvable at emit time — orchestrators key off field
+  // presence (`if (data.paths)`) rather than checking for empty
+  // strings.
 
-  emitWizardCapabilities(): void {
+  emitWizardCapabilities(data?: { installDir?: string }): void {
     // Snapshot the registry as a plain object so JSON.stringify
     // produces stable, insertion-ordered output (the registry is
     // declared as a `const` literal — its key order is the
@@ -1392,6 +1409,37 @@ export class AgentUI implements WizardUI {
       ...EVENT_DATA_VERSIONS,
     };
     const supportedEvents = Object.keys(EVENT_DATA_VERSIONS).sort();
+    // Resolve per-project paths via the canonical storage-paths
+    // helpers. When `installDir` isn't resolvable (very unlikely —
+    // capabilities is emitted right after `run_started`), omit the
+    // field entirely rather than emit empty strings so consumers
+    // can rely on `data.paths` presence as the has-paths signal.
+    // `getCacheRoot()` is unconditional (per-user, not per-project)
+    // but is grouped under `paths` for a single coherent block.
+    let paths: WizardCapabilitiesPaths | undefined;
+    const installDir = data?.installDir;
+    if (typeof installDir === 'string' && installDir.length > 0) {
+      try {
+        paths = {
+          logFile: getLogFile(installDir),
+          logFileNdjson: getStructuredLogFile(installDir),
+          runDir: getRunDir(installDir),
+          cacheRoot: getCacheRoot(),
+        };
+      } catch (err) {
+        // never throw from emit — the announcement is purely
+        // observational. Drop `paths` rather than block the envelope.
+        try {
+          logToFileLazy(
+            `[agent-ui] emitWizardCapabilities: paths resolution failed — ${
+              err instanceof Error ? err.message : String(err)
+            }`,
+          );
+        } catch {
+          // swallow
+        }
+      }
+    }
     emit(
       'lifecycle',
       `wizard_capabilities: protocol v${WIZARD_PROTOCOL_VERSION}, ${supportedEvents.length} events`,
@@ -1402,6 +1450,7 @@ export class AgentUI implements WizardUI {
           eventDataVersions,
           supportedEvents,
           mode: 'agent',
+          ...(paths ? { paths } : {}),
         },
       },
     );
