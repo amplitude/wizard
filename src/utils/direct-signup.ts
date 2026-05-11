@@ -146,7 +146,10 @@ const DocumentEntrySchema = z.object({
 
 const TermsAcceptanceDocsSchema = z
   .array(DocumentEntrySchema)
-  .length(2)
+  // Length derives from KNOWN_DOC_KINDS so adding a new kind doesn't
+  // leave a stale magic number behind. Today: 2. Tomorrow: whatever
+  // KNOWN_DOC_KINDS becomes.
+  .length(KNOWN_DOC_KINDS.length)
   .transform((docs, ctx) => {
     const map: Partial<Record<DocKind, string>> = {};
     for (const d of docs) map[d.kind] = d.url;

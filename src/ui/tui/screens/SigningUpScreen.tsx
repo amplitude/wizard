@@ -172,7 +172,7 @@ export const SigningUpScreen = ({ store }: SigningUpScreenProps) => {
               case 'full_name':
                 return fullName !== null;
               case 'terms_acceptance':
-                return store.session.tosAccepted === true;
+                return session.tosAccepted === true;
               default:
                 return assertNever(field);
             }
