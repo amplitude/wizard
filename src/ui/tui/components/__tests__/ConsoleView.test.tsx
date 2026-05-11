@@ -296,3 +296,38 @@ describe('ConsoleView screenError key handling', () => {
     unmount();
   });
 });
+
+describe('ConsoleView slash command dispatch — /version', () => {
+  it('renders wizard + protocol + Node lines after /version is submitted', async () => {
+    // Pin: typing `/version<Enter>` must land the multi-line version
+    // summary in commandFeedback so the user can grab the values
+    // without exiting the TUI. Catches accidental removal of the case
+    // from the switch statement in executeCommand.
+    const store = makeStore();
+
+    const { stdin, unmount } = render(
+      <ConsoleView store={store} width={80} height={24} />,
+    );
+
+    // Wait one tick so the dormant useInput handler mounts.
+    await new Promise((r) => setTimeout(r, 10));
+
+    // `/` activates the slash console with `/` as the seed.
+    stdin.write('/');
+    await new Promise((r) => setTimeout(r, 20));
+    // Type the rest of the command.
+    stdin.write('version');
+    await new Promise((r) => setTimeout(r, 20));
+    // Submit. `\r` is what ink-testing-library maps to `key.return`.
+    stdin.write('\r');
+    // Give the dispatch + setCommandFeedback round-trip a tick.
+    await new Promise((r) => setTimeout(r, 30));
+
+    const feedback = store.commandFeedback ?? '';
+    expect(feedback).toContain('Amplitude Wizard v');
+    expect(feedback).toContain('Agent-mode protocol: v');
+    expect(feedback).toContain(`Node: ${process.version}`);
+
+    unmount();
+  });
+});
