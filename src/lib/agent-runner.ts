@@ -9,6 +9,7 @@ import {
   type AdditionalFeature,
   ADDITIONAL_FEATURE_PROMPTS,
   ADDITIONAL_FEATURE_LABELS,
+  DiscoveredFeature,
   INLINE_FEATURES,
   isCreateAccountOnboarding,
 } from './wizard-session';
@@ -1069,6 +1070,24 @@ async function runAgentWizardBody(
     label: 'Region',
     value: cloudRegion.toUpperCase(),
   });
+
+  // Stripe detection used to surface as a banner under the Progress
+  // tab task list ("Stripe detected — add as data source: <url>")
+  // rendered by ConditionalTips. ConditionalTips was deleted alongside
+  // the always-rendered Events tab + RunScreen simplification; the
+  // Stripe affordance moves here so it sits alongside the other
+  // discovery facts (framework, package manager, project, region) and
+  // can rely on the resolved zone + orgId being present.
+  if (session.discoveredFeatures.includes(DiscoveredFeature.Stripe)) {
+    const stripeUrl = OUTBOUND_URLS.stripeDataSource(
+      cloudRegion,
+      session.selectedOrgId ?? null,
+    );
+    publishDiscoveryFact('stripe', {
+      label: 'Stripe',
+      value: `detected — connect as data source: ${stripeUrl}`,
+    });
+  }
 
   // Detect project size up-front and let `buildPreflightContext` make the
   // gate decision. Internal LLM-reliability research recommends a JIT-

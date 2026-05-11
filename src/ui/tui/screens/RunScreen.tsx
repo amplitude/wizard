@@ -3,7 +3,7 @@
  *
  * Tabs:
  *   - Progress (default): full-width ProgressList, elapsed timer, currently
- *     editing file, inline event plan, and compact conditional tips
+ *     editing file, and the FinalizingPanel for post-agent steps
  *   - Events: the event plan the agent proposed (placeholder pre-plan)
  *   - Logs: LogViewer tailing the wizard log file
  *
@@ -12,11 +12,12 @@
  *
  * Queued additional features (LLM, Session Replay) appear in the task list
  * as pending → in_progress → completed items as the stop hook drains the
- * queue. Stripe stays a passive doc-link tip when detected.
+ * queue. Stripe surfaces as a DiscoveryFact ('stripe') pushed by
+ * agent-runner alongside framework / region / package-manager.
  */
 
 import { Box, Text } from 'ink';
-import { useState, useEffect, useRef, type ReactNode } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useWizardStore } from '../hooks/useWizardStore.js';
 import { useScreenHints } from '../hooks/useScreenHints.js';
 import { useTimedCoaching } from '../hooks/useTimedCoaching.js';
@@ -27,7 +28,6 @@ import {
   ProgressList,
   LogViewer,
   EventPlanViewer,
-  TerminalLink,
 } from '../primitives/index.js';
 import type { ProgressItem } from '../primitives/index.js';
 import { Colors, Icons, SPINNER_FRAMES, SPINNER_INTERVAL } from '../styles.js';
@@ -38,13 +38,10 @@ import { ActiveTaskSubsteps } from '../components/ActiveTaskSubsteps.js';
 import { DiscoveryFeed } from '../components/DiscoveryFeed.js';
 import { resolveRunStatusPill } from './run-status-pill.js';
 import { useStdoutDimensions } from '../hooks/useStdoutDimensions.js';
-import { useResolvedZone } from '../hooks/useResolvedZone.js';
-import { DiscoveredFeature } from '../../../lib/wizard-session.js';
 import {
   ADDITIONAL_FEATURE_LABELS,
   TRAILING_FEATURES,
 } from '../session-constants.js';
-import { OUTBOUND_URLS } from '../../../lib/constants.js';
 import { linkify } from '../utils/terminal-rendering.js';
 import path from 'node:path';
 import { getLogFile } from '../../../utils/storage-paths.js';
@@ -140,63 +137,6 @@ interface RunScreenProps {
 export function resolveRunScreenStatus(store: WizardStore): string | undefined {
   return resolveRunStatusPill(store);
 }
-
-/** Vertical list of planned event names + descriptions. */
-const InlineEventPlan = ({ store }: { store: WizardStore }) => {
-  const events = store.eventPlan.filter((e) => e.name);
-  if (events.length === 0) return null;
-
-  // Vertical bullet list. The Progress tab has a screen-full of
-  // empty space below the active task list once Wiring is the
-  // focused step; the previous single-line `truncate-end` row
-  // stuffed every event name into one truncated line ending in
-  // "…" even when there were 30 free rows below it. Now each
-  // event gets its own row with name + description on a soft-wrap
-  // boundary so long names stay readable and the user can audit
-  // the plan they just approved without flipping to /events.
-  return (
-    <Box flexDirection="column" marginTop={1}>
-      <Text bold color={Colors.accent}>
-        {Icons.diamond} Events ({events.length})
-      </Text>
-      {events.map((e, i) => (
-        <Box key={`${e.name}-${i}`} flexDirection="row">
-          <Text color={Colors.muted}> · </Text>
-          <Box flexDirection="column" flexGrow={1}>
-            <Text color={Colors.secondary}>
-              <Text bold>{e.name}</Text>
-              {e.description ? (
-                <Text color={Colors.muted}> — {e.description}</Text>
-              ) : null}
-            </Text>
-          </Box>
-        </Box>
-      ))}
-    </Box>
-  );
-};
-
-/** Compact conditional tips — Stripe doc link only (other features are queued tasks). */
-const ConditionalTips = ({ store }: { store: WizardStore }) => {
-  const { discoveredFeatures, selectedOrgId } = store.session;
-  const zone = useResolvedZone(store.session);
-  const tips: ReactNode[] = [];
-
-  if (discoveredFeatures.includes(DiscoveredFeature.Stripe)) {
-    const stripeUrl = OUTBOUND_URLS.stripeDataSource(zone, selectedOrgId);
-    tips.push(
-      <Text key="stripe" color={Colors.secondary}>
-        <Text color={Colors.accent}>{Icons.diamond}</Text> Stripe detected
-        {Icons.dash} add as data source:{' '}
-        <TerminalLink url={stripeUrl}>{stripeUrl}</TerminalLink>
-      </Text>,
-    );
-  }
-
-  if (tips.length === 0) return null;
-
-  return <Box flexDirection="column">{tips}</Box>;
-};
 
 /** The main Progress tab content. */
 // The wide-terminal threshold below which we collapse the right column
@@ -528,14 +468,15 @@ const ProgressTab = ({ store }: { store: WizardStore }) => {
             the "main agent work done" milestone intact while still
             surfacing the work happening between agent completion and
             the MCP/Verify screens. Empty until agent-runner seeds the
-            queue, so it's a no-op during the agent run itself. */}
+            queue, so it's a no-op during the agent run itself.
+
+            The previous InlineEventPlan + ConditionalTips panels lived
+            under FinalizingPanel; both were dropped in the v3
+            foundation pass — the Events tab is the canonical home for
+            the planned event list, and the Stripe doc link surfaces as
+            a 'stripe' DiscoveryFact pushed by agent-runner (which has
+            the orgId + zone the link template requires). */}
         <FinalizingPanel steps={store.session.postAgentSteps} />
-
-        {/* Inline event plan */}
-        <InlineEventPlan store={store} />
-
-        {/* Compact conditional tips */}
-        <ConditionalTips store={store} />
         </Box>
 
         {/* Right column: Discovered facts panel (real status), replacing

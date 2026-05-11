@@ -450,18 +450,19 @@ describe('RunScreen — Progress tab dead-vertical-space invariant', () => {
     expect(frame).not.toMatch(/Snake/);
   });
 
-  it('Events tab content updates when the event plan goes from empty to populated', () => {
+  it('does NOT render ConditionalTips Stripe banner under the task list (moved to DiscoveryFeed)', async () => {
+    // Pre-fix: when Stripe was in discoveredFeatures, RunScreen
+    // rendered an inline "Stripe detected — add as data source: <url>"
+    // banner under the task list. The Events tab + DiscoveryFeed
+    // consolidation moved that affordance into a stable 'stripe'
+    // DiscoveryFact pushed by agent-runner. RunScreen no longer
+    // references DiscoveredFeature.Stripe at all.
     mockedDims = [120, 40];
-
-    // Switch to the Events tab via the store's requestedTab hook, then
-    // populate the plan and assert the agent's events appear.
     const store = seedColdStartProgressStore();
-    expect(store.eventPlan.length).toBe(0);
-    store.setEventPlan([
-      { name: 'Signup Complete', description: 'User finished onboarding' },
-      { name: 'Purchase', description: 'Order placed' },
-    ]);
-    store.setRequestedTab('events');
+    const { DiscoveredFeature: DF } = await import(
+      '../../../../lib/wizard-session.js'
+    );
+    store.addDiscoveredFeature(DF.Stripe);
 
     const { lastFrame, unmount } = render(
       <Box width={120} height={30} flexDirection="column">
@@ -470,6 +471,42 @@ describe('RunScreen — Progress tab dead-vertical-space invariant', () => {
     );
     const frame = stripAnsi(lastFrame() ?? '');
     unmount();
+
+    // The old banner text used "Stripe detected — add as data source:".
+    expect(frame).not.toMatch(/Stripe detected/);
+    expect(frame).not.toMatch(/add as data source/);
+    // Task list still renders normally — Tasks header is the canary.
+    expect(frame).toMatch(/0 done .* 4 to go/);
+  });
+
+  it('Events tab content updates when the event plan goes from empty to populated', async () => {
+    mockedDims = [120, 40];
+
+    // Switch to the Events tab via the store's requestedTab hook, then
+    // populate the plan and assert the agent's events appear. We use
+    // a 2-frame wait (useEffect commit + re-render) so the
+    // requestedTab effect lands before we capture the frame.
+    const store = seedColdStartProgressStore();
+    expect(store.eventPlan.length).toBe(0);
+    store.setEventPlan([
+      { name: 'Signup Complete', description: 'User finished onboarding' },
+      { name: 'Purchase', description: 'Order placed' },
+    ]);
+
+    const view = render(
+      <Box width={120} height={30} flexDirection="column">
+        <RunScreen store={store} />
+      </Box>,
+    );
+    // Flip the requested tab AFTER initial mount so the useEffect in
+    // TabContainer fires off it (vi.useFakeTimers is on, so we drive
+    // microtasks forward manually).
+    store.setRequestedTab('events');
+    await vi.advanceTimersByTimeAsync(0);
+    await vi.advanceTimersByTimeAsync(0);
+
+    const frame = stripAnsi(view.lastFrame() ?? '');
+    view.unmount();
 
     // The events render inside the EventPlanViewer.
     expect(frame).toMatch(/Signup Complete/);
