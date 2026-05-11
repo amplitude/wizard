@@ -397,6 +397,24 @@ export interface WizardUI {
   }): void;
 
   /**
+   * Emit a `lifecycle: auth_retry_exhausted` event when the wizard
+   * decides the SDK's internal auth-retry storm is unrecoverable —
+   * the boundary that fires immediately before
+   * `controller.abort('auth_failed')` in `agent-interface.ts`. Lets
+   * orchestrators distinguish "single 401, transient" from "we tried
+   * twice, giving up" without parsing the eventual `auth_required`
+   * envelope's text.
+   *
+   * Optional — only AgentUI emits to NDJSON. InkUI / LoggingUI no-op
+   * (the TUI surfaces the failure via the AUTH_ERROR outro; CI logs
+   * still see the underlying api_retry messages via the SDK).
+   */
+  emitAuthRetryExhausted?(data: {
+    attempts: number;
+    subkind?: 'amplitude' | 'llm-gateway';
+  }): void;
+
+  /**
    * Emit a `setup_context` event carrying the resolved Amplitude scope
    * (region, org, project, app, env) at a known phase boundary.
    * Optional because only AgentUI emits to NDJSON — InkUI / LoggingUI

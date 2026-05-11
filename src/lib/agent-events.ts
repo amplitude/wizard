@@ -85,6 +85,17 @@ export const EVENT_DATA_VERSIONS = {
    * field is optional.
    */
   auth_required: 2,
+  /**
+   * `auth_retry_exhausted` — emitted by the SDK retry-loop boundary
+   * (`agent-interface.ts`) once the wizard has observed
+   * AUTH_RETRY_LIMIT consecutive auth-flavoured api_retry messages.
+   * Fires BEFORE the controller.abort('auth_failed') and the
+   * subsequent AUTH_ERROR routing, so orchestrators can observe the
+   * exhaustion event in the stream (rather than just inferring it
+   * from a 401-flavoured `auth_required`). Carries the attempt count
+   * and the auth subkind (`amplitude` / `llm-gateway`).
+   */
+  auth_retry_exhausted: 1,
   nested_agent: 1,
   inner_agent_started: 1,
   // Project create. Discriminators must match the actual `data.event`
@@ -584,6 +595,26 @@ export type InnerAgentLifecycleData =
   | EventPlanConfirmedData
   | VerificationStartedData
   | VerificationResultData;
+
+/**
+ * `auth_retry_exhausted` — terminal observability event from the SDK
+ * retry-loop boundary. After AUTH_RETRY_LIMIT consecutive 401-flavoured
+ * api_retry messages the wizard short-circuits the SDK's own ~3-minute
+ * retry storm and aborts. Orchestrators watching the stream see this
+ * event BEFORE the subsequent `auth_required` envelope, so they can
+ * distinguish "single 401, transient" from "we tried twice, this is
+ * stuck" without re-parsing message strings.
+ *
+ * `subkind` is the canonical authentication source — auth retries
+ * always originate from the LLM-gateway today (the SDK only retries
+ * upstream auth failures), but the field is explicit so future
+ * Amplitude-side retry storms can be tagged without a schema bump.
+ */
+export interface AuthRetryExhaustedData {
+  event: 'auth_retry_exhausted';
+  attempts: number;
+  subkind?: 'amplitude' | 'llm-gateway';
+}
 
 // ── Tool-input summarizer ───────────────────────────────────────────
 //

@@ -490,6 +490,33 @@ export class AgentUI implements WizardUI {
   }
 
   /**
+   * Emit a `lifecycle: auth_retry_exhausted` event at the SDK
+   * retry-loop boundary. Pairs with the eventual AUTH_ERROR /
+   * `auth_required` follow-on — sees that exhaustion happened BEFORE
+   * the abort lands. See `AuthRetryExhaustedData` in
+   * `agent-events.ts`.
+   */
+  emitAuthRetryExhausted(data: {
+    attempts: number;
+    subkind?: 'amplitude' | 'llm-gateway';
+  }): void {
+    emit(
+      'lifecycle',
+      `auth_retry_exhausted: attempts=${data.attempts}${
+        data.subkind ? ` subkind=${data.subkind}` : ''
+      }`,
+      {
+        level: 'warn',
+        data: {
+          event: 'auth_retry_exhausted',
+          attempts: data.attempts,
+          ...(data.subkind ? { subkind: data.subkind } : {}),
+        },
+      },
+    );
+  }
+
+  /**
    * NDJSON events for the inline create-project flow. Emitted at each phase
    * so orchestrators can track progress. The `apiKey` is intentionally
    * REDACTED from the success payload — only `appId` and `name` are emitted.

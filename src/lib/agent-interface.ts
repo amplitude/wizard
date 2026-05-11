@@ -3546,6 +3546,20 @@ export async function runAgent(
                 'retry count': authRetryCount,
                 attempt: attempt + 1,
               });
+              // Emit the structured lifecycle event BEFORE the abort so an
+              // agent-mode orchestrator sees the exhaustion in the stream
+              // (vs inferring it from the downstream `auth_required`).
+              // Wrapped in try/catch because UI emission must never block
+              // the abort path — orchestrators that drop the event still
+              // get the AUTH_ERROR outcome on `run_completed`.
+              try {
+                getUI().emitAuthRetryExhausted?.({
+                  attempts: authRetryCount,
+                  subkind: 'llm-gateway',
+                });
+              } catch (err) {
+                logToFile('emitAuthRetryExhausted threw', err);
+              }
               if (!controller.signal.aborted) {
                 controller.abort('auth_failed');
               }
