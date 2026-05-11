@@ -63,22 +63,25 @@ export const EventPlanViewer = ({
 }: EventPlanViewerProps) => {
   const visible = events.filter((e) => e.name.trim().length > 0);
 
-  // Walk the ledger once per refreshKey bump (plus when the plan
-  // identity changes). The ledger is per-run and append-only during
-  // wiring, so reading it under useMemo is safe — no subscription
-  // needed. When no ledger is initialised (snapshot tests, the
-  // synthetic full-activation re-run path, or callers that omit
-  // refreshKey), the empty map below makes every plan entry render as
-  // pending — which degrades gracefully to the older plan-only view.
+  // Walk the ledger once per refreshKey bump. The ledger is per-run
+  // and append-only during wiring, so reading it under useMemo is safe
+  // — no subscription needed. When no ledger is initialised (snapshot
+  // tests, the synthetic full-activation re-run path, or callers that
+  // omit refreshKey), the empty map below makes every plan entry
+  // render as pending — which degrades gracefully to the older
+  // plan-only view.
+  //
+  // Bugbot 3221791773: `visible` was previously in the dep array, but
+  // it's a fresh array reference every render (created by
+  // `events.filter(...)` above), which defeated memoization entirely.
+  // The walk is independent of `visible` — `collectWiredEventNames`
+  // reads the ledger, not the plan — so dropping `visible` from the
+  // deps is correct: invalidation only needs `refreshKey`.
   const wiredNames = useMemo(() => {
     const ledger = getFileChangeLedger();
     if (!ledger) return new Map<string, string>();
     return collectWiredEventNames(ledger.getEntries());
-    // refreshKey is part of the cadence contract — bumping it re-runs
-    // the walk. We don't dereference it inside the body; that's by
-    // design. The visible plan identity changes when the user-approved
-    // plan changes, which is also a valid invalidation trigger.
-  }, [refreshKey, visible]);
+  }, [refreshKey]);
 
   if (visible.length === 0) {
     return (
