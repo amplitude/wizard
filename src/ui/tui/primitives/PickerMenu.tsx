@@ -15,6 +15,7 @@ import { Icons, Colors } from '../styles.js';
 import { PromptLabel } from './PromptLabel.js';
 import { useScreenInput } from '../hooks/useScreenInput.js';
 import { useStdoutDimensions } from '../hooks/useStdoutDimensions.js';
+import { logToFile } from '../../../utils/debug.js';
 
 /**
  * First-frame fallback chrome size, used before `measureElement` has run.
@@ -232,7 +233,30 @@ const SinglePickerMenu = <T,>({
     setFlashingIndex(idx);
     flashTimerRef.current = setTimeout(() => {
       flashTimerRef.current = null;
-      onSelect(value);
+      // Always release the flash + input lock, even if `onSelect`
+      // throws or the parent's navigation is asynchronous. Without
+      // this guard, a thrown handler would leave `flashingIndex`
+      // set — the input handler reads that as "still flashing" and
+      // swallows every subsequent keystroke, deadlocking the picker
+      // with no recovery path. Catch + re-throw asynchronously: the
+      // error still surfaces (via Node's unhandled-rejection handler
+      // and our existing error boundary) but the picker stays alive.
+      try {
+        onSelect(value);
+      } catch (err) {
+        // The picker's contract is "I won't deadlock". The parent's
+        // contract is "your onSelect is safe to call". If the parent
+        // breaks its contract, log to the wizard's debug file but
+        // keep the picker responsive — silently swallowing here is
+        // the lesser of two evils vs. the user being unable to type.
+        logToFile(
+          `PickerMenu onSelect threw — input released to avoid deadlock: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+      } finally {
+        setFlashingIndex(null);
+      }
     }, PICKER_FLASH_MS);
   };
   const [, termRows] = useStdoutDimensions();
