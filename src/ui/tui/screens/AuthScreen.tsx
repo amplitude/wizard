@@ -24,14 +24,12 @@ import { useTimedCoaching } from '../hooks/useTimedCoaching.js';
 import { PickerMenu, TerminalLink } from '../primitives/index.js';
 import { Colors, Icons } from '../styles.js';
 import { BrailleSpinner } from '../components/BrailleSpinner.js';
-import {
-  DEFAULT_AMPLITUDE_ZONE,
-  DEFAULT_HOST_URL,
-} from '../../../lib/constants.js';
+import { DEFAULT_AMPLITUDE_ZONE } from '../../../lib/constants.js';
 import { isCreateAccountOnboarding } from '../../../lib/wizard-session.js';
 import { resolveZone } from '../../../lib/zone-resolution.js';
 import { toCredentialAppId } from '../../../lib/wizard-session.js';
 import { analytics } from '../../../utils/analytics.js';
+import { getHostFromRegion } from '../../../utils/urls.js';
 import { wizardSuccessExit } from '../../../utils/wizard-abort.js';
 import { ExitCode } from '../../../lib/exit-codes.js';
 
@@ -116,9 +114,9 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
   >(null);
   const [selectedEnv, setSelectedEnv] = useState<EnvironmentEntry | null>(null);
   const [apiKeyError, setApiKeyError] = useState('');
-  const [savedKeySource, setSavedKeySource] = useState<
-    'cache' | 'env' | null
-  >(null);
+  const [savedKeySource, setSavedKeySource] = useState<'cache' | 'env' | null>(
+    null,
+  );
   const [pickerNotice, setPickerNotice] = useState<string | null>(null);
   const completedStepsRef = useRef<DOMElement>(null);
   const orgChromeRef = useRef<DOMElement>(null);
@@ -271,11 +269,16 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
             matchedAppId = match.app?.id ?? null;
           }
         }
+        // Region-aware host so EU users don't get their credentials.host
+        // pinned to api2.amplitude.com (US). readDisk: true matches the
+        // sibling branches below — Auth runs before RegionSelect commits.
+        const zone = resolveZone(s, DEFAULT_AMPLITUDE_ZONE, { readDisk: true });
+        if (cancelled || store.session.credentials !== null) return;
         store.setCredentials({
           accessToken: s.pendingAuthAccessToken ?? '',
           idToken: s.pendingAuthIdToken ?? undefined,
           projectApiKey: local.key,
-          host: DEFAULT_HOST_URL,
+          host: getHostFromRegion(zone),
           appId: toCredentialAppId(matchedAppId),
         });
         store.setProjectHasData(false);
@@ -289,7 +292,6 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
         const envAppId = selectedEnv.app.id ?? null;
         // readDisk: true — auth screen runs before the RegionSelect gate.
         const zone = resolveZone(s, DEFAULT_AMPLITUDE_ZONE, { readDisk: true });
-        const { getHostFromRegion } = await import('../../../utils/urls.js');
         if (cancelled || store.session.credentials !== null) return;
 
         persistApiKey(apiKey, s.installDir);
@@ -316,7 +318,6 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
       const zone = resolveZone(s, DEFAULT_AMPLITUDE_ZONE, { readDisk: true });
 
       const { getAPIKey } = await import('../../../utils/get-api-key.js');
-      const { getHostFromRegion } = await import('../../../utils/urls.js');
 
       const projectApiKey = await getAPIKey({
         installDir: s.installDir,
@@ -466,11 +467,17 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
     // Env name stays null for manually-entered keys — we can't determine
     // which environment the key belongs to without an extra backend call.
     // The header will render org / project only, which is acceptable.
+    // Region-aware host so EU users on the manual path don't get their
+    // credentials.host pinned to api2.amplitude.com (US), which would
+    // route LLM traffic through the US gateway.
+    const zone = resolveZone(session, DEFAULT_AMPLITUDE_ZONE, {
+      readDisk: true,
+    });
     store.setCredentials({
       accessToken: session.pendingAuthAccessToken ?? '',
       idToken: session.pendingAuthIdToken ?? undefined,
       projectApiKey: trimmed,
-      host: DEFAULT_HOST_URL,
+      host: getHostFromRegion(zone),
       appId: 0,
     });
     // Fresh project: no existing event data — advance past DataSetup
@@ -522,8 +529,7 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
   // because that's the most likely next phase for any returning user.
   const oauthWaitPreparingLine = isCreateAccountOnboarding(session)
     ? 'Opening your Amplitude sign-in page'
-    : session.authPhase === 'verifying-session' ||
-      session.authPhase === 'idle'
+    : session.authPhase === 'verifying-session' || session.authPhase === 'idle'
     ? 'Verifying your session'
     : 'Preparing your sign-in link';
   const { tier: oauthCoachingTier } = useTimedCoaching({
@@ -652,8 +658,8 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
             Continue with this Amplitude project?
           </Text>
           <Text color={Colors.muted}>
-            We picked up your previous selection from this machine. Confirm
-            it's still right before we run the wizard against it.
+            We picked up your previous selection from this machine. Confirm it's
+            still right before we run the wizard against it.
           </Text>
         </Box>
         <Box flexDirection="column">
