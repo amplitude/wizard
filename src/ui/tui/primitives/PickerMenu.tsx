@@ -136,12 +136,25 @@ function numKey(index: number): string | null {
   return null;
 }
 
+/**
+ * Threshold beyond which the digit-shortcut UI hints (the `[N]` chip per
+ * row, and the implied "press a number to pick") are dropped. There are
+ * only 10 digit shortcuts (1-9 plus 0 → index 9), so a list with more
+ * than 10 options has items that look identical to shortcut-enabled
+ * rows but don't respond to their visible number. Rather than render a
+ * confusing partial set, hide the chips on every row once the list
+ * exceeds the budget. The digit handler itself still works for indices
+ * 0-9 (back-compat for power users), it just isn't advertised.
+ */
+const DIGIT_SHORTCUT_LIMIT = 10;
+
 /** Render a single picker item row. */
 const PickerItem = <T,>({
   opt,
   isFocused,
   isFlashing,
   index,
+  showDigit,
 }: {
   opt: PickerOption<T>;
   isFocused: boolean;
@@ -153,9 +166,15 @@ const PickerItem = <T,>({
    */
   isFlashing?: boolean;
   index: number;
+  /**
+   * Whether to render the `[N]` digit-shortcut chip. Suppressed when
+   * the parent picker has more than `DIGIT_SHORTCUT_LIMIT` options,
+   * since the shortcut only covers the first 10 indices.
+   */
+  showDigit: boolean;
 }) => {
   const label = opt.hint ? `${opt.label} (${opt.hint})` : opt.label;
-  const key = numKey(index);
+  const key = showDigit ? numKey(index) : null;
   // Foreground rule: flashing rows render in white text against the
   // accent background so the row stays legible. Focused rows keep the
   // existing accent foreground on the default background; non-focused
@@ -206,6 +225,12 @@ const SinglePickerMenu = <T,>({
   onSelect: (value: T | T[]) => void;
 }) => {
   const [focused, setFocused] = useState(0);
+  // Digit shortcuts only cover indices 0-9 (keys 1-9 + 0). For larger
+  // lists we hide both the per-row `[N]` chips and the implied digit
+  // affordance so the UI doesn't lie about which rows respond. The
+  // handler below still accepts digits for back-compat with users who
+  // know the trick.
+  const showDigits = options.length <= DIGIT_SHORTCUT_LIMIT;
   // Selection-confirmation flash. Holds the index the user just
   // committed (Enter / digit shortcut) so the row renders with an
   // accent background for PICKER_FLASH_MS before we hand control to
@@ -353,6 +378,7 @@ const SinglePickerMenu = <T,>({
             index={scrollOffset + i}
             isFocused={scrollOffset + i === focused}
             isFlashing={scrollOffset + i === flashingIndex}
+            showDigit={showDigits}
           />
         ))}
         {hasBelow && (
@@ -360,6 +386,9 @@ const SinglePickerMenu = <T,>({
             {'  \u2193 '}
             {options.length - scrollOffset - maxVisible} more
           </Text>
+        )}
+        {!showDigits && (
+          <Text color={Colors.muted}> Use arrows + Enter to pick</Text>
         )}
       </Box>
     );
@@ -389,12 +418,16 @@ const SinglePickerMenu = <T,>({
                   index={idx}
                   isFocused={idx === focused}
                   isFlashing={idx === flashingIndex}
+                  showDigit={showDigits}
                 />
               );
             })}
           </Box>
         ))}
       </Box>
+      {!showDigits && (
+        <Text color={Colors.muted}> Use arrows + Enter to pick</Text>
+      )}
     </Box>
   );
 };
@@ -416,6 +449,9 @@ const MultiPickerMenu = <T,>({
   onSelect: (value: T | T[]) => void;
 }) => {
   const [focused, setFocused] = useState(0);
+  // See SinglePickerMenu — digit chips are suppressed once the list
+  // exceeds the 10-shortcut budget. The handler still accepts digits.
+  const showDigits = options.length <= DIGIT_SHORTCUT_LIMIT;
   const [selected, setSelected] = useState<Set<number>>(() => {
     if (!defaultSelected?.length) return new Set();
     const initial = new Set<number>();
@@ -520,7 +556,7 @@ const MultiPickerMenu = <T,>({
               const checkbox = isSelected
                 ? Icons.squareFilled
                 : Icons.squareOpen;
-              const key = numKey(flatIdx);
+              const key = showDigits ? numKey(flatIdx) : null;
               return (
                 <Box key={flatIdx} gap={1}>
                   <Text
