@@ -758,7 +758,13 @@ export const runDirectSignupIfRequested = async (
     trackSignupAttempt({
       status: 'wrapper_exception',
       zone,
-      'legal document source': 'unused',
+      // Source matches the input the wrapper received: a
+      // `'with_required_fields'` body built from LOCAL_DOC_URLS. If
+      // `performSignupOrAuth` throws after its internal try/catch (e.g.
+      // `replaceStoredUser` errors), this outer catch is the sole
+      // telemetry emitter — tagging `'unused'` here would misattribute
+      // the URL source in adoption dashboards.
+      'legal document source': 'local',
     });
     getUI().log.warn(
       `Direct signup errored: ${
