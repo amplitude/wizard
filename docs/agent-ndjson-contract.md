@@ -293,3 +293,27 @@ The deterministic shell of the wizard makes these tractable:
 6. Add at least one test that pins the wire shape.
 7. Bump the per-event `data_version` on any subsequent breaking change —
    not the envelope `v`.
+
+### Invariant: emit/registry sync
+
+The `src/ui/__tests__/agent-events.registry.test.ts` invariant guards
+step 2 mechanically. It walks every `event: '<name>'` literal in
+`src/ui/agent-ui.ts` and `src/lib/agent-events.ts` (the only two
+files where a discriminator can be born) and fails CI if **either**
+direction of the equivalence breaks:
+
+- A discriminator emitted on the wire with no `EVENT_DATA_VERSIONS`
+  entry — the `data_version` stamp is silently dropped, the
+  coherence check in `validateEnvelopeOrLog` skips the event, and
+  `wizard_capabilities.supportedEvents` lies about what the wizard
+  speaks. This is the bug Bugbot caught for `project_created` and
+  later for `outro_data` / `signup_input_required` /
+  `post_agent_seeded` / `post_agent_step` / `journey_transition`.
+- A registry entry with no emit callsite — dead protocol surface
+  that orchestrators will allocate UI for and never receive.
+
+If you add an event that's emitted in code paths the test's
+representative runtime walk doesn't reach, the static grep half of
+the invariant still catches it — but please also exercise the new
+emitter in the runtime walk so the `data_version` stamp is
+explicitly pinned.
