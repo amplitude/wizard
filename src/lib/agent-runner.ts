@@ -1026,44 +1026,74 @@ async function runAgentWizardBody(
     logToFile('cold-start: setCurrentActivity (skills) failed', err);
   }
 
+  // PR B5: per-phase cold-start timing breakdown. Each of the five phases
+  // below is wrapped in a `try/finally` so the breakdown event always
+  // ships, even when the phase throws — orchestrators see a timing
+  // breadcrumb for the failing phase rather than a silent gap on the
+  // wire. The emitter is a no-op on InkUI / LoggingUI (TUI shows the
+  // labeled activity line; CI logs the per-phase step messages).
+  const emitColdStartPhase = (
+    phase:
+      | 'skill_staging'
+      | 'package_manager_detection'
+      | 'framework_detection',
+    startedAt: number,
+  ): void => {
+    try {
+      getUI().emitColdStartBreakdown?.({
+        phase,
+        startedAt,
+        finishedAt: Date.now(),
+      });
+    } catch (err) {
+      logToFile(`[agent-runner] emitColdStartBreakdown(${phase}) threw`, err);
+    }
+  };
+
   // Pre-stage all bundled skills the agent will need into the user's
   // .claude/skills/ directory. The taxonomy / instrumentation / dashboard
   // skills are constants; the integration skill is resolved per framework
   // (with a sensible default fallback). When staging succeeds the prompt pins
   // that id; otherwise a deterministic on-disk resolver picks at most one
   // `integration-*` match so the model never chooses among several Glob hits.
-  const { preStageSkills, bundledSkillExists } = await import(
-    './wizard-tools.js'
-  );
-  const { listIntegrationSkillIdsOnDisk, resolveIntegrationSkillId } =
-    await import('./integration-skill-resolve.js');
-  const integrationSkillId = config.metadata.getIntegrationSkillId
-    ? config.metadata.getIntegrationSkillId(frameworkContext)
-    : (() => {
-        const fallback = `integration-${config.metadata.integration}`;
-        return bundledSkillExists(fallback) ? fallback : null;
-      })();
-  const { integrationStaged } = preStageSkills(
-    session.installDir,
-    integrationSkillId,
-  );
+  const skillStagingStartedAt = Date.now();
+  let integrationSkillIdForPrompt: string | null;
+  try {
+    const { preStageSkills, bundledSkillExists } = await import(
+      './wizard-tools.js'
+    );
+    const { listIntegrationSkillIdsOnDisk, resolveIntegrationSkillId } =
+      await import('./integration-skill-resolve.js');
+    const integrationSkillId = config.metadata.getIntegrationSkillId
+      ? config.metadata.getIntegrationSkillId(frameworkContext)
+      : (() => {
+          const fallback = `integration-${config.metadata.integration}`;
+          return bundledSkillExists(fallback) ? fallback : null;
+        })();
+    const { integrationStaged } = preStageSkills(
+      session.installDir,
+      integrationSkillId,
+    );
 
-  let integrationSkillIdForPrompt: string | null =
-    integrationStaged && integrationSkillId ? integrationSkillId : null;
-  if (!integrationSkillIdForPrompt) {
-    const diskIds = listIntegrationSkillIdsOnDisk(session.installDir);
-    const resolved = resolveIntegrationSkillId({
-      integration: config.metadata.integration,
-      primaryBundledId: integrationSkillId,
-      frameworkContext,
-      candidateSkillIds: diskIds,
-    });
-    if (resolved?.source === 'lexicographic_tiebreak') {
-      logToFile(
-        `[runAgentWizard] integration skill lexicographic tie-break: picked "${resolved.skillId}" (scoped pool had multiple matches; consider tightening framework hints).`,
-      );
+    integrationSkillIdForPrompt =
+      integrationStaged && integrationSkillId ? integrationSkillId : null;
+    if (!integrationSkillIdForPrompt) {
+      const diskIds = listIntegrationSkillIdsOnDisk(session.installDir);
+      const resolved = resolveIntegrationSkillId({
+        integration: config.metadata.integration,
+        primaryBundledId: integrationSkillId,
+        frameworkContext,
+        candidateSkillIds: diskIds,
+      });
+      if (resolved?.source === 'lexicographic_tiebreak') {
+        logToFile(
+          `[runAgentWizard] integration skill lexicographic tie-break: picked "${resolved.skillId}" (scoped pool had multiple matches; consider tightening framework hints).`,
+        );
+      }
+      integrationSkillIdForPrompt = resolved?.skillId ?? null;
     }
-    integrationSkillIdForPrompt = resolved?.skillId ?? null;
+  } finally {
+    emitColdStartPhase('skill_staging', skillStagingStartedAt);
   }
 
   // Cold-start phase 2: project read. The next 1-5s is package-manager
@@ -1094,6 +1124,7 @@ async function runAgentWizardBody(
   let packageManagerInfo: Awaited<
     ReturnType<typeof config.detection.detectPackageManager>
   > | null = null;
+  const packageManagerDetectionStartedAt = Date.now();
   try {
     packageManagerInfo = await config.detection.detectPackageManager(
       session.installDir,
@@ -1102,6 +1133,11 @@ async function runAgentWizardBody(
     preflightLog.warn('detectPackageManager failed', {
       'error message': err instanceof Error ? err.message : String(err),
     });
+  } finally {
+    emitColdStartPhase(
+      'package_manager_detection',
+      packageManagerDetectionStartedAt,
+    );
   }
 
   if (packageManagerInfo?.primary) {
@@ -1131,25 +1167,31 @@ async function runAgentWizardBody(
   // pay a probe tax to figure out we're large. Logging happens AFTER the
   // gate so the diagnostic line reflects the authoritative decision the
   // gate emitted (no risk of divergence between two recomputations).
-  const preflightCtx = await buildPreflightContext({
-    installDir: session.installDir,
-    integration: session.integration,
-    detectedFrameworkLabel: session.detectedFrameworkLabel,
-    frameworkVersion: frameworkVersion ?? null,
-    typescript: typeScriptDetected,
-    packageManagerInfo,
-    userEmail: session.userEmail,
-    selectedOrgId: session.selectedOrgId,
-    selectedOrgName: session.selectedOrgName,
-    selectedProjectId: session.selectedProjectId,
-    selectedProjectName: session.selectedProjectName,
-    selectedEnvName: session.selectedEnvName,
-    cloudRegion,
-    projectBound: fsSync.existsSync(
-      path.join(session.installDir, '.amplitude', 'project-binding.json'),
-    ),
-    frameworkContext,
-  });
+  const frameworkDetectionStartedAt = Date.now();
+  let preflightCtx: Awaited<ReturnType<typeof buildPreflightContext>>;
+  try {
+    preflightCtx = await buildPreflightContext({
+      installDir: session.installDir,
+      integration: session.integration,
+      detectedFrameworkLabel: session.detectedFrameworkLabel,
+      frameworkVersion: frameworkVersion ?? null,
+      typescript: typeScriptDetected,
+      packageManagerInfo,
+      userEmail: session.userEmail,
+      selectedOrgId: session.selectedOrgId,
+      selectedOrgName: session.selectedOrgName,
+      selectedProjectId: session.selectedProjectId,
+      selectedProjectName: session.selectedProjectName,
+      selectedEnvName: session.selectedEnvName,
+      cloudRegion,
+      projectBound: fsSync.existsSync(
+        path.join(session.installDir, '.amplitude', 'project-binding.json'),
+      ),
+      frameworkContext,
+    });
+  } finally {
+    emitColdStartPhase('framework_detection', frameworkDetectionStartedAt);
+  }
   preflightLog.info('project size detected', {
     'file count': preflightCtx.projectSize.fileCount,
     'event count': preflightCtx.projectSize.eventCount,
