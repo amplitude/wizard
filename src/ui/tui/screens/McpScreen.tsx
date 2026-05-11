@@ -335,11 +335,17 @@ export const McpScreen = ({
               : '💬 Chat with your Amplitude data'}
           </Text>
           {!isRemove && (
+            // Lead with the value prop, NOT a hardcoded list of clients
+            // we haven't detected yet. The prior copy named Claude Code
+            // / Cursor / Claude Desktop in the pre-detection screen
+            // even when the user had none of them installed, which
+            // promised tools the wizard couldn't deliver. Detected
+            // clients surface in the Phase.Ask line below
+            // ('Detected: …'), and the empty-detection arm
+            // (Phase.None) tells the user what to do next.
             <Text color={Colors.muted}>
-              We’ll wire the Amplitude MCP into Claude Code, Cursor, Claude
-              Desktop, and other AI tools you have installed. You can then ask
-              questions, build charts, and check metrics from chat (e.g. “show
-              me yesterday’s signups”).
+              Ask Amplitude questions from your editor — e.g. “show me
+              yesterday’s signups”.
             </Text>
           )}
 
@@ -355,12 +361,27 @@ export const McpScreen = ({
             )}
 
             {phase === Phase.None && (
-              <Text color={Colors.muted}>
-                {isRemove
-                  ? 'Amplitude isn’t installed in any detected AI tool. Skipping'
-                  : 'No supported AI tools found on this machine. Skipping'}
-                {Icons.ellipsis}
-              </Text>
+              <Box flexDirection="column">
+                <Text color={Colors.muted}>
+                  {isRemove
+                    ? 'Amplitude isn’t installed in any detected AI tool. Skipping'
+                    : 'No supported editors detected. Skipping'}
+                  {Icons.ellipsis}
+                </Text>
+                {!isRemove && (
+                  // Tell the user how to install MCP later without
+                  // re-running the wizard — the `mcp serve` subcommand
+                  // exposes the same server the wizard would have
+                  // wired up.
+                  <Text color={Colors.muted}>
+                    You can still install via{' '}
+                    <Text color={Colors.body} bold>
+                      amplitude-wizard mcp serve
+                    </Text>
+                    .
+                  </Text>
+                )}
+              </Box>
             )}
 
             {phase === Phase.Ask && (
