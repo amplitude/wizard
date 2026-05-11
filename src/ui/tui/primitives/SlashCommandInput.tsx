@@ -10,6 +10,7 @@
 import { Box, Text, useInput } from 'ink';
 import { useState, useEffect } from 'react';
 import { Colors, Icons } from '../styles.js';
+import { longestCommonPrefix } from '../components/PathInput.js';
 
 export interface SlashCommand {
   cmd: string;
@@ -31,29 +32,6 @@ export function computeIsSlashMode(
     firstWord.startsWith('/') &&
     commands.some((c) => c.cmd.startsWith(firstWord))
   );
-}
-
-/**
- * Returns the longest common prefix shared by every string in `values`.
- * Returns the input itself if `values` has a single entry, and `''` if
- * the input is empty. Used by Tab autocomplete: typing `/d` then Tab
- * extends the input to `/d` (no common prefix beyond the current input
- * across /debug, /diagnostics), while `/diag` + Tab extends to
- * `/diagnostics`.
- */
-export function longestCommonPrefix(values: string[]): string {
-  if (values.length === 0) return '';
-  if (values.length === 1) return values[0];
-  let prefix = values[0];
-  for (let i = 1; i < values.length; i++) {
-    const candidate = values[i];
-    let j = 0;
-    const maxLen = Math.min(prefix.length, candidate.length);
-    while (j < maxLen && prefix[j] === candidate[j]) j++;
-    prefix = prefix.slice(0, j);
-    if (prefix === '') return '';
-  }
-  return prefix;
 }
 
 interface SlashCommandInputProps {
