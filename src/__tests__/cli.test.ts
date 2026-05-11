@@ -139,6 +139,7 @@ vi.mock('../lib/constants', () => ({
   DEFAULT_HOST_URL: 'https://api.amplitude.com',
   EMAIL_REGEX: /^[^\s@]+@[^\s@]+\.[^\s@]+$/,
   TERMS_OF_SERVICE_URL: 'https://amplitude.com/terms',
+  PRIVACY_POLICY_URL: 'https://amplitude.com/privacy',
 }));
 vi.mock('../utils/oauth', () => ({
   performAmplitudeAuth: mockPerformAmplitudeAuth,
