@@ -392,7 +392,18 @@ describe('performDirectSignup', () => {
     }
   });
 
-  it('flag-ON with terms_acceptance alone (no full_name required): still parses', async () => {
+  it('flag-ON with terms_acceptance alone (no full_name required) is unsupported_required_shape', async () => {
+    // Wire-contract guard: the wizard cannot honestly satisfy a
+    // `needs_information` response that requires `terms_acceptance`
+    // without also requiring `full_name`. TUI: signupFullName is only
+    // collectable when 'full_name' ∈ required. Non-TUI: helpers.ts
+    // already sent fullName in the first POST body; a `terms_acceptance`-
+    // only follow-up implies the body was rejected with nothing the
+    // wizard can re-collect on the spot. Either way, surface as
+    // `unsupported_required_shape` so the wrapper tags
+    // `needs_information_unsupported` telemetry and the drift is
+    // observable in dashboards instead of silently falling through to
+    // OAuth.
     server.use(
       http.post(PROVISIONING_URL, () =>
         HttpResponse.json({
@@ -428,10 +439,9 @@ describe('performDirectSignup', () => {
       zone: 'us',
     });
 
-    expect(result.kind).toBe('needs_information');
-    if (result.kind === 'needs_information') {
-      expect(result.requiredFields).toEqual(['terms_acceptance']);
-      expect(result.legalDocumentSource).toBe('server');
+    expect(result.kind).toBe('error');
+    if (result.kind === 'error') {
+      expect(result.code).toBe('unsupported_required_shape');
     }
   });
 
