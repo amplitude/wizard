@@ -1792,7 +1792,6 @@ export function classifyFileChangeError(message: string): FileChangeErrorClass {
     lower.includes('etimedout') ||
     lower.includes('timed out') ||
     lower.includes('timeout') ||
-    lower.includes('operation timed out') ||
     lower.includes('deadline exceeded')
   ) {
     return 'timeout';
