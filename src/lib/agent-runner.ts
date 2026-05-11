@@ -1222,6 +1222,19 @@ async function runAgentWizardBody(
   // outro hook needed.
   getUI().startRun();
 
+  // PR B8: emit the startup capability announcement immediately
+  // after `run_started` so an orchestrator sees the protocol /
+  // event-version contract BEFORE any contract-shaped event lands
+  // on the stream. Wrapped in try/catch so a misbehaving emitter
+  // can never block run start — the announcement is observational.
+  // AgentUI is the only UI that implements `emitWizardCapabilities`;
+  // InkUI / LoggingUI no-op.
+  try {
+    getUI().emitWizardCapabilities?.();
+  } catch (err) {
+    logToFile('[agent-runner] emitWizardCapabilities threw', err);
+  }
+
   // Cold-start phase 3: agent SDK init (MCP server connect, model handshake,
   // system-prompt cache prime, first LLM round-trip). Frequently the longest
   // single block of pre-first-message silence on a fresh run. We reuse

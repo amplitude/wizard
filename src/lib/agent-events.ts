@@ -37,6 +37,30 @@
 export const AGENT_EVENT_WIRE_VERSION = 1 as const;
 
 /**
+ * Orchestrator-facing protocol version. Distinct from
+ * `AGENT_EVENT_WIRE_VERSION` (which gates the envelope FRAME shape)
+ * and from `EVENT_DATA_VERSIONS` (which gates per-event `data`
+ * shapes): `WIZARD_PROTOCOL_VERSION` is the SEMVER-flavoured number
+ * an orchestrator branches on to decide "do I speak this wizard's
+ * dialect at all?".
+ *
+ * Bump only on a contract change that breaks orchestrators who were
+ * happy with the previous value — adding a new event-key to the
+ * registry is non-breaking (orchestrators see it absent from their
+ * known set and ignore the envelope), while removing or renaming an
+ * existing event-key, or changing the meaning of `mode`, is.
+ *
+ * Currently `2` because this is the first version that ships the
+ * v2 event family (run_phase, decision_id, retry events,
+ * cold_start_breakdown, tool_call_summary, mcp_status, and the
+ * capability announcement itself). Wizard binaries earlier than this
+ * branch implicitly emit a v1 stream (which would not carry a
+ * `wizard_capabilities` envelope at all — capability absence IS the
+ * v1 signal).
+ */
+export const WIZARD_PROTOCOL_VERSION = 2 as const;
+
+/**
  * Per-event-type data-shape version. The key insight from orchestrator
  * feedback: pinning to envelope `v: 1` doesn't protect orchestrators
  * from breaking changes inside `data`. Adding/renaming a field on
@@ -517,6 +541,39 @@ export const EVENT_DATA_VERSIONS = {
    * blocker.
    */
   mcp_status: 1,
+  /**
+   * `wizard_capabilities` — startup announcement emitted as the FIRST
+   * orchestrator-facing envelope after `run_started`, before any
+   * `run_phase: cold_start`. Lets a parent agent (Claude Code, Codex,
+   * custom orchestrator) detect what protocol the wizard speaks
+   * BEFORE any contract-shaped event lands on the stream.
+   *
+   * Why it exists: without this, orchestrators have to either
+   * hard-code feature detection ("wizard >= 0.40 speaks v2 events")
+   * or parse-and-discover at runtime ("I saw `mcp_status`, so the
+   * wizard must support it"). Both are fragile. A single up-front
+   * capability envelope lets orchestrators:
+   *   - Detect protocol version mismatches early ("wizard speaks v1,
+   *     I expect v2") and either downgrade their parser or refuse to
+   *     proceed before any user-visible state has been mutated.
+   *   - Pre-allocate UI for events they know will fire (vs the
+   *     wait-and-see pattern of allocating on first sighting).
+   *   - Gate optional UX on capability presence — e.g. only render
+   *     the per-phase cold-start sparkline if
+   *     `cold_start_breakdown` is in `supportedEvents`.
+   *
+   * Payload: `protocolVersion` (currently 2 — bump on any
+   * orchestrator-breaking contract change), `eventDataVersions` (the
+   * full `EVENT_DATA_VERSIONS` registry mirrored verbatim so
+   * orchestrators can branch per-event without a wizard upgrade),
+   * `supportedEvents` (sorted list of every event-key for cheap
+   * `has`-style lookups), and `mode` (`'agent' | 'ci' |
+   * 'interactive'` — currently always `'agent'` because only AgentUI
+   * emits NDJSON, but the field is on the contract so future CI /
+   * interactive modes that learn to emit capabilities don't need a
+   * schema bump).
+   */
+  wizard_capabilities: 1,
 } as const;
 
 /** All NDJSON event-level types. */
@@ -1778,7 +1835,8 @@ export type InnerAgentLifecycleData =
   | AttemptStartedData
   | ColdStartBreakdownData
   | ToolCallSummaryData
-  | MCPStatusData;
+  | MCPStatusData
+  | WizardCapabilitiesData;
 
 /**
  * Which MCP server a `mcp_status` event refers to. Two distinct
@@ -1876,6 +1934,58 @@ export interface MCPStatusData {
   state: MCPStatusState;
   transition_ts: number;
   detail?: string;
+}
+
+/**
+ * Execution mode discriminator on the `wizard_capabilities`
+ * envelope. Mirrors `ExecutionMode` from `lib/mode-config.ts`,
+ * duplicated here so orchestrators parsing the NDJSON contract
+ * don't need to import wizard internals to type-narrow on it.
+ *
+ * `'agent'`        — NDJSON-only output via `--agent`. The only
+ *                    mode that currently emits this envelope.
+ * `'ci'`           — non-interactive batch mode. Reserved on the
+ *                    contract for a future CI emitter; today CI runs
+ *                    use `LoggingUI` which doesn't emit NDJSON.
+ * `'interactive'`  — TUI mode (`InkUI`). Reserved on the contract
+ *                    for the same reason — InkUI is a no-op for
+ *                    this event today.
+ */
+export type WizardCapabilitiesMode = 'agent' | 'ci' | 'interactive';
+
+/**
+ * Wire shape of the `data` field on a `wizard_capabilities`
+ * envelope. See `EVENT_DATA_VERSIONS.wizard_capabilities` for the
+ * full contract, the lifecycle ordering (after `run_started`, before
+ * `run_phase: cold_start`), and the bump policy.
+ *
+ *   protocolVersion    — orchestrator-facing protocol version
+ *                        (`WIZARD_PROTOCOL_VERSION` at emit time).
+ *                        Orchestrators branch on this first.
+ *   eventDataVersions  — verbatim mirror of `EVENT_DATA_VERSIONS`.
+ *                        Stable insertion order (matches the
+ *                        registry's declaration order). Orchestrators
+ *                        can pre-allocate per-event handlers from
+ *                        this map before the first contract event
+ *                        fires.
+ *   supportedEvents    — `Object.keys(EVENT_DATA_VERSIONS).sort()`.
+ *                        Pre-sorted so orchestrators can use
+ *                        binary-search / `Set`-style membership
+ *                        checks without resorting on their side.
+ *                        Identical semantically to the keys of
+ *                        `eventDataVersions`, but cheaper to
+ *                        consume when the orchestrator only cares
+ *                        about presence ("does this wizard emit
+ *                        `progress_estimate`?").
+ *   mode               — `WizardCapabilitiesMode`. Discriminator
+ *                        for execution context.
+ */
+export interface WizardCapabilitiesData {
+  event: 'wizard_capabilities';
+  protocolVersion: number;
+  eventDataVersions: Readonly<Record<string, number>>;
+  supportedEvents: readonly string[];
+  mode: WizardCapabilitiesMode;
 }
 
 /**

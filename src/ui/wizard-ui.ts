@@ -919,4 +919,33 @@ export interface WizardUI {
     transition_ts: number;
     detail?: string;
   }): void;
+
+  /**
+   * Startup capability announcement. Emitted exactly once per run,
+   * as the FIRST orchestrator-facing envelope after `run_started`
+   * and BEFORE `run_phase: cold_start`. Lets a parent agent (Claude
+   * Code, Cursor, Codex, custom orchestrator) detect which protocol
+   * the wizard speaks BEFORE any contract-shaped event lands on the
+   * stream — so a v1 orchestrator can either downgrade its parser
+   * or refuse to proceed before any user-visible state has been
+   * mutated.
+   *
+   * Payload (see `WizardCapabilitiesData` in `agent-events.ts`):
+   *   - `protocolVersion`    — `WIZARD_PROTOCOL_VERSION`.
+   *   - `eventDataVersions`  — verbatim mirror of
+   *                            `EVENT_DATA_VERSIONS`.
+   *   - `supportedEvents`    — sorted list of every event-key in
+   *                            the registry, for cheap presence
+   *                            checks.
+   *   - `mode`               — `'agent' | 'ci' | 'interactive'`.
+   *
+   * Optional — only AgentUI emits to NDJSON. InkUI / LoggingUI
+   * no-op (TUI has no machine consumer; CI logs lifecycle events
+   * inline rather than via NDJSON).
+   *
+   * Each call site wraps the emit in try/catch so a misbehaving
+   * emitter never blocks startup — the announcement is purely
+   * observational.
+   */
+  emitWizardCapabilities?(): void;
 }
