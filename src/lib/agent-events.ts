@@ -188,8 +188,18 @@ export const EVENT_DATA_VERSIONS = {
    * recommended pick, manual-entry hint, and pagination. The most
    * orchestrator-facing event in the wire — without this `data_version`
    * stamp consumers couldn't safely evolve schema for it.
+   *
+   * v2 — added `decisionId` (e.g. `dec_001`), a stable, monotonically
+   * numbered correlation id that lets orchestrators pair a request
+   * with its `decision_auto` resolution. Previously orchestrators had
+   * to reconstruct the pairing by timing + `code` heuristics, which
+   * fails the moment two prompts share a code (e.g. two `confirm`
+   * dialogs back-to-back). Field is optional at the consumer end —
+   * v1 readers that don't know about `decisionId` continue to work
+   * because they were already keying off `code` alone; consumers
+   * that want strict correlation branch on `data_version >= 2`.
    */
-  needs_input: 1,
+  needs_input: 2,
   /**
    * `decision_auto` — emitted alongside a `needs_input` whenever the
    * wizard auto-resolves the prompt (under `--auto-approve` /
@@ -202,8 +212,15 @@ export const EVENT_DATA_VERSIONS = {
    * Fires AFTER the corresponding `needs_input` so a single-event
    * subscriber that sees `needs_input` first is guaranteed to see the
    * auto-resolution next on the same stream.
+   *
+   * v2 — added `decisionId` mirroring the value from the preceding
+   * `needs_input`. Pair `decision_auto.decisionId` with
+   * `needs_input.decisionId` for exact correlation; this replaces
+   * the brittle "match on `code` + emission order" heuristic that
+   * broke when two prompts shared a code. Field is optional at the
+   * consumer end for v1-compat.
    */
-  decision_auto: 1,
+  decision_auto: 2,
   /**
    * `heartbeat` — periodic liveness signal emitted every ~10s while
    * the inner agent is running. Carries elapsed wall-clock time, the
@@ -479,6 +496,21 @@ export interface NeedsInputData<V = string> {
    *   - 'destructive_overwrite_confirm'
    */
   code: string;
+  /**
+   * Stable, monotonically-numbered correlation id paired with the
+   * subsequent `decision_auto` (or other resolution envelope) that
+   * answers this request. Format: `dec_<NNN>` zero-padded to 3
+   * digits. Generated process-locally by the emitter — orchestrators
+   * MUST NOT synthesize their own ids. Two prompts that happen to
+   * share a `code` (back-to-back `confirm` dialogs, paginated
+   * choosers) carry different `decisionId`s, which is the only
+   * sound way to pair request and response.
+   *
+   * Optional in the type signature for back-compat — `emitNeedsInput`
+   * auto-fills it when callers omit it. Always present on the wire
+   * for `data_version >= 2` consumers.
+   */
+  decisionId?: string;
   /** Short human-readable description of the question. */
   message: string;
   /** Rendering hints the outer agent can use to pick the right widget. */
@@ -521,6 +553,12 @@ export interface NeedsInputData<V = string> {
 export interface NeedsInputWireData<V = string> {
   event: 'needs_input';
   code: string;
+  /**
+   * Correlation id paired with the subsequent `decision_auto` /
+   * response envelope. See `NeedsInputData.decisionId` for the
+   * full contract. Always present on the wire for v2 consumers.
+   */
+  decisionId: string;
   ui?: UiHints;
   choices: NeedsInputChoice<V>[];
   recommended?: V;
@@ -535,6 +573,76 @@ export interface NeedsInputWireData<V = string> {
 export type NeedsInputEvent<V = string> = AgentEventEnvelope<
   NeedsInputWireData<V>
 >;
+
+/**
+ * Wire shape of the `data` field on a `decision_auto` envelope.
+ * Carries the resolved value plus the `decisionId` from the matching
+ * `needs_input` so orchestrators can pair request and response
+ * exactly. See `EVENT_DATA_VERSIONS.decision_auto` for the full
+ * contract.
+ */
+export interface DecisionAutoData {
+  event: 'decision_auto';
+  /** Echoes the `code` from the matching `needs_input`. */
+  code: string;
+  /**
+   * Correlation id from the matching `needs_input`. Always present
+   * for `data_version >= 2`. Optional in the type signature for
+   * forward-compat with synthetic test fixtures.
+   */
+  decisionId?: string;
+  /** The auto-picked value. */
+  value: unknown;
+  /**
+   * Why the wizard auto-resolved instead of waiting for input.
+   * `auto_approve` — `--yes` / `--ci` / `--force` was set.
+   * `back_compat` — `--agent` implies-autoApprove path.
+   */
+  reason: 'auto_approve' | 'back_compat';
+}
+
+// ── decision_id generator ───────────────────────────────────────────
+//
+// Process-local counter used to mint a fresh correlation id for every
+// `needs_input` request. The id is the single source of truth that
+// pairs a request envelope with its `decision_auto` resolution; without
+// it, an orchestrator would have to reconstruct pairing by timing +
+// `code` heuristics, which breaks the moment two prompts share a code
+// (back-to-back `confirm` dialogs, paginated choosers).
+//
+// Why a counter and not UUID:
+//   - Stable across log replay — a transcript replayed offline reads
+//     the SAME ids it read live. UUIDs would re-randomize.
+//   - Zero-padded `dec_NNN` reads cleanly in `grep` / `jq` filters
+//     against a transcript.
+//   - Wrap at 999 isn't a concern: a single wizard run never asks
+//     hundreds of questions. (If it did, that's the real bug.)
+
+let _decisionIdCounter = 0;
+
+/**
+ * Mint the next `decision_id` for a `needs_input` request. Format:
+ * `dec_<NNN>` zero-padded to 3 digits (e.g. `dec_001`, `dec_042`).
+ * Monotonic within a single Node process; resets when the wizard
+ * restarts (orchestrators correlate per-run, not across runs).
+ *
+ * Test-only: use `__resetDecisionIdCounterForTests()` to get a
+ * deterministic sequence inside `beforeEach`.
+ */
+export function nextDecisionId(): string {
+  _decisionIdCounter += 1;
+  return `dec_${String(_decisionIdCounter).padStart(3, '0')}`;
+}
+
+/**
+ * Test helper — reset the process-local counter so each test starts
+ * from `dec_001`. NEVER call this from production code; the counter
+ * MUST be monotonic across an entire wizard run so orchestrators see
+ * stable, non-reused ids.
+ */
+export function __resetDecisionIdCounterForTests(): void {
+  _decisionIdCounter = 0;
+}
 
 // ── Inner-agent lifecycle ───────────────────────────────────────────
 //
