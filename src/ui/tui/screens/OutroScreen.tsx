@@ -16,6 +16,7 @@ import type { WizardStore } from '../store.js';
 import { useWizardStore } from '../hooks/useWizardStore.js';
 import { OutroKind } from '../session-constants.js';
 import { Colors, Icons } from '../styles.js';
+import { GradientText } from '../components/GradientText.js';
 import {
   ChangedFilesView,
   PickerMenu,
@@ -570,12 +571,27 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
               re-runs (returning user, project already healthy) get a
               calmer "your project is healthy" line — the wizard didn't
               just set anything up, so the celebratory tone would feel
-              false. Both paths share every other element below. */}
-          <Text color={Colors.success} bold>
-            {isFullActivationSuccess
-              ? `${Icons.checkmark} Your Amplitude project is healthy`
-              : '🎉 Amplitude is live!'}
-          </Text>
+              false. Both paths share every other element below.
+
+              Wordmark gradient (PR A2 #1): success outros render the
+              heading text with the Amplitude brand violet → blueOnDark
+              gradient — the same brand pairing the IntroScreen logo
+              uses — so the wizard's terminal celebration matches the
+              tone of the rest of the product. The emoji / checkmark
+              prefix stays in a plain <Text> so font rendering of the
+              glyph is unaffected by the per-character color stripe.
+              Error and Cancel outros below keep the minimal monochrome
+              treatment — the gradient is reserved for success states. */}
+          <Box flexDirection="row" gap={1}>
+            <Text color={Colors.success} bold>
+              {isFullActivationSuccess ? Icons.checkmark : '🎉'}
+            </Text>
+            <GradientText>
+              {isFullActivationSuccess
+                ? 'Your Amplitude project is healthy'
+                : 'Amplitude is live!'}
+            </GradientText>
+          </Box>
           {isFullActivationSuccess && (
             <Text color={Colors.body}>
               {store.session.selectedProjectName
