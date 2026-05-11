@@ -43,6 +43,7 @@ import { getLogFilePath } from '../../../lib/observability/index.js';
 import { writeBugReport } from '../../../lib/bug-report.js';
 import { ManualVerificationRibbon } from '../components/ManualVerificationRibbon.js';
 import { HotkeyPills, type HotkeyPill } from '../components/HotkeyPills.js';
+import { buildLastActivityFooter } from './outro-last-activity.js';
 import { toWizardDashboardOpenUrl } from '../../../utils/dashboard-open-url.js';
 import {
   getDashboardFile,
@@ -734,6 +735,31 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
               <Text color={Colors.body}>{outroData.message}</Text>
             </Box>
           )}
+          {/* Last-activity anchor — when the run actually started AND any
+              task transitioned past pending, surface a one-line
+              "Started at HH:MM:SS · Step: <label>" so the user has a
+              concrete entry-point into the log file before they open it.
+              The bullets below ("Press L to open the log", "--debug",
+              "Press C to write a bug report") all reference the log
+              indirectly; this line tells the user *where* in the log to
+              look. Rendered as a muted sub-line so it sits visually
+              under the error message rather than competing with the
+              actionable bullets that follow. */}
+          {(() => {
+            const footer = buildLastActivityFooter({
+              runStartedAt: store.session.runStartedAt,
+              tasks: store.tasks,
+            });
+            if (!footer) return null;
+            return (
+              <Box marginTop={1}>
+                <Text color={Colors.muted}>
+                  Started at <Text bold>{footer.startedAt}</Text> {Icons.dot}{' '}
+                  Step: <Text bold>{footer.stepLabel}</Text>
+                </Text>
+              </Box>
+            );
+          })()}
           <Box marginTop={1} flexDirection="column">
             <Text color={Colors.secondary}>
               {Icons.arrowRight} Check your API key and network connection
