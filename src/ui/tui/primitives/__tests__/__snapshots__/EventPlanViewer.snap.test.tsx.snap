@@ -9,6 +9,6 @@ exports[`EventPlanViewer snapshots > renders the waiting state before any events
 exports[`EventPlanViewer snapshots > renders visible events and skips blank names 1`] = `
 " Event plan
 
- ● Project Created — Fires after successful project provisioning.
- ● SDK Initialized"
+ ○ Project Created — Fires after successful project provisioning.
+ ○ SDK Initialized"
 `;

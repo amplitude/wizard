@@ -594,7 +594,18 @@ export const RunScreen = ({ store }: RunScreenProps) => {
           {
             id: 'events',
             label: 'Events',
-            component: <EventPlanViewer events={store.eventPlan} />,
+            // `fileWritesTotal` is a monotonic counter that climbs every
+            // time the agent initiates a file write — see store.ts. Using
+            // it as `refreshKey` makes EventPlanViewer re-walk the ledger
+            // exactly when new `track()` callsites can land, no more
+            // often. The user sees pending → wired transitions in
+            // real time without per-frame ledger walks.
+            component: (
+              <EventPlanViewer
+                events={store.eventPlan}
+                refreshKey={store.fileWritesTotal}
+              />
+            ),
           },
         ]
       : []),
