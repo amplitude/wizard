@@ -287,7 +287,27 @@ export async function wizardSuccessExit(exitCode = 0): Promise<never> {
       }),
     ]),
   );
-  return process.exit(exitCode);
+  // In production `process.exit` never returns. Tests that mock
+  // `process.exit` to throw (vitest's strict-exit guard) would
+  // otherwise see the throw surface as an Unhandled Rejection on
+  // Node 22 / 24 — the await chain above unwinds normally, the test
+  // moves on, and then the throw fires asynchronously without an
+  // attached handler. Catching here keeps the test-harness behaviour
+  // clean across Node versions without changing production semantics.
+  // Re-applied here after a stacked PR refactor regressed the wrap.
+  try {
+    process.exit(exitCode);
+  } catch {
+    /* test-harness only: process.exit is mocked to throw */
+  }
+  // Satisfy `Promise<never>`. In production the `process.exit` above
+  // terminates and we never reach here. In tests, the harness has
+  // already observed the side effects it cares about — analytics
+  // flush, run_completed emit — before this point, so returning a
+  // never-resolving promise is correct.
+  return new Promise<never>(() => {
+    /* deliberately unresolved */
+  });
 }
 
 /**
