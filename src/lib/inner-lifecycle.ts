@@ -120,8 +120,17 @@ export function extractToolFailureMessage(
   if (result === null || result === undefined) return null;
   if (typeof result === 'object') {
     const obj = result as Record<string, unknown>;
-    // Newer SDK shape: `{ is_error: true, error: 'msg' }` or `{ error: 'msg' }`.
-    if (obj.is_error === true || (obj.error && typeof obj.error === 'string')) {
+    // Newer SDK shape: `{ is_error: true, error: 'msg' }` or `{ error: 'msg' }`
+    // — flag a failure when either the explicit `is_error: true` boolean is
+    // set, OR when an `error` string is present AND `is_error` isn't
+    // explicitly `false`. Some SDK paths attach an informational `error`
+    // string to a successful response (`{ is_error: false, error: 'recovered' }`);
+    // treating that as a failure would skip `recordFileChangeApplied`,
+    // skip the post-write ledger entry, and falsely emit
+    // `file_change_failed` for a successful write.
+    const isExplicitlyOk = obj.is_error === false;
+    const hasErrorString = !!(obj.error && typeof obj.error === 'string');
+    if (!isExplicitlyOk && (obj.is_error === true || hasErrorString)) {
       const msg = typeof obj.error === 'string' ? obj.error : 'tool error';
       return msg;
     }

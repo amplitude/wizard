@@ -305,6 +305,46 @@ describe('createInnerLifecycleHooks (with AgentUI)', () => {
     expect(applied).toBeDefined();
   });
 
+  it('PostToolUse with is_error:false + informational error string still emits file_change_applied (Bugbot 3217023094)', async () => {
+    // Regression: `extractToolFailureMessage` used to treat any truthy
+    // `error` string as a failure, even when `is_error` was explicitly
+    // `false`. Some SDK paths attach an informational `error` field to
+    // a successful response (e.g. `{ is_error: false, error: 'auto-recovered
+    // from missing newline' }`). The pre-fix logic would have falsely
+    // emitted `file_change_failed` and SKIPPED `recordFileChangeApplied`
+    // — leaving the orchestrator's audit trail incomplete and the
+    // ledger missing a post-write entry.
+    const lifecycle = createInnerLifecycleHooks({ phase: 'apply' });
+    await lifecycle.hooks().PostToolUse(
+      {
+        tool_name: 'Write',
+        tool_input: { file_path: 'src/lib/recovered.ts', content: 'ok' },
+        tool_response: {
+          is_error: false,
+          error: 'auto-recovered from missing trailing newline',
+        },
+      },
+      undefined,
+      { signal: new AbortController().signal },
+    );
+
+    const allEvents = writes.map((l) => JSON.parse(l.trim()) as NDJSONEvent);
+    // No false-positive failure event.
+    const failed = allEvents.find(
+      (e) =>
+        (e.data as { event?: string } | undefined)?.event ===
+        'file_change_failed',
+    );
+    expect(failed).toBeUndefined();
+    // Success-side emit still fires.
+    const applied = allEvents.find(
+      (e) =>
+        (e.data as { event?: string } | undefined)?.event ===
+        'file_change_applied',
+    );
+    expect(applied).toBeDefined();
+  });
+
   it('emitEventPlanProposed surfaces all events to NDJSON', () => {
     const lifecycle = createInnerLifecycleHooks({ phase: 'wizard' });
     lifecycle.emitEventPlanProposed([
