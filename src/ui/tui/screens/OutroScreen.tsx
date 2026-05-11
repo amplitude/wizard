@@ -52,7 +52,10 @@ import {
 import { readDraftEventPlanMeta } from '../../../lib/wizard-tools.js';
 import { retryFromCheckpoint } from '../../../lib/retry-from-checkpoint.js';
 import { isInteractiveOutro } from '../utils/outro-mode.js';
-import { executeRollbackWithStatus } from '../../../lib/file-change-ledger.js';
+import {
+  executeRollbackWithStatus,
+  getFileChangeLedger,
+} from '../../../lib/file-change-ledger.js';
 
 const REPORT_FILE = 'amplitude-setup-report.md';
 
@@ -136,6 +139,25 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
   // unrelated store events too). The report file is written by the
   // agent before this screen mounts, so a one-shot read is sufficient.
   const [reportExists, setReportExists] = useState(false);
+
+  // Cancel-outro file-state snapshot — addresses TUI Auditor T4 (the
+  // cancel branch never confirmed what was preserved). Captured ONCE on
+  // mount so the count reflects the ledger as of the moment we render,
+  // not the moment a stray re-render happens.
+  //
+  //   null  → ledger absent (pre-agent cancel, or test fixture with no
+  //           ledger init). We omit the file-state line entirely rather
+  //           than asserting "0 files" with uncertainty.
+  //   0     → ledger initialised but no writes were tracked. Render
+  //           "No files were changed."
+  //   N > 0 → agent-runner's cleanup rollback already reverted N entries
+  //           by the time we mount (cleanup hook fires synchronously
+  //           before the outro renders). Render the exact count so the
+  //           user doesn't have to `git status` to find out.
+  const [cancelLedgerSize] = useState<number | null>(() => {
+    const ledger = getFileChangeLedger();
+    return ledger ? ledger.size() : null;
+  });
 
   // `isSuccess` / `isError` drive input handling and the action picker.
   // We compute them off the raw session.outroData (so error/cancel paths
@@ -884,6 +906,23 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
           {outroData.message && (
             <Box marginTop={1}>
               <Text color={Colors.body}>{outroData.message}</Text>
+            </Box>
+          )}
+          {/* File-state line — TUI Auditor T4. "Closure is empathy when
+              the user knows exactly what's on disk." Rendered in muted
+              tone (not warning / not success) so it informs without
+              shouting. Omitted entirely when the ledger is absent — we
+              don't have evidence either way, so asserting "0 files"
+              would be the same uncertainty the audit flagged. */}
+          {cancelLedgerSize !== null && (
+            <Box marginTop={1}>
+              <Text color={Colors.muted}>
+                {cancelLedgerSize === 0
+                  ? 'No files were changed.'
+                  : `Reverted ${cancelLedgerSize} file${
+                      cancelLedgerSize === 1 ? '' : 's'
+                    } the wizard had started writing.`}
+              </Text>
             </Box>
           )}
           {/* Resume-later note — closes the cancel outro on a forward-
