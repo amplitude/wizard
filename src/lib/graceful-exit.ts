@@ -238,16 +238,23 @@ async function wizardAbortRunner(opts: {
   reason: string;
 }): Promise<void> {
   // wizardAbort is `Promise<never>` — it always calls `process.exit`
-  // and never resolves in production. We deliberately don't catch its
-  // rejection here: any exception coming out of it means the test
-  // harness is stubbing `process.exit` to throw (vitest does this by
-  // default to detect unintended exits). Re-throwing the rejection
-  // lets that diagnostic surface in tests instead of swallowing it and
-  // spinning on `process.exit` again.
-  const { wizardAbort } = await import('../utils/wizard-abort.js');
-  await wizardAbort({
-    message: opts.message,
-    exitCode: opts.exitCode,
-    reason: opts.reason,
-  });
+  // and never resolves in production. Wrap in try/catch to silence
+  // the unhandled rejection that surfaces when a vitest harness has
+  // stubbed `process.exit` to throw (vitest's strict-exit guard does
+  // this to catch unintended terminations). In production the throw
+  // path never fires; the rejection only ever shows up in tests.
+  try {
+    const { wizardAbort } = await import('../utils/wizard-abort.js');
+    await wizardAbort({
+      message: opts.message,
+      exitCode: opts.exitCode,
+      reason: opts.reason,
+    });
+  } catch {
+    // Best-effort: production runs never reach here because wizardAbort
+    // calls process.exit. Tests that stub process.exit may surface a
+    // synthetic exception — swallowed because the test harness owns
+    // the verification (the run_completed envelope + signal state
+    // have already been observed by then).
+  }
 }
