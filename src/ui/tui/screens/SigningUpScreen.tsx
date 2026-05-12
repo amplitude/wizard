@@ -36,6 +36,10 @@ import { DEFAULT_AMPLITUDE_ZONE } from '../../../lib/constants.js';
 import { createLogger } from '../../../lib/observability/logger.js';
 import { assertNever } from '../../../utils/assert-never.js';
 import type { SignupOrAuthInput } from '../../../utils/signup-or-auth.js';
+import type {
+  LegalDocumentBundle,
+  LegalDocumentSource,
+} from '../../../utils/direct-signup.js';
 
 const log = createLogger('signing-up-screen');
 
@@ -72,35 +76,51 @@ export const SigningUpScreen = ({ store }: SigningUpScreenProps) => {
 
       let input: SignupOrAuthInput;
       if (requiredFields !== null) {
-        const wantsFullName = requiredFields.includes('full_name');
-        const wantsTerms = requiredFields.includes('terms_acceptance');
-        const hasFullName = session.signupFullName !== null;
-        const hasTerms =
-          session.legalDocumentBundle !== null &&
-          session.legalDocumentSource !== null;
-
-        if ((wantsFullName && !hasFullName) || (wantsTerms && !hasTerms)) {
-          log.error(
-            'signup: re-fired in follow-up mode without complete data; abandoning',
-          );
-          store.setSignupAbandoned(true);
-          return;
+        // Per-RequiredKey exhaustive switch: validates session readiness AND
+        // collects the input slot for each requested key. `assertNever`
+        // makes adding a new `RequiredKey` (e.g. `phone_number`) a compile
+        // error here until the contributor maps it to a session field and
+        // an input slot — otherwise the new key would silently be treated
+        // as "not collected" and abandon every ceremony.
+        let fullName: string | undefined;
+        let legalDocumentBundle: LegalDocumentBundle | undefined;
+        let legalDocumentSource: LegalDocumentSource | undefined;
+        for (const key of requiredFields) {
+          switch (key) {
+            case 'full_name':
+              if (session.signupFullName === null) {
+                log.error(
+                  'signup: re-fired in follow-up mode without full_name; abandoning',
+                );
+                store.setSignupAbandoned(true);
+                return;
+              }
+              fullName = session.signupFullName;
+              break;
+            case 'terms_acceptance':
+              if (
+                session.legalDocumentBundle === null ||
+                session.legalDocumentSource === null
+              ) {
+                log.error(
+                  'signup: re-fired in follow-up mode without terms_acceptance state; abandoning',
+                );
+                store.setSignupAbandoned(true);
+                return;
+              }
+              legalDocumentBundle = session.legalDocumentBundle;
+              legalDocumentSource = session.legalDocumentSource;
+              break;
+            default:
+              assertNever(key);
+          }
         }
-
         input = {
           kind: 'with_required_fields',
           email,
-          ...(wantsFullName && session.signupFullName !== null
-            ? { fullName: session.signupFullName }
-            : {}),
-          ...(wantsTerms &&
-          session.legalDocumentBundle !== null &&
-          session.legalDocumentSource !== null
-            ? {
-                legalDocumentBundle: session.legalDocumentBundle,
-                legalDocumentSource: session.legalDocumentSource,
-              }
-            : {}),
+          fullName,
+          legalDocumentBundle,
+          legalDocumentSource,
           zone,
           signal,
         };

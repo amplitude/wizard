@@ -166,4 +166,63 @@ describe('SigningUpScreen input construction', () => {
 
     unmount();
   });
+
+  // Abandon paths — the per-RequiredKey switch must reject ceremonies
+  // where the BE asked for a field but the corresponding session state
+  // is null. Without this, the wrapper would receive `kind:
+  // 'with_required_fields'` with the relevant fields missing and the
+  // body builder would emit an empty `terms_acceptance` or missing
+  // `full_name` slot, breaking the wire contract.
+
+  it("abandons when BE wants 'full_name' but session.signupFullName is null", async () => {
+    const { SigningUpScreen } = await import('../SigningUpScreen.js');
+    const { makeStoreForSnapshot } = await import(
+      '../../__tests__/snapshot-utils.js'
+    );
+
+    const store = makeStoreForSnapshot({
+      introConcluded: true,
+      region: 'us',
+      signupEmail: 'ada@example.com',
+      signupFullName: null,
+      signupRequiredFields: ['full_name'],
+      legalDocumentBundle: null,
+      legalDocumentSource: null,
+      tosAccepted: null,
+    });
+
+    const { unmount } = render(<SigningUpScreen store={store} />);
+    await new Promise((r) => setTimeout(r, 50));
+
+    expect(store.session.signupAbandoned).toBe(true);
+    expect(mockedPerformSignupOrAuth).not.toHaveBeenCalled();
+
+    unmount();
+  });
+
+  it("abandons when BE wants 'terms_acceptance' but legal-doc state is null", async () => {
+    const { SigningUpScreen } = await import('../SigningUpScreen.js');
+    const { makeStoreForSnapshot } = await import(
+      '../../__tests__/snapshot-utils.js'
+    );
+
+    const store = makeStoreForSnapshot({
+      introConcluded: true,
+      region: 'us',
+      signupEmail: 'ada@example.com',
+      signupFullName: 'Ada Lovelace',
+      signupRequiredFields: ['terms_acceptance'],
+      legalDocumentBundle: null,
+      legalDocumentSource: null,
+      tosAccepted: null,
+    });
+
+    const { unmount } = render(<SigningUpScreen store={store} />);
+    await new Promise((r) => setTimeout(r, 50));
+
+    expect(store.session.signupAbandoned).toBe(true);
+    expect(mockedPerformSignupOrAuth).not.toHaveBeenCalled();
+
+    unmount();
+  });
 });
