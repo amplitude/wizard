@@ -11,6 +11,7 @@ import {
   gateCiSignupAcceptToS,
   gateAgentSignupArguments,
   isAuthTaskGateReady,
+  applyEnvSelectionDeferral,
 } from './helpers';
 import { WIZARD_VERSION } from './context';
 import { isNonInteractiveEnvironment } from '../utils/environment';
@@ -452,34 +453,32 @@ export const defaultCommand: CommandModule = {
             // When the resolver explicitly told us it needs the user to
             // pick an environment (typical second-run state after
             // `git reset --hard` wipes `<installDir>/.amplitude/`),
-            // wipe leftover env / app pre-selection from a prior run
-            // so AuthScreen's `selectedEnv` lookup can't resolve a
-            // stale name against the freshly-fetched pendingOrgs and
+            // wipe leftover env / app / credentials pre-selection from a
+            // prior run so AuthScreen's `selectedEnv` lookup can't resolve
+            // a stale name against the freshly-fetched pendingOrgs and
             // auto-call `setCredentials()` against the wrong env. #703
-            // made the resolver outcome observable; this clamps the
-            // downstream session state so the env picker is the
-            // unambiguous next step.
+            // made the resolver outcome observable; #709 added env/appId
+            // clearing; this commit adds `credentials` clearing to fix the
+            // rerun path where a stored API key or checkpoint rehydration
+            // left `session.credentials` non-null, which made
+            // `Auth.isComplete` (flows.ts) return true and the router
+            // advance past Auth to Setup with no env-picker surface.
             //
             // Note: we do NOT set `requiresAccountConfirmation` here —
             // that flag drives the returning-user "confirm this
             // account" UI, which is the wrong affordance for "you
-            // need to pick an env". The Auth flow gate
-            // (`s.credentials !== null`) is already false because the
-            // resolver returned `needs_user_choice`; that's what keeps
-            // the user on AuthScreen.
+            // need to pick an env". With `credentials` now nulled the
+            // Auth flow gate evaluates false, which is what routes the
+            // user back to AuthScreen.
             //
-            // Skipped in --agent / --ci mode — those modes emit a
-            // structured rejection elsewhere and don't render an
+            // Only the `'environment_selection'` arm clears credentials;
+            // see `applyEnvSelectionDeferral` for the discriminator-gated
+            // rationale. Skipped in --agent / --ci mode — those modes
+            // emit a structured rejection elsewhere and don't render an
             // interactive picker.
-            if (
-              credentialResolution.outcome === 'needs_user_choice' &&
-              !session.ci &&
-              !session.agent
-            ) {
-              session.selectedEnvName = null;
-              session.selectedAppId = null;
+            if (applyEnvSelectionDeferral(session, credentialResolution)) {
               logToFile(
-                '[bin] needs_user_choice: cleared stale env/appId pre-selection so AuthScreen renders the env picker unambiguously',
+                '[bin] needs_user_choice/environment_selection: cleared stale env/appId/credentials so AuthScreen renders the env picker unambiguously',
               );
             }
 

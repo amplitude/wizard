@@ -1,7 +1,15 @@
 /**
  * EventPlanViewer — Renders a list of planned analytics events.
  *
- * Two-state rendering keyed on the file-change ledger:
+ * The header copy reflects the wiring lifecycle so the Events tab
+ * never lies about the agent's state:
+ *
+ *   - No plan yet           → "Waiting for the agent to propose events..."
+ *   - Plan proposed, pending → "Event plan ({N} events) · awaiting your
+ *                              approval — see the popup"
+ *   - Plan approved, wiring → "Approved · wiring {N} events…"
+ *
+ * Per-event rendering is keyed on the file-change ledger:
  *
  *   - **Pending** events (no matching `track()` callsite found on disk
  *     yet) render with an open-circle glyph (○) and the **plan name**
@@ -13,7 +21,7 @@
  *     normalized Title Case.
  *
  * This mirrors the source-of-truth fix already applied to the Outro
- * celebration screen (#746). Before this change, the Events tab during
+ * celebration screen (#746). Before that change, the Events tab during
  * the wiring phase blindly rendered `store.eventPlan` so any
  * normalize-mangling (e.g. `Ai` instead of `AI`) or user-feedback
  * divergence (the user asked for lowercase but the plan still held
@@ -47,11 +55,19 @@ interface EventPlanViewerProps {
    * ledger.
    */
   refreshKey?: number;
+  /**
+   * True once the user has hit Y on the EventPlan approval screen.
+   * Drives the post-approval header copy. False during the propose +
+   * pending-approval window so the existing "review in the popup"
+   * affordance stays visible.
+   */
+  approved?: boolean;
 }
 
 export const EventPlanViewer = ({
   events,
   refreshKey,
+  approved = false,
 }: EventPlanViewerProps) => {
   const visible = events.filter((e) => e.name.trim().length > 0);
 
@@ -87,9 +103,17 @@ export const EventPlanViewer = ({
     );
   }
 
+  const header = approved
+    ? `Approved · wiring ${visible.length} event${
+        visible.length === 1 ? '' : 's'
+      }…`
+    : `Event plan (${visible.length} event${
+        visible.length === 1 ? '' : 's'
+      }) · awaiting your approval`;
+
   return (
     <Box flexDirection="column" paddingX={1}>
-      <Text bold>Event plan</Text>
+      <Text bold>{header}</Text>
       <Box height={1} />
       {visible.map((event) => {
         // wiredNames is keyed by the lowercase-collapsed event name and

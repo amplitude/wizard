@@ -604,6 +604,7 @@ export const RunScreen = ({ store }: RunScreenProps) => {
               <EventPlanViewer
                 events={store.eventPlan}
                 refreshKey={store.fileWritesTotal}
+                approved={store.session.eventPlanApproved}
               />
             ),
           },

@@ -208,8 +208,15 @@ export class WizardStore {
   /** True while the user is typing a slash command in the command bar. */
   private $commandMode = atom(false);
 
-  /** Transient feedback message shown in the command bar after a command runs. */
-  private $commandFeedback = atom<string | null>(null);
+  /**
+   * Transient feedback message shown in the command bar after a command runs.
+   *
+   * `string[]` is rendered as one line per entry — used by `/diagnostics` and
+   * `/debug` to show storage paths without hard-truncating to `/Users/…` when
+   * the line overflows the terminal. Single-line commands (`/whoami`,
+   * `/region`, etc.) keep passing a `string`.
+   */
+  private $commandFeedback = atom<string | string[] | null>(null);
 
   /** Error caught by the app error boundary — shown in ConsoleView. */
   private $screenError = atom<Error | null>(null);
@@ -274,7 +281,7 @@ export class WizardStore {
     return this.$commandMode.get();
   }
 
-  get commandFeedback(): string | null {
+  get commandFeedback(): string | string[] | null {
     return this.$commandFeedback.get();
   }
 
@@ -761,6 +768,12 @@ export class WizardStore {
     // semantics on the next forward pass).
     this.$session.setKey('signupFullName', null);
     this.$session.setKey('tosAccepted', null);
+    // `legalDocumentBundle` and `legalDocumentSource` are tied to the
+    // same probe response as `tosAccepted` — reset together so a stale
+    // bundle can't ride into a follow-up POST whose acceptance got
+    // cleared, or into a re-probe that should see fresh URLs from BE.
+    this.$session.setKey('legalDocumentBundle', null);
+    this.$session.setKey('legalDocumentSource', null);
     // `signupTokensObtained` gates whether the post-TUI auth task
     // hydrates from disk vs. opens browser OAuth. If we leave a stale
     // `true` after a ceremony reset, the next forward pass would
@@ -815,12 +828,34 @@ export class WizardStore {
 
   resetToS(): void {
     this.$session.setKey('tosAccepted', null);
+    // Intentionally leave `legalDocumentBundle` and `legalDocumentSource`
+    // intact. They're tied to the probe response that drove this
+    // ceremony, not to the acceptance decision. After this revert, the
+    // router immediately re-resolves to the ToS screen (because
+    // `'terms_acceptance'` is still in `signupRequiredFields` and
+    // `tosAccepted` is now null), and `ToSScreen` renders nothing when
+    // the bundle is null — clearing them here would strand the user on
+    // a blank screen with no interactive elements. The stale-bundle
+    // invariant matters only when the *whole* ceremony resets (new
+    // email → new probe response → possibly-new URLs); that's handled
+    // by `_resetCeremonyKeys`, which wipes the bundle alongside the
+    // rest of the ceremony state.
     analytics.wizardCapture('back navigation', { to: 'tos' });
     this.emitChange();
   }
 
-  setSignupRequiredFields(fields: string[] | null): void {
+  setSignupRequiredFields(fields: WizardSession['signupRequiredFields']): void {
     this.$session.setKey('signupRequiredFields', fields);
+    this.emitChange();
+  }
+
+  setLegalDocumentBundle(bundle: WizardSession['legalDocumentBundle']): void {
+    this.$session.setKey('legalDocumentBundle', bundle);
+    this.emitChange();
+  }
+
+  setLegalDocumentSource(source: WizardSession['legalDocumentSource']): void {
+    this.$session.setKey('legalDocumentSource', source);
     this.emitChange();
   }
 
@@ -1118,6 +1153,13 @@ export class WizardStore {
   /** Show an event-plan confirmation. Resolves when the user approves, skips, or gives feedback. */
   promptEventPlan(events: PlannedEvent[]): Promise<EventPlanDecision> {
     return new Promise((resolve) => {
+      // A fresh `confirm_event_plan` call is landing — clear any
+      // in-flight "Revising your plan…" state from the previous round
+      // so EventPlanFullScreen flips back to the normal plan list
+      // (now showing the revised events) instead of the spinner.
+      if (this.$session.get().pendingEventPlanFeedback !== null) {
+        this.$session.setKey('pendingEventPlanFeedback', null);
+      }
       this.$pendingPrompt.set({ kind: 'event-plan', events, resolve });
       this.emitChange();
     });
@@ -1131,6 +1173,29 @@ export class WizardStore {
       'prompt kind': 'event-plan',
       response: typeof decision === 'object' ? 'feedback' : String(decision),
     });
+    // On feedback: stash the user's text so EventPlanFullScreen stays
+    // mounted (App.tsx checks `pendingEventPlanFeedback` alongside the
+    // pending prompt) and can render a "Revising your plan…" state
+    // while the agent re-runs `confirm_event_plan`. Cleared by
+    // `promptEventPlan` when the revised plan lands, by an explicit
+    // approve/skip below, or by the next `setEventPlan` arrival.
+    //
+    // On approve: flip `eventPlanApproved` so the Events tab in
+    // RunScreen swaps the stale "Waiting for the agent to propose
+    // events..." copy for "Approved · wiring N events…". Skipped does
+    // NOT flip the flag — the user opted out, not in.
+    if (typeof decision === 'object' && decision.decision === 'revised') {
+      this.$session.setKey('pendingEventPlanFeedback', decision.feedback);
+    } else {
+      if (this.$session.get().pendingEventPlanFeedback !== null) {
+        this.$session.setKey('pendingEventPlanFeedback', null);
+      }
+      const decisionKind =
+        typeof decision === 'object' ? decision.decision : decision;
+      if (decisionKind === 'approved') {
+        this.$session.setKey('eventPlanApproved', true);
+      }
+    }
     this.$pendingPrompt.set(null);
     this.emitChange();
     prompt.resolve(decision);
@@ -1250,8 +1315,14 @@ export class WizardStore {
     this.$requestedTab.set(null);
   }
 
-  /** Show a transient feedback message in the command bar. Clears after ms. */
-  setCommandFeedback(message: string, ms = 3000): void {
+  /**
+   * Show a transient feedback message in the command bar. Clears after `ms`.
+   *
+   * Pass an array of strings to render one line per entry — used by
+   * `/diagnostics` and `/debug` so multi-line path summaries don't get
+   * hard-truncated to `/Users/…` when the line overflows the terminal.
+   */
+  setCommandFeedback(message: string | string[], ms = 3000): void {
     if (this._feedbackTimer !== null) {
       clearTimeout(this._feedbackTimer);
       this._feedbackTimer = null;
@@ -2165,6 +2236,14 @@ export class WizardStore {
 
   setEventPlan(events: PlannedEvent[]): void {
     this.$eventPlan.set(events);
+    // A fresh event plan (typically the agent's revised plan after
+    // user feedback) — clear the in-flight "Revising your plan…"
+    // marker so EventPlanFullScreen flips back to the normal plan
+    // list. Guarded so the common no-op case (events arrive without
+    // pending feedback) doesn't churn the session map.
+    if (this.$session.get().pendingEventPlanFeedback !== null) {
+      this.$session.setKey('pendingEventPlanFeedback', null);
+    }
     this.emitChange();
   }
 

@@ -342,6 +342,138 @@ describe('discovery parallelism commandment', () => {
 });
 
 /**
+ * Autocapture-no-propose commandment — a live test in the Excalidraw
+ * codebase exposed the bug: the agent proposed 14 events, then the
+ * Setup Report's "Autocapture coverage" section explained that 8 of
+ * them were "covered by autocapture — no track() needed." User
+ * feedback verbatim: *"Auto capture takes work from the user to setup
+ * those events. We didn't use to skip implementing events that were
+ * proposed. If auto capture should do it, we should not be proposing."*
+ *
+ * The fix is upstream: refuse to propose events that autocapture
+ * handles. This test pins the commandment text so the rule can't
+ * silently drift — if a future copy edit waters it down, the failure
+ * mode (propose-but-don't-implement, with a band-aid in the Setup
+ * Report) comes straight back.
+ */
+describe('autocapture-no-propose commandment', () => {
+  // The universal rule applies to every run; the surface catalog with
+  // exact SDK identifiers lives in the browser-only block because
+  // mobile SDKs autocapture different surfaces (Swift: .sessions /
+  // .appLifecycles / .screenViews; backend SDKs: none). Tests are
+  // split accordingly.
+  const universalText = getWizardCommandments();
+  const browserText = getWizardCommandments({ targetsBrowser: true });
+
+  it('forbids proposing events fully covered by autocapture (universal)', () => {
+    // The MUST NOT formulation is the durable sentinel — it's what the
+    // model anchors on when deciding whether to drop a candidate event.
+    // Must be in the UNIVERSAL block so mobile / server runs see it too.
+    expect(universalText).toContain(
+      'Events fully covered by Amplitude autocapture MUST NOT be proposed in the event plan',
+    );
+    // Explicitly names the failure mode in the commandment so a future
+    // skim-reader (model or human) understands why the rule exists.
+    expect(universalText).toMatch(
+      /proposing an event the wizard will not implement is a bug/i,
+    );
+  });
+
+  it('names every browser autocapture surface in the browser-only block', () => {
+    // The 10 default autocapture surfaces from @amplitude/unified /
+    // @amplitude/analytics-browser. If the SDK adds or renames one,
+    // both this list and the commandment copy update together — the
+    // wizard's events.json shape is keyed on those names, and the
+    // prompt must reference them by their exact API identifier so the
+    // model can grep for matches in init code. Verified against
+    // generic-wizard-agent.ts initAll example.
+    const surfaces = [
+      'attribution',
+      'pageViews',
+      'sessions',
+      'formInteractions',
+      'fileDownloads',
+      'elementInteractions',
+      'frustrationInteractions',
+      'networkTracking',
+      'webVitals',
+      'errorMonitoring',
+    ];
+    for (const surface of surfaces) {
+      expect(
+        browserText,
+        `browser commandments should name autocapture surface "${surface}" so the agent can match it against the SDK init config.`,
+      ).toContain(surface);
+    }
+  });
+
+  it('points the model at the upstream autocapture catalog (both blocks)', () => {
+    // The published Amplitude doc is the source of truth — if the
+    // commandment ever stops linking to it, future SDK additions
+    // (e.g. a new autocapture key) won't get caught by the agent.
+    // The link must appear in BOTH the universal block (so non-browser
+    // runs can still navigate to it for orientation) AND the browser-
+    // only block (where the surface table lives).
+    expect(universalText).toContain(
+      'https://amplitude.com/docs/data/sdks/browser-2/autocapture',
+    );
+    expect(browserText).toContain(
+      'https://amplitude.com/docs/data/sdks/browser-2/autocapture',
+    );
+  });
+
+  it('orders the autocapture rule AFTER the confirm_event_plan mandate', () => {
+    // The agent reads the system prompt top-to-bottom. We deliberately
+    // place the autocapture filter immediately AFTER the
+    // confirm_event_plan mandate so the agent has the mandate context
+    // (events.json shape, plan ownership) before reading the filter.
+    const autocaptureIdx = universalText.indexOf(
+      'Events fully covered by Amplitude autocapture MUST NOT be proposed',
+    );
+    const confirmRuleIdx = universalText.indexOf(
+      'you MUST call confirm_event_plan',
+    );
+    expect(
+      autocaptureIdx,
+      'autocapture-no-propose rule missing',
+    ).toBeGreaterThan(-1);
+    expect(
+      confirmRuleIdx,
+      'confirm_event_plan mandate rule missing',
+    ).toBeGreaterThan(-1);
+    expect(
+      autocaptureIdx,
+      'autocapture-no-propose rule should appear immediately after the confirm_event_plan mandate so the agent has the mandate context before reading the filter',
+    ).toBeGreaterThan(confirmRuleIdx);
+  });
+
+  it('explicitly forbids the "include with a note" loophole (universal)', () => {
+    // The most likely failure mode after this commandment ships: the
+    // model includes an autocaptured event anyway with a description
+    // like "covered by autocapture — for reference." Reject that
+    // pattern by name so a future eval can't legitimize it.
+    expect(universalText).toMatch(/do NOT include it with a note/);
+    expect(universalText).toMatch(/do NOT mention it in the description/i);
+  });
+
+  it('pins exact example event-name shapes that must be dropped (universal)', () => {
+    // The Excalidraw run had events like "Canvas Exported" (a single
+    // button click), "Library Item Added" (drag-drop), "Chart Pasted"
+    // (paste handler), "Command Palette Opened" (key combo) — all
+    // dispatched by element interactions autocapture catches. The
+    // commandment's example list trains the model on the shape of the
+    // events that must be dropped, not just the abstract category.
+    // These appear in the universal block so mobile runs also see
+    // common shape examples (form / session / page surfaces are
+    // cross-platform concepts even though the exact SDK options differ).
+    expect(universalText).toMatch(/"\[X\] Clicked"/);
+    expect(universalText).toMatch(/"Page Viewed"/);
+    expect(universalText).toMatch(/"Session Started"/);
+    expect(universalText).toMatch(/"Form Submitted"/);
+  });
+});
+
+/**
  * Pre-flight context — the wizard injects a structured Markdown block at
  * the top of the first user message containing every value the agent used
  * to probe for at cold-start (cwd, framework, package manager, env files,
@@ -358,6 +490,104 @@ describe('discovery parallelism commandment', () => {
  * regression — and the hallucination-prone discovery loop — comes
  * straight back.
  */
+/**
+ * track() property mandate + Setup Report reconciliation.
+ *
+ * Excalidraw live test exposed two failure modes:
+ *   1. 10 of 12 approved events were instrumented as bare `track("name")`
+ *      with no properties — analyst can only count occurrences, not slice.
+ *   2. 2 events were silently dropped; the Setup Report celebrated "10
+ *      instrumented" without explaining what happened to the other 2.
+ *
+ * These commandments raise the floor: every track() call carries 1-3
+ * properties, and the Setup Report reconciles every approved-plan event
+ * into Instrumented / Autocaptured / Dropped buckets with totals matching
+ * the plan. Tests pin the exact sentinel phrasing so a future copy edit
+ * can't quietly soften the rule.
+ */
+describe('track() property mandate commandment', () => {
+  const text = getWizardCommandments();
+
+  it('mandates 1-3 properties on every track() call', () => {
+    // Exact sentinel from the rule — keeps the property-count contract
+    // pinned across copy edits. The rule wraps `track()` in backticks
+    // so the agent renders it as code.
+    expect(text).toContain(
+      'Every `track()` call you write MUST include 1-3 properties',
+    );
+  });
+
+  it('shows the GOOD example with prompt_length / model / latency_ms', () => {
+    // The shape of the GOOD example is the durable teaching artifact —
+    // it shows the agent how to mine context from local variables
+    // without inventing values. Pin the exact track call.
+    expect(text).toContain('amplitude.track("ai diagram generated"');
+    expect(text).toContain('prompt_length: prompt.length');
+    expect(text).toContain('model: "claude-sonnet-4-6"');
+    expect(text).toContain('latency_ms: Date.now() - startedAt');
+  });
+
+  it('shows a BAD bare-event example so the failure mode is named', () => {
+    // The Excalidraw failure mode — bare `track("scene saved to backend")`
+    // with no properties. Naming it as BAD makes the contrast unmissable.
+    expect(text).toContain('// BAD');
+    expect(text).toContain('amplitude.track("scene saved to backend")');
+  });
+
+  it('carves out a single-property fallback for unavoidable lifecycle events', () => {
+    // The rule has to leave room for the rare "no useful context here"
+    // callsite. The carve-out tells the agent: prefer 1 property over 0,
+    // and document the gap in the Setup Report. Lock the carve-out
+    // language so a future edit doesn't accidentally turn the rule
+    // absolute (which would lead to invented property values).
+    expect(text).toContain('prefer a single property over zero');
+    expect(text).toContain('no properties captured — context unavailable');
+  });
+});
+
+describe('Setup Report reconciliation commandment', () => {
+  const text = getWizardCommandments();
+
+  it('mandates reconciling every approved-plan event into three buckets', () => {
+    // Exact sentinel: the rule must name the file and the reconcile verb.
+    expect(text).toContain(
+      'MUST reconcile every event in the approved `.amplitude/events.json` plan',
+    );
+  });
+
+  it('names all three buckets with the exact labels', () => {
+    // The bucket labels are the contract — they appear verbatim in the
+    // Setup Report's reconciliation section, so the agent and the
+    // downstream renderer both need a single source of truth.
+    expect(text).toContain('**Instrumented**');
+    expect(text).toContain('**Covered by autocapture**');
+    expect(text).toContain('**Dropped**');
+  });
+
+  it('forces specific autocapture-surface naming, not the generic claim', () => {
+    // The Excalidraw failure mode wasn't just dropped events — even when
+    // the agent did report autocapture coverage, it said "autocapture
+    // handles it" without naming WHICH surface. The user can't verify
+    // that. Lock the specificity requirement and the explicit
+    // counter-example phrasing in.
+    expect(text).toContain(
+      'Generic "autocapture handles it" is insufficient — be specific',
+    );
+    // Concrete examples that demonstrate the expected specificity.
+    expect(text).toContain('autocapture.elementInteractions');
+    expect(text).toContain('autocapture.pageViews');
+  });
+
+  it('mandates the bucket sum equal the approved plan size', () => {
+    // The arithmetic invariant is what catches the silent-drop bug:
+    // if the Setup Report's bucket totals don't equal the plan size,
+    // the agent has hidden work. Lock the equality requirement in.
+    expect(text).toContain(
+      'sum of events across all three buckets MUST equal the count',
+    );
+  });
+});
+
 describe('pre-flight context commandment', () => {
   const text = getWizardCommandments();
 

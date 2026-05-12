@@ -17,6 +17,11 @@ import { EMAIL_REGEX } from './constants';
 import type { AmplitudeZone, Integration } from './constants';
 import type { FrameworkConfig } from './framework-config';
 import { resolveInstallDir } from '../utils/install-dir';
+import type {
+  RequiredKey,
+  LegalDocumentBundle,
+  LegalDocumentSource,
+} from '../utils/direct-signup';
 
 /**
  * Whether the user is signing into an existing Amplitude account or
@@ -710,6 +715,39 @@ export interface WizardSession {
    */
   postAgentSteps: PostAgentStep[];
 
+  /**
+   * Free-form feedback text the user just submitted on the event-plan
+   * approval screen, while we're waiting for the agent to emit a revised
+   * plan. Set synchronously when the user resolves the prompt with
+   * `decision === 'revised'`; cleared when the agent's next
+   * `confirm_event_plan` call lands (a fresh `setEventPlan` + new
+   * `promptEventPlan`) OR when the user approves/skips.
+   *
+   * Drives two UX surfaces:
+   *   1. App.tsx — keeps `EventPlanFullScreen` mounted across the
+   *      feedback round-trip so the user doesn't briefly land on the
+   *      Run tab view and think their feedback was ignored.
+   *   2. EventPlanFullScreen — renders a "Revising your plan…" state
+   *      that quotes the feedback back, so the in-flight wait reads as
+   *      "the agent is working on it" instead of an unexplained pause.
+   *
+   * Null in every state except "feedback submitted, revised plan not
+   * yet emitted". Never persisted — this is purely transient session
+   * state for the live TUI.
+   */
+  pendingEventPlanFeedback: string | null;
+
+  /**
+   * True once the user has approved the agent's proposed event plan
+   * (Y on the EventPlanFullScreen). Drives the Events tab body in
+   * RunScreen — pre-approval it still says "Waiting for the agent to
+   * propose events..."; post-approval it switches to "Approved · wiring
+   * N events..." so the stale waiting copy doesn't linger for the
+   * entire instrumentation phase. Skipped / revised decisions do NOT
+   * flip this — only an explicit approve.
+   */
+  eventPlanApproved: boolean;
+
   // Lifecycle
   runPhase: RunPhase;
   /**
@@ -894,18 +932,52 @@ export interface WizardSession {
    * Server-driven signup field collection state.
    *
    * The agentic signup endpoint can respond `needs_information` when the
-   * user is new and the request is missing fields the server requires
-   * (today: `full_name`). The TUI's signup ceremony POSTs email-only
-   * first, then writes the server's `required` array here. Downstream
-   * collection screens render iff their key is present AND the session
-   * doesn't already hold a value for it.
+   * user is new and the request is missing fields the server requires.
+   * The TUI's signup ceremony POSTs email-only first, then writes the
+   * server's `required` array here. Downstream collection screens render
+   * iff their key is present AND the session doesn't already hold a value
+   * for it.
+   *
+   * Typed as `RequiredKey[] | null` (rather than `string[] | null`)
+   * because the parser's `z.enum(KNOWN_REQUIRED_KEYS)` refine guarantees
+   * only known kinds reach the session — letting consumers
+   * (`flows.ts`'s `requiredSatisfied` predicate, etc.) `switch` on each
+   * field with `assertNever` exhaustiveness checking and no `as` casts.
    *
    * `null` = no probe POST has fired yet (initial state) OR the server
    * didn't ask for anything (e.g. redirect / error / success arms).
    * Non-null = SigningUpScreen received `needs_information` and the
    * collection-screen pipeline should advance.
    */
-  signupRequiredFields: string[] | null;
+  signupRequiredFields: RequiredKey[] | null;
+
+  /**
+   * URLs of the legal documents the user must accept, populated by the
+   * parser whenever `'terms_acceptance' in signupRequiredFields`.
+   *
+   * Source of these URLs: in Phase A, the parser's spoof block synthesizes
+   * them from local constants when the BE-flag is OFF, or passes through
+   * BE-supplied URLs when ON. Either way, downstream code (ToSScreen, the
+   * follow-up POST body) reads from this field — there's no `??` fallback
+   * past the parser, no per-call-site decision about URL origin.
+   *
+   * Reset alongside `tosAccepted` in `resetToS()` and `_resetCeremonyKeys()`
+   * — they're tied to the same probe response, so they stay lock-step.
+   * Asymmetric reset would let stale URLs ride into a follow-up POST whose
+   * acceptance got cleared.
+   */
+  legalDocumentBundle: LegalDocumentBundle | null;
+
+  /**
+   * Where `legalDocumentBundle`'s URLs originated. `null` when there's no
+   * probe response yet (or no terms_acceptance involved). Used as the
+   * value of the `'legal document source'` telemetry tag on signup-attempt
+   * events — including post-probe arms (success, error, requires_redirect)
+   * — so we don't have to thread the source through every wrapper input.
+   *
+   * Reset alongside `legalDocumentBundle`.
+   */
+  legalDocumentSource: LegalDocumentSource | null;
 
   /**
    * Direct-signup success result, captured by SigningUpScreen on the
@@ -1248,6 +1320,8 @@ export function buildSession(args: {
     regionForced: false,
 
     postAgentSteps: [],
+    pendingEventPlanFeedback: null,
+    eventPlanApproved: false,
     runPhase: RunPhase.Idle,
     runStartedAt: null,
     discoveredFeatures: [],
@@ -1303,6 +1377,8 @@ export function buildSession(args: {
     tosAccepted: validated.acceptTos === true ? true : null,
     signupTokensObtained: false,
     signupRequiredFields: null,
+    legalDocumentBundle: null,
+    legalDocumentSource: null,
     signupAuth: null,
     signupAbandoned: false,
     signupInFlight: false,
