@@ -3,6 +3,7 @@ import {
   parseFeedbackSlashInput,
   parseCreateProjectSlashInput,
   getWhoamiText,
+  getDiagnosticsLines,
   getDiagnosticsText,
   checkCommandBlockedByRun,
   isKnownCommand,
@@ -341,5 +342,54 @@ describe('getDiagnosticsText', () => {
   it('includes a tar command pointing at the run dir for support bundles', () => {
     const text = getDiagnosticsText('/p');
     expect(text).toContain('tar -czf wizard-logs.tar.gz');
+  });
+});
+
+describe('getDiagnosticsLines', () => {
+  let originalCacheOverride: string | undefined;
+
+  beforeEach(() => {
+    originalCacheOverride = process.env[CACHE_ROOT_OVERRIDE_ENV];
+    process.env[CACHE_ROOT_OVERRIDE_ENV] = '/tmp/wizard-diag-lines-test';
+  });
+
+  afterEach(() => {
+    if (originalCacheOverride === undefined) {
+      delete process.env[CACHE_ROOT_OVERRIDE_ENV];
+    } else {
+      process.env[CACHE_ROOT_OVERRIDE_ENV] = originalCacheOverride;
+    }
+  });
+
+  it('returns an array so each storage path renders on its own row', () => {
+    // Regression: /diagnostics used to pack every path into a single feedback
+    // string and the overflow-hidden Text element hard-truncated it to
+    // "/Users/…" — the user could not copy the log file path.
+    const lines = getDiagnosticsLines('/Users/test/project-a');
+    expect(Array.isArray(lines)).toBe(true);
+    expect(lines.length).toBeGreaterThan(5);
+  });
+
+  it('exposes every labelled path (log, checkpoint, events, binding, etc.) as its own line', () => {
+    const lines = getDiagnosticsLines('/Users/test/project-a');
+    const findLine = (label: string) => lines.find((l) => l.includes(label));
+    expect(findLine('log:')).toBeDefined();
+    expect(findLine('log (json):')).toBeDefined();
+    expect(findLine('checkpoint:')).toBeDefined();
+    expect(findLine('events:')).toBeDefined();
+    expect(findLine('binding:')).toBeDefined();
+    expect(findLine('Cache root:')).toBeDefined();
+  });
+
+  it('keeps each path fully expanded (no truncation, no /Users/… ellipsis)', () => {
+    const lines = getDiagnosticsLines('/Users/test/project-a');
+    for (const line of lines) {
+      // No line should be the literal truncated form the bug reproduces.
+      expect(line).not.toMatch(/\/Users\/…/);
+      // Any line that mentions /Users must include a full absolute path.
+      if (line.includes('/Users')) {
+        expect(line).toMatch(/\/Users\/[\w.-]+/);
+      }
+    }
   });
 });
