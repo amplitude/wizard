@@ -16,10 +16,17 @@
 import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render } from 'ink-testing-library';
+import { performSignupOrAuth } from '../../../../utils/signup-or-auth.js';
 
 vi.mock('../../../../utils/signup-or-auth.js', () => ({
   performSignupOrAuth: vi.fn(),
 }));
+
+// Single typed entry point for inspecting what the screen passed to the
+// wrapper. `vi.mocked` preserves the original function's signature, so
+// `.mock.calls[i][j]` is typed as `SignupOrAuthInput` — no `as` cast
+// needed at the access sites below.
+const mockedPerformSignupOrAuth = vi.mocked(performSignupOrAuth);
 
 describe('SigningUpScreen input construction', () => {
   beforeEach(() => {
@@ -27,13 +34,9 @@ describe('SigningUpScreen input construction', () => {
   });
 
   it("requiredFields=['full_name']: input has fullName, no bundle/source", async () => {
-    const mod = await import('../../../../utils/signup-or-auth.js');
-    const performSignupOrAuth = mod.performSignupOrAuth as ReturnType<
-      typeof vi.fn
-    >;
     // Stub: return a `redirect` so the screen unmounts cleanly without
     // exercising the success-arm side effects (replaceStoredUser etc.).
-    performSignupOrAuth.mockResolvedValue({ kind: 'redirect' });
+    mockedPerformSignupOrAuth.mockResolvedValue({ kind: 'redirect' });
 
     const { SigningUpScreen } = await import('../SigningUpScreen.js');
     const { makeStoreForSnapshot } = await import(
@@ -54,22 +57,20 @@ describe('SigningUpScreen input construction', () => {
     const { unmount } = render(<SigningUpScreen store={store} />);
     await new Promise((r) => setTimeout(r, 50));
 
-    expect(performSignupOrAuth).toHaveBeenCalledOnce();
-    const input = performSignupOrAuth.mock.calls[0][0];
+    expect(mockedPerformSignupOrAuth).toHaveBeenCalledOnce();
+    const input = mockedPerformSignupOrAuth.mock.calls[0][0];
     expect(input.kind).toBe('with_required_fields');
-    expect(input.fullName).toBe('Ada Lovelace');
-    expect(input.legalDocumentBundle).toBeUndefined();
-    expect(input.legalDocumentSource).toBeUndefined();
+    if (input.kind === 'with_required_fields') {
+      expect(input.fullName).toBe('Ada Lovelace');
+      expect(input.legalDocumentBundle).toBeUndefined();
+      expect(input.legalDocumentSource).toBeUndefined();
+    }
 
     unmount();
   });
 
   it("requiredFields=['terms_acceptance']: input has bundle/source, no fullName", async () => {
-    const mod = await import('../../../../utils/signup-or-auth.js');
-    const performSignupOrAuth = mod.performSignupOrAuth as ReturnType<
-      typeof vi.fn
-    >;
-    performSignupOrAuth.mockResolvedValue({ kind: 'redirect' });
+    mockedPerformSignupOrAuth.mockResolvedValue({ kind: 'redirect' });
 
     const { SigningUpScreen } = await import('../SigningUpScreen.js');
     const { makeStoreForSnapshot } = await import(
@@ -93,25 +94,23 @@ describe('SigningUpScreen input construction', () => {
     const { unmount } = render(<SigningUpScreen store={store} />);
     await new Promise((r) => setTimeout(r, 50));
 
-    expect(performSignupOrAuth).toHaveBeenCalledOnce();
-    const input = performSignupOrAuth.mock.calls[0][0];
+    expect(mockedPerformSignupOrAuth).toHaveBeenCalledOnce();
+    const input = mockedPerformSignupOrAuth.mock.calls[0][0];
     expect(input.kind).toBe('with_required_fields');
-    expect(input.fullName).toBeUndefined();
-    expect(input.legalDocumentBundle).toEqual({
-      terms_of_service: 'https://example.test/t',
-      privacy_policy: 'https://example.test/p',
-    });
-    expect(input.legalDocumentSource).toBe('server');
+    if (input.kind === 'with_required_fields') {
+      expect(input.fullName).toBeUndefined();
+      expect(input.legalDocumentBundle).toEqual({
+        terms_of_service: 'https://example.test/t',
+        privacy_policy: 'https://example.test/p',
+      });
+      expect(input.legalDocumentSource).toBe('server');
+    }
 
     unmount();
   });
 
   it("requiredFields=['full_name','terms_acceptance']: input has both", async () => {
-    const mod = await import('../../../../utils/signup-or-auth.js');
-    const performSignupOrAuth = mod.performSignupOrAuth as ReturnType<
-      typeof vi.fn
-    >;
-    performSignupOrAuth.mockResolvedValue({ kind: 'redirect' });
+    mockedPerformSignupOrAuth.mockResolvedValue({ kind: 'redirect' });
 
     const { SigningUpScreen } = await import('../SigningUpScreen.js');
     const { makeStoreForSnapshot } = await import(
@@ -135,15 +134,17 @@ describe('SigningUpScreen input construction', () => {
     const { unmount } = render(<SigningUpScreen store={store} />);
     await new Promise((r) => setTimeout(r, 50));
 
-    expect(performSignupOrAuth).toHaveBeenCalledOnce();
-    const input = performSignupOrAuth.mock.calls[0][0];
+    expect(mockedPerformSignupOrAuth).toHaveBeenCalledOnce();
+    const input = mockedPerformSignupOrAuth.mock.calls[0][0];
     expect(input.kind).toBe('with_required_fields');
-    expect(input.fullName).toBe('Ada Lovelace');
-    expect(input.legalDocumentBundle).toEqual({
-      terms_of_service: 'https://example.test/t',
-      privacy_policy: 'https://example.test/p',
-    });
-    expect(input.legalDocumentSource).toBe('server');
+    if (input.kind === 'with_required_fields') {
+      expect(input.fullName).toBe('Ada Lovelace');
+      expect(input.legalDocumentBundle).toEqual({
+        terms_of_service: 'https://example.test/t',
+        privacy_policy: 'https://example.test/p',
+      });
+      expect(input.legalDocumentSource).toBe('server');
+    }
 
     unmount();
   });
@@ -153,11 +154,7 @@ describe('SigningUpScreen input construction', () => {
     // probes with `kind: 'email_only'` regardless of what session.signupFullName
     // or session.legalDocumentBundle happen to hold (those could be
     // populated from a prior abandoned ceremony's leftovers).
-    const mod = await import('../../../../utils/signup-or-auth.js');
-    const performSignupOrAuth = mod.performSignupOrAuth as ReturnType<
-      typeof vi.fn
-    >;
-    performSignupOrAuth.mockResolvedValue({ kind: 'redirect' });
+    mockedPerformSignupOrAuth.mockResolvedValue({ kind: 'redirect' });
 
     const { SigningUpScreen } = await import('../SigningUpScreen.js');
     const { makeStoreForSnapshot } = await import(
@@ -178,8 +175,8 @@ describe('SigningUpScreen input construction', () => {
     const { unmount } = render(<SigningUpScreen store={store} />);
     await new Promise((r) => setTimeout(r, 50));
 
-    expect(performSignupOrAuth).toHaveBeenCalledOnce();
-    const input = performSignupOrAuth.mock.calls[0][0];
+    expect(mockedPerformSignupOrAuth).toHaveBeenCalledOnce();
+    const input = mockedPerformSignupOrAuth.mock.calls[0][0];
     expect(input.kind).toBe('email_only');
 
     unmount();
