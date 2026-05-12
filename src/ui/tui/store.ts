@@ -761,6 +761,12 @@ export class WizardStore {
     // semantics on the next forward pass).
     this.$session.setKey('signupFullName', null);
     this.$session.setKey('tosAccepted', null);
+    // `legalDocumentBundle` and `legalDocumentSource` are tied to the
+    // same probe response as `tosAccepted` — reset together so a stale
+    // bundle can't ride into a follow-up POST whose acceptance got
+    // cleared, or into a re-probe that should see fresh URLs from BE.
+    this.$session.setKey('legalDocumentBundle', null);
+    this.$session.setKey('legalDocumentSource', null);
     // `signupTokensObtained` gates whether the post-TUI auth task
     // hydrates from disk vs. opens browser OAuth. If we leave a stale
     // `true` after a ceremony reset, the next forward pass would
@@ -815,12 +821,34 @@ export class WizardStore {
 
   resetToS(): void {
     this.$session.setKey('tosAccepted', null);
+    // Intentionally leave `legalDocumentBundle` and `legalDocumentSource`
+    // intact. They're tied to the probe response that drove this
+    // ceremony, not to the acceptance decision. After this revert, the
+    // router immediately re-resolves to the ToS screen (because
+    // `'terms_acceptance'` is still in `signupRequiredFields` and
+    // `tosAccepted` is now null), and `ToSScreen` renders nothing when
+    // the bundle is null — clearing them here would strand the user on
+    // a blank screen with no interactive elements. The stale-bundle
+    // invariant matters only when the *whole* ceremony resets (new
+    // email → new probe response → possibly-new URLs); that's handled
+    // by `_resetCeremonyKeys`, which wipes the bundle alongside the
+    // rest of the ceremony state.
     analytics.wizardCapture('back navigation', { to: 'tos' });
     this.emitChange();
   }
 
-  setSignupRequiredFields(fields: string[] | null): void {
+  setSignupRequiredFields(fields: WizardSession['signupRequiredFields']): void {
     this.$session.setKey('signupRequiredFields', fields);
+    this.emitChange();
+  }
+
+  setLegalDocumentBundle(bundle: WizardSession['legalDocumentBundle']): void {
+    this.$session.setKey('legalDocumentBundle', bundle);
+    this.emitChange();
+  }
+
+  setLegalDocumentSource(source: WizardSession['legalDocumentSource']): void {
+    this.$session.setKey('legalDocumentSource', source);
     this.emitChange();
   }
 
