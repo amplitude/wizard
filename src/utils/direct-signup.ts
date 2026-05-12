@@ -261,17 +261,24 @@ export type SignupShape<Email extends string | null> =
       kind: 'with_required_fields';
       email: Email;
       /**
-       * Present iff the BE asked for `'full_name'` in `needs_information.required`
-       * AND the user supplied it. The body builder in `performDirectSignup`
-       * omits the `full_name` slot when this is undefined.
+       * Present when the caller has supplied a full name. Two paths:
+       * TUI flow — `SignupFullName` screen collected it after the BE
+       * asked for `'full_name'` in `needs_information.required`;
+       * non-TUI flow — the operator passed `--full-name`, populating
+       * `session.signupFullName` upfront and `helpers.ts` forwards it
+       * regardless of any BE round-trip. The body builder in
+       * `performDirectSignup` omits the `full_name` slot when this is
+       * undefined.
        */
       fullName?: string;
       /**
-       * Present iff the BE asked for `'terms_acceptance'` in
-       * `needs_information.required` AND the user accepted the documents.
-       * The body builder omits the `terms_acceptance` slot when this is
-       * undefined. Co-varies with `legalDocumentSource`: either both fields
-       * are present together or both are absent.
+       * Present when the caller has terms-acceptance state to send.
+       * Same two-path pattern as `fullName`: TUI collects via the ToS
+       * screen after the BE asks for `'terms_acceptance'`; non-TUI uses
+       * `LOCAL_DOC_URLS` upfront. The body builder omits the
+       * `terms_acceptance` slot when this is undefined. Co-varies with
+       * `legalDocumentSource` — either both fields are present together
+       * or both are absent.
        */
       legalDocumentBundle?: LegalDocumentBundle;
       /**

@@ -390,7 +390,9 @@ export async function performSignupOrAuth(
     // when the post-signup fetch fails. Empty when the caller didn't
     // supply `fullName` — the next successful user fetch overwrites it.
     const fullNameForFallback =
-      input.kind === 'with_required_fields' ? input.fullName ?? '' : '';
+      input.kind === 'with_required_fields' && input.fullName
+        ? input.fullName
+        : '';
     const parts = fullNameForFallback.trim().split(/\s+/);
     user = {
       id: 'pending',
