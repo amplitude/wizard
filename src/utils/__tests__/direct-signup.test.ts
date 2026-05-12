@@ -414,18 +414,16 @@ describe('performDirectSignup', () => {
     }
   });
 
-  it('flag-ON with terms_acceptance alone (no full_name required) is unsupported_required_shape', async () => {
-    // Wire-contract guard: the wizard cannot honestly satisfy a
-    // `needs_information` response that requires `terms_acceptance`
-    // without also requiring `full_name`. TUI: signupFullName is only
-    // collectable when 'full_name' ∈ required. Non-TUI: helpers.ts
-    // already sent fullName in the first POST body; a `terms_acceptance`-
-    // only follow-up implies the body was rejected with nothing the
-    // wizard can re-collect on the spot. Either way, surface as
-    // `unsupported_required_shape` so the wrapper tags
-    // `needs_information_unsupported` telemetry and the drift is
-    // observable in dashboards instead of silently falling through to
-    // OAuth.
+  it('flag-ON with terms_acceptance alone (no full_name required) returns needs_information', async () => {
+    // BA-149: the wizard now accepts any non-empty subset of
+    // KNOWN_REQUIRED_KEYS — including `['terms_acceptance']` alone.
+    // The ToS screen renders whenever 'terms_acceptance' ∈ requiredFields
+    // (independent of 'full_name'), user accepts, and the follow-up POST
+    // body carries only the terms_acceptance slot. The wire-contract
+    // guard added in commit f1b02ebd (PR #675), which rejected this shape
+    // as `unsupported_required_shape`, is deleted alongside this test
+    // change — its rejection was a stop-gap for the wrapper-side
+    // rigidity that BA-149 lifts.
     server.use(
       http.post(PROVISIONING_URL, () =>
         HttpResponse.json({
@@ -461,9 +459,14 @@ describe('performDirectSignup', () => {
       zone: 'us',
     });
 
-    expect(result.kind).toBe('error');
-    if (result.kind === 'error') {
-      expect(result.code).toBe('unsupported_required_shape');
+    expect(result.kind).toBe('needs_information');
+    if (result.kind === 'needs_information') {
+      expect(result.requiredFields).toEqual(['terms_acceptance']);
+      expect(result.legalDocumentSource).toBe('server');
+      expect(result.legalDocumentBundle).toEqual({
+        terms_of_service: 'https://amplitude.com/terms',
+        privacy_policy: 'https://amplitude.com/privacy',
+      });
     }
   });
 

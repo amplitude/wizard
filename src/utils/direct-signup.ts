@@ -459,37 +459,6 @@ export async function performDirectSignup(
       // === END SPOOF ===
     }
 
-    // Wire-contract guard: the wizard cannot honestly satisfy a
-    // `needs_information` response that requires `terms_acceptance`
-    // without also requiring `full_name`.
-    //   - TUI: signupFullName is only collectable via the SignupFullName
-    //     screen, which renders only when 'full_name' ∈ required. With
-    //     'full_name' absent, ToS shows, user accepts, SigningUp re-fires,
-    //     and FollowUpSessionReadySchema rejects on null signupFullName —
-    //     a silent fall-through to OAuth with no observability of the
-    //     wire-contract drift.
-    //   - Non-TUI (helpers.ts): the first POST already carried fullName
-    //     in the body, so the BE asking for needs_information with
-    //     'terms_acceptance' alone implies our payload was rejected and
-    //     more is needed — also unsatisfiable on the spot.
-    // Surface as `unsupported_required_shape` so the wrapper tags
-    // `needs_information_unsupported` telemetry and the drift shows up
-    // in dashboards instead of looking like an OAuth fallback.
-    if (
-      normalizedRequired.includes('terms_acceptance') &&
-      !normalizedRequired.includes('full_name')
-    ) {
-      log.warn(
-        '[direct-signup] needs_information requires terms_acceptance without full_name — unsupported shape',
-      );
-      return {
-        kind: 'error',
-        code: 'unsupported_required_shape',
-        message:
-          'Server requested terms_acceptance without full_name — wizard cannot collect this shape.',
-      };
-    }
-
     return {
       kind: 'needs_information',
       requiredFields: normalizedRequired,
