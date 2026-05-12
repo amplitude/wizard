@@ -52,11 +52,7 @@ export const SigningUpScreen = ({ store }: SigningUpScreenProps) => {
 
   const { session } = store;
   const email = session.signupEmail;
-  // Derived for `useAsyncEffect`'s deps and the rendered header. The
-  // input-construction switch below reads directly from session for
-  // the discriminated-union narrowing.
-  const fullName =
-    session.tosAccepted === true ? (session.signupFullName ?? null) : null;
+  const signupFullName = session.signupFullName;
 
   useAsyncEffect(
     async (signal) => {
@@ -82,9 +78,6 @@ export const SigningUpScreen = ({ store }: SigningUpScreenProps) => {
         // error here until the contributor maps it to a session field and
         // an input slot — otherwise the new key would silently be treated
         // as "not collected" and abandon every ceremony.
-        // Renamed (vs outer-scope `fullName` at line 58) so the inner
-        // collected value doesn't shadow the outer derived one — the outer
-        // feeds `useAsyncEffect`'s deps and the rendered header.
         let inputFullName: string | undefined;
         let inputLegalDocumentBundle: LegalDocumentBundle | undefined;
         let inputLegalDocumentSource: LegalDocumentSource | undefined;
@@ -181,7 +174,7 @@ export const SigningUpScreen = ({ store }: SigningUpScreenProps) => {
           // Defensive guard against a stuck-spinner deadlock: if the
           // server is asking for a field we already populated, the
           // ceremony can't make progress — `useAsyncEffect`'s deps
-          // (`[email, fullName]`) won't change on the next
+          // (`[email, signupFullName]`) won't change on the next
           // `setSignupRequiredFields` write, the screen won't re-mount,
           // and no further effect will fire. Without this guard the
           // user wedges on the spinner forever with no escape besides
@@ -191,14 +184,14 @@ export const SigningUpScreen = ({ store }: SigningUpScreenProps) => {
           // a complete body and the server is still asking for these
           // fields), but the cost of the guard is one switch and the
           // failure mode it prevents has zero in-band recovery.
+          //
+          // Per-key arms read raw session fields, mirroring
+          // `flows.ts:requiredSatisfied`. Reading a `tosAccepted`-gated
+          // derivation would have miscoded full_name-only flows as
+          // unsatisfied even after the user supplied a name.
           const alreadySatisfied = result.requiredFields.every((field) => {
             switch (field) {
               case 'full_name':
-                // Read the raw session field rather than the outer-derived
-                // `fullName`, which gates on `tosAccepted === true` and is
-                // therefore always `null` in full_name-only flows (where no
-                // ToS screen ever runs). Mirrors the gate in
-                // `flows.ts:requiredSatisfied`.
                 return session.signupFullName !== null;
               case 'terms_acceptance':
                 return session.tosAccepted === true;
@@ -238,7 +231,12 @@ export const SigningUpScreen = ({ store }: SigningUpScreenProps) => {
           assertNever(result);
       }
     },
-    [email, fullName],
+    // Deps read raw session fields rather than `tosAccepted`-gated
+    // derivations — full_name-only flows never set `tosAccepted`, so a
+    // derived `fullName` would stay null even after the user supplied
+    // a name and the effect would miss re-firings keyed on it. (Same
+    // staleness pattern bugbot caught in the deadlock guard above.)
+    [email, signupFullName],
   );
 
   // Render mimics the previous input screen so the screen swap feels
@@ -269,7 +267,7 @@ export const SigningUpScreen = ({ store }: SigningUpScreenProps) => {
       {email && (
         <Box flexDirection="column" marginBottom={1}>
           <Text>{email}</Text>
-          {fullName && <Text>{fullName}</Text>}
+          {signupFullName && <Text>{signupFullName}</Text>}
         </Box>
       )}
 
