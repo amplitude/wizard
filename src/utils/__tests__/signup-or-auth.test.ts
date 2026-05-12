@@ -423,6 +423,50 @@ describe('performSignupOrAuth', () => {
     );
   });
 
+  // BA-149: a `'with_required_fields'` input may legitimately carry no
+  // `legalDocumentBundle` (BE asked for `'full_name'` only). The body in
+  // that case has no `terms_acceptance` slot, so the telemetry tag should
+  // report 'unused' — same as the email_only probe arm — not the
+  // (now-optional) `input.legalDocumentSource`, which may be undefined.
+  it("with_required_fields without legalDocumentBundle tags 'legal document source' as 'unused' on success", async () => {
+    const { performDirectSignup } = await import('../direct-signup.js');
+    vi.mocked(performDirectSignup).mockResolvedValue({
+      kind: 'success',
+      tokens: {
+        accessToken: 'a',
+        idToken: 'i',
+        refreshToken: 'r',
+        expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+        zone: 'us',
+      },
+    });
+    const { fetchAmplitudeUser } = await import('../../lib/api.js');
+    vi.mocked(fetchAmplitudeUser).mockResolvedValue({
+      id: 'user-123',
+      firstName: 'Ada',
+      lastName: 'Lovelace',
+      email: 'ada@example.com',
+      orgs: provisionedOrgs,
+    });
+    const { analytics } = await import('../analytics');
+
+    await performSignupOrAuth({
+      kind: 'with_required_fields',
+      email: 'ada@example.com',
+      fullName: 'Ada Lovelace',
+      // No legalDocumentBundle — BE asked for 'full_name' only.
+      zone: 'us',
+    });
+
+    expect(analytics.wizardCapture).toHaveBeenCalledWith(
+      AGENTIC_SIGNUP_ATTEMPTED_EVENT,
+      expect.objectContaining({
+        status: 'success',
+        'legal document source': 'unused',
+      }),
+    );
+  });
+
   it('persists StoredUser with real user id from fetchAmplitudeUser', async () => {
     const { performDirectSignup } = await import('../direct-signup.js');
     vi.mocked(performDirectSignup).mockResolvedValue({

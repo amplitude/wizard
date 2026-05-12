@@ -255,17 +255,29 @@ export type SignupShape<Email extends string | null> =
   | {
       kind: 'with_required_fields';
       email: Email;
-      fullName: string;
-      legalDocumentBundle: LegalDocumentBundle;
       /**
-       * Where `legalDocumentBundle`'s URLs originated. The body builder in
-       * `performDirectSignup` doesn't read this — the request body only
-       * needs the URLs. The field exists so the wrapper's telemetry layer
-       * can tag the `'legal document source'` event on follow-up arms
-       * (success / error / etc.) without re-deriving the source or
+       * Present iff the BE asked for `'full_name'` in `needs_information.required`
+       * AND the user supplied it. The body builder in `performDirectSignup`
+       * omits the `full_name` slot when this is undefined.
+       */
+      fullName?: string;
+      /**
+       * Present iff the BE asked for `'terms_acceptance'` in
+       * `needs_information.required` AND the user accepted the documents.
+       * The body builder omits the `terms_acceptance` slot when this is
+       * undefined. Co-varies with `legalDocumentSource`: either both fields
+       * are present together or both are absent.
+       */
+      legalDocumentBundle?: LegalDocumentBundle;
+      /**
+       * Where `legalDocumentBundle`'s URLs originated. Only meaningful when
+       * `legalDocumentBundle` is set. The body builder doesn't read this —
+       * the request body only needs the URLs. The field exists so the
+       * wrapper's telemetry layer can tag the `'legal document source'`
+       * event on follow-up arms without re-deriving the source or
        * re-threading it through session reads.
        */
-      legalDocumentSource: LegalDocumentSource;
+      legalDocumentSource?: LegalDocumentSource;
       zone: AmplitudeZone;
       signal?: AbortSignal;
     };
@@ -336,23 +348,36 @@ export async function performDirectSignup(
     redirect_uri: `http://localhost:${OAUTH_PORT}/callback`,
   };
 
-  const requestBody: Record<string, unknown> =
-    input.kind === 'email_only'
-      ? baseBody
-      : {
-          ...baseBody,
-          full_name: input.fullName,
-          terms_acceptance: {
-            terms_of_service: {
-              url: input.legalDocumentBundle.terms_of_service,
-              accepted: true,
-            },
-            privacy_policy: {
-              url: input.legalDocumentBundle.privacy_policy,
-              accepted: true,
-            },
-          },
-        };
+  // Build the request body conditionally based on which optional fields
+  // the caller supplied. Discriminator `'email_only'` produces the bare
+  // envelope; `'with_required_fields'` adds `full_name` and/or
+  // `terms_acceptance` slots, mirroring whichever fields the BE asked
+  // for in the prior `needs_information` response (and the user collected
+  // via the screen pipeline).
+  //
+  // Why per-field, not per-combination: the BE's `required` array can
+  // be any non-empty subset of `KNOWN_REQUIRED_KEYS`. Two keys today
+  // (3 combinations), N keys tomorrow (2^N - 1 combinations). Per-field
+  // emission stays uniform regardless of N; per-combination switches
+  // would need an arm per subset.
+  const requestBody: Record<string, unknown> = { ...baseBody };
+  if (input.kind === 'with_required_fields') {
+    if (input.fullName !== undefined) {
+      requestBody.full_name = input.fullName;
+    }
+    if (input.legalDocumentBundle !== undefined) {
+      requestBody.terms_acceptance = {
+        terms_of_service: {
+          url: input.legalDocumentBundle.terms_of_service,
+          accepted: true,
+        },
+        privacy_policy: {
+          url: input.legalDocumentBundle.privacy_policy,
+          accepted: true,
+        },
+      };
+    }
+  }
 
   let response;
   try {

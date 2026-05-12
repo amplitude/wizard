@@ -53,6 +53,28 @@ const INITIAL_INPUT = {
   zone: 'us',
 } as const;
 
+// Follow-up POST shape carrying only the fields the BE asked for in a
+// 'with_required_fields' input. After BA-149, both `fullName` and
+// `legalDocumentBundle` are optional on `SignupShape<'with_required_fields'>`
+// — the body builder emits each slot only when its source field is supplied.
+const FULL_NAME_ONLY_INPUT = {
+  kind: 'with_required_fields',
+  email: 'ada@example.com',
+  fullName: 'Ada Lovelace',
+  zone: 'us',
+} as const;
+
+const TERMS_ONLY_INPUT = {
+  kind: 'with_required_fields',
+  email: 'ada@example.com',
+  legalDocumentBundle: {
+    terms_of_service: 'https://amplitude.com/terms',
+    privacy_policy: 'https://amplitude.com/privacy',
+  },
+  legalDocumentSource: 'server',
+  zone: 'us',
+} as const;
+
 describe('performDirectSignup', () => {
   it('happy path: exchanges oauth code for tokens and returns success', async () => {
     server.use(
@@ -588,6 +610,53 @@ describe('performDirectSignup', () => {
     expect(observedBody).not.toBeNull();
     expect(observedBody!).not.toHaveProperty('terms_acceptance');
     expect(observedBody!).not.toHaveProperty('full_name');
+  });
+
+  // BA-149 per-combination body shapes. The wrapper's `'with_required_fields'`
+  // input arm carries `fullName` and `legalDocumentBundle` as independently
+  // optional fields after BA-149, so the body builder emits each slot only
+  // when its source field is defined.
+  it('with_required_fields body: fullName-only input emits full_name and omits terms_acceptance', async () => {
+    let observedBody: Record<string, unknown> | null = null;
+    server.use(
+      http.post(PROVISIONING_URL, async ({ request }) => {
+        observedBody = (await request.json()) as Record<string, unknown>;
+        return HttpResponse.json({ type: 'oauth', oauth: { code: 'c' } });
+      }),
+      http.post(TOKEN_URL, () => HttpResponse.json(VALID_TOKEN_RESPONSE)),
+    );
+
+    await performDirectSignup(FULL_NAME_ONLY_INPUT);
+
+    expect(observedBody).not.toBeNull();
+    expect(observedBody!.full_name).toBe('Ada Lovelace');
+    expect(observedBody!).not.toHaveProperty('terms_acceptance');
+  });
+
+  it('with_required_fields body: terms-only input emits terms_acceptance and omits full_name', async () => {
+    let observedBody: Record<string, unknown> | null = null;
+    server.use(
+      http.post(PROVISIONING_URL, async ({ request }) => {
+        observedBody = (await request.json()) as Record<string, unknown>;
+        return HttpResponse.json({ type: 'oauth', oauth: { code: 'c' } });
+      }),
+      http.post(TOKEN_URL, () => HttpResponse.json(VALID_TOKEN_RESPONSE)),
+    );
+
+    await performDirectSignup(TERMS_ONLY_INPUT);
+
+    expect(observedBody).not.toBeNull();
+    expect(observedBody!).not.toHaveProperty('full_name');
+    expect(observedBody!.terms_acceptance).toEqual({
+      terms_of_service: {
+        url: 'https://amplitude.com/terms',
+        accepted: true,
+      },
+      privacy_policy: {
+        url: 'https://amplitude.com/privacy',
+        accepted: true,
+      },
+    });
   });
 
   it('returns requires_redirect on requires_auth response', async () => {
