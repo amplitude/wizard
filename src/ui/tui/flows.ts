@@ -18,6 +18,7 @@ import {
 import type { WizardStore } from './store.js';
 import { RunPhase } from './session-constants.js';
 import { tryResolveZone } from '../../lib/zone-resolution.js';
+import { assertNever } from '../../utils/assert-never.js';
 
 // ── Screen + Flow enums ──────────────────────────────────────────────
 
@@ -198,17 +199,24 @@ export const FLOWS: Record<Flow, FlowEntry[]> = {
         s.signupEmail !== null &&
         s.signupAuth === null &&
         !s.signupAbandoned &&
-        // No required fields known yet, OR all known required fields are
-        // filled. SigningUp re-shows after collection screens write back.
+        // No required fields known yet (initial probe), OR every required
+        // field has been satisfied via its corresponding session state.
+        // The exhaustive switch + `assertNever` makes adding a future
+        // RequiredKey a compile-time error here until the new kind is
+        // explicitly mapped to its "satisfied" condition. The previous
+        // `: true` default branch silently passed unknown kinds, which
+        // would have masked a contract drift.
         (s.signupRequiredFields === null ||
-          s.signupRequiredFields.every((field) =>
-            field === 'full_name' ? s.signupFullName !== null : true,
-          )) &&
-        // ToS must be accepted before the second POST creates the account.
-        // On the initial probe (`signupRequiredFields === null`) ToS is not
-        // required yet — the server might redirect or error and we never
-        // touch ToS at all.
-        (s.signupRequiredFields === null || s.tosAccepted === true),
+          s.signupRequiredFields.every((field) => {
+            switch (field) {
+              case 'full_name':
+                return s.signupFullName !== null;
+              case 'terms_acceptance':
+                return s.tosAccepted === true;
+              default:
+                return assertNever(field);
+            }
+          })),
       isComplete: (s) =>
         !isCreateAccountOnboarding(s) ||
         s.signupAuth !== null ||
@@ -224,20 +232,25 @@ export const FLOWS: Record<Flow, FlowEntry[]> = {
       revert: () => false,
       isWall: signupCommittedWall,
     },
-    // 2c. Terms of Service — only renders AFTER the server confirmed
-    //     agentic signup is happening (signupRequiredFields was set).
-    //     Skipped entirely on the redirect / error / immediate-success
-    //     arms — exactly the "don't ask for ToS unless we're going to
-    //     create the account" behavior PR 234 motivated.
+    // 2c. Terms of Service — renders only when the server (or the parser's
+    //     spoof) actually requires it: `'terms_acceptance' in
+    //     signupRequiredFields`. This is the load-bearing migration
+    //     decision: when the BE flag is ON across env tiers and the spoof
+    //     is removed, the parser stops injecting `'terms_acceptance'` and
+    //     the screen naturally skips. If a future BE business decision
+    //     drops the requirement entirely, this predicate evaluates false
+    //     with no further wizard work.
     {
       screen: Screen.ToS,
       show: (s) =>
         isCreateAccountOnboarding(s) &&
         s.signupRequiredFields !== null &&
+        s.signupRequiredFields.includes('terms_acceptance') &&
         s.tosAccepted !== true,
       isComplete: (s) =>
         !isCreateAccountOnboarding(s) ||
         s.signupRequiredFields === null ||
+        !s.signupRequiredFields.includes('terms_acceptance') ||
         s.tosAccepted === true,
       // Returning false when the screen was *skipped* (server never asked,
       // or ToS was never accepted) is critical: `isComplete` returns true
@@ -248,13 +261,17 @@ export const FLOWS: Record<Flow, FlowEntry[]> = {
         if (!isCreateAccountOnboarding(store.session)) return false;
         if (store.session.signupRequiredFields === null) return false;
         if (store.session.tosAccepted === null) return false;
-        // Walk past on abandonment: clearing tosAccepted alone leaves
-        // signupAbandoned=true, which still gates SigningUp.show off.
-        // The user would re-accept ToS and land back on Auth without
-        // any retry — a dead-end. Letting back-nav continue to
-        // SignupEmail.revert clears the whole ceremony via
-        // _resetCeremonyKeys (which resets signupAbandoned), giving
-        // the user a clean restart.
+        // Walk past on abandonment BEFORE touching ToS state. `resetToS`
+        // emits a 'back navigation to tos' analytics event as a side
+        // effect of clearing tosAccepted + the lock-step legal-doc
+        // bundle/source — appropriate when the user explicitly
+        // back-navigated to ToS, but misleading during an abandonment
+        // cascade (no user action targeted ToS). Letting back-nav
+        // continue to SignupEmail.revert clears the whole ceremony via
+        // _resetCeremonyKeys (which re-nulls tosAccepted +
+        // legalDocumentBundle + legalDocumentSource alongside the rest
+        // of the ceremony, and resets signupAbandoned), giving the user
+        // a clean restart without emitting the misattributed event.
         if (store.session.signupAbandoned) return false;
         store.resetToS();
       },

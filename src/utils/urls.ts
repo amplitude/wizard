@@ -1,29 +1,6 @@
+import axios from 'axios';
 import { IS_DEV, WIZARD_USER_AGENT } from '../lib/constants';
 import type { CloudRegion } from './types';
-
-// Lazy-load axios — most callers of this module only need the synchronous
-// URL string helpers (`getHostFromRegion`, `getLlmGatewayUrlFromHost`, etc.),
-// which run on every cold start. The async `detectRegionFromToken` is the
-// only consumer that actually needs HTTP, and it runs once per login flow.
-// Importing axios eagerly costs ~33 ms of cold-start parse time and pulls
-// in ~20 form-data / proxy / cookie modules transitively.
-type AxiosStatic = import('axios').AxiosStatic;
-let axiosPromise: Promise<AxiosStatic> | null = null;
-const loadAxios = (): Promise<AxiosStatic> => {
-  // axios is exported as `module.exports = axios` (callable + namespaced),
-  // so the ESM/CJS interop bridge surfaces the static object as `.default`.
-  // Clear the cache on rejection so a transient import failure can be
-  // retried — otherwise every subsequent call would replay the stale error.
-  if (!axiosPromise) {
-    axiosPromise = import('axios')
-      .then((m) => m.default)
-      .catch((err) => {
-        axiosPromise = null;
-        throw err;
-      });
-  }
-  return axiosPromise;
-};
 
 /**
  * Resolve the Amplitude data ingestion host for a given region.
@@ -72,7 +49,6 @@ export async function detectRegionFromToken(
     'User-Agent': WIZARD_USER_AGENT,
   };
 
-  const axios = await loadAxios();
   const [usResult, euResult] = await Promise.allSettled([
     axios.get('https://us.amplitude.com/api/users/@me/', { headers }),
     axios.get('https://eu.amplitude.com/api/users/@me/', { headers }),

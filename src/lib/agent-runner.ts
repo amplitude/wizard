@@ -31,6 +31,7 @@ import { getLlmGatewayUrlFromHost, getMcpUrlFromZone } from '../utils/urls';
 import { DEFAULT_AMPLITUDE_ZONE, OUTBOUND_URLS } from './constants.js';
 import { resolveZone } from './zone-resolution.js';
 import { getVersionCheckInfo, getVersionWarning } from './version-check';
+import { sanitizeErrorMessageForLog } from './agent-events';
 
 import * as fsSync from 'fs';
 import path from 'path';
@@ -294,14 +295,24 @@ async function abortOnApiError(
   //                     fully effective and we need a deeper fix.
   //   rate_limit      — Wizard exhausted retries against a 429 storm.
   //   other           — Unclassified API error. Catch-all.
+  // Classification runs against the raw form so the regex can still see
+  // the canonical "API Error: 400 terminated" / "stream closed" markers
+  // — they're tiny strings at the head of the message, never the SSE
+  // body itself. Once classified, every downstream callsite that
+  // INTERPOLATES the message into user-facing copy or Sentry context
+  // must use the sanitized form so the gateway's mid-stream SSE body
+  // doesn't leak as a wall of `event:` / `data:` lines. (Sentry
+  // #7442894144 — the raw message had been getting embedded into
+  // `userMessage` and surfaced verbatim in the TUI Outro screen.)
   const errorSubtype = classifyApiErrorSubtype({
     errorType,
     message: rawMessage,
   });
+  const safeMessage = sanitizeErrorMessageForLog(rawMessage);
 
   captureWizardError(
     'Agent API',
-    rawMessage || 'Unknown API error',
+    safeMessage || 'Unknown API error',
     'agent-runner',
     {
       integration: config.metadata.integration,
@@ -314,34 +325,36 @@ async function abortOnApiError(
   let userMessage: string;
   switch (errorSubtype) {
     case 'stream_closed':
-      userMessage = `LLM gateway connection lost\n\nThe wizard couldn't keep a stable connection to the Amplitude LLM gateway across retries (${rawMessage}). Re-running the wizard usually clears this up.\n\n${buildGatewayBypassHint()}\n\nIf this persists, please report it (with ${getLogFilePath()}) to: ${SUPPORT_EMAIL}`;
+      userMessage = `LLM gateway connection lost\n\nThe wizard couldn't keep a stable connection to the Amplitude LLM gateway across retries (${safeMessage}). Re-running the wizard usually clears this up.\n\n${buildGatewayBypassHint()}\n\nIf this persists, please report it (with ${getLogFilePath()}) to: ${SUPPORT_EMAIL}`;
       break;
     case 'terminated_400':
-      userMessage = `LLM gateway dropped the connection\n\nThe Amplitude LLM gateway terminated the request mid-flight (${rawMessage}). Some progress was made before this happened — re-running the wizard usually finishes the job.\n\n${buildGatewayBypassHint()}\n\nIf this persists, please report it (with ${getLogFilePath()}) to: ${SUPPORT_EMAIL}`;
+      userMessage = `LLM gateway dropped the connection\n\nThe Amplitude LLM gateway terminated the request mid-flight (${safeMessage}). Some progress was made before this happened — re-running the wizard usually finishes the job.\n\n${buildGatewayBypassHint()}\n\nIf this persists, please report it (with ${getLogFilePath()}) to: ${SUPPORT_EMAIL}`;
       break;
     case 'rate_limit':
       userMessage = `Rate limit reached\n\nThe LLM gateway is rate-limiting requests (${
-        rawMessage || 'API Error: 429'
+        safeMessage || 'API Error: 429'
       }). Wait a minute or two and re-run the wizard.\n\n${buildGatewayBypassHint()}`;
       break;
     case 'other':
       userMessage = `LLM gateway error\n\n${
-        rawMessage || 'Unknown error'
+        safeMessage || 'Unknown error'
       }\n\nThis is typically an upstream issue with the Amplitude LLM gateway, not your project. Re-running the wizard usually works.\n\n${buildGatewayBypassHint()}\n\nIf this persists, please report it (with ${getLogFilePath()}) to: ${SUPPORT_EMAIL}`;
       break;
   }
 
   await wizardAbort({
     message: userMessage,
-    error: new WizardError(`API error: ${rawMessage || 'unknown'}`, {
+    error: new WizardError(`API error: ${safeMessage || 'unknown'}`, {
       integration: config.metadata.integration,
       'error type': errorType,
       'error subtype': errorSubtype,
       // Preserves the structured `report_status` detail / underlying
       // agentResult.message that produced this branch — without it
       // Sentry only sees the boilerplate `userMessage` copy, which
-      // doesn't disambiguate between subtypes for debugging.
-      'agent error detail': rawMessage || null,
+      // doesn't disambiguate between subtypes for debugging. The
+      // sanitized form keeps SSE protocol noise out of the Sentry
+      // payload while preserving the head of the real error.
+      'agent error detail': safeMessage || null,
     }),
     exitCode: ExitCode.NETWORK_ERROR,
   });
@@ -876,6 +889,27 @@ async function runAgentWizardBody(
   // Credentials are pre-set by bin.ts (TUI mode) via the AuthScreen SUSI flow.
   // Only fall back to getOrAskForProjectData for CI mode or non-TUI fallback.
   if (!session.credentials) {
+    // Diagnostic: in TUI mode we should never reach the agent runner
+    // with null credentials — the Auth flow gate (`isComplete` requires
+    // `credentials !== null`) is the single source of truth. If we DO
+    // reach here, the gate let the user past, which means a different
+    // bug. Log loudly so the next "stalled session after `git reset
+    // --hard`" report has an unambiguous breadcrumb instead of a
+    // silent fallback into `getOrAskForProjectData` that may itself
+    // stall on prompts.
+    if (!session.ci && !session.agent) {
+      logToFile(
+        '[agent-runner] WARN: credentials null in TUI mode at runAgent entry — Auth flow gate let through an unconfirmed session. Falling back to getOrAskForProjectData; if this stalls, the AuthScreen never set credentials before the run kicked off.',
+        {
+          hasPendingOrgs: session.pendingOrgs !== null,
+          pendingOrgsLength: session.pendingOrgs?.length ?? 0,
+          selectedOrgId: session.selectedOrgId ?? null,
+          selectedProjectId: session.selectedProjectId ?? null,
+          selectedEnvName: session.selectedEnvName ?? null,
+          requiresAccountConfirmation: session.requiresAccountConfirmation,
+        },
+      );
+    }
     const authResult = await getOrAskForProjectData({
       authOnboardingPath: session.authOnboardingPath,
       ci: session.ci,
@@ -1467,9 +1501,14 @@ async function runAgentWizardBody(
   }
 
   if (agentResult.error === AgentErrorType.GATEWAY_DOWN) {
+    // Same SSE-suppression rationale as `abortOnApiError` below: the
+    // raw gateway error string can include the entire failing SSE body.
+    const safeAgentMessage = sanitizeErrorMessageForLog(
+      agentResult.message ?? '',
+    );
     captureWizardError(
       'Agent API',
-      agentResult.message ?? 'LLM gateway unavailable',
+      safeAgentMessage || 'LLM gateway unavailable',
       'agent-runner',
       {
         integration: config.metadata.integration,
@@ -1480,15 +1519,15 @@ async function runAgentWizardBody(
     const usingDirectKey = !!process.env.ANTHROPIC_API_KEY;
     await wizardAbort({
       message: `Amplitude LLM gateway unavailable\n\nEvery retry attempt failed with the same upstream error (${
-        agentResult.message || 'API Error: 400 terminated'
+        safeAgentMessage || 'API Error: 400 terminated'
       }). This is an issue with the Amplitude LLM gateway, not your project.\n\n${buildGatewayBypassHint()}\n\nIf this persists, please report it (with the log file at ${getLogFilePath()}) to: ${SUPPORT_EMAIL}`,
       error: new WizardError(
-        `LLM gateway unavailable: ${agentResult.message ?? 'unknown'}`,
+        `LLM gateway unavailable: ${safeAgentMessage || 'unknown'}`,
         {
           integration: config.metadata.integration,
           'error type': agentResult.error,
           'using direct key': usingDirectKey,
-          'agent error detail': agentResult.message ?? null,
+          'agent error detail': safeAgentMessage || null,
         },
       ),
       exitCode: ExitCode.NETWORK_ERROR,
@@ -1496,9 +1535,12 @@ async function runAgentWizardBody(
   }
 
   if (agentResult.error === AgentErrorType.GATEWAY_INVALID_REQUEST) {
+    const safeAgentMessage = sanitizeErrorMessageForLog(
+      agentResult.message ?? '',
+    );
     captureWizardError(
       'Agent API',
-      agentResult.message ?? 'Wizard request rejected by gateway',
+      safeAgentMessage || 'Wizard request rejected by gateway',
       'agent-runner',
       {
         integration: config.metadata.integration,
@@ -1510,14 +1552,12 @@ async function runAgentWizardBody(
     await wizardAbort({
       message: `Wizard request rejected by Amplitude gateway\n\nThe gateway returned "Invalid request sent to model provider" — this build of the wizard is sending a request shape (e.g. an \`anthropic-beta\` header or tool schema field) that the upstream model provider does not accept. Retrying will not help because the next request will be identically rejected.\n\nFix: upgrade to the latest \`@amplitude/wizard\` (npm i -g @amplitude/wizard@latest) — this build addresses known schema/beta rejection cases.\n\n${buildGatewayBypassHint()}\n\nIf you are already on the latest build, please report it (with the log file at ${getLogFilePath()}) to: ${SUPPORT_EMAIL}`,
       error: new WizardError(
-        `Wizard request rejected by gateway: ${
-          agentResult.message ?? 'unknown'
-        }`,
+        `Wizard request rejected by gateway: ${safeAgentMessage || 'unknown'}`,
         {
           integration: config.metadata.integration,
           'error type': agentResult.error,
           'using direct key': usingDirectKey,
-          'agent error detail': agentResult.message ?? null,
+          'agent error detail': safeAgentMessage || null,
         },
       ),
       exitCode: ExitCode.NETWORK_ERROR,
@@ -1548,8 +1588,13 @@ async function runAgentWizardBody(
         errorType: agentResult.error,
         message: rawMessage,
       });
+      // Sanitize before logging / surfacing — gateway 4xx error strings
+      // sometimes contain the entire failing SSE response body. Using
+      // the raw form here would dump hundreds of `event:` / `data:`
+      // protocol frames into the user-visible status ticker.
+      const safeMessage = sanitizeErrorMessageForLog(rawMessage);
       logToFile(
-        `[agent-runner] Soft API error after work completed (${errorSubtype}, dashboard=${dashboardComplete}, events=${eventsInstrumented}): ${rawMessage}. Continuing to MCP / outro.`,
+        `[agent-runner] Soft API error after work completed (${errorSubtype}, dashboard=${dashboardComplete}, events=${eventsInstrumented}): ${safeMessage}. Continuing to MCP / outro.`,
       );
       analytics.wizardCapture('agent soft error', {
         integration: config.metadata.integration,
@@ -1562,7 +1607,7 @@ async function runAgentWizardBody(
       // sees something happened on the way out, but don't abort.
       getUI().pushStatus(
         `Note: a late API call failed (${
-          rawMessage || agentResult.error
+          safeMessage || agentResult.error
         }) but your project's setup is complete — continuing.`,
       );
       // Fall through to the post-agent steps (env upload, MCP, Slack,

@@ -1,4 +1,4 @@
-import { describe, it, expect, afterEach, vi } from 'vitest';
+import { describe, it, expect, afterEach } from 'vitest';
 import {
   getCloudUrlFromRegion,
   getHostFromRegion,
@@ -263,58 +263,5 @@ describe('getMcpUrlFromZone', () => {
     expect(getMcpUrlFromZone('eu', { path: 'sse' })).toBe(
       'https://mcp.eu.amplitude.com/sse',
     );
-  });
-});
-
-// ── lazy axios import — rejection-clearing contract ─────────────────────────
-//
-// `urls.ts` (and the matching helpers in `lib/api.ts` + `utils/environment.ts`)
-// caches its dynamic import promise to amortize cold-start cost across the
-// process. The cache must clear on rejection so a transient import failure
-// (broken install, partial filesystem) doesn't poison every subsequent
-// caller — mirroring the contract in `loadDefaultDriver` / `agent-driver.ts`.
-
-describe('detectRegionFromToken — lazy axios import', () => {
-  afterEach(() => {
-    vi.doUnmock('axios');
-    vi.resetModules();
-    delete process.env.NODE_ENV;
-  });
-
-  it('clears the cached axios promise on rejection so retries can succeed', async () => {
-    // Force the module under test out of dev-mode short-circuit.
-    process.env.NODE_ENV = 'production';
-    vi.resetModules();
-
-    // First load: the import resolves but `.default` access blows up,
-    // which is the realistic failure mode (post-import accessor throws on
-    // a partial install / version skew). Vitest's strict mocker rejects
-    // factories that throw outright at hoist time, so we use a getter
-    // that throws — same pattern agent-driver.test.ts uses.
-    vi.doMock('axios', () => ({
-      get default() {
-        throw new Error('axios import failed');
-      },
-    }));
-    const failing = await import('../urls.js');
-    await expect(failing.detectRegionFromToken('tok')).rejects.toThrow(
-      'axios import failed',
-    );
-
-    // Swap in a working axios that succeeds against US — without the
-    // rejection-clearing branch, the cached failed promise would replay
-    // on every subsequent call instead of re-attempting the import.
-    vi.doMock('axios', () => ({
-      default: {
-        get: async (url: string) => {
-          if (url.startsWith('https://us.amplitude.com'))
-            return { status: 200 };
-          throw new Error('eu unreachable');
-        },
-      },
-    }));
-
-    const region = await failing.detectRegionFromToken('tok');
-    expect(region).toBe('us');
   });
 });

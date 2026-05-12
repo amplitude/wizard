@@ -203,7 +203,18 @@ export function getWhoamiText(
  * so it can be unit-tested without filesystem mocks.
  */
 export function getDiagnosticsText(installDir: string): string {
-  const lines: string[] = [
+  return getDiagnosticsLines(installDir).join('\n');
+}
+
+/**
+ * Multi-line version of {@link getDiagnosticsText} for the in-TUI feedback
+ * panel. Each entry renders as its own row so long absolute paths
+ * (`/Users/…/.amplitude/wizard/runs/<sha>/log.txt`) are never hard-truncated
+ * by a single overflow-hidden Text element — the original bug behind
+ * "log file: /Users/…" in the screenshot.
+ */
+export function getDiagnosticsLines(installDir: string): string[] {
+  return [
     'Wizard storage paths:',
     '',
     'Per-project (this run):',
@@ -224,7 +235,6 @@ export function getDiagnosticsText(installDir: string): string {
     'Tip: tar up the run dir to share with support:',
     `  tar -czf wizard-logs.tar.gz ${getRunDir(installDir)}`,
   ];
-  return lines.join('\n');
 }
 
 /**

@@ -60,7 +60,11 @@ import {
   consumeSnapshot,
 } from './agent-state';
 import { createInnerLifecycleHooks } from './inner-lifecycle';
-import { classifyWriteOperation, truncateLogMessage } from './agent-events';
+import {
+  classifyWriteOperation,
+  sanitizeErrorMessageForLog,
+  truncateLogMessage,
+} from './agent-events';
 import {
   createWizardToolsServer,
   isWizardPromptActive,
@@ -4217,7 +4221,22 @@ function handleSDKMessage(
     case 'result': {
       // Check is_error flag - can be true even when subtype is 'success'
       if (message.is_error) {
-        logToFile('Agent result with error:', message.result);
+        // `message.result` from the Anthropic SDK occasionally serializes
+        // the entire failing SSE response body into a single string —
+        // hundreds of `event:` / `data:` framing lines plus
+        // `partial_json` `tool_use` deltas. `sanitizeErrorMessageForLog`
+        // collapses each run of SSE frames into a single
+        // `[N SSE frames suppressed]` marker and then caps the result at
+        // `MAX_LOG_MESSAGE_LENGTH` so the user-visible log shows ONE
+        // readable line per upstream failure. (Sentry #7442894144 — the
+        // raw form was leaking into the TUI Logs tab as walls of
+        // protocol noise.)
+        logToFile(
+          'Agent result with error:',
+          typeof message.result === 'string'
+            ? sanitizeErrorMessageForLog(message.result)
+            : message.result,
+        );
         if (typeof message.result === 'string') {
           collectedText.push(message.result);
         }
@@ -4230,12 +4249,13 @@ function handleSDKMessage(
         // (40-50KB of model id, signature blobs, partial JSON deltas)
         // serialized into a single string. Past sessions surfaced 50KB
         // `log.message` strings that polluted orchestrator context.
-        // `truncateLogMessage` is the same helper the NDJSON emit layer
-        // uses; capping here keeps the on-disk verbose log bounded too.
+        // `sanitizeErrorMessageForLog` strips SSE frames AND truncates,
+        // matching the on-disk dump above so user-visible + persisted
+        // forms agree.
         if (message.errors && !receivedSuccessResult) {
           for (const err of message.errors) {
             const errStr = typeof err === 'string' ? err : String(err);
-            const capped = truncateLogMessage(errStr);
+            const capped = sanitizeErrorMessageForLog(errStr);
             getUI().log.error(`Error: ${capped}`);
             logToFile('ERROR:', capped);
           }
@@ -4246,7 +4266,13 @@ function handleSDKMessage(
           collectedText.push(message.result);
         }
       } else {
-        logToFile('Agent result with error:', message.result);
+        // See the is_error branch above for the SSE-suppression rationale.
+        logToFile(
+          'Agent result with error:',
+          typeof message.result === 'string'
+            ? sanitizeErrorMessageForLog(message.result)
+            : message.result,
+        );
         // Error result - only show to user if we haven't already succeeded.
         // Full message already logged above via JSON dump. Cap each
         // error string at 2KB at the source (same rationale as the
@@ -4255,7 +4281,7 @@ function handleSDKMessage(
         if (message.errors && !receivedSuccessResult) {
           for (const err of message.errors) {
             const errStr = typeof err === 'string' ? err : String(err);
-            const capped = truncateLogMessage(errStr);
+            const capped = sanitizeErrorMessageForLog(errStr);
             getUI().log.error(`Error: ${capped}`);
             logToFile('ERROR:', capped);
           }

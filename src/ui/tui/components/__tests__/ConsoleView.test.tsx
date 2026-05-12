@@ -17,12 +17,13 @@
  */
 
 import React from 'react';
-import { describe, it, expect } from 'vitest';
+import { afterEach, beforeEach, describe, it, expect } from 'vitest';
 import { render } from 'ink-testing-library';
 
 import { ConsoleView } from '../ConsoleView.js';
 import { WizardStore } from '../../store.js';
 import type { PlannedEvent } from '../../store.js';
+import { CACHE_ROOT_OVERRIDE_ENV } from '../../../../utils/storage-paths.js';
 
 const CREDS = {
   accessToken: 'tok',
@@ -144,6 +145,76 @@ describe('ConsoleView event-plan key handling', () => {
 
     expect(resolved).toBe(false);
     expect(store.pendingPrompt?.kind).toBe('event-plan');
+    unmount();
+  });
+});
+
+/**
+ * Regression: the bottom command-feedback line in ConsoleView used to render a
+ * single overflow-hidden Text element. `/diagnostics` packed all storage paths
+ * into one string and the long log path got hard-truncated to "/Users/…", so
+ * users couldn't copy the log path to share with support. The fix renders
+ * multi-line feedback (string[]) as one Text row per entry inside a column Box.
+ */
+describe('ConsoleView command-feedback rendering', () => {
+  let originalCacheOverride: string | undefined;
+
+  beforeEach(() => {
+    originalCacheOverride = process.env[CACHE_ROOT_OVERRIDE_ENV];
+    process.env[CACHE_ROOT_OVERRIDE_ENV] = '/tmp/wizard-cv-render-test';
+  });
+
+  afterEach(() => {
+    if (originalCacheOverride === undefined) {
+      delete process.env[CACHE_ROOT_OVERRIDE_ENV];
+    } else {
+      process.env[CACHE_ROOT_OVERRIDE_ENV] = originalCacheOverride;
+    }
+  });
+
+  it('renders multi-line feedback as separate rows (one line per path)', () => {
+    const store = makeStore();
+    store.setCommandFeedback(
+      [
+        'Wizard storage paths:',
+        '  log:        /Users/test/.amplitude/wizard/runs/abcdef/log.txt',
+        '  checkpoint: /Users/test/.amplitude/wizard/runs/abcdef/checkpoint.json',
+        '  Cache root: /Users/test/.amplitude/wizard/',
+      ],
+      30_000,
+    );
+
+    const { lastFrame, unmount } = render(
+      <ConsoleView store={store} width={120} height={30} />,
+    );
+    const frame = lastFrame() ?? '';
+
+    expect(frame).toContain('Wizard storage paths:');
+    expect(frame).toContain(
+      '/Users/test/.amplitude/wizard/runs/abcdef/log.txt',
+    );
+    expect(frame).toContain(
+      '/Users/test/.amplitude/wizard/runs/abcdef/checkpoint.json',
+    );
+    expect(frame).toContain('/Users/test/.amplitude/wizard/');
+    // Regression check: no entry collapsed to the truncated /Users/… form
+    // that the screenshot reproduced.
+    expect(frame).not.toMatch(/\/Users\/…/);
+    unmount();
+  });
+
+  it('keeps single-line feedback (string) as a single row — no regression for /whoami / /region', () => {
+    const store = makeStore();
+    store.setCommandFeedback('user@example.com  org: Acme  region: us', 30_000);
+
+    const { lastFrame, unmount } = render(
+      <ConsoleView store={store} width={120} height={30} />,
+    );
+    const frame = lastFrame() ?? '';
+
+    expect(frame).toContain('user@example.com');
+    expect(frame).toContain('org: Acme');
+    expect(frame).toContain('region: us');
     unmount();
   });
 });
