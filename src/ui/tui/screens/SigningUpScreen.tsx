@@ -194,7 +194,12 @@ export const SigningUpScreen = ({ store }: SigningUpScreenProps) => {
           const alreadySatisfied = result.requiredFields.every((field) => {
             switch (field) {
               case 'full_name':
-                return fullName !== null;
+                // Read the raw session field rather than the outer-derived
+                // `fullName`, which gates on `tosAccepted === true` and is
+                // therefore always `null` in full_name-only flows (where no
+                // ToS screen ever runs). Mirrors the gate in
+                // `flows.ts:requiredSatisfied`.
+                return session.signupFullName !== null;
               case 'terms_acceptance':
                 return session.tosAccepted === true;
               default:
