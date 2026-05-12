@@ -106,6 +106,12 @@ Examples:
 
 If you genuinely cannot capture any property at a callsite (e.g., a pure lifecycle event like \`app loaded\` where the only available context is \`frame_id\` and you've already captured it), prefer a single property over zero — and document the gap in the Setup Report's "Instrumented" table as "(no properties captured — context unavailable at callsite)".`,
 
+  `Event-plan size MUST scale with the signal in the codebase — do NOT artificially cap the plan at round numbers (5, 10, 12) regardless of project size. The floor is whatever the **discover-event-surfaces** skill turned up: count of route/page entries, distinct user-meaningful action callsites (form submits, mutations, network writes, dialog opens, navigation events), and the wrapper/helper hits from \`discover-analytics-patterns\`. A medium app (≈50+ routes / ≈20+ distinct user actions) typically warrants 20-40 events; a large monorepo or feature-rich SaaS can justifiably exceed that. The goal is COVERAGE of high-priority user actions, not minimal viable instrumentation — leaving real signal on the table for the sake of a tidy number is a quality regression.
+
+The plan you pass to \`confirm_event_plan\` MUST be ordered by user-impact — most-used / most-load-bearing flows first (auth, primary creation/save actions, conversion-shaped events), supporting actions next, edge-case events last. Users review the plan top-down and may skim; the top entries are what the reviewer reads first and what gets shipped if they tap "looks good" early. Do NOT sort alphabetically, by file location, or by the order events surfaced during discovery.
+
+The ONLY context where a hard cap is appropriate is DEMO_MODE — that constraint is owned by \`DEMO_MODE_COMMANDMENTS\` in this file and applied by the wizard itself; do not replicate or anticipate that cap in normal runs.`,
+
   'Post-instrumentation `.amplitude/events.json` array shape — read `.claude/skills/wizard-prompt-supplement/references/post-instrumentation-events-and-dashboard.md`. This run does NOT create charts or dashboards: do NOT call `record_dashboard` / `create_chart` / `create_dashboard` / `query_dataset` / any Amplitude MCP chart/dashboard tool — those are deferred to the `amplitude-wizard dashboard` command, which runs after ingestion catches up.',
 
   'Setup report format and `<wizard-report>` tags — read `.claude/skills/wizard-prompt-supplement/references/setup-report-requirements.md`. You MUST write `amplitude-setup-report.md` at the project root before the run ends.',

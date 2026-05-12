@@ -1971,7 +1971,7 @@ BEFORE calling this tool, filter out any candidate events that are fully covered
 
 You MUST NOT ask the user clarifying questions in response to feedback. Make a reasonable interpretation of their feedback, revise the plan in-process, and call this tool again with the revised events. The user can give more feedback in the next round if your interpretation was wrong — do not block the run with a chat-style follow-up question, the wizard has no surface for the user to reply mid-stream.
 
-Reminder: every track() call you ship MUST include 1-3 user-meaningful properties (rules in the system prompt). The Setup Report MUST reconcile every approved-plan event into Instrumented / Autocaptured / Dropped buckets with totals matching the plan size.
+Reminder: every track() call you ship MUST include 1-3 user-meaningful properties (rules in the system prompt). The Setup Report MUST reconcile every approved-plan event into Instrumented / Autocaptured / Dropped buckets with totals matching the plan size. Plan size MUST scale with the codebase signal (route count, distinct user-action callsites) and be ordered by user-impact — no artificial round-number caps.
 
 If the user gives feedback, revise your plan and call this tool again — loop until approved or skipped.
 Returns: "approved", "skipped", or "feedback: <user message>"`,
