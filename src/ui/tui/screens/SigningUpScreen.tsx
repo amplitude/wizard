@@ -36,7 +36,6 @@ import { DEFAULT_AMPLITUDE_ZONE } from '../../../lib/constants.js';
 import { createLogger } from '../../../lib/observability/logger.js';
 import { assertNever } from '../../../utils/assert-never.js';
 import type { SignupOrAuthInput } from '../../../utils/signup-or-auth.js';
-import { buildFollowUpSessionReadySchema } from '../../../lib/account-creation-flow.js';
 
 const log = createLogger('signing-up-screen');
 
@@ -63,57 +62,38 @@ export const SigningUpScreen = ({ store }: SigningUpScreenProps) => {
         readDisk: false,
       });
 
-      // Discriminator is BE-driven: `signupRequiredFields !== null`
-      // means BE returned `needs_information` at least once during
-      // this ceremony, so this is a follow-up call. The flow's
-      // `requiredSatisfied` predicate prevents SigningUp re-firing with
-      // incomplete data per required key, so the schema check below
-      // should be unreachable-false in production — it exists as a
-      // belt-and-suspenders guard before the type-safe field reads.
+      // `signupRequiredFields !== null` means the BE returned
+      // `needs_information` at least once this ceremony, so this is a
+      // follow-up call. The flow's `requiredSatisfied` predicate keeps
+      // us out of SigningUp until each required-key has its session
+      // value populated; the per-field null checks below narrow
+      // `string | null` to `string` for the wrapper input.
       const requiredFields = session.signupRequiredFields;
 
       let input: SignupOrAuthInput;
       if (requiredFields !== null) {
-        // Validate that the session holds every BE-required field. The
-        // schema is parameterized on `requiredFields` so it asserts
-        // exactly the subset the BE asked for — never more, never less.
-        // Adding a new `RequiredKey` to `KNOWN_REQUIRED_KEYS` becomes a
-        // compile error inside the builder's exhaustive switch until it's
-        // mapped to a session field.
-        //
-        // We don't read fields off `ready.data` because the schema is
-        // built dynamically and its inferred output types are too loose
-        // (`unknown` per field). Instead we read directly from `session`
-        // (typed) and use `ready.success` only as the readiness gate.
-        const schema = buildFollowUpSessionReadySchema(requiredFields);
-        const ready = schema.safeParse(session);
-        if (!ready.success) {
-          // Invariant violation: the flow gate should prevent reaching
-          // SigningUp in follow-up mode without the BE-required session
-          // fields populated. If we hit this branch, route to OAuth via
-          // abandonment instead of building a partial input that the
-          // wrapper would have to reject downstream.
+        const wantsFullName = requiredFields.includes('full_name');
+        const wantsTerms = requiredFields.includes('terms_acceptance');
+        const hasFullName = session.signupFullName !== null;
+        const hasTerms =
+          session.legalDocumentBundle !== null &&
+          session.legalDocumentSource !== null;
+
+        if ((wantsFullName && !hasFullName) || (wantsTerms && !hasTerms)) {
           log.error(
             'signup: re-fired in follow-up mode without complete data; abandoning',
           );
           store.setSignupAbandoned(true);
           return;
         }
-        // Each field is conditionally set based on whether the BE
-        // asked for it AND the corresponding session value is non-null.
-        // The session-level null-checks aren't redundant — they narrow
-        // `session.signupFullName: string | null` to `string` for the
-        // wrapper input, replacing what `ready.data.signupFullName`
-        // would have given us if the dynamic schema preserved its
-        // input types.
+
         input = {
           kind: 'with_required_fields',
           email,
-          ...(requiredFields.includes('full_name') &&
-          session.signupFullName !== null
+          ...(wantsFullName && session.signupFullName !== null
             ? { fullName: session.signupFullName }
             : {}),
-          ...(requiredFields.includes('terms_acceptance') &&
+          ...(wantsTerms &&
           session.legalDocumentBundle !== null &&
           session.legalDocumentSource !== null
             ? {
