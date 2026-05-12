@@ -35,6 +35,8 @@ import { resolveZone } from '../../../lib/zone-resolution.js';
 import { DEFAULT_AMPLITUDE_ZONE } from '../../../lib/constants.js';
 import { createLogger } from '../../../lib/observability/logger.js';
 import { assertNever } from '../../../utils/assert-never.js';
+import type { SignupOrAuthInput } from '../../../utils/signup-or-auth.js';
+import { FollowUpSessionReadySchema } from '../../../lib/account-creation-flow.js';
 
 const log = createLogger('signing-up-screen');
 
@@ -47,22 +49,67 @@ export const SigningUpScreen = ({ store }: SigningUpScreenProps) => {
 
   const { session } = store;
   const email = session.signupEmail;
-  // Only include `fullName` in the POST when ToS is accepted too — the
-  // server creates the account on the success arm, and shipping the user
-  // through provisioning before they confirm ToS is the regression we're
-  // explicitly fixing. Without ToS, send email-only and let the server
-  // route us to needs_information so the ToS screen renders next.
+  // Derived for `useAsyncEffect`'s deps and the rendered header. The
+  // input-construction switch below reads directly from session for
+  // the discriminated-union narrowing.
   const fullName =
     session.tosAccepted === true ? (session.signupFullName ?? null) : null;
 
   useAsyncEffect(
     async (signal) => {
       if (email === null) return; // SignupEmailScreen still pending
-      log.debug('posting signup', { hasFullName: fullName !== null });
 
       const zone = resolveZone(session, DEFAULT_AMPLITUDE_ZONE, {
         readDisk: false,
       });
+
+      // Discriminator is BE-driven: `signupRequiredFields !== null`
+      // means BE returned `needs_information` at least once during
+      // this ceremony, so this is a follow-up call. The flow's
+      // `requiredSatisfied` predicate (Step 8 in the spec) prevents
+      // SigningUp re-firing with incomplete data, so the defensive
+      // narrowing guard below should be unreachable in production —
+      // it exists to satisfy the type system without `!` non-null
+      // assertions.
+      const hasRequiredFields = session.signupRequiredFields !== null;
+
+      let input: SignupOrAuthInput;
+      if (hasRequiredFields) {
+        // Narrow + validate the session fields a with_required_fields input needs.
+        // The schema's strictness matches what the prior manual null-
+        // check ladder did (just non-null on each field) — centralized
+        // so the "what makes a with_required_fields session complete" contract
+        // lives next to the related ProvisioningReadySchema.
+        const ready = FollowUpSessionReadySchema.safeParse(session);
+        if (!ready.success) {
+          // Invariant violation: flow gate should prevent reaching
+          // SigningUp in follow-up mode without complete data. If we
+          // hit this branch, route to OAuth via abandonment instead
+          // of crashing on a null access.
+          log.error(
+            'signup: re-fired in follow-up mode without complete data; abandoning',
+          );
+          store.setSignupAbandoned(true);
+          return;
+        }
+        input = {
+          kind: 'with_required_fields',
+          email,
+          // Spread the schema-narrowed fields. `legalDocumentSource` is
+          // the parser-recorded source, passed through so telemetry on
+          // success / error arms can tag this follow-up's URL origin
+          // accurately, without re-reading from the session.
+          fullName: ready.data.signupFullName,
+          legalDocumentBundle: ready.data.legalDocumentBundle,
+          legalDocumentSource: ready.data.legalDocumentSource,
+          zone,
+          signal,
+        };
+      } else {
+        input = { kind: 'email_only', email, zone, signal };
+      }
+
+      log.debug('posting signup', { kind: input.kind });
       // `store.runSignupAttempt` is the sole TUI surface for the
       // agentic-signup POST: it wraps `performSignupOrAuth` in a
       // try/finally that toggles `signupInFlight` for the duration
@@ -76,12 +123,7 @@ export const SigningUpScreen = ({ store }: SigningUpScreenProps) => {
       // the user backed out before the success arm settled —
       // otherwise an abandoned ceremony can still leak tokens to
       // disk and make the next launch think the user is signed in.
-      const result = await store.runSignupAttempt({
-        email,
-        fullName,
-        zone,
-        signal,
-      });
+      const result = await store.runSignupAttempt(input);
 
       if (signal.aborted) return;
 
@@ -124,12 +166,19 @@ export const SigningUpScreen = ({ store }: SigningUpScreenProps) => {
           // Ctrl+C.
           //
           // Today this can only fire as a server bug (we just sent
-          // `full_name` and the server is still asking for it), but
-          // the cost of the guard is one branch and the failure mode
-          // it prevents has zero in-band recovery.
-          const alreadySatisfied = result.requiredFields.every((field) =>
-            field === 'full_name' ? fullName !== null : false,
-          );
+          // a complete body and the server is still asking for these
+          // fields), but the cost of the guard is one switch and the
+          // failure mode it prevents has zero in-band recovery.
+          const alreadySatisfied = result.requiredFields.every((field) => {
+            switch (field) {
+              case 'full_name':
+                return fullName !== null;
+              case 'terms_acceptance':
+                return session.tosAccepted === true;
+              default:
+                return assertNever(field);
+            }
+          });
           if (alreadySatisfied) {
             log.warn(
               'signup: server re-requested already-provided fields; abandoning',
@@ -139,6 +188,14 @@ export const SigningUpScreen = ({ store }: SigningUpScreenProps) => {
             return;
           }
           store.setSignupRequiredFields(result.requiredFields);
+          // Persist the legal-doc URLs the parser produced for this
+          // probe response. The ToSScreen reads from session.legalDocumentBundle
+          // (no fallback at the screen — parser already normalized via the
+          // spoof block when BE flag is OFF) and the follow-up POST body
+          // pulls from the same field. Source is recorded so subsequent
+          // telemetry arms can tag attempts without re-threading it.
+          store.setLegalDocumentBundle(result.legalDocumentBundle);
+          store.setLegalDocumentSource(result.legalDocumentSource);
           return;
         }
         case 'redirect':

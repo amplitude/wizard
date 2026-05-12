@@ -40,7 +40,15 @@ function renderWithSpies(): {
   unmount: () => void;
 } {
   capturedOnSelect = null;
-  const store = makeStoreForSnapshot();
+  // Seed `legalDocumentBundle` so the screen's null-narrowing guard
+  // doesn't early-return. The screen renders nothing when the bundle
+  // is null (defensive — flow predicate prevents this in production).
+  const store = makeStoreForSnapshot({
+    legalDocumentBundle: {
+      terms_of_service: 'https://amplitude.com/terms',
+      privacy_policy: 'https://amplitude.com/privacy',
+    },
+  });
   const accept = vi.fn();
   const cancel = vi.fn();
   store.acceptTermsOfService = accept;
