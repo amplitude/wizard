@@ -759,6 +759,17 @@ export const runDirectSignupIfRequested = async (
     // follow-up shape with local URL constants since no parser-probe
     // has run to populate session.legalDocumentBundle.
     //
+    // Intentional asymmetry vs `SigningUpScreen` (which switches over
+    // `RequiredKey` exhaustively): the non-TUI path pre-commits to a
+    // fixed body and never honors a per-key contract from the BE. If a
+    // future `RequiredKey` is added (e.g. `phone_number`), CI / agent
+    // runs without the matching flag get routed to OAuth fallback via
+    // `needs_information` — observable, not silently broken. Adding a
+    // new field here is a product decision (new `--<field>` flag + its
+    // gate in `gateAgentSignupArguments` / `gateCiSignupAcceptToS`)
+    // rather than a wire-contract correctness fix, so the compile-error
+    // gate the screen has isn't reproduced here.
+    //
     // No `signal` here: CI / agent / classic modes have no in-band
     // cancellation surface (no Esc handler, no unmount lifecycle), so
     // there is nothing to thread through. The TUI path passes a signal

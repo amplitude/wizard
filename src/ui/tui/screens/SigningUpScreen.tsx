@@ -82,9 +82,12 @@ export const SigningUpScreen = ({ store }: SigningUpScreenProps) => {
         // error here until the contributor maps it to a session field and
         // an input slot — otherwise the new key would silently be treated
         // as "not collected" and abandon every ceremony.
-        let fullName: string | undefined;
-        let legalDocumentBundle: LegalDocumentBundle | undefined;
-        let legalDocumentSource: LegalDocumentSource | undefined;
+        // Renamed (vs outer-scope `fullName` at line 58) so the inner
+        // collected value doesn't shadow the outer derived one — the outer
+        // feeds `useAsyncEffect`'s deps and the rendered header.
+        let inputFullName: string | undefined;
+        let inputLegalDocumentBundle: LegalDocumentBundle | undefined;
+        let inputLegalDocumentSource: LegalDocumentSource | undefined;
         for (const key of requiredFields) {
           switch (key) {
             case 'full_name':
@@ -95,7 +98,7 @@ export const SigningUpScreen = ({ store }: SigningUpScreenProps) => {
                 store.setSignupAbandoned(true);
                 return;
               }
-              fullName = session.signupFullName;
+              inputFullName = session.signupFullName;
               break;
             case 'terms_acceptance':
               if (
@@ -108,8 +111,8 @@ export const SigningUpScreen = ({ store }: SigningUpScreenProps) => {
                 store.setSignupAbandoned(true);
                 return;
               }
-              legalDocumentBundle = session.legalDocumentBundle;
-              legalDocumentSource = session.legalDocumentSource;
+              inputLegalDocumentBundle = session.legalDocumentBundle;
+              inputLegalDocumentSource = session.legalDocumentSource;
               break;
             default:
               assertNever(key);
@@ -118,9 +121,9 @@ export const SigningUpScreen = ({ store }: SigningUpScreenProps) => {
         input = {
           kind: 'with_required_fields',
           email,
-          fullName,
-          legalDocumentBundle,
-          legalDocumentSource,
+          fullName: inputFullName,
+          legalDocumentBundle: inputLegalDocumentBundle,
+          legalDocumentSource: inputLegalDocumentSource,
           zone,
           signal,
         };
@@ -236,8 +239,16 @@ export const SigningUpScreen = ({ store }: SigningUpScreenProps) => {
   // Render mimics the previous input screen so the screen swap feels
   // continuous: same heading, the submitted value as a static line, and
   // a spinner.
+  //
+  // "Creating…" runs on every follow-up POST regardless of which fields
+  // the user collected — `signupRequiredFields !== null` is the load-
+  // bearing condition (BE has acknowledged the email and asked for at
+  // least one field; we're committing the account). Conditioning on
+  // `fullName !== null` was correct when full_name was always required
+  // but rendered "Checking…" on terms-only follow-ups, which became
+  // user-visible after BA-149 enabled that combination.
   const headerLabel =
-    session.signupRequiredFields !== null && fullName !== null
+    session.signupRequiredFields !== null
       ? 'Creating your account…'
       : 'Checking your account…';
 
