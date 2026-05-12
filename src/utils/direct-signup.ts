@@ -335,11 +335,6 @@ export async function performDirectSignup(
     kind: input.kind,
   });
 
-  // Build the request body via discriminated switch — `'email_only'` shapes
-  // produce the bare envelope, `'with_required_fields'` shapes add `full_name` and
-  // `terms_acceptance`. The type system enforces "with_required_fields always has
-  // both collected fields" at the call site, so the body construction
-  // here doesn't need runtime guards on optional fields.
   const baseBody = {
     email: input.email,
     scopes: ['openid', 'offline'],
@@ -348,18 +343,10 @@ export async function performDirectSignup(
     redirect_uri: `http://localhost:${OAUTH_PORT}/callback`,
   };
 
-  // Build the request body conditionally based on which optional fields
-  // the caller supplied. Discriminator `'email_only'` produces the bare
-  // envelope; `'with_required_fields'` adds `full_name` and/or
-  // `terms_acceptance` slots, mirroring whichever fields the BE asked
-  // for in the prior `needs_information` response (and the user collected
-  // via the screen pipeline).
-  //
-  // Why per-field, not per-combination: the BE's `required` array can
-  // be any non-empty subset of `KNOWN_REQUIRED_KEYS`. Two keys today
-  // (3 combinations), N keys tomorrow (2^N - 1 combinations). Per-field
-  // emission stays uniform regardless of N; per-combination switches
-  // would need an arm per subset.
+  // Each `with_required_fields` slot is emitted only when its source
+  // field is supplied — the BE's `required` array can be any non-empty
+  // subset of `KNOWN_REQUIRED_KEYS`, so per-field emission stays
+  // uniform regardless of how many keys exist.
   const requestBody: Record<string, unknown> = { ...baseBody };
   if (input.kind === 'with_required_fields') {
     if (input.fullName !== undefined) {

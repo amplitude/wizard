@@ -1,17 +1,8 @@
-/**
- * SigningUpScreen — per-required-fields input construction.
- *
- * The screen reads `session.signupRequiredFields` (populated by the
- * parser when the BE returned `needs_information`) and constructs a
- * `kind: 'with_required_fields'` input for the wrapper. Each optional
- * field (`fullName`, `legalDocumentBundle`, `legalDocumentSource`) is
- * present iff the BE asked for the corresponding required key.
- *
- * BA-149 pins this contract via the wrapper's body builder: only the
- * slots the input populates appear in the POST body. Misaligning here
- * would send the BE a body asserting acceptance the user wasn't asked
- * to give (or omitting a field the user did provide).
- */
+// SigningUpScreen — per-required-fields input construction.
+// Each optional input slot (`fullName`, `legalDocumentBundle`,
+// `legalDocumentSource`) must be present iff the BE asked for the
+// corresponding required key; misaligning here sends the BE a body
+// asserting acceptance the user wasn't asked to give.
 
 import React from 'react';
 import { describe, it, expect, vi, beforeEach } from 'vitest';
@@ -22,10 +13,6 @@ vi.mock('../../../../utils/signup-or-auth.js', () => ({
   performSignupOrAuth: vi.fn(),
 }));
 
-// Single typed entry point for inspecting what the screen passed to the
-// wrapper. `vi.mocked` preserves the original function's signature, so
-// `.mock.calls[i][j]` is typed as `SignupOrAuthInput` — no `as` cast
-// needed at the access sites below.
 const mockedPerformSignupOrAuth = vi.mocked(performSignupOrAuth);
 
 describe('SigningUpScreen input construction', () => {
@@ -150,10 +137,8 @@ describe('SigningUpScreen input construction', () => {
   });
 
   it('signupRequiredFields=null: sends email_only probe', async () => {
-    // Pins the "no needs_information response yet" path: the screen
-    // probes with `kind: 'email_only'` regardless of what session.signupFullName
-    // or session.legalDocumentBundle happen to hold (those could be
-    // populated from a prior abandoned ceremony's leftovers).
+    // Stale session fields from a prior abandoned ceremony must not
+    // leak into the probe body.
     mockedPerformSignupOrAuth.mockResolvedValue({ kind: 'redirect' });
 
     const { SigningUpScreen } = await import('../SigningUpScreen.js');

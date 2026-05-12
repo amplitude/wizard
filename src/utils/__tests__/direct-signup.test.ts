@@ -53,10 +53,9 @@ const INITIAL_INPUT = {
   zone: 'us',
 } as const;
 
-// Follow-up POST shape carrying only the fields the BE asked for in a
-// 'with_required_fields' input. After BA-149, both `fullName` and
-// `legalDocumentBundle` are optional on `SignupShape<'with_required_fields'>`
-// — the body builder emits each slot only when its source field is supplied.
+// Follow-up POST shapes that carry only one of the `with_required_fields`
+// slots — the body builder emits each slot only when its source field
+// is supplied.
 const FULL_NAME_ONLY_INPUT = {
   kind: 'with_required_fields',
   email: 'ada@example.com',
@@ -415,15 +414,9 @@ describe('performDirectSignup', () => {
   });
 
   it('flag-ON with terms_acceptance alone (no full_name required) returns needs_information', async () => {
-    // BA-149: the wizard now accepts any non-empty subset of
-    // KNOWN_REQUIRED_KEYS — including `['terms_acceptance']` alone.
-    // The ToS screen renders whenever 'terms_acceptance' ∈ requiredFields
-    // (independent of 'full_name'), user accepts, and the follow-up POST
-    // body carries only the terms_acceptance slot. The wire-contract
-    // guard added in commit f1b02ebd (PR #675), which rejected this shape
-    // as `unsupported_required_shape`, is deleted alongside this test
-    // change — its rejection was a stop-gap for the wrapper-side
-    // rigidity that BA-149 lifts.
+    // `terms_acceptance` alone is a valid `needs_information.required`
+    // subset; the wrapper must surface it so the ToS screen renders
+    // and the follow-up POST carries only the terms_acceptance slot.
     server.use(
       http.post(PROVISIONING_URL, () =>
         HttpResponse.json({
@@ -615,10 +608,9 @@ describe('performDirectSignup', () => {
     expect(observedBody!).not.toHaveProperty('full_name');
   });
 
-  // BA-149 per-combination body shapes. The wrapper's `'with_required_fields'`
-  // input arm carries `fullName` and `legalDocumentBundle` as independently
-  // optional fields after BA-149, so the body builder emits each slot only
-  // when its source field is defined.
+  // Per-combination body shapes — `fullName` and `legalDocumentBundle`
+  // are independently optional on `with_required_fields`, so the body
+  // builder emits each slot only when its source field is defined.
   it('with_required_fields body: fullName-only input emits full_name and omits terms_acceptance', async () => {
     let observedBody: Record<string, unknown> | null = null;
     server.use(

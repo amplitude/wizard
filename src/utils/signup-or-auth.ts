@@ -245,16 +245,11 @@ export async function performSignupOrAuth(
   const directSignupInput: DirectSignupInput = { ...input, email: input.email };
 
   // Source tag for the `'legal document source'` telemetry property,
-  // derived from what the attempt's body WILL carry:
-  //   - 'with_required_fields' input with legalDocumentBundle present →
-  //     URLs in body → use the source the parser recorded (passed in via
-  //     input.legalDocumentSource).
-  //   - 'with_required_fields' input without legalDocumentBundle (BE
-  //     asked for 'full_name' only) → body has no terms_acceptance slot
-  //     → 'unused', same as the email_only probe arm.
-  //   - 'email_only' input → body has no terms_acceptance slot → 'unused'.
-  // The `needs_information` arm overrides this with `result.legalDocumentSource`
-  // because that arm reports what BE produced, not what the caller sent.
+  // derived from what the body WILL carry: an input that has no
+  // `legalDocumentSource` won't emit a `terms_acceptance` slot, so the
+  // attempt's source is `'unused'`. The `needs_information` arm
+  // overrides this with `result.legalDocumentSource` since that reports
+  // what BE produced, not what the caller sent.
   const inputSource: LegalDocumentSource | 'unused' =
     input.kind === 'with_required_fields' && input.legalDocumentSource
       ? input.legalDocumentSource
@@ -389,16 +384,9 @@ export async function performSignupOrAuth(
         zone: input.zone,
       },
     );
-    // `fullName` is the value we'd persist into ~/.ampli.json as the
-    // pending-sentinel user's display name when the post-signup user fetch
-    // fails. Sources, in order:
-    //   - 'with_required_fields' input with input.fullName set → use it.
-    //   - 'with_required_fields' input without input.fullName (BE asked for
-    //     'terms_acceptance' only) → no name to persist; empty string.
-    //   - 'email_only' input → BE returned tokens straight away without
-    //     asking for the name; empty string.
-    // The pending sentinel is patched on the next successful user fetch,
-    // so an empty placeholder here is benign.
+    // Display-name placeholder for the pending-sentinel `StoredUser`
+    // when the post-signup fetch fails. Empty when the caller didn't
+    // supply `fullName` — the next successful user fetch overwrites it.
     const fullNameForFallback =
       input.kind === 'with_required_fields' ? input.fullName ?? '' : '';
     const parts = fullNameForFallback.trim().split(/\s+/);

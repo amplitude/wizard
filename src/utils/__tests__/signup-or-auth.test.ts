@@ -423,11 +423,10 @@ describe('performSignupOrAuth', () => {
     );
   });
 
-  // BA-149: a `'with_required_fields'` input may legitimately carry no
-  // `legalDocumentBundle` (BE asked for `'full_name'` only). The body in
-  // that case has no `terms_acceptance` slot, so the telemetry tag should
-  // report 'unused' — same as the email_only probe arm — not the
-  // (now-optional) `input.legalDocumentSource`, which may be undefined.
+  // A `'with_required_fields'` input may legitimately carry no
+  // `legalDocumentBundle` — the body has no `terms_acceptance` slot,
+  // so the telemetry tag must report `'unused'`, not the (undefined)
+  // `input.legalDocumentSource`.
   it("with_required_fields without legalDocumentBundle tags 'legal document source' as 'unused' on success", async () => {
     const { performDirectSignup } = await import('../direct-signup.js');
     vi.mocked(performDirectSignup).mockResolvedValue({
