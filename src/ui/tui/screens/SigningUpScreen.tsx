@@ -36,7 +36,7 @@ import { DEFAULT_AMPLITUDE_ZONE } from '../../../lib/constants.js';
 import { createLogger } from '../../../lib/observability/logger.js';
 import { assertNever } from '../../../utils/assert-never.js';
 import type { SignupOrAuthInput } from '../../../utils/signup-or-auth.js';
-import { FollowUpSessionReadySchema } from '../../../lib/account-creation-flow.js';
+import { buildFollowUpSessionReadySchema } from '../../../lib/account-creation-flow.js';
 
 const log = createLogger('signing-up-screen');
 
@@ -66,42 +66,61 @@ export const SigningUpScreen = ({ store }: SigningUpScreenProps) => {
       // Discriminator is BE-driven: `signupRequiredFields !== null`
       // means BE returned `needs_information` at least once during
       // this ceremony, so this is a follow-up call. The flow's
-      // `requiredSatisfied` predicate (Step 8 in the spec) prevents
-      // SigningUp re-firing with incomplete data, so the defensive
-      // narrowing guard below should be unreachable in production —
-      // it exists to satisfy the type system without `!` non-null
-      // assertions.
-      const hasRequiredFields = session.signupRequiredFields !== null;
+      // `requiredSatisfied` predicate prevents SigningUp re-firing with
+      // incomplete data per required key, so the schema check below
+      // should be unreachable-false in production — it exists as a
+      // belt-and-suspenders guard before the type-safe field reads.
+      const requiredFields = session.signupRequiredFields;
 
       let input: SignupOrAuthInput;
-      if (hasRequiredFields) {
-        // Narrow + validate the session fields a with_required_fields input needs.
-        // The schema's strictness matches what the prior manual null-
-        // check ladder did (just non-null on each field) — centralized
-        // so the "what makes a with_required_fields session complete" contract
-        // lives next to the related ProvisioningReadySchema.
-        const ready = FollowUpSessionReadySchema.safeParse(session);
+      if (requiredFields !== null) {
+        // Validate that the session holds every BE-required field. The
+        // schema is parameterized on `requiredFields` so it asserts
+        // exactly the subset the BE asked for — never more, never less.
+        // Adding a new `RequiredKey` to `KNOWN_REQUIRED_KEYS` becomes a
+        // compile error inside the builder's exhaustive switch until it's
+        // mapped to a session field.
+        //
+        // We don't read fields off `ready.data` because the schema is
+        // built dynamically and its inferred output types are too loose
+        // (`unknown` per field). Instead we read directly from `session`
+        // (typed) and use `ready.success` only as the readiness gate.
+        const schema = buildFollowUpSessionReadySchema(requiredFields);
+        const ready = schema.safeParse(session);
         if (!ready.success) {
-          // Invariant violation: flow gate should prevent reaching
-          // SigningUp in follow-up mode without complete data. If we
-          // hit this branch, route to OAuth via abandonment instead
-          // of crashing on a null access.
+          // Invariant violation: the flow gate should prevent reaching
+          // SigningUp in follow-up mode without the BE-required session
+          // fields populated. If we hit this branch, route to OAuth via
+          // abandonment instead of building a partial input that the
+          // wrapper would have to reject downstream.
           log.error(
             'signup: re-fired in follow-up mode without complete data; abandoning',
           );
           store.setSignupAbandoned(true);
           return;
         }
+        // Each field is conditionally set based on whether the BE
+        // asked for it AND the corresponding session value is non-null.
+        // The session-level null-checks aren't redundant — they narrow
+        // `session.signupFullName: string | null` to `string` for the
+        // wrapper input, replacing what `ready.data.signupFullName`
+        // would have given us if the dynamic schema preserved its
+        // input types.
         input = {
           kind: 'with_required_fields',
           email,
-          // Spread the schema-narrowed fields. `legalDocumentSource` is
-          // the parser-recorded source, passed through so telemetry on
-          // success / error arms can tag this follow-up's URL origin
-          // accurately, without re-reading from the session.
-          fullName: ready.data.signupFullName,
-          legalDocumentBundle: ready.data.legalDocumentBundle,
-          legalDocumentSource: ready.data.legalDocumentSource,
+          ...(requiredFields.includes('full_name') &&
+          session.signupFullName !== null
+            ? { fullName: session.signupFullName }
+            : {}),
+          ...(requiredFields.includes('terms_acceptance') &&
+          session.legalDocumentBundle !== null &&
+          session.legalDocumentSource !== null
+            ? {
+                legalDocumentBundle: session.legalDocumentBundle,
+                legalDocumentSource: session.legalDocumentSource,
+              }
+            : {}),
           zone,
           signal,
         };
