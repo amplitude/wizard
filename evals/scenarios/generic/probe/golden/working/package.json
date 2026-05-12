@@ -1,0 +1,11 @@
+{
+  "name": "generic-probe",
+  "version": "0.1.0",
+  "private": true,
+  "scripts": {
+    "build": "echo 'no build step'"
+  },
+  "dependencies": {
+    "@amplitude/unified": "^1.0.0"
+  }
+}

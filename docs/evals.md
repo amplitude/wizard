@@ -379,13 +379,16 @@ Two notes worth lifting out of the code:
 
 **Cost:** 1-3 minutes per scenario. Nightly only by default.
 
-### Layer 5 — Ingestion verification
+### Layer 5 — Ingestion verification (out of scope; owned by e2e tests)
 
-**What it catches:** End-to-end correctness — the events the agent claimed to track actually arrive in Amplitude with the expected names and properties.
+End-to-end ingestion verification is **not** in the eval suite. Two reasons:
 
-**How:** Forward the runtime probe's outbound requests to a real Amplitude project (the eval-only project — see open decisions), then poll the API for ingestion. Compare against `event_plan_confirmed`.
+1. **The wizard is run with `--no-telemetry` in eval mode**, so synthetic eval invocations never reach the prod analytics project. That removes the original motivation for an "eval-only Amplitude project" (decision #2 in the spec) — there's nothing to isolate.
+2. **Whether the integrated SDK actually delivers events at runtime is fundamentally an e2e concern**, not a regression-on-prompt-changes concern. It depends on the framework's bundling, the customer's hosting, network shape, sampling — variables the eval suite explicitly doesn't control. `e2e-tests/test-applications/` is the right home for that signal.
 
-**Cost:** Pre-release only. Adds wall-clock for ingestion lag (typically tens of seconds per scenario). Spend is bounded.
+The eval suite's coverage of "does the SDK fire" stops at Layer 4 (runtime probe): boot the integration in a headless browser, intercept Amplitude requests, assert ≥1 fired. That's enough to catch the regressions the suite is built for (init in the wrong context, tree-shaken-away SDK, server/client boundary breakage). Whether the request reaches Amplitude is a different test.
+
+If we ever need ingestion coverage in the eval suite later, the wiring is straightforward: forward the Layer 4 probe's intercepted requests to a real project + poll. The plumbing is already in place; what we lack is a reason to build it now.
 
 ### Layer 6 — LLM judge
 
@@ -662,9 +665,16 @@ If a scenario fails for a reason this table doesn't predict, that's a finding �
 - **Judge model and cadence (decision #3).** Unlimited Anthropic budget removes the spend constraint. Sonnet stays the default judge; Opus enters via the pre-release bake-off only if it earns the slot. Judge runs at 100% of nightly scenarios, not 10%.
 - **CI gating shape.** Default PR is Layers 0-3 on Ring 1. Opt-in full PR via `evals:full` label or `[evals]` trigger phrase. Nightly is full Ring 2 with Layers 0-6 and judge at 100%. Pre-release is Ring 3 with ingestion.
 
+### Implemented as of 2026-05-08
+
+- Layers 0–4 + 6 wired and tested (122 scorer tests). Layer 5 is the only deferred piece, blocked on decision #2 (eval-only Amplitude project).
+- Ring 1 scenarios fully shipped: `nextjs-app-router/vanilla`, `nextjs-app-router/pre-existing-vendor`, `react-router-7/framework`, `react-router-7/data`, `react-vite/vanilla`, `expo/vanilla`, `generic/probe`. Each carries a lockfile-pinned pristine fixture and a hand-authored golden.
+- PR gate runs `.github/workflows/evals-pr-scenarios.yml` (Layers 0–3, Ring 1 matrix). Nightly Ring 2 runs `.github/workflows/evals-nightly.yml` (Layers 0–6, two seeds per scenario, Playwright installed for Layer 4, Sonnet judge for Layer 6, plus a separate variance-summary job that flags any scenario whose seed-to-seed score spread exceeds 10).
+- Layer 0 `correct-sdk-package` now hard-fails on stale-legacy-SDK coexistence (failure mode #10 from the table) — a `pre-existing-vendor` run that leaves both `@amplitude/unified` and `@amplitude/analytics-browser` in `package.json` is graded as broken.
+
 ### Still open
 
-- **Decision #2 — eval-only Amplitude project.** Layer 5 ingestion verification needs a project that we can blast with synthetic events without polluting prod analytics. Ops conversation pending; needs an org owner and a project key managed outside the user-facing OAuth flow.
+- ~~**Decision #2 — eval-only Amplitude project.**~~ **Resolved 2026-05-08.** The wizard is invoked with `--no-telemetry` in eval mode, so synthetic runs never reach the prod analytics project. End-to-end ingestion verification is now explicitly owned by `e2e-tests/`, not the eval suite. See "Layer 5" above.
 - **Decision #4 — naming convention enforcement.** Criterion 15 (Title Case events, snake_case properties or the lowercase-with-spaces variant the wizard already enforces internally) is currently soft / warn-only. Open question: do we promote it to medium (5 pts) for runs targeting projects we own, and keep it warn-only for customer projects? Needs a call from BA leads.
 - **Decision #5 — negative-control ownership.** The suite needs a deliberate-regression PR every quarter to confirm scorers haven't decayed into "always pass" mode. Open: who on the eng-manager side owns scheduling these and reviewing the resulting reports.
 - **Decision #6 — context-hub coupling.** Skills are pulled from `amplitude/context-hub` via `pnpm skills:refresh`. Open: when the eval suite finds a skill regression, is the fix made in this repo (and propagated upstream) or required to land in context-hub first? Affects PR latency materially.

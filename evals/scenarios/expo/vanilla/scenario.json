@@ -1,0 +1,18 @@
+{
+  "name": "expo/vanilla",
+  "ring": 1,
+  "integrationHint": "expo",
+  "buildCommand": ["pnpm", "exec", "expo", "export", "--platform", "web"],
+  "expectedEnvPrefix": "EXPO_PUBLIC_",
+  "expectedInitFile": "app/_layout.tsx",
+  "expectedEvents": ["Sign Up Submitted", "Burrito Considered"],
+  "forbiddenPaths": [
+    "babel.config.js",
+    "metro.config.js",
+    "app.config.js",
+    "app.config.ts",
+    "webpack.config.js"
+  ],
+  "useDetection": false,
+  "notes": "Expo Router (vanilla) Ring 1 scenario. Init lives at the root `app/_layout.tsx` so every route mounts under one provider. Env prefix is EXPO_PUBLIC_ — Expo inlines these at bundle time without leaking the secret into native binaries. Build command is `expo export --platform web` so Layer 3 doesn't require Xcode/Android tooling on Linux runners. integrationHint=expo isn't yet in the wizard's Integration enum (skill / detector drift sidebar in docs/evals.md), so useDetection is false — the runner won't pass --integration to the wizard, and live runs must rely on detection finding the Expo skill via package.json signals."
+}

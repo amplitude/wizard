@@ -58,6 +58,12 @@ jobs:
         # logic).
         scenario:
           - nextjs-app-router/vanilla
+          - nextjs-app-router/pre-existing-vendor
+          - react-router-7/framework
+          - react-router-7/data
+          - react-vite/vanilla
+          - expo/vanilla
+          - generic/probe
     steps:
       - uses: actions/checkout@34e114876b0b11c390a56381ad16ebd13914f8d5 # v4
       - uses: pnpm/action-setup@fc06bc1257f339d1d5d8b3a19a8cae5388b55320 # v5.0.0

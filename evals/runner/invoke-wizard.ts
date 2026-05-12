@@ -29,7 +29,14 @@ import { join } from 'node:path';
 import { redactString } from '../../src/lib/observability/redact.js';
 import { captureFsSnapshot } from './fs-snapshot.js';
 import { parseStream } from './parse-stream.js';
-import type { Artifact, BuildResult, FsSnapshot, Scenario } from './types.js';
+import type { JudgeResult } from './judge.js';
+import type {
+  Artifact,
+  BuildResult,
+  FsSnapshot,
+  RuntimeResult,
+  Scenario,
+} from './types.js';
 
 /**
  * Generate a short, sortable run ID. Prefer crypto.randomUUID over a
@@ -225,7 +232,19 @@ export async function runLive(
   const auth = resolveLiveAuthMode(options);
 
   const { cmd, baseArgs } = resolveWizardSpawn(options);
-  const args = [...baseArgs, '--agent', '--yes', '--install-dir', workingDir];
+  // `--no-telemetry` is non-negotiable in eval mode: the wizard child
+  // is a synthetic run, and its `wizard cli: *` events would otherwise
+  // pollute the prod analytics project. The flag is forwarded
+  // unconditionally; orchestrators that want telemetry from a live
+  // run should call the wizard directly, not through the eval runner.
+  const args = [
+    ...baseArgs,
+    '--agent',
+    '--yes',
+    '--no-telemetry',
+    '--install-dir',
+    workingDir,
+  ];
   // useDetection defaults to `true` (pass `--integration`). Set
   // `false` on a scenario to drop the hint and grade the wizard's
   // detection pipeline against `integrationHint` as ground truth.
@@ -240,6 +259,11 @@ export async function runLive(
   // Ensure the wizard takes the agent code path even if the parent
   // process happens to have set TUI-leaning env.
   env.AMPLITUDE_WIZARD_AGENT = '1';
+  // Belt-and-braces with the `--no-telemetry` flag above. If the flag
+  // is ever stripped (e.g. by a packaging change or a wrapper script
+  // that doesn't propagate argv cleanly), the env var still disables
+  // analytics inside the wizard child.
+  env.AMPLITUDE_WIZARD_NO_TELEMETRY = '1';
   if (auth.kind === 'oauth-env') {
     // Forward gateway-auth env to the wizard child. Wizard-side
     // reading of these env vars is a follow-up PR; until then a run
@@ -409,6 +433,35 @@ export function runReplay(options: ReplayOptions): RunnerResult {
   const parsed = parseStream(ndjson);
   const fsSnapshot: FsSnapshot = captureFsSnapshot(pristineDir, goldenWorking);
 
+  // Optional `golden/run-second.ndjson` pins a recorded second-run NDJSON
+  // stream for the L1 idempotent-rerun scorer (criterion 16). Absence is
+  // fine — the scorer skip-passes with weight 0 when the field is unset.
+  const secondRunPath = join(goldenDir, 'run-second.ndjson');
+  let secondRunLog: typeof parsed.events | undefined;
+  if (existsSync(secondRunPath)) {
+    secondRunLog = parseStream(readFileSync(secondRunPath, 'utf8')).events;
+  }
+
+  // Optional `golden/runtime-result.json` pins a recorded
+  // {@link RuntimeResult} for the L4 runtime-probe scorer. Absence is
+  // fine — the scorer skip-passes with weight 0 (no signal, no penalty).
+  const runtimePath = join(goldenDir, 'runtime-result.json');
+  let runtimeResult: RuntimeResult | undefined;
+  if (existsSync(runtimePath)) {
+    runtimeResult = JSON.parse(
+      readFileSync(runtimePath, 'utf8'),
+    ) as RuntimeResult;
+  }
+
+  // Optional `golden/judge-result.json` pins a recorded LLM-judge
+  // response for the L6 scorer. Useful for snapshot-style coverage
+  // without re-spending tokens on every replay run.
+  const judgePath = join(goldenDir, 'judge-result.json');
+  let judgeResult: JudgeResult | undefined;
+  if (existsSync(judgePath)) {
+    judgeResult = JSON.parse(readFileSync(judgePath, 'utf8')) as JudgeResult;
+  }
+
   return {
     artifact: {
       runId: newRunId(),
@@ -421,6 +474,9 @@ export function runReplay(options: ReplayOptions): RunnerResult {
       fsSnapshot,
       stderr,
       buildResult,
+      runtimeResult,
+      judgeResult,
+      secondRunLog,
       source: 'golden',
     },
     // Replay reads file content from the pre-recorded golden working

@@ -9,6 +9,7 @@
  */
 
 import type { AgentEventEnvelope } from '../../src/lib/agent-events.js';
+import type { JudgeResult } from './judge.js';
 import type { Scenario } from './scenario-schema.js';
 
 /**
@@ -56,6 +57,39 @@ export interface BuildResult {
 }
 
 /**
+ * Result of probing the post-wizard working tree at runtime. Layer 4
+ * grades against this — boots the framework's dev server, loads a known
+ * route in a headless browser, and reports whether the agent's
+ * integration actually executes without errors.
+ *
+ * `consoleErrors` carries the messages so triagers see what blew up;
+ * the full console log is not preserved (it's noisy and mostly
+ * developer-tooling banter that doesn't help). `amplitudeRequestCount`
+ * is incremented for every outbound request to the Amplitude ingestion
+ * endpoint family — `api2.amplitude.com`, `api.eu.amplitude.com`,
+ * `api.amplitude.com`, the v2/v3 prefixes. The probe intercepts these
+ * (it does NOT forward them — Layer 5 owns the ingestion verification
+ * piece, and the eval-only project is decision #2 in the spec).
+ *
+ * `pageStatusCode` is the top-level navigation HTTP response (200 for
+ * a successful boot, 5xx for a server error, 0 for navigation timeout).
+ */
+export interface RuntimeResult {
+  /** Boot URL the probe loaded (e.g. `http://localhost:5173/`). */
+  url: string;
+  pageStatusCode: number;
+  consoleErrors: string[];
+  amplitudeRequestCount: number;
+  /** First few outbound paths hit (capped to 5 entries for triage). */
+  amplitudeRequestPaths: string[];
+  /** True when the probe booted, navigated, and exited cleanly. */
+  ok: boolean;
+  /** One-line failure message when `ok=false`. */
+  detail?: string;
+  durationMs: number;
+}
+
+/**
  * The artifact a scenario produces. Scorers consume this; they never
  * re-spawn the wizard or touch the live filesystem.
  *
@@ -96,11 +130,41 @@ export interface Artifact {
    */
   buildResult?: BuildResult;
   /**
+   * Result of booting the integration in a headless browser (Layer 4).
+   * Live runs populate this when `--runtime` is passed and the
+   * scenario opts in via a `runtimeProbe` config. Goldens may pin a
+   * recorded outcome via `golden/runtime-result.json`. Absence is
+   * fine — the L4 scorer skip-passes with weight 0.
+   */
+  runtimeResult?: RuntimeResult;
+  /**
+   * LLM-judge result for Layer 6 grading. Populated when the runner
+   * is invoked with `--judge` and `ANTHROPIC_API_KEY` is set. Goldens
+   * may pin a `golden/judge-result.json` to make replay coverage
+   * deterministic. Absence is fine — the L6 scorer skip-passes with
+   * weight 0.
+   */
+  judgeResult?: JudgeResult;
+  /**
    * Source of the artifact. `live` = freshly spawned wizard. `golden`
    * = pre-recorded NDJSON + a baseline snapshot loaded from disk.
    * Useful for triage so you don't mistake a replay for a real run.
    */
   source: 'live' | 'golden';
+  /**
+   * NDJSON run log captured from a SECOND consecutive wizard run on
+   * the same working tree. Optional — the orchestrator only populates
+   * this when the scenario opts in to idempotency coverage (criterion
+   * 16) by setting `runTwice: true` on the scenario, or by providing a
+   * `golden/run-second.ndjson` for replay mode.
+   *
+   * Layer 1's `idempotent-rerun` scorer compares the second run's
+   * `file_change_applied` events to the first; a clean re-run should
+   * produce the same set or a strict subset (modify-only, no
+   * surprise creates / deletes). Absent → scorer skip-passes with
+   * weight 0 (no signal, no penalty).
+   */
+  secondRunLog?: AgentEventEnvelope[];
 }
 
 /**

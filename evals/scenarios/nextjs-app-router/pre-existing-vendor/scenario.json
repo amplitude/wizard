@@ -1,0 +1,17 @@
+{
+  "name": "nextjs-app-router/pre-existing-vendor",
+  "ring": 1,
+  "integrationHint": "nextjs",
+  "buildCommand": ["pnpm", "build"],
+  "expectedEnvPrefix": "NEXT_PUBLIC_",
+  "expectedInitFile": "src/app/AmplitudeProvider.tsx",
+  "expectedEvents": ["Page Viewed", "Sign Up", "Sign In"],
+  "forbiddenPaths": [
+    "next.config.js",
+    "next.config.mjs",
+    "next.config.ts",
+    "webpack.config.js",
+    "babel.config.js"
+  ],
+  "notes": "Next.js App Router with @amplitude/analytics-browser pre-installed. Exercises 'augment, don't replace' — the agent must migrate the project to @amplitude/unified, removing the legacy browser SDK from package.json and refactoring the existing init wrapper. This is the canonical Ring 1 scenario for SDK-major coexistence regressions: a clean run leaves @amplitude/unified as the only Amplitude package, and Layer 0's correct-sdk-package hard-fails if both packages survive together (failure mode #10 in the spec)."
+}

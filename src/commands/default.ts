@@ -216,6 +216,19 @@ export const defaultCommand: CommandModule = {
   handler: (argv) => {
     const options = { ...argv };
 
+    // --no-telemetry hard-disables wizard internal analytics for the
+    // remainder of the process. Used by the eval suite so synthetic
+    // wizard runs never reach the prod analytics project. Apply before
+    // any other code path so the very first event (`session started`,
+    // captured inside runWizard) short-circuits at the analytics
+    // singleton instead of getting through to the SDK init.
+    if (
+      options['no-telemetry'] ||
+      process.env.AMPLITUDE_WIZARD_NO_TELEMETRY === '1'
+    ) {
+      analytics.disable();
+    }
+
     // --env is redundant with --app-id (each Amplitude env has its own
     // app.id, so the numeric app-id already identifies the env). Keep the
     // flag parseable for legacy scripts, but nudge callers toward --app-id.

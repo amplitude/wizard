@@ -33,6 +33,8 @@ import { scorer as l1EnvVarPrefix } from '../scorers/layer1-structural/env-var-p
 import { scorer as l1SetupCompleteShape } from '../scorers/layer1-structural/setup-complete-shape.js';
 import { scorer as l1ExitCodeMatches } from '../scorers/layer1-structural/exit-code-matches-outcome.js';
 import { scorer as l1ConfirmedEventsTracked } from '../scorers/layer1-structural/confirmed-events-tracked.js';
+import { scorer as l1IdempotentRerun } from '../scorers/layer1-structural/idempotent-rerun.js';
+import { scorer as l1SelfVerificationPasses } from '../scorers/layer1-structural/self-verification-passes.js';
 
 import { scorer as l2ServerClientBoundary } from '../scorers/layer2-static/server-client-boundary.js';
 import { scorer as l2InitOptionsCommented } from '../scorers/layer2-static/init-options-commented.js';
@@ -42,6 +44,10 @@ import { scorer as l2ServerSdkUsage } from '../scorers/layer2-static/server-sdk-
 import { scorer as l2PropertyKeyNaming } from '../scorers/layer2-static/property-key-naming.js';
 
 import { scorer as l3BuildPasses } from '../scorers/layer3-build/build-passes.js';
+
+import { scorer as l4RuntimeProbe } from '../scorers/layer4-runtime/runtime-probe.js';
+
+import { scorer as l6JudgeVerdict } from '../scorers/layer6-judge/judge-verdict.js';
 
 /**
  * The full scorer stack. Order matters — Layer 0 runs first; if any
@@ -62,6 +68,8 @@ export const SCORERS: Scorer[] = [
   l1SetupCompleteShape,
   l1ExitCodeMatches,
   l1ConfirmedEventsTracked,
+  l1IdempotentRerun,
+  l1SelfVerificationPasses,
   // Layer 2 — static SDK rules (AST-aware).
   l2ServerClientBoundary,
   l2ServerSdkUsage,
@@ -71,6 +79,10 @@ export const SCORERS: Scorer[] = [
   l2PropertyKeyNaming,
   // Layer 3 — build / typecheck.
   l3BuildPasses,
+  // Layer 4 — runtime probe (opt-in via scenario.runtimeProbe).
+  l4RuntimeProbe,
+  // Layer 6 — LLM judge (opt-in via --judge + ANTHROPIC_API_KEY).
+  l6JudgeVerdict,
 ];
 
 export interface ScoreOptions {

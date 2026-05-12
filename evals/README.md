@@ -2,31 +2,42 @@
 
 This directory holds the SDK-integration eval suite for `@amplitude/wizard`. The full design lives in [`docs/evals.md`](../docs/evals.md). Read that first if you're new to this work — the design rationale (why NDJSON, why the layered scorer stack, why three rings) is there, and this README assumes you've seen it.
 
-## What "Week 1" ships
+## Status
 
-The Week 1 deliverables are scoped narrowly so the framework can land before scorers and scenarios fan out:
+Phase 1 of the spec is complete. Layers 0–4 + 6 are wired with deterministic + LLM-judge scorers, all seven Ring 1 scenarios have lockfile-pinned fixtures and pinned goldens, and CI is split between the PR gate (Layers 0–3, ~5 min wall-clock) and a nightly Ring 2 job (Layers 0–6, two seeds per scenario, variance summary uploaded as an artifact).
 
-- **Runner skeleton** — spawns `amplitude-wizard --agent --yes` against a fixture, captures the NDJSON stream, walks the post-run filesystem, and produces a structured artifact. Also supports replaying a pre-recorded artifact (see [Source modes](#source-modes) below).
-- **Contract assertions** — every NDJSON line is `v: 1`, exactly one terminal `run_completed`, `setup_complete` matches the outcome, and the process exit code agrees with `run_completed.outcome`. See [`runner/parse-stream.ts`](./runner/parse-stream.ts).
-- **Layer 0 hard-fail scorers** — secrets, wrong package, multiple init, build-config bridging. Any hit short-circuits the scorer stack.
-- **Layer 1 structural scorers** — file-touched, import-present, init-call-present, env-var-prefix, setup-complete-shape, exit-code-matches-outcome, confirmed-events-tracked.
-- **One Ring 1 fixture** — `scenarios/nextjs-app-router/vanilla/`, modelled on `e2e-tests/test-applications/nextjs-app-router-test-app/`.
-- **One green end-to-end test** — runs the full pipeline against the fixture's golden artifact and asserts every Layer 0 + Layer 1 scorer passes.
+| Layer | Status | Notes |
+|-------|--------|-------|
+| 0 — hard-fail | ✅ done | criterions 1, 6, 8, 10 + secret-in-stderr; correct-sdk-package now hard-fails on stale-legacy-SDK coexistence (failure mode #10) |
+| 1 — structural | ✅ done | criterions 4, 5, 9, 13, 14, 16, 17, 19; idempotent-rerun + self-verification opt in via second-run NDJSON / verification_result events |
+| 2 — static SDK | ✅ done | criterions 2, 3, 7, 11, 12, 15 |
+| 3 — build / typecheck | ✅ done | criterion 18; PR-gate runs golden-pinned `BuildResult`; nightly runs `pnpm install && <buildCommand>` against the working tree |
+| 4 — runtime probe | ✅ done | Playwright-driven, dynamic-import gated; nightly installs playwright, PR-gate skip-passes |
+| 5 — ingestion verification | ⛔ out of scope | wizard runs with `--no-telemetry` in eval mode; ingestion correctness is owned by `e2e-tests/`. See [Layer 5 below](#layer-5--ingestion-verification-out-of-scope) |
+| 6 — LLM judge | ✅ done | rubric versioned via `rubrics/rubric-version.txt`; --judge flag + `ANTHROPIC_API_KEY`; gateway routing is the next step |
 
-What the spec describes that Week 1 explicitly does **not** ship: Layer 2 (static SDK rules), Layer 3 (build), Layer 4 (runtime probe), Layer 5 (ingestion), Layer 6 (LLM judge), the seed-variance harness, the CI workflow files, and the second-through-seventh Ring 1 scenarios.
+Ring 1 scenarios shipped: `nextjs-app-router/vanilla`, `nextjs-app-router/pre-existing-vendor`, `react-router-7/framework`, `react-router-7/data`, `react-vite/vanilla`, `expo/vanilla`, `generic/probe`. The nightly variance harness flags any scenario whose two seeds disagree by more than 10 points (the spec's non-determinism threshold).
 
 ## Quick start
 
 ```bash
-# Run the Vitest end-to-end test for the framework. This is the
-# Week 1 green run.
-pnpm test evals/scorers/__tests__/runner.test.ts
+# Run the full Vitest suite for the eval framework.
+pnpm test evals/
 
 # Score a scenario via the CLI (golden replay by default).
 pnpm evals:run nextjs-app-router/vanilla
 
 # Score it against a real wizard run (requires AMPLITUDE_EVAL_API_KEY).
 AMPLITUDE_EVAL_API_KEY=… pnpm evals:run nextjs-app-router/vanilla --live
+
+# Add Layer 4 (Playwright runtime probe) — requires playwright installed.
+pnpm evals:run nextjs-app-router/vanilla --runtime
+
+# Add Layer 6 (LLM judge) — requires ANTHROPIC_API_KEY.
+ANTHROPIC_API_KEY=… pnpm evals:run nextjs-app-router/vanilla --judge
+
+# Pin a seed for variance tracking (see nightly workflow).
+pnpm evals:run nextjs-app-router/vanilla --seed 2
 ```
 
 The CLI prints a summary to stdout and writes the full report to `evals/reports/<runId>/report.json`.
@@ -98,23 +109,19 @@ The full flow is in `docs/evals.md` § Adding a new scenario. Mechanics for Week
 
 **Adding a scorer:** see `docs/evals.md` § Adding a new scorer. Always start by adding a row to the 19-point checklist in `docs/evals.md`, then update the mirror at [`spec/quality-criteria.md`](./spec/quality-criteria.md).
 
-## Known gaps and Week 2 candidates
+## Layer 5 — ingestion verification (out of scope)
 
-These are intentional Week 1 omissions, not bugs:
+Layer 5 is intentionally **not** part of the eval suite. The wizard is invoked with `--no-telemetry` in eval mode (`evals/runner/invoke-wizard.ts` forwards the flag and the env var unconditionally), so synthetic eval runs never reach the prod analytics project. There's nothing to verify ingestion against.
 
-- **No Layer 5 (ingestion verification).** The eval-only Amplitude project is unprovisioned (decision #2 open in the spec). Until it lands, every scenario stays at Layer 3 in PR rings.
+End-to-end "does the SDK actually deliver events to Amplitude?" coverage lives in `e2e-tests/test-applications/`, not here. That's the right home: ingestion depends on framework bundling, hosting, and network shape — variables the eval suite doesn't control. The eval suite stops at Layer 4 (runtime probe boots the integration, asserts ≥1 outbound Amplitude request fires).
+
+If a future need surfaces, the wiring is straightforward — Layer 4's request interceptor can be flipped to forward instead of fulfill, and a Layer 5 scorer can poll the Amplitude API for arrival. The plumbing exists; we just don't run it.
+
+## Known gaps
+
 - **Wizard-side `WIZARD_OAUTH_TOKEN` reading is a follow-up PR.** The runner forwards the env var to the wizard child today, but the wizard doesn't read it yet — live runs need either the wizard-side wiring or the explicit `EVALS_ALLOW_API_KEY_BYPASS=1` opt-in. Once the wizard-side lands, gateway-routed live evals work in CI without the bypass.
-- **AST-based init counting.** Layer 0's `single-init-call.ts` uses regex; it can false-positive on commented-out callsites. AST inspection moves it to Layer 2 in Week 2.
-
-### Week 2 priorities
-
-In rough order:
-
-1. **Layer 2 static scorers.** The seven criteria the spec lists (2, 3, 7, 9, 11, 12, 15). `@typescript-eslint/parser` is already in the repo; lift it for the AST passes.
-2. **Three more Ring 1 scenarios.** React Router 7 (framework + data modes), React + Vite. Each follows the nextjs scaffold; the framework is ready.
-3. **Layer 3 build runner.** Run `pnpm build` (or the scenario's `buildCommand`) inside `working/` after a live run; capture stderr tail; gate on exit code.
-4. **CI workflow.** `.github/workflows/evals-pr.yml` per the spec sketch — paths-filtered, Ring 1 only, Layers 0–3, `< 8 minutes` budget.
-5. **Negative-control PR.** Land a deliberate regression in a scratch branch and confirm the suite catches it at the layer the spec predicts.
+- **Judge auth is direct-to-Anthropic.** Layer 6 calls `@anthropic-ai/sdk` directly using `ANTHROPIC_API_KEY`. Routing through the wizard's LLM gateway is a follow-up so judge calls share the same auth + rate-limit story as the wizard itself.
+- **AST-based init counting.** Layer 0's `single-init-call.ts` uses regex; it can false-positive on commented-out callsites. AST inspection moves it to Layer 2 in a follow-up.
 
 ## References
 
