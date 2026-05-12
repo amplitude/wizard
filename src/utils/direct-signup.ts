@@ -223,18 +223,23 @@ function isCallerAbort(error: unknown, signal?: AbortSignal): boolean {
  *   The BE decides what's needed and responds `needs_information`,
  *   `requires_redirect` (existing user), or `oauth` (success).
  *
- * - `kind: 'with_required_fields'` — the wizard received `needs_information` on a
- *   prior call, the user has now satisfied every required field, and
- *   we're submitting the complete body. `fullName` and
- *   `legalDocumentBundle` are both required at the type level — the
- *   discriminated union enforces that callers can't construct a
- *   `'with_required_fields'` shape without all of them.
+ * - `kind: 'with_required_fields'` — the wizard received `needs_information`
+ *   on a prior call and the user has satisfied the fields the BE
+ *   requested in that response. Each of `fullName` and
+ *   `legalDocumentBundle` is independently optional: present iff the BE
+ *   asked for the corresponding `RequiredKey` AND the user collected it.
+ *   The body builder in `performDirectSignup` emits each request slot
+ *   only when its source field is defined, so the POST body mirrors the
+ *   BE-supplied `required` array exactly.
  *
- * Why this is binary: the wizard's flow gate (`requiredSatisfied` in
- * `flows.ts`) prevents `SigningUp` from re-firing until every required
- * field is collected. There's no "I have full_name but not yet
- * terms_acceptance" intermediate state that hits the network — re-fires
- * only happen after all required fields are filled.
+ * Why the kind discriminator is binary even though the fields aren't:
+ * the wizard's flow gate (`requiredSatisfied` in `flows.ts`) prevents
+ * `SigningUp` from re-firing until every BE-required field is collected.
+ * So `'with_required_fields'` always means "this is the follow-up POST
+ * after `needs_information`" — never a partial-progress retry. What the
+ * BE asked for determines which optional fields are populated; the kind
+ * itself just tells callers (and the body builder) whether they're on
+ * the probe path or the follow-up path.
  */
 export type SignupShape<Email extends string | null> =
   | {

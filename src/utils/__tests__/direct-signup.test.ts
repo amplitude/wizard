@@ -242,13 +242,14 @@ describe('performDirectSignup', () => {
 
   // ── needs_information `required` shape gate (schema-layer) ───────────
   //
-  // The schema's `.refine()` enforces that `required` is exactly
-  // `['full_name']`. Any other shape (additional fields, missing fields,
-  // empty array, substituted field) means the server's contract has
-  // drifted past what this client supports — the parse fails, and the
-  // type-aware fall-through detects `type === 'needs_information'` and
-  // returns `kind: 'error'` with `code: 'unsupported_required_shape'`.
-  // The wrapper maps that code to a distinct telemetry status.
+  // The schema accepts any non-empty subset of `KNOWN_REQUIRED_KEYS` via
+  // `z.array(z.enum(KNOWN_REQUIRED_KEYS)).nonempty()`. Any shape outside
+  // that (unknown kinds, empty array, or a mix that includes an unknown
+  // kind) means the server's contract has drifted past what this client
+  // supports — the parse fails, the type-aware fall-through detects
+  // `type === 'needs_information'`, and returns `kind: 'error'` with
+  // `code: 'unsupported_required_shape'`. The wrapper maps that code to
+  // a distinct telemetry status.
 
   it.each([
     ['unknown field only', ['company']],

@@ -104,12 +104,14 @@ export type SignupAttemptStatus =
   | 'needs_information'
   /**
    * Server returned `needs_information` with a `required` shape the wizard
-   * doesn't know how to collect (anything other than exactly `['full_name']`
-   * — including unknown new fields, an empty array, or a mix with unknown
-   * fields). Treated as a terminal abandon → user falls back to OAuth.
-   * Distinct from `signup_error` so the wire-contract drift is visible in
-   * the funnel — if this status starts firing, the server has added a
-   * required field the wizard doesn't yet handle.
+   * doesn't know how to collect — i.e. anything outside a non-empty subset
+   * of `KNOWN_REQUIRED_KEYS` (unknown new fields, an empty array, or a mix
+   * that includes an unknown field). Also fires when `'terms_acceptance'`
+   * is in `required` but the BE's `documents` payload is malformed.
+   * Treated as a terminal abandon → user falls back to OAuth. Distinct
+   * from `signup_error` so the wire-contract drift is visible in the
+   * funnel: if this status starts firing, the server has added a required
+   * field (or doc kind) the wizard doesn't yet handle.
    */
   | 'needs_information_unsupported'
   | 'signup_error'
