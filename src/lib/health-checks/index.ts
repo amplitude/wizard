@@ -11,11 +11,15 @@ export {
   checkAnthropicHealth,
   checkAmplitudeOverallHealth,
   checkAmplitudeComponentHealth,
+  checkAmplitudeStatusAndComponents,
   checkGithubHealth,
   checkNpmOverallHealth,
   checkNpmComponentHealth,
+  checkNpmStatusAndComponents,
   checkCloudflareOverallHealth,
   checkCloudflareComponentHealth,
+  checkCloudflareStatusAndComponents,
+  fetchStatuspageOverallAndComponents,
 } from './statuspage';
 
 export { checkLlmGatewayHealth, checkMcpHealth } from './endpoints';
