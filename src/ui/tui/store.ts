@@ -1176,6 +1176,13 @@ export class WizardStore {
       if (this.$session.get().pendingEventPlanFeedback !== null) {
         this.$session.setKey('pendingEventPlanFeedback', null);
       }
+      // Drop any stale abandonment / timeout banner — the user just got
+      // a fresh plan, so "(feedback wasn't applied…)" is no longer
+      // relevant. Without this an Esc-then-revised-plan flow would keep
+      // showing the stale banner above the new plan.
+      if (this.$session.get().eventPlanRevisionBanner !== null) {
+        this.$session.setKey('eventPlanRevisionBanner', null);
+      }
       this.$pendingPrompt.set({ kind: 'event-plan', events, resolve });
       this.emitChange();
     });
@@ -1202,9 +1209,21 @@ export class WizardStore {
     // NOT flip the flag — the user opted out, not in.
     if (typeof decision === 'object' && decision.decision === 'revised') {
       this.$session.setKey('pendingEventPlanFeedback', decision.feedback);
+      // New revision starts — clear any leftover abandon/timeout banner
+      // from a prior round so the "Revising your plan…" panel doesn't
+      // render with stale "feedback wasn't applied" copy above it.
+      if (this.$session.get().eventPlanRevisionBanner !== null) {
+        this.$session.setKey('eventPlanRevisionBanner', null);
+      }
     } else {
       if (this.$session.get().pendingEventPlanFeedback !== null) {
         this.$session.setKey('pendingEventPlanFeedback', null);
+      }
+      // The user explicitly approved or skipped — they're moving on, so
+      // any "feedback wasn't applied" banner from a previous abandoned
+      // revision is no longer informative.
+      if (this.$session.get().eventPlanRevisionBanner !== null) {
+        this.$session.setKey('eventPlanRevisionBanner', null);
       }
       const decisionKind =
         typeof decision === 'object' ? decision.decision : decision;
@@ -1215,6 +1234,48 @@ export class WizardStore {
     this.$pendingPrompt.set(null);
     this.emitChange();
     prompt.resolve(decision);
+  }
+
+  /**
+   * Drop the in-flight "Revising your plan…" state without resolving a
+   * fresh prompt. EventPlanFullScreen calls this on the Esc recovery
+   * path and from the 5-minute watchdog when the agent never returned a
+   * revised plan — the original `pendingPrompt` is gone by then
+   * (resolved when the user pressed Enter on their feedback), so this
+   * only flips the transient session flag back to null and forces a
+   * re-render. Safe to call when no feedback is pending (no-op).
+   */
+  clearPendingEventPlanFeedback(): void {
+    if (this.$session.get().pendingEventPlanFeedback === null) return;
+    this.$session.setKey('pendingEventPlanFeedback', null);
+    this.emitChange();
+  }
+
+  /**
+   * Raise the abandon/timeout banner above the next render of the
+   * original plan list. Lives in session state (not local React state)
+   * so the banner survives the `pendingEventPlanFeedback → null` flip
+   * that would otherwise unmount EventPlanFullScreen and erase a
+   * component-local value before the user ever sees it.
+   *
+   * Bugbot HIGH (comment 3235276649) — without this lift the entire
+   * Esc-cancel + watchdog UX was dead code in prod (the user just saw
+   * the screen vanish for a tick and then snap back to the unchanged
+   * plan list with no explanation). Tests passed because they rendered
+   * EventPlanFullScreen standalone, bypassing App.tsx's conditional
+   * mount.
+   */
+  setEventPlanRevisionBanner(banner: string | null): void {
+    if (this.$session.get().eventPlanRevisionBanner === banner) return;
+    this.$session.setKey('eventPlanRevisionBanner', banner);
+    this.emitChange();
+  }
+
+  /** Drop the abandon/timeout banner. No-op when already null. */
+  clearEventPlanRevisionBanner(): void {
+    if (this.$session.get().eventPlanRevisionBanner === null) return;
+    this.$session.setKey('eventPlanRevisionBanner', null);
+    this.emitChange();
   }
 
   /** Enter or exit slash command mode. */
@@ -2259,6 +2320,11 @@ export class WizardStore {
     // pending feedback) doesn't churn the session map.
     if (this.$session.get().pendingEventPlanFeedback !== null) {
       this.$session.setKey('pendingEventPlanFeedback', null);
+    }
+    // A new plan landed — any stale abandon/timeout banner from a
+    // previous round is no longer informative.
+    if (this.$session.get().eventPlanRevisionBanner !== null) {
+      this.$session.setKey('eventPlanRevisionBanner', null);
     }
     this.emitChange();
   }
