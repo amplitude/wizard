@@ -75,7 +75,53 @@ export const EVENT_DATA_VERSIONS = {
   intro: 1,
   outro: 1,
   cancel: 1,
-  auth_required: 1,
+  /**
+   * v2 — added `midRun`, `preserveFiles`, `partialProgress`,
+   * `authSubkind`, plus the `amplitude_token_expired` /
+   * `gateway_token_expired` reason discriminators. Lets agent-mode
+   * orchestrators distinguish a pre-run credential-resolution failure
+   * (where no work has been done) from a mid-run 401 that leaves
+   * partial progress on disk. v1 callers continue to work — every new
+   * field is optional.
+   */
+  auth_required: 2,
+  /**
+   * `auth_retry_exhausted` — emitted by the SDK retry-loop boundary
+   * (`agent-interface.ts`) once the wizard has observed
+   * AUTH_RETRY_LIMIT consecutive auth-flavoured api_retry messages.
+   * Fires BEFORE the controller.abort('auth_failed') and the
+   * subsequent AUTH_ERROR routing, so orchestrators can observe the
+   * exhaustion event in the stream (rather than just inferring it
+   * from a 401-flavoured `auth_required`). Carries the attempt count
+   * and the auth subkind (`amplitude` / `llm-gateway`).
+   */
+  auth_retry_exhausted: 1,
+  /**
+   * `run_error` — anonymous-until-now `error` envelope from
+   * `AgentUI.setRunError`. Previously the `data` payload carried
+   * `{ name, recoverable, suggestedAction }` with NO `event`
+   * discriminator, breaking the convention used by every other
+   * lifecycle / progress / result event. Orchestrators relying on
+   * `data.event` to branch saw nothing for run-aborting errors and
+   * had to special-case `type === 'error'` alone — making the wire
+   * harder to filter.
+   *
+   * Bumping to v1 = the first registered version (the schema didn't
+   * carry data_version before — orchestrators treat absence as 1 by
+   * convention). Future bumps land here.
+   */
+  run_error: 1,
+  /**
+   * `run_phase` — coarse-grained progress signal emitted at the four
+   * canonical phase boundaries of an agent run (`cold_start` →
+   * `agent_running` → `finalizing` → `completed` | `error`). Lets a
+   * parent agent render a faithful progress indicator without
+   * parsing every tool_call / status / progress event in the stream.
+   * Distinct from `pushStatus` (free-form sub-line for the TUI) and
+   * `journey transitions` (fine-grained four-step journey stepper)
+   * — `run_phase` is the orchestrator-facing five-state contract.
+   */
+  run_phase: 1,
   nested_agent: 1,
   inner_agent_started: 1,
   // Project create. Discriminators must match the actual `data.event`
@@ -575,6 +621,59 @@ export type InnerAgentLifecycleData =
   | EventPlanConfirmedData
   | VerificationStartedData
   | VerificationResultData;
+
+/**
+ * Coarse-grained orchestrator-facing phase boundaries for a wizard run.
+ * Five fixed states; a single run transits in order:
+ *
+ *   cold_start    -> the wizard has started bootstrapping (skill
+ *                    staging, project read, agent SDK handshake). The
+ *                    user sees the spinner; no SDK tool has been
+ *                    called yet.
+ *   agent_running -> the inner Claude agent has fired its first tool
+ *                    call or its first turn. Most of the run lives
+ *                    here.
+ *   finalizing    -> the inner agent has stopped; the wizard is
+ *                    running post-agent steps (commit events,
+ *                    MCP install, env upload, Slack, Outro).
+ *   completed     -> terminal success. Pairs with `run_completed:
+ *                    { outcome: 'success' }`.
+ *   error         -> terminal failure. Pairs with `run_completed:
+ *                    { outcome: 'error' | 'cancelled' }`.
+ *
+ * Orchestrators key off `data.phase` rather than the message string.
+ */
+export type RunPhase =
+  | 'cold_start'
+  | 'agent_running'
+  | 'finalizing'
+  | 'completed'
+  | 'error';
+
+export interface RunPhaseData {
+  event: 'run_phase';
+  phase: RunPhase;
+}
+
+/**
+ * `auth_retry_exhausted` — terminal observability event from the SDK
+ * retry-loop boundary. After AUTH_RETRY_LIMIT consecutive 401-flavoured
+ * api_retry messages the wizard short-circuits the SDK's own ~3-minute
+ * retry storm and aborts. Orchestrators watching the stream see this
+ * event BEFORE the subsequent `auth_required` envelope, so they can
+ * distinguish "single 401, transient" from "we tried twice, this is
+ * stuck" without re-parsing message strings.
+ *
+ * `subkind` is the canonical authentication source — auth retries
+ * always originate from the LLM-gateway today (the SDK only retries
+ * upstream auth failures), but the field is explicit so future
+ * Amplitude-side retry storms can be tagged without a schema bump.
+ */
+export interface AuthRetryExhaustedData {
+  event: 'auth_retry_exhausted';
+  attempts: number;
+  subkind?: 'amplitude' | 'llm-gateway';
+}
 
 // ── Tool-input summarizer ───────────────────────────────────────────
 //

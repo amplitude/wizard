@@ -342,6 +342,75 @@ describe('wizardAbort', () => {
 
       expect(flagDuringCancel).toBe(true);
     });
+
+    it('second concurrent wizardAbort parks instead of double-emitting run_completed', async () => {
+      // Reproduces the race the SIGINT handler exposed: agent-runner's
+      // error path is mid-flight inside `wizardAbort` (between the
+      // `await getUI().cancel(...)` and the terminal `process.exit`)
+      // when a Ctrl-C delivery triggers `installAbortSignalHandler`,
+      // which calls `wizardAbortRunner` -> a *second* `wizardAbort`.
+      // Without the re-entry guard, both calls would run to completion
+      // and emit `run_completed` twice.
+      let cancelStarted = false;
+      let secondCallStarted = false;
+      let cancelResolve: (() => void) | null = null;
+      getUI().cancel.mockImplementation(async () => {
+        cancelStarted = true;
+        // Hold the first abort in the async gap that SIGINT would hit.
+        await new Promise<void>((resolve) => {
+          cancelResolve = resolve;
+        });
+      });
+
+      // Start the first abort; it parks inside cancel().
+      const firstAbort = wizardAbort({ message: 'first', exitCode: 10 });
+
+      // Wait for the first abort to enter the cancel() gap.
+      await new Promise<void>((resolve) => setImmediate(resolve));
+      expect(cancelStarted).toBe(true);
+      expect(getUI().cancel).toHaveBeenCalledTimes(1);
+
+      // SIGINT-equivalent re-entry. With the guard in place, this returns
+      // a never-resolving promise instead of executing the abort body.
+      const secondAbortPromise = wizardAbort({
+        message: 'sigint',
+        exitCode: 130,
+      })
+        .then(() => {
+          secondCallStarted = true;
+        })
+        .catch(() => {
+          secondCallStarted = true;
+        });
+
+      // Give the second call a microtask tick to either park or run.
+      await new Promise<void>((resolve) => setImmediate(resolve));
+
+      // Critical assertion: the second call must NOT have advanced into
+      // the abort body. If it had, we'd see a second cancel() invocation.
+      expect(getUI().cancel).toHaveBeenCalledTimes(1);
+      expect(secondCallStarted).toBe(false);
+
+      // Unblock the first abort so it runs through to process.exit.
+      cancelResolve?.();
+      await expect(firstAbort).rejects.toThrow('process.exit called');
+
+      // run_completed must have been emitted exactly once.
+      const emitCalls = getUI().emitRunCompleted.mock.calls.length;
+      expect(emitCalls).toBe(1);
+
+      // The second promise stays parked (never resolves) — this is fine
+      // in production because process.exit terminates first. We don't
+      // await it here.
+      void secondAbortPromise;
+
+      // Crucial cleanup: vi.clearAllMocks() in subsequent beforeEach
+      // clears mock.calls but NOT mock implementations. Without this
+      // reset, the next test's `wizardAbort` would call our parked
+      // `cancel` implementation and hang waiting for `cancelResolve`
+      // which is local to this test. Restore the default vi.fn().
+      getUI().cancel.mockReset();
+    });
   });
 });
 

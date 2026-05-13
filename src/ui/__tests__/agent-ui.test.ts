@@ -165,6 +165,56 @@ describe('AgentUI.emitAuthRequired', () => {
     expect(event.data).not.toHaveProperty('previousAttempt');
     expect(event.data).not.toHaveProperty('choices');
   });
+
+  it('emits midRun + preserveFiles + partialProgress on a mid-run AUTH_ERROR', () => {
+    // Regression: mid-run 401s (LLM gateway token expiry after the agent
+    // already wrote files) must signal to the orchestrator that there's
+    // partial progress on disk so it advertises `--resume` instead of a
+    // clean restart. Previously the auth_required envelope had no way
+    // to distinguish pre-run vs mid-run failures.
+    const ui = new AgentUI();
+    ui.emitAuthRequired({
+      reason: 'gateway_token_expired',
+      instruction: 'LLM gateway token expired mid-run.',
+      loginCommand: ['amplitude-wizard', 'login'],
+      resumeCommand: ['amplitude-wizard', '--agent'],
+      midRun: true,
+      preserveFiles: true,
+      partialProgress: {
+        eventsInstrumented: true,
+        dashboardComplete: false,
+      },
+      authSubkind: 'llm-gateway',
+    });
+
+    const event = JSON.parse(writes[0].trim()) as NDJSONEvent;
+    expect(event.data_version).toBe(2);
+    expect(event.data).toMatchObject({
+      event: 'auth_required',
+      reason: 'gateway_token_expired',
+      midRun: true,
+      preserveFiles: true,
+      partialProgress: {
+        eventsInstrumented: true,
+        dashboardComplete: false,
+      },
+      authSubkind: 'llm-gateway',
+    });
+  });
+
+  it('omits midRun/preserveFiles/partialProgress when not provided (pre-run failures stay v1-compatible)', () => {
+    const ui = new AgentUI();
+    ui.emitAuthRequired({
+      reason: 'no_stored_credentials',
+      instruction: 'Run wizard login.',
+      loginCommand: ['amplitude-wizard', 'login'],
+    });
+    const event = JSON.parse(writes[0].trim()) as NDJSONEvent;
+    expect(event.data).not.toHaveProperty('midRun');
+    expect(event.data).not.toHaveProperty('preserveFiles');
+    expect(event.data).not.toHaveProperty('partialProgress');
+    expect(event.data).not.toHaveProperty('authSubkind');
+  });
 });
 
 describe('AgentUI.emitNestedAgent', () => {
@@ -747,7 +797,7 @@ describe('AgentUI — per-event data_version', () => {
       .map((w) => JSON.parse(w.trim()) as NDJSONEvent)
       .filter((e) => e.type === type);
 
-  it('stamps data_version=1 on auth_required (registered event)', () => {
+  it('stamps data_version=2 on auth_required (bumped to add midRun fields)', () => {
     const ui = new AgentUI();
     ui.emitAuthRequired({
       reason: 'no_stored_credentials',
@@ -755,7 +805,7 @@ describe('AgentUI — per-event data_version', () => {
       loginCommand: ['npx', '@amplitude/wizard', 'login'],
     });
     const event = eventsOfType('lifecycle').at(-1)!;
-    expect((event as unknown as { data_version: number }).data_version).toBe(1);
+    expect((event as unknown as { data_version: number }).data_version).toBe(2);
   });
 
   it('stamps data_version on dashboard_created (result event)', () => {
@@ -1105,7 +1155,7 @@ describe('EVENT_DATA_VERSIONS registry covers every emitted discriminator', () =
   // whose `data.event` discriminator must be in the registry. This
   // test exercises the public methods that carry a discriminator and
   // asserts every resulting event is stamped with `data_version`.
-  it('every documented emit method stamps data_version', () => {
+  it('every documented emit method stamps data_version', async () => {
     const ui = new AgentUI();
     ui.emitAuthRequired({
       reason: 'no_stored_credentials',
@@ -1155,13 +1205,20 @@ describe('EVENT_DATA_VERSIONS registry covers every emitted discriminator', () =
         typeof (e.data as { event?: unknown }).event === 'string',
     );
     expect(versioned.length).toBeGreaterThan(0);
+    // Look up each event's expected data_version from the registry so a
+    // bump in `EVENT_DATA_VERSIONS` (e.g. auth_required v1 -> v2 when
+    // mid-run fields landed) doesn't require touching this test every
+    // time. The invariant is just "every registered event lands on the
+    // wire with its registered version" — not "every event is on v1".
+    const { EVENT_DATA_VERSIONS } = await import('../../lib/agent-events.js');
+    const registry = EVENT_DATA_VERSIONS as Readonly<Record<string, number>>;
     for (const e of versioned) {
+      const eventName = (e.data as { event: string }).event;
+      const expected = registry[eventName];
       expect(
         (e as unknown as { data_version?: number }).data_version,
-        `Event ${
-          (e.data as { event: string }).event
-        } should have data_version stamped — registry key may be missing or misnamed`,
-      ).toBe(1);
+        `Event ${eventName} should have data_version stamped — registry key may be missing or misnamed`,
+      ).toBe(expected);
     }
   });
 });
@@ -1869,4 +1926,199 @@ describe('AgentUI reliability events (transient_retry, compaction)', () => {
     expect(data.postTokens).toBeUndefined();
     expect(data.durationMs).toBeUndefined();
   });
+});
+
+describe('AgentUI — Zod envelope validation on every emit', () => {
+  let writes: string[];
+  let spy: ReturnType<typeof vi.spyOn>;
+
+  beforeEach(() => {
+    writes = [];
+    spy = vi
+      .spyOn(process.stdout, 'write')
+      .mockImplementation((chunk: string | Uint8Array): boolean => {
+        writes.push(typeof chunk === 'string' ? chunk : chunk.toString());
+        return true;
+      });
+  });
+
+  afterEach(() => {
+    spy.mockRestore();
+  });
+
+  it('every documented emit method produces an envelope that passes the wire schema', async () => {
+    // Regression: a single bad envelope (missing `v`, mistyped `type`,
+    // non-string `message`) silently corrupted the stream for any
+    // orchestrator strictly parsing the wire format. The Zod
+    // validator at the emit boundary logs the issue to the on-disk
+    // log instead of throwing — this test asserts NO emit method
+    // produces a bad envelope in steady state.
+    const ui = new AgentUI();
+    ui.emitAuthRequired({
+      reason: 'no_stored_credentials',
+      instruction: 'login',
+      loginCommand: ['x'],
+    });
+    ui.emitProjectCreateStart({ orgId: 'o', name: 'n' });
+    ui.emitInnerAgentStarted({ model: 'm', phase: 'wizard' });
+    ui.emitToolCall({ tool: 'Edit', summary: 'e' });
+    ui.emitFileChangePlanned({ operation: 'create', path: 'p' });
+    ui.emitFileChangeApplied({ operation: 'create', path: 'p' });
+    ui.startRun();
+    ui.setEventIngestionDetected(['Sign Up']);
+    ui.setDashboardUrl('https://example.com');
+    await ui.setRunError(new Error('boom'));
+
+    const { z: zod } = await import('zod');
+    const schema = zod.object({
+      v: zod.literal(1),
+      '@timestamp': zod.string(),
+      type: zod.enum([
+        'lifecycle',
+        'log',
+        'status',
+        'progress',
+        'session_state',
+        'prompt',
+        'needs_input',
+        'diagnostic',
+        'result',
+        'error',
+      ]),
+      message: zod.string(),
+      level: zod.enum(['info', 'warn', 'error', 'success', 'step']).optional(),
+      session_id: zod.string().optional(),
+      run_id: zod.string().optional(),
+      data_version: zod.number().optional(),
+      data: zod.unknown().optional(),
+    });
+
+    expect(writes.length).toBeGreaterThan(0);
+    for (const line of writes) {
+      const event = JSON.parse(line.trim());
+      const result = schema.safeParse(event);
+      expect(result.success, `bad envelope on ${line.trim()}`).toBe(true);
+    }
+  });
+
+  it('setRunError emits the new event=run_error discriminator with data_version stamped', async () => {
+    const ui = new AgentUI();
+    await ui.setRunError(new Error('boom'));
+    const event = JSON.parse(writes[0].trim());
+    expect(event.type).toBe('error');
+    expect(event.data).toMatchObject({
+      event: 'run_error',
+      name: 'Error',
+      recoverable: expect.any(String),
+    });
+    expect(event.data_version).toBe(1);
+  });
+
+  // Parameterized over the typed `code` discriminators surfaced by
+  // `emitRunError`. Lets orchestrators key off `data.code` instead of
+  // pattern-matching message text to disambiguate "back off"
+  // (RATE_LIMIT) from "retry" (GATEWAY_DOWN) from "upgrade wizard"
+  // (GATEWAY_INVALID_REQUEST) from "fix permission" (MCP_MISSING /
+  // RESOURCE_MISSING).
+  const errorCodeCases: Array<{
+    code:
+      | 'GATEWAY_DOWN'
+      | 'GATEWAY_INVALID_REQUEST'
+      | 'RATE_LIMIT'
+      | 'API_ERROR'
+      | 'MCP_MISSING'
+      | 'RESOURCE_MISSING';
+    recoverable: 'retry' | 'reinvoke_with_flag' | 'human_required' | 'fatal';
+    mcpServer?: 'wizard-tools' | 'amplitude-wizard';
+  }> = [
+    { code: 'GATEWAY_DOWN', recoverable: 'retry' },
+    { code: 'GATEWAY_INVALID_REQUEST', recoverable: 'fatal' },
+    { code: 'RATE_LIMIT', recoverable: 'retry' },
+    { code: 'API_ERROR', recoverable: 'retry' },
+    {
+      code: 'MCP_MISSING',
+      recoverable: 'retry',
+      mcpServer: 'amplitude-wizard',
+    },
+    {
+      code: 'RESOURCE_MISSING',
+      recoverable: 'retry',
+      mcpServer: 'wizard-tools',
+    },
+  ];
+
+  it('emitRunPhase emits a stamped envelope for each documented phase + dedups repeats', () => {
+    const ui = new AgentUI();
+    ui.emitRunPhase?.('cold_start');
+    ui.emitRunPhase?.('cold_start'); // dedup — same phase
+    ui.emitRunPhase?.('agent_running');
+    ui.emitRunPhase?.('agent_running'); // dedup
+    ui.emitRunPhase?.('agent_running'); // dedup
+    ui.emitRunPhase?.('finalizing');
+    ui.emitRunPhase?.('completed');
+
+    // Each unique phase transition should produce one envelope —
+    // dedupe is what keeps the agent_running PreToolUse hook
+    // from flooding the stream.
+    expect(writes).toHaveLength(4);
+    const phases = writes.map(
+      (l) => (JSON.parse(l.trim()).data as { phase: string }).phase,
+    );
+    expect(phases).toEqual([
+      'cold_start',
+      'agent_running',
+      'finalizing',
+      'completed',
+    ]);
+    for (const line of writes) {
+      const event = JSON.parse(line.trim());
+      expect(event.type).toBe('lifecycle');
+      expect(event.data_version).toBe(1);
+      expect(event.data).toMatchObject({ event: 'run_phase' });
+    }
+  });
+
+  it('emitRunPhase ordering invariant: cold_start <= agent_running <= finalizing <= completed', () => {
+    const ui = new AgentUI();
+    // Drive the documented happy-path sequence and assert the
+    // wire-level ordering survives. A bug that emitted finalizing
+    // before agent_running would fail here.
+    const expected = [
+      'cold_start',
+      'agent_running',
+      'finalizing',
+      'completed',
+    ] as const;
+    for (const p of expected) ui.emitRunPhase?.(p);
+    const phases = writes.map(
+      (l) => (JSON.parse(l.trim()).data as { phase: string }).phase,
+    );
+    expect(phases).toEqual([...expected]);
+  });
+
+  for (const c of errorCodeCases) {
+    it(`emitRunError(${c.code}) lands a typed envelope with data.code + recoverable hint`, () => {
+      const ui = new AgentUI();
+      ui.emitRunError({
+        message: `${c.code} boom`,
+        code: c.code,
+        ...(c.mcpServer ? { mcpServer: c.mcpServer } : {}),
+        recoverable: c.recoverable,
+      });
+      const event = JSON.parse(writes[0].trim());
+      expect(event.type).toBe('error');
+      expect(event.data).toMatchObject({
+        event: 'run_error',
+        code: c.code,
+        recoverable: c.recoverable,
+      });
+      if (c.mcpServer) {
+        expect(event.data.mcpServer).toBe(c.mcpServer);
+      } else {
+        expect(event.data).not.toHaveProperty('mcpServer');
+      }
+      // Registry stamp shared with setRunError's run_error.
+      expect(event.data_version).toBe(1);
+    });
+  }
 });

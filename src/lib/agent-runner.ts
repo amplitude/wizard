@@ -342,6 +342,26 @@ async function abortOnApiError(
       break;
   }
 
+  // Tag the orchestrator-facing envelope. RATE_LIMIT and the
+  // `rate_limit` API subtype both map to a back-off remediation,
+  // while terminated_400 / stream_closed / other map to a retry on
+  // the next launch. Distinct from GATEWAY_DOWN above because the
+  // retry budget already exhausted inside the SDK loop — the
+  // orchestrator should NOT instant-retry, but a deliberate re-launch
+  // is fine.
+  try {
+    const code =
+      errorType === AgentErrorType.RATE_LIMIT || errorSubtype === 'rate_limit'
+        ? 'RATE_LIMIT'
+        : 'API_ERROR';
+    getUI().emitRunError?.({
+      message: `API error: ${safeMessage || 'unknown'} (${errorSubtype})`,
+      code,
+      recoverable: 'retry',
+    });
+  } catch (err) {
+    logToFile('[agent-runner] emitRunError (API_ERROR/RATE_LIMIT) threw', err);
+  }
   await wizardAbort({
     message: userMessage,
     error: new WizardError(`API error: ${safeMessage || 'unknown'}`, {
@@ -976,6 +996,16 @@ async function runAgentWizardBody(
   const skipAmplitudeMcp =
     config.prompts.buildPrompt !== undefined || !accessToken;
 
+  // Mark the coarse `cold_start` phase boundary for orchestrators
+  // observing the NDJSON stream. Pairs with `agent_running` (first
+  // tool call), `finalizing` (seedPostAgentSteps), and a terminal
+  // `completed` / `error`. Idempotent; the AgentUI emitter dedups.
+  try {
+    getUI().emitRunPhase?.('cold_start');
+  } catch (err) {
+    logToFile('[agent-runner] emitRunPhase(cold_start) threw', err);
+  }
+
   // Cold-start phase 1: skill staging. The next few seconds is bundled-skill
   // copy + on-disk resolution; surface it on the activity line so the user
   // doesn't read the silence as a hung process. Cleared on the matching
@@ -1407,6 +1437,32 @@ async function runAgentWizardBody(
     if (!isLlmGateway) {
       session.credentials = null;
     }
+
+    // Emit the structured `auth_required` envelope BEFORE wizardAbort so
+    // an agent-mode orchestrator has the machine-readable payload (mid-run
+    // discriminator, partial-progress flags, resume command) before the
+    // terminal `run_completed` envelope lands. Previously only the TUI
+    // flow surfaced this via the keep/revert prompt; agent mode silently
+    // aborted with a generic error event.
+    try {
+      const { dashboardComplete, eventsInstrumented } =
+        classifyAgentOutcome(session);
+      getUI().emitAuthRequired?.({
+        reason: isLlmGateway
+          ? 'gateway_token_expired'
+          : 'amplitude_token_expired',
+        instruction: authMessage,
+        loginCommand: ['amplitude-wizard', 'login'],
+        resumeCommand: ['amplitude-wizard', '--agent'],
+        midRun: true,
+        preserveFiles: true,
+        partialProgress: { eventsInstrumented, dashboardComplete },
+        authSubkind: isLlmGateway ? 'llm-gateway' : 'amplitude',
+      });
+    } catch (err) {
+      logToFile('[agent-runner] emitAuthRequired threw', err);
+    }
+
     await wizardAbort({
       message: authMessage,
       error: new WizardError('Authentication failed during agent run', {
@@ -1481,6 +1537,34 @@ async function runAgentWizardBody(
       // (skill loading) failing right at startup. Abort with the
       // jargon-free copy from PR #336.
       const isMcp = errorType === AgentErrorType.MCP_MISSING;
+      // Emit the structured error envelope with the typed `code`
+      // discriminator BEFORE wizardAbort so an orchestrator parsing
+      // the NDJSON stream can distinguish MCP / resource failures from
+      // generic AGENT_FAILED exits without parsing the message string.
+      try {
+        getUI().emitRunError?.({
+          message: isMcp
+            ? 'Agent could not access Amplitude MCP server'
+            : 'Agent could not access setup resource',
+          code: isMcp ? 'MCP_MISSING' : 'RESOURCE_MISSING',
+          // `wizard-tools` is the in-process MCP server bundled with
+          // the wizard (skill loading); `amplitude-wizard` is the
+          // remote `mcp.amplitude.com` server. The detail string is
+          // free-form (set by the inner agent via report_status), so
+          // we surface it as a hint for orchestrator routing without
+          // requiring exact-match parsing.
+          mcpServer:
+            detail && detail.includes('wizard-tools')
+              ? 'wizard-tools'
+              : 'amplitude-wizard',
+          recoverable: 'retry',
+          suggestedAction: {
+            docsUrl: config.metadata.docsUrl,
+          },
+        });
+      } catch (err) {
+        logToFile('[agent-runner] emitRunError (MCP/RESOURCE) threw', err);
+      }
       await wizardAbort({
         message: isMcp
           ? `Couldn't reach Amplitude's setup service — this looks like a network or service issue.\n\nTry again in a moment, or set up ${config.metadata.name} manually:\n${config.metadata.docsUrl}`
@@ -1517,6 +1601,19 @@ async function runAgentWizardBody(
     );
 
     const usingDirectKey = !!process.env.ANTHROPIC_API_KEY;
+    // Tag the orchestrator-facing envelope with `code: 'GATEWAY_DOWN'`
+    // so a consumer can distinguish "retry your launch" (5xx blip)
+    // from "upgrade wizard" / "back off" without parsing the
+    // human-readable message.
+    try {
+      getUI().emitRunError?.({
+        message: `LLM gateway unavailable: ${safeAgentMessage || 'unknown'}`,
+        code: 'GATEWAY_DOWN',
+        recoverable: 'retry',
+      });
+    } catch (err) {
+      logToFile('[agent-runner] emitRunError (GATEWAY_DOWN) threw', err);
+    }
     await wizardAbort({
       message: `Amplitude LLM gateway unavailable\n\nEvery retry attempt failed with the same upstream error (${
         safeAgentMessage || 'API Error: 400 terminated'
@@ -1549,6 +1646,27 @@ async function runAgentWizardBody(
     );
 
     const usingDirectKey = !!process.env.ANTHROPIC_API_KEY;
+    // GATEWAY_INVALID_REQUEST is non-recoverable in the current
+    // session — retrying sends the same payload back through the
+    // same broken pipe. Tag as `fatal` so orchestrators don't burn
+    // retry budget; the suggestedAction points at `npm i` to upgrade.
+    try {
+      getUI().emitRunError?.({
+        message: `Wizard request rejected by gateway: ${
+          safeAgentMessage || 'unknown'
+        }`,
+        code: 'GATEWAY_INVALID_REQUEST',
+        recoverable: 'fatal',
+        suggestedAction: {
+          command: ['npm', 'install', '-g', '@amplitude/wizard@latest'],
+        },
+      });
+    } catch (err) {
+      logToFile(
+        '[agent-runner] emitRunError (GATEWAY_INVALID_REQUEST) threw',
+        err,
+      );
+    }
     await wizardAbort({
       message: `Wizard request rejected by Amplitude gateway\n\nThe gateway returned "Invalid request sent to model provider" — this build of the wizard is sending a request shape (e.g. an \`anthropic-beta\` header or tool schema field) that the upstream model provider does not accept. Retrying will not help because the next request will be identically rejected.\n\nFix: upgrade to the latest \`@amplitude/wizard\` (npm i -g @amplitude/wizard@latest) — this build addresses known schema/beta rejection cases.\n\n${buildGatewayBypassHint()}\n\nIf you are already on the latest build, please report it (with the log file at ${getLogFilePath()}) to: ${SUPPORT_EMAIL}`,
       error: new WizardError(
@@ -1681,6 +1799,17 @@ async function runAgentWizardBody(
   // creation moved to the deferred `amplitude-wizard dashboard` command.
   // The final-success message and (optionally) a `dashboard-plan.json`
   // hand-off replace the inline dashboard step.
+  // Mark the coarse `finalizing` phase boundary — the inner agent
+  // has stopped and the wizard is running its post-agent steps
+  // (commit events, env upload, MCP install, etc.). Pairs with the
+  // terminal `completed` / `error` emitted from wizardSuccessExit /
+  // wizardAbort below.
+  try {
+    getUI().emitRunPhase?.('finalizing');
+  } catch (err) {
+    logToFile('[agent-runner] emitRunPhase(finalizing) threw', err);
+  }
+
   getUI().seedPostAgentSteps([
     {
       id: POST_AGENT_STEP_COMMIT_EVENTS,
