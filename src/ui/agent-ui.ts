@@ -32,6 +32,7 @@ import type {
 } from '../lib/agent-events';
 import {
   EVENT_DATA_VERSIONS,
+  WIZARD_PROTOCOL_VERSION,
   buildColdStartBreakdown,
   buildProgressEstimate,
   classifyRunError,
@@ -1361,6 +1362,49 @@ export class AgentUI implements WizardUI {
     emit('lifecycle', `mcp_status: ${data.server} -> ${data.state}`, {
       data: { event: 'mcp_status', ...data },
     });
+  }
+
+  // ── PR B8: wizard_capabilities (startup announcement) ───────────────
+  //
+  // Emitted exactly once per run, as the FIRST orchestrator-facing
+  // envelope after `run_started` and BEFORE `run_phase: cold_start`.
+  // The agent-runner wires the call site immediately after
+  // `startRun()` — see `agent-runner.ts`.
+  //
+  // Payload mirrors the full `EVENT_DATA_VERSIONS` registry so an
+  // orchestrator can branch on per-event versions at parse time
+  // without a wizard upgrade. `supportedEvents` is the same set,
+  // pre-sorted, so orchestrators that only care about presence
+  // ("does this wizard emit `progress_estimate`?") don't have to
+  // sort on their side.
+  //
+  // `mode` is hardcoded to `'agent'` here because AgentUI is the
+  // only `WizardUI` implementation that emits NDJSON. The field is
+  // on the contract (see `WizardCapabilitiesMode`) so future CI /
+  // interactive emitters don't need a schema bump.
+
+  emitWizardCapabilities(): void {
+    // Snapshot the registry as a plain object so JSON.stringify
+    // produces stable, insertion-ordered output (the registry is
+    // declared as a `const` literal — its key order is the
+    // declaration order, which the orchestrator contract pins on).
+    const eventDataVersions: Record<string, number> = {
+      ...EVENT_DATA_VERSIONS,
+    };
+    const supportedEvents = Object.keys(EVENT_DATA_VERSIONS).sort();
+    emit(
+      'lifecycle',
+      `wizard_capabilities: protocol v${WIZARD_PROTOCOL_VERSION}, ${supportedEvents.length} events`,
+      {
+        data: {
+          event: 'wizard_capabilities',
+          protocolVersion: WIZARD_PROTOCOL_VERSION,
+          eventDataVersions,
+          supportedEvents,
+          mode: 'agent',
+        },
+      },
+    );
   }
 
   // ── Session state ───────────────────────────────────────────────────
