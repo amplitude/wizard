@@ -27,6 +27,12 @@ export default tseslint.config(
       'evals/scenarios/**/pristine/**',
       'evals/scenarios/**/golden/working/**',
       'evals/reports/**',
+      // Quality A/B harness ships as .mjs (operator-run scripts that
+      // dynamic-import the AI SDK). The TS-typed parts are the unit
+      // tests under `evals/model-quality/__tests__/*.test.ts`, which
+      // stay in scope for the lint config.
+      'evals/model-quality/**/*.mjs',
+      'evals/model-quality/results/**',
       'benchmarks/**',
     ],
   },
