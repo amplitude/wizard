@@ -823,6 +823,7 @@ describe('EVENT_DATA_VERSIONS (v2 entries registered)', () => {
     ['attempt_started', 1],
     ['progress_estimate', 1],
     ['cold_start_breakdown', 1],
+    ['tool_call_summary', 1],
   ] as const)('registers %s at version %d', (event, version) => {
     expect(
       (EVENT_DATA_VERSIONS as Readonly<Record<string, number>>)[event],

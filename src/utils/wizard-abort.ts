@@ -235,6 +235,20 @@ export async function wizardSuccessExit(exitCode = 0): Promise<never> {
   } catch {
     /* setup-complete emission must never block exit */
   }
+  // PR B6: emit the cumulative `tool_call_summary` rollup at terminal
+  // exit. The phase-finalize emission already covered the inner-agent
+  // tool calls; this re-emission captures any tool calls the
+  // post-agent steps made (today these go through `executeStepQueue`
+  // and don't currently call the AgentUI tool-call emitter, so in
+  // practice the payload usually matches the finalize emission —
+  // which is why AgentUI dedups on signature). Wrapped so the rollup
+  // can never block the exit path.
+  try {
+    getUI().emitToolCallSummary?.();
+  } catch {
+    /* terminal rollup emission must not prevent exit */
+  }
+
   // Mark the terminal `completed` run_phase BEFORE `run_completed` so
   // an orchestrator's phase-state transitions
   // (cold_start -> agent_running -> finalizing -> completed) close
@@ -273,7 +287,27 @@ export async function wizardSuccessExit(exitCode = 0): Promise<never> {
       }),
     ]),
   );
-  return process.exit(exitCode);
+  // In production `process.exit` never returns. Tests that mock
+  // `process.exit` to throw (vitest's strict-exit guard) would
+  // otherwise see the throw surface as an Unhandled Rejection on
+  // Node 22 / 24 — the await chain above unwinds normally, the test
+  // moves on, and then the throw fires asynchronously without an
+  // attached handler. Catching here keeps the test-harness behaviour
+  // clean across Node versions without changing production semantics.
+  // Re-applied here after a stacked PR refactor regressed the wrap.
+  try {
+    process.exit(exitCode);
+  } catch {
+    /* test-harness only: process.exit is mocked to throw */
+  }
+  // Satisfy `Promise<never>`. In production the `process.exit` above
+  // terminates and we never reach here. In tests, the harness has
+  // already observed the side effects it cares about — analytics
+  // flush, run_completed emit — before this point, so returning a
+  // never-resolving promise is correct.
+  return new Promise<never>(() => {
+    /* deliberately unresolved */
+  });
 }
 
 /**
@@ -466,6 +500,19 @@ export async function wizardAbort(
   //    Esc on the framework picker). Wrapped in try/catch so a
   //    misbehaving emitter can't block the exit.
   const outcome: 'error' | 'cancelled' = error ? 'error' : 'cancelled';
+  // PR B6: emit the cumulative `tool_call_summary` rollup on the
+  // error / cancel path too — an orchestrator that's about to render
+  // an "agent failed" panel still benefits from seeing what the
+  // inner agent attempted before the abort fired. AgentUI dedups
+  // on payload signature so a duplicate from a runner that already
+  // reached the finalize boundary is a no-op. Wrapped so the rollup
+  // can never block the abort path.
+  try {
+    getUI().emitToolCallSummary?.();
+  } catch {
+    /* terminal rollup emission must not prevent exit */
+  }
+
   // Mark the terminal `error` run_phase BEFORE `run_completed` so an
   // orchestrator's phase-state transitions (cold_start ->
   // agent_running -> finalizing -> error) close cleanly. AgentUI

@@ -305,6 +305,27 @@ export function createInnerLifecycleHooks(config: InnerLifecycleConfig): {
         : typeof input.toolName === 'string'
         ? input.toolName
         : 'unknown';
+
+    // Record the run-level tool-call outcome for ALL tools (not just
+    // write tools) so `tool_call_summary` carries an accurate
+    // success/error breakdown at phase / terminal boundaries. The
+    // outcome is derived from the same `extractToolFailureMessage`
+    // probe the write-tool path uses below — non-null message means
+    // the tool surfaced an error. Wrapped in try/catch so the outcome
+    // probe can never block the agent loop.
+    try {
+      const agentUI = getAgentUI();
+      if (agentUI) {
+        const outcomeMessage = extractToolFailureMessage(input);
+        agentUI.recordToolOutcome(
+          toolName,
+          outcomeMessage === null ? 'success' : 'error',
+        );
+      }
+    } catch {
+      // Outcome accumulation must never break the agent loop.
+    }
+
     const operation = classifyWriteOperation(toolName);
     if (!operation) return Promise.resolve({});
     const toolInput =

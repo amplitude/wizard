@@ -820,4 +820,24 @@ export interface WizardUI {
     errorClass: 'permission' | 'not_found' | 'syntax' | 'timeout' | 'generic';
     errorMessage: string;
   }): void;
+
+  /**
+   * Aggregated rollup of every tool call the inner agent made.
+   * Emitted at two boundaries: (1) phase finalize, before
+   * `run_phase: finalizing` so the orchestrator can render the
+   * inner-agent tool summary before the post-agent steps section
+   * appears; (2) terminal exit (`wizardSuccessExit` /
+   * `wizardAbort`), so the orchestrator always sees a final
+   * cumulative rollup covering the whole run.
+   *
+   * Dedup-safe: the emitter no-ops when the payload signature is
+   * identical to the previous emission (so a duplicate boundary
+   * call doesn't double-emit). `totalCalls === 0` is suppressed at
+   * the wire — absence of the event means no tools were called.
+   *
+   * Optional — only AgentUI emits. InkUI / LoggingUI no-op (the
+   * TUI already renders per-task progress; CI logs the per-call
+   * stream).
+   */
+  emitToolCallSummary?(): void;
 }
