@@ -1271,13 +1271,6 @@ export class WizardStore {
     this.emitChange();
   }
 
-  /** Drop the abandon/timeout banner. No-op when already null. */
-  clearEventPlanRevisionBanner(): void {
-    if (this.$session.get().eventPlanRevisionBanner === null) return;
-    this.$session.setKey('eventPlanRevisionBanner', null);
-    this.emitChange();
-  }
-
   /** Enter or exit slash command mode. */
   setCommandMode(active: boolean): void {
     this.$commandMode.set(active);

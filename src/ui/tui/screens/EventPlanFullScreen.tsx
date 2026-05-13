@@ -163,6 +163,21 @@ export const EventPlanFullScreen = ({
   // while the banner is non-null. (Bugbot HIGH — comment 3235276649.)
   const abandonedBanner = store.session.eventPlanRevisionBanner;
 
+  // "Banner-only" state: the user already resolved the original
+  // `confirm_event_plan` prompt with feedback (so $pendingPrompt is
+  // null) and then either pressed Esc or hit the 5-minute watchdog
+  // (clearing pendingEventPlanFeedback while raising the banner).
+  // EventPlanFullScreen is only mounted here because the banner is
+  // non-null — there's no prompt left to approve / skip / feedback.
+  // Y/S/F would all silently no-op against the resolveEventPlan guard,
+  // which Bugbot MEDIUM (comment 3235413202) flagged as a trap UX. We
+  // render a [Dismiss] hint instead, and treat any keypress as
+  // "ack the banner, take me back to the run view". The agent moves
+  // on through whatever phase it's in next.
+  const pendingPrompt = store.pendingPrompt;
+  const bannerOnly =
+    abandonedBanner !== null && pendingPrompt === null && !isRevising;
+
   // Rows available for the events list itself, derived from the current
   // viewport height. Sizing the window here (instead of from a hard cap
   // like MAX_VISIBLE_EVENTS) means events can never be silently clipped
@@ -270,6 +285,16 @@ export const EventPlanFullScreen = ({
 
   useInput(
     (char, key) => {
+      // Banner-only state: there's no prompt to act on. Treat any key
+      // as "dismiss banner and return to the run view" so the user
+      // isn't trapped staring at non-functional Y/S/F hints. (Bugbot
+      // MEDIUM — comment 3235413202.) Ctrl/meta combos pass through
+      // untouched so Ctrl+C still exits.
+      if (bannerOnly) {
+        if (key.ctrl || key.meta) return;
+        store.setEventPlanRevisionBanner(null);
+        return;
+      }
       if (planInputMode === 'feedback') {
         if (key.return) {
           const text = planFeedbackText.trim();
@@ -442,9 +467,17 @@ export const EventPlanFullScreen = ({
         )}
       </Box>
 
-      {/* Action hint — pinned to bottom, always visible */}
+      {/* Action hint — pinned to bottom, always visible. Three modes:
+          - banner-only (no prompt to act on, user just needs to ack
+            the abandon/timeout banner)
+          - feedback typing
+          - normal Y/S/F options */}
       <Box flexShrink={0} marginTop={1} flexDirection="column">
-        {planInputMode === 'feedback' ? (
+        {bannerOnly ? (
+          <Text color={Colors.muted}>
+            [Any key] dismiss · the agent is moving on to the next step
+          </Text>
+        ) : planInputMode === 'feedback' ? (
           <Box gap={1}>
             <Text color={Colors.muted}>Feedback: </Text>
             <Text>

@@ -579,6 +579,63 @@ describe('EventPlanFullScreen — revising recovery', () => {
         expect(store.session.eventPlanRevisionBanner).toBeNull();
       },
     );
+
+    it(
+      'banner-only state shows "[Any key] dismiss" instead of Y/S/F hints ' +
+        '(Bugbot MEDIUM regression — comment 3235413202)',
+      () => {
+        // No pendingPrompt, no pendingEventPlanFeedback, just a stale
+        // banner. This is the exact "trapped" state Bugbot flagged —
+        // the original Y/S/F hints would silently no-op against
+        // resolveEventPlan's `!prompt` guard.
+        store.session = {
+          ...store.session,
+          eventPlanRevisionBanner: REVISION_TIMEOUT_BANNER,
+        };
+        const { lastFrame } = render(
+          <EventPlanFullScreen
+            store={store}
+            events={sampleEvents(3)}
+            width={120}
+            height={30}
+          />,
+        );
+        const frame = lastFrame() ?? '';
+        expect(frame).toContain(REVISION_TIMEOUT_BANNER);
+        // Bottom hint must NOT advertise actions that wouldn't work.
+        expect(frame).not.toContain('[Y] approve [S] skip [F] give feedback');
+        // It MUST tell the user they can press anything to move on.
+        expect(frame).toContain('[Any key] dismiss');
+      },
+    );
+
+    it(
+      'banner-only state: any keypress dismisses the banner ' +
+        '(no trap state)',
+      async () => {
+        store.session = {
+          ...store.session,
+          eventPlanRevisionBanner: REVISION_TIMEOUT_BANNER,
+        };
+        const setBannerSpy = vi.spyOn(store, 'setEventPlanRevisionBanner');
+        const { stdin } = render(
+          <EventPlanFullScreen
+            store={store}
+            events={sampleEvents(3)}
+            width={120}
+            height={30}
+          />,
+        );
+        stdin.write('q');
+        // Let React flush.
+        for (let i = 0; i < 10; i++) {
+          if (store.session.eventPlanRevisionBanner === null) break;
+          await new Promise((r) => setTimeout(r, 10));
+        }
+        expect(setBannerSpy).toHaveBeenCalledWith(null);
+        expect(store.session.eventPlanRevisionBanner).toBeNull();
+      },
+    );
   });
 
   describe('chrome budget', () => {
