@@ -600,13 +600,27 @@ export const EVENT_DATA_VERSIONS = {
    * full `EVENT_DATA_VERSIONS` registry mirrored verbatim so
    * orchestrators can branch per-event without a wizard upgrade),
    * `supportedEvents` (sorted list of every event-key for cheap
-   * `has`-style lookups), and `mode` (`'agent' | 'ci' |
-   * 'interactive'` — currently always `'agent'` because only AgentUI
-   * emits NDJSON, but the field is on the contract so future CI /
-   * interactive modes that learn to emit capabilities don't need a
-   * schema bump).
+   * `has`-style lookups), `mode` (`'agent' | 'ci' | 'interactive'`
+   * — currently always `'agent'` because only AgentUI emits NDJSON,
+   * but the field is on the contract so future CI / interactive
+   * modes that learn to emit capabilities don't need a schema
+   * bump), and `paths?` (v2+).
+   *
+   * v2 — added `paths` block (`logFile`, `logFileNdjson`, `runDir`,
+   * `cacheRoot`). Addresses Agent-Mode Auditor A5 High-severity
+   * finding: CI orchestrators that wanted to upload the per-project
+   * log as an artifact had to either replicate the
+   * `sha256(installDir)` hashing logic themselves OR pass `--debug`
+   * and grep stderr. With v2, the parent agent extracts the artifact
+   * path directly from the first capabilities envelope (emitted
+   * right after `run_started`). Additive — readers that ignore the
+   * new field continue to work; readers that want the artifact paths
+   * branch on `data_version >= 2`. The block is OMITTED entirely if
+   * `installDir` is unresolvable at emit time (rather than emitting
+   * empty strings) so orchestrators can use field presence as the
+   * has-paths signal.
    */
-  wizard_capabilities: 1,
+  wizard_capabilities: 2,
 } as const;
 
 /** All NDJSON event-level types. */
@@ -1778,6 +1792,50 @@ export interface MCPStatusData {
 export type WizardCapabilitiesMode = 'agent' | 'ci' | 'interactive';
 
 /**
+ * Per-project artifact paths block on `wizard_capabilities` (v2+).
+ *
+ * Each entry resolves through `src/utils/storage-paths.ts` —
+ * `getLogFile`, `getStructuredLogFile`, `getRunDir`, `getCacheRoot`.
+ * The wizard hashes the install directory (sha256, 12-char prefix)
+ * to produce a per-project subdirectory under the cache root, so
+ * concurrent runs from different projects don't collide.
+ *
+ * A CI orchestrator that wants to upload the wizard's log as an
+ * artifact reads `paths.logFile` off this envelope and feeds it
+ * verbatim to its artifact-upload step — no need to replicate the
+ * sha256 hashing logic and no need to enable `--debug` and grep
+ * stderr.
+ *
+ *   logFile        — human-readable log
+ *                    (`<runDir>/log.txt`). Append-only.
+ *   logFileNdjson  — structured NDJSON mirror
+ *                    (`<runDir>/log.ndjson`). Same records, parser-
+ *                    friendly. Append-only.
+ *   runDir         — per-project run directory
+ *                    (`<cacheRoot>/runs/<hash>/`). Contains both
+ *                    log files, the session checkpoint, the apply
+ *                    lock, and any installation-error logs. Bundle
+ *                    this whole directory for a support tarball.
+ *   cacheRoot      — per-user cache root (`~/.amplitude/wizard/` by
+ *                    default; honors `AMPLITUDE_WIZARD_CACHE_DIR`).
+ *                    Contains the `runs/` subdir, OAuth tokens,
+ *                    credentials, and the plans directory. Useful
+ *                    for orchestrators that want to introspect or
+ *                    purge per-user wizard state.
+ *
+ * Every value is an absolute path. The block is OMITTED from the
+ * envelope entirely (not emitted as empty strings) when `installDir`
+ * is unresolvable at emit time, so orchestrators can use field
+ * presence as the has-paths signal.
+ */
+export interface WizardCapabilitiesPaths {
+  logFile: string;
+  logFileNdjson: string;
+  runDir: string;
+  cacheRoot: string;
+}
+
+/**
  * Wire shape of the `data` field on a `wizard_capabilities`
  * envelope. See `EVENT_DATA_VERSIONS.wizard_capabilities` for the
  * full contract, the lifecycle ordering (after `run_started`, before
@@ -1803,6 +1861,13 @@ export type WizardCapabilitiesMode = 'agent' | 'ci' | 'interactive';
  *                        `progress_estimate`?").
  *   mode               — `WizardCapabilitiesMode`. Discriminator
  *                        for execution context.
+ *   paths              — v2+ per-project artifact paths (log file,
+ *                        NDJSON log mirror, run dir, cache root).
+ *                        OMITTED entirely (rather than emitted as
+ *                        empty strings) when `installDir` is
+ *                        unresolvable at emit time — orchestrators
+ *                        can use field presence as the has-paths
+ *                        signal.
  */
 export interface WizardCapabilitiesData {
   event: 'wizard_capabilities';
@@ -1810,6 +1875,7 @@ export interface WizardCapabilitiesData {
   eventDataVersions: Readonly<Record<string, number>>;
   supportedEvents: readonly string[];
   mode: WizardCapabilitiesMode;
+  paths?: WizardCapabilitiesPaths;
 }
 
 /**

@@ -31,12 +31,19 @@
  * after `run_started`, BEFORE any `run_phase: cold_start` envelope.
  */
 
+import path from 'node:path';
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { AgentUI } from '../agent-ui.js';
 import {
   EVENT_DATA_VERSIONS,
   WIZARD_PROTOCOL_VERSION,
 } from '../../lib/agent-events.js';
+import {
+  getCacheRoot,
+  getLogFile,
+  getRunDir,
+  getStructuredLogFile,
+} from '../../utils/storage-paths.js';
 
 interface NDJSONEvent {
   v: 1;
@@ -338,5 +345,148 @@ describe('wizard_capabilities — emit ordering on the stream', () => {
     ui.emitWizardCapabilities();
     ui.emitWizardCapabilities();
     expect(findCapabilities(writes).length).toBe(2);
+  });
+});
+
+// ── v2 paths block — A5 audit fix (B17) ────────────────────────────────
+//
+// PR B17 extends the capabilities envelope with a `data.paths` block
+// so CI orchestrators can upload `~/.amplitude/wizard/runs/<hash>/log.txt`
+// as a build artifact without replicating the `sha256(installDir)`
+// hashing logic. The capabilities event itself bumps from
+// `data_version: 1` to `data_version: 2`. The block is OMITTED
+// entirely when `installDir` is unresolvable at emit time so
+// orchestrators can use field presence as the has-paths signal.
+
+// Use a real on-disk path so storage-paths.realpathSync works. The
+// vitest worker's cwd is always a real, existing directory.
+const TEST_INSTALL_DIR = process.cwd();
+
+describe('wizard_capabilities — v2 paths block (B17 A5 audit fix)', () => {
+  let writes: string[];
+  let restore: () => void;
+
+  beforeEach(() => {
+    ({ writes, restore } = setupStdoutSpy());
+  });
+  afterEach(() => restore());
+
+  it('EVENT_DATA_VERSIONS.wizard_capabilities is pinned at v2 (B17 paths regression pin)', () => {
+    // Audit A5 High-severity: the capability announcement event MUST
+    // ship the per-project artifact paths block so CI orchestrators
+    // can upload the per-project log without replicating the
+    // sha256-of-installDir hashing logic. v2 is the first version
+    // that includes `paths`; regressing to v1 would silently drop
+    // the field for every consumer that branches on
+    // `data_version >= 2`. Pin the value so the field can't get
+    // accidentally rolled back.
+    expect(EVENT_DATA_VERSIONS.wizard_capabilities).toBe(2);
+  });
+
+  it('stamps data_version = 2 on the wire (B17 bumped from v1 to ship `paths`)', () => {
+    const ui = new AgentUI();
+    ui.emitWizardCapabilities({ installDir: TEST_INSTALL_DIR });
+    const event = findCapabilities(writes)[0];
+    // Pin to both the registry and the literal `2` so a future
+    // bump auto-flows here without a test edit — but a SILENT
+    // regression to v1 (or to v0) will fail both this assertion
+    // and the registry pin above.
+    expect(event.data_version).toBe(EVENT_DATA_VERSIONS.wizard_capabilities);
+    expect(event.data_version).toBe(2);
+  });
+
+  it('ships data.paths with all four entries when installDir is provided', () => {
+    const ui = new AgentUI();
+    ui.emitWizardCapabilities({ installDir: TEST_INSTALL_DIR });
+    const event = findCapabilities(writes)[0];
+    const data = event.data as Record<string, unknown>;
+    expect(data.paths).toBeDefined();
+    const paths = data.paths as Record<string, string>;
+    expect(Object.keys(paths).sort()).toEqual([
+      'cacheRoot',
+      'logFile',
+      'logFileNdjson',
+      'runDir',
+    ]);
+  });
+
+  it('paths.logFile is a non-empty absolute path ending in log.txt', () => {
+    const ui = new AgentUI();
+    ui.emitWizardCapabilities({ installDir: TEST_INSTALL_DIR });
+    const event = findCapabilities(writes)[0];
+    const paths = (event.data as { paths?: Record<string, string> }).paths!;
+    expect(typeof paths.logFile).toBe('string');
+    expect(paths.logFile.length).toBeGreaterThan(0);
+    expect(path.isAbsolute(paths.logFile)).toBe(true);
+    expect(paths.logFile.endsWith('log.txt')).toBe(true);
+  });
+
+  it('paths.logFileNdjson is a non-empty absolute path ending in log.ndjson', () => {
+    const ui = new AgentUI();
+    ui.emitWizardCapabilities({ installDir: TEST_INSTALL_DIR });
+    const event = findCapabilities(writes)[0];
+    const paths = (event.data as { paths?: Record<string, string> }).paths!;
+    expect(typeof paths.logFileNdjson).toBe('string');
+    expect(paths.logFileNdjson.length).toBeGreaterThan(0);
+    expect(path.isAbsolute(paths.logFileNdjson)).toBe(true);
+    expect(paths.logFileNdjson.endsWith('log.ndjson')).toBe(true);
+  });
+
+  it('paths.runDir is a non-empty absolute path under cacheRoot/runs/', () => {
+    const ui = new AgentUI();
+    ui.emitWizardCapabilities({ installDir: TEST_INSTALL_DIR });
+    const event = findCapabilities(writes)[0];
+    const paths = (event.data as { paths?: Record<string, string> }).paths!;
+    expect(typeof paths.runDir).toBe('string');
+    expect(paths.runDir.length).toBeGreaterThan(0);
+    expect(path.isAbsolute(paths.runDir)).toBe(true);
+    expect(paths.runDir.startsWith(paths.cacheRoot)).toBe(true);
+    expect(paths.runDir).toMatch(/runs/);
+  });
+
+  it('paths.cacheRoot is a non-empty absolute path', () => {
+    const ui = new AgentUI();
+    ui.emitWizardCapabilities({ installDir: TEST_INSTALL_DIR });
+    const event = findCapabilities(writes)[0];
+    const paths = (event.data as { paths?: Record<string, string> }).paths!;
+    expect(typeof paths.cacheRoot).toBe('string');
+    expect(paths.cacheRoot.length).toBeGreaterThan(0);
+    expect(path.isAbsolute(paths.cacheRoot)).toBe(true);
+  });
+
+  it('paths values come from the canonical storage-paths helpers (no re-derivation)', () => {
+    // Single-source-of-truth invariant: a future regression where
+    // someone re-derives the paths inline (and forgets the
+    // sha256-of-installDir hashing) will fail this assertion. The
+    // emitter MUST route through storage-paths.
+    const ui = new AgentUI();
+    ui.emitWizardCapabilities({ installDir: TEST_INSTALL_DIR });
+    const event = findCapabilities(writes)[0];
+    const paths = (event.data as { paths?: Record<string, string> }).paths!;
+    expect(paths.logFile).toBe(getLogFile(TEST_INSTALL_DIR));
+    expect(paths.logFileNdjson).toBe(getStructuredLogFile(TEST_INSTALL_DIR));
+    expect(paths.runDir).toBe(getRunDir(TEST_INSTALL_DIR));
+    expect(paths.cacheRoot).toBe(getCacheRoot());
+  });
+
+  // ── Graceful degradation: no installDir → no paths block ───────────
+
+  it('omits data.paths entirely when installDir is not provided', () => {
+    const ui = new AgentUI();
+    ui.emitWizardCapabilities();
+    const event = findCapabilities(writes)[0];
+    const data = event.data as Record<string, unknown>;
+    expect(data.paths).toBeUndefined();
+    // Other fields still ship — `paths` absence is the only delta.
+    expect(data.protocolVersion).toBe(WIZARD_PROTOCOL_VERSION);
+    expect(data.mode).toBe('agent');
+  });
+
+  it('omits data.paths entirely when installDir is an empty string', () => {
+    const ui = new AgentUI();
+    ui.emitWizardCapabilities({ installDir: '' });
+    const event = findCapabilities(writes)[0];
+    const data = event.data as Record<string, unknown>;
+    expect(data.paths).toBeUndefined();
   });
 });

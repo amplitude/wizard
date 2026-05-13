@@ -903,6 +903,20 @@ export interface WizardUI {
    *                            the registry, for cheap presence
    *                            checks.
    *   - `mode`               — `'agent' | 'ci' | 'interactive'`.
+   *   - `paths`              — v2+ per-project artifact paths so
+   *                            CI orchestrators can upload the
+   *                            wizard's log file as a build
+   *                            artifact without replicating the
+   *                            `sha256(installDir)` hashing logic.
+   *                            Omitted when `installDir` is
+   *                            unresolvable at emit time.
+   *
+   * `data.installDir` is the project directory the wizard is
+   * running against — passed in by the caller (typically
+   * `session.installDir` from `agent-runner.ts`). Used to derive
+   * per-project paths via `src/utils/storage-paths.ts`. When
+   * omitted, the emitter ships the envelope without the `paths`
+   * block (rather than emitting empty strings).
    *
    * Optional — only AgentUI emits to NDJSON. InkUI / LoggingUI
    * no-op (TUI has no machine consumer; CI logs lifecycle events
@@ -912,5 +926,5 @@ export interface WizardUI {
    * emitter never blocks startup — the announcement is purely
    * observational.
    */
-  emitWizardCapabilities?(): void;
+  emitWizardCapabilities?(data?: { installDir?: string }): void;
 }

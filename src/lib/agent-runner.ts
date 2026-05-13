@@ -1266,15 +1266,21 @@ async function runAgentWizardBody(
   // outro hook needed.
   getUI().startRun();
 
-  // PR B8: emit the startup capability announcement immediately
+  // PR B17: emit the startup capability announcement immediately
   // after `run_started` so an orchestrator sees the protocol /
-  // event-version contract BEFORE any contract-shaped event lands
-  // on the stream. Wrapped in try/catch so a misbehaving emitter
-  // can never block run start — the announcement is observational.
-  // AgentUI is the only UI that implements `emitWizardCapabilities`;
-  // InkUI / LoggingUI no-op.
+  // event-version contract — and the per-project artifact paths —
+  // BEFORE any contract-shaped event lands on the stream. Wrapped
+  // in try/catch so a misbehaving emitter can never block run start
+  // (the announcement is observational). AgentUI is the only UI
+  // that implements `emitWizardCapabilities`; InkUI / LoggingUI
+  // no-op.
+  //
+  // `installDir` is passed through so the emitter can populate
+  // `data.paths` (log file, NDJSON log, run dir, cache root) — a CI
+  // orchestrator can upload the per-project log as an artifact
+  // without replicating the `sha256(installDir)` hashing logic.
   try {
-    getUI().emitWizardCapabilities?.();
+    getUI().emitWizardCapabilities?.({ installDir: session.installDir });
   } catch (err) {
     logToFile('[agent-runner] emitWizardCapabilities threw', err);
   }
