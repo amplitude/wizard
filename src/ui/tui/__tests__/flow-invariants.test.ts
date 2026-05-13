@@ -1051,3 +1051,136 @@ describe('WizardRouter pendingEnvSelection rewinds the flow to Auth', () => {
     expect(authEntry.isComplete(session)).toBe(false);
   });
 });
+
+// ── Env-picker race: bin.ts ↔ WizardStore session ref divergence ─────
+//
+// PR #760 added the `pendingEnvSelection` flag and gated every post-Auth
+// `show:` predicate on it. The router tests above verify the gate logic.
+// But the live bug *still reproduced* after #760 landed: bin.ts mutates
+// its `session` object in-place during checkpoint hydration,
+// `resolveCredentials`, and `applyEnvSelectionDeferral`, then calls
+// `tui.store.session = session` to re-emit. The store internally uses
+// nanostores' `map.setKey`, which allocates a fresh
+// `{ ...prev, [key]: value }` object on every key change. The first
+// in-store setter (typically `concludeIntro` fired when the user
+// presses Continue on the checkpoint Resume prompt while
+// `resolveCredentials` is still awaiting) detaches `$session.value`
+// from the bin.ts `session` reference. After that point, bin.ts's
+// later mutations on `session` — including the deferral that sets
+// `pendingEnvSelection = true` — never reach the store. The final
+// `tui.store.session = session` then OVERWRITES the store's
+// accumulated state with the stale bin.ts ref, wiping the user's
+// `introConcluded = true` progress.
+//
+// The fix patches `$session.setKey` to mutate the underlying object
+// in-place (preserving the shared reference with bin.ts) while still
+// firing `notify()` per key. This test pins both halves of the
+// regression: ref stability across in-store setters AND propagation
+// of external mutations after a setter has fired.
+describe('WizardStore session ref stability (env-picker race regression)', () => {
+  it('preserves the bin.ts session reference after an in-store setKey', async () => {
+    // Lazy import to avoid pulling the full store module graph into the
+    // property-test bootstrap above when this file is loaded.
+    const { WizardStore } = await import('../store.js');
+    const store = new WizardStore(Flow.Wizard);
+    const session = buildSession({});
+
+    // bin.ts: `startTUI(version, undefined, session)` → store.session = session
+    store.session = session;
+    expect(store.session).toBe(session);
+
+    // bin.ts: user clicks Continue on Intro → concludeIntro() fires.
+    // Prior to the fix, this allocated a fresh `{ ...prev, introConcluded: true }`
+    // object and detached `$session.value` from `session`.
+    store.concludeIntro();
+
+    // The bin.ts ref must still match $session.value, otherwise bin.ts's
+    // later in-place mutations (deferral) will be invisible to the store.
+    expect(store.session).toBe(session);
+    expect(store.session.introConcluded).toBe(true);
+    expect(session.introConcluded).toBe(true);
+  });
+
+  it('propagates in-place external mutations after an in-store setKey, including pendingEnvSelection', async () => {
+    const { WizardStore } = await import('../store.js');
+    const store = new WizardStore(Flow.Wizard);
+
+    // Simulate the exact bin.ts sequence for the env-picker bug:
+    //   1) buildSessionFromOptions + Object.assign(session, checkpoint)
+    //   2) startTUI(session)
+    //   3) user clicks Resume on the checkpoint prompt
+    //      → store.concludeIntro() fires
+    //   4) resolveCredentials populates pendingOrgs + returns
+    //      needs_user_choice/environment_selection
+    //   5) applyEnvSelectionDeferral mutates session in-place
+    //   6) bin.ts: tui.store.session = session (line 598)
+    const session = buildSession({});
+    Object.assign(session, {
+      region: 'us',
+      selectedOrgId: 'org-1',
+      selectedOrgName: 'Acme',
+      selectedProjectId: 'proj-1',
+      selectedProjectName: 'Demo',
+      selectedEnvName: 'Production',
+    });
+    session.introConcluded = false; // bin.ts forces this on rehydration
+    session._restoredFromCheckpoint = true;
+
+    // (2) startTUI
+    store.session = session;
+    expect(store.currentScreen).toBe(Screen.Intro);
+
+    // (3) user picks Resume
+    store.concludeIntro();
+    // With the fix, the ref is preserved; without it, this would be a new object.
+    expect(store.session).toBe(session);
+
+    // (4) + (5) — bin.ts mutates `session` in-place
+    session.pendingOrgs = [
+      {
+        id: 'org-1',
+        name: 'Acme',
+        projects: [
+          {
+            id: 'proj-1',
+            name: 'Demo',
+            environments: [
+              {
+                name: 'Production',
+                rank: 1,
+                app: { id: 'app-1', apiKey: 'k1' },
+              },
+              { name: 'Staging', rank: 2, app: { id: 'app-2', apiKey: 'k2' } },
+              { name: 'Dev', rank: 3, app: { id: 'app-3', apiKey: 'k3' } },
+              { name: 'Test', rank: 4, app: { id: 'app-4', apiKey: 'k4' } },
+            ],
+          },
+        ],
+      },
+    ];
+    session.pendingAuthIdToken = 'id';
+    session.pendingAuthAccessToken = 'at';
+    // applyEnvSelectionDeferral
+    session.selectedEnvName = null;
+    session.selectedAppId = null;
+    session.credentials = null;
+    session.pendingEnvSelection = true;
+
+    // The store must see these external mutations because $session.value
+    // and `session` are the same object. Pre-fix, store.session.pendingEnvSelection
+    // would be `false` here (deferral's mutation never reached the store).
+    expect(store.session.pendingEnvSelection).toBe(true);
+    expect(store.session.credentials).toBeNull();
+    expect(store.session.selectedEnvName).toBeNull();
+
+    // (6) The final re-emit must NOT clobber the user's introConcluded=true.
+    // Pre-fix, line 598 replaced $session.value with the stale bin.ts ref
+    // whose introConcluded=false bumped the user back to Intro.
+    store.session = session;
+    expect(store.session.introConcluded).toBe(true);
+    expect(store.session.pendingEnvSelection).toBe(true);
+
+    // Router rewinds to Auth (env picker surface) — not Intro, not Setup.
+    expect(store.currentScreen).toBe(Screen.Auth);
+  });
+});
