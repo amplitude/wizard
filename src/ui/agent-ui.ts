@@ -1953,9 +1953,18 @@ export class AgentUI implements WizardUI {
    * emitted or omitted.
    */
   setCurrentActivity(activity: WizardActivity | null): void {
+    // Stamp BOTH `event: 'current_activity'` (the orchestrator-facing
+    // discriminator that drives `EVENT_DATA_VERSIONS` lookup and the
+    // `validateEnvelopeOrLog` coherence check) AND keep the legacy
+    // `kind: 'current_activity'` field for back-compat with any
+    // existing consumer that branched on it. New code should branch on
+    // `data.event === 'current_activity'`; `kind` is preserved purely
+    // so orchestrators that shipped before the registry entry landed
+    // continue to work unchanged.
     if (activity) {
       emit('progress', activity.message, {
         data: {
+          event: 'current_activity',
           kind: 'current_activity',
           activityKind: activity.kind,
           message: activity.message,
@@ -1966,6 +1975,7 @@ export class AgentUI implements WizardUI {
     } else {
       emit('progress', 'activity cleared', {
         data: {
+          event: 'current_activity',
           kind: 'current_activity',
           activityKind: 'idle',
           message: '',
