@@ -10,7 +10,7 @@
  */
 
 import { Box, Text } from 'ink';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import * as fs from 'fs';
 import type { WizardStore } from '../store.js';
 import { useWizardStore } from '../hooks/useWizardStore.js';
@@ -48,7 +48,14 @@ import {
 import { readDraftEventPlanMeta } from '../../../lib/wizard-tools.js';
 import { retryFromCheckpoint } from '../../../lib/retry-from-checkpoint.js';
 import { isInteractiveOutro } from '../utils/outro-mode.js';
-import { executeRollbackWithStatus } from '../../../lib/file-change-ledger.js';
+import {
+  executeRollbackWithStatus,
+  getFileChangeLedger,
+} from '../../../lib/file-change-ledger.js';
+import {
+  classifyPlanAgainstWiredCode,
+  collectWiredEventNames,
+} from '../../../lib/wired-event-instrumentation.js';
 
 const REPORT_FILE = 'amplitude-setup-report.md';
 
@@ -363,6 +370,53 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
   const rawOutroData = store.session.outroData;
   const visibleEvents = store.eventPlan.filter((e) => e.name.trim().length > 0);
 
+  // ── Wired-code classification ──────────────────────────────────────
+  //
+  // The persisted plan (`store.eventPlan`) is the user-approved list of
+  // events the wizard SAID it would set up. The actual on-disk truth
+  // lives in the file-change ledger — every Write / Edit / MultiEdit
+  // the agent ran is captured there with its `afterContent`. We grep
+  // those snapshots for `track("...")` callsites and split the plan
+  // into two buckets:
+  //
+  //   - **Instrumented**: plan event whose name (case-insensitive)
+  //     appears in some `track()` callsite. The celebration shows the
+  //     wired-code casing, not the plan's normalized Title Case.
+  //   - **Covered by autocapture**: plan event NOT found in any wired
+  //     file. Web SDKs autocapture sessions / page views / form
+  //     interactions / clicks, so the agent intentionally skips
+  //     `track()` for these.
+  //
+  // Without this split the outro confidently lists every plan event as
+  // "instrumented in the Wizard API" — even when the agent actually
+  // routed half of them through autocapture. The Setup Report has
+  // always distinguished these; this brings the outro into line.
+  //
+  // Memoize on `visibleEvents` identity — the ledger is per-run and
+  // frozen post-agent, so once the agent finishes the classification is
+  // stable. Without `useMemo`, this IIFE re-walked the ledger and
+  // re-ran `TRACK_CALL_RE` against every wired file on every render
+  // (and every keypress in the outro picker drives a render). When the
+  // ledger isn't initialized (e.g. tests, the synthetic full-activation
+  // success path where the agent never ran), we fall back to
+  // "everything instrumented" so legacy behavior holds.
+  const wiredClassification = useMemo(() => {
+    const ledger = getFileChangeLedger();
+    if (!ledger) {
+      return {
+        instrumented: visibleEvents.map((e) => ({
+          name: e.name,
+          description: e.description,
+        })),
+        autocaptured: [],
+      };
+    }
+    const wiredNames = collectWiredEventNames(ledger.getEntries());
+    return classifyPlanAgainstWiredCode(visibleEvents, wiredNames);
+  }, [visibleEvents]);
+  const instrumentedEvents = wiredClassification.instrumented;
+  const autocapturedEvents = wiredClassification.autocaptured;
+
   // For activationLevel === 'full' users, the agent run is skipped — so
   // `outro()` on InkUI never fires and `outroData` stays null when the
   // router lands them here. Without this defaulting, those users would
@@ -575,8 +629,11 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
           )}
           {!isFullActivationSuccess && visibleEvents.length > 0 && (
             <Text color={Colors.body}>
-              {visibleEvents.length} event
-              {visibleEvents.length !== 1 ? 's' : ''} instrumented
+              {instrumentedEvents.length} event
+              {instrumentedEvents.length !== 1 ? 's' : ''} instrumented
+              {autocapturedEvents.length > 0
+                ? ` · ${autocapturedEvents.length} covered by autocapture`
+                : ''}
               {store.session.selectedEnvName
                 ? ` in ${store.session.selectedEnvName}`
                 : ''}
@@ -595,12 +652,19 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
             </Box>
           )}
 
-          {/* Events added */}
+          {/* Events added — split into two sections so the celebration
+              tells the truth:
+                - Instrumented: plan events whose `track()` call landed
+                  in the wired code (names show with their wired-code
+                  spelling, not the plan's normalized Title Case).
+                - Covered by autocapture: plan events where the agent
+                  intentionally did NOT write a track() call because the
+                  SDK's autocapture surfaces them automatically.
+              The Setup Report has always made this distinction; this
+              block brings the outro into line so all three sources
+              (diff, report, outro) agree. */}
           {visibleEvents.length > 0 && (
             <Box flexDirection="column" marginTop={1}>
-              <Text color={Colors.secondary} bold>
-                Events
-              </Text>
               {/* Draft notice — only when events.json is the wrapper-shaped
                   draft persisted by the outro safety net (i.e. the user
                   gave feedback during confirm_event_plan and the agent
@@ -620,12 +684,39 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
                   )}
                 </Box>
               )}
-              {visibleEvents.map((event) => (
-                <Text key={event.name} color={Colors.body}>
-                  {Icons.diamond} <Text bold>{event.name}</Text>
-                  <Text color={Colors.muted}> {event.description}</Text>
-                </Text>
-              ))}
+              {instrumentedEvents.length > 0 && (
+                <Box flexDirection="column">
+                  <Text color={Colors.secondary} bold>
+                    Instrumented ({instrumentedEvents.length} event
+                    {instrumentedEvents.length === 1 ? '' : 's'} with track()
+                    calls)
+                  </Text>
+                  {instrumentedEvents.map((event) => (
+                    <Text key={`i:${event.name}`} color={Colors.body}>
+                      {Icons.diamond} <Text bold>{event.name}</Text>
+                      <Text color={Colors.muted}> {event.description}</Text>
+                    </Text>
+                  ))}
+                </Box>
+              )}
+              {autocapturedEvents.length > 0 && (
+                <Box
+                  flexDirection="column"
+                  marginTop={instrumentedEvents.length > 0 ? 1 : 0}
+                >
+                  <Text color={Colors.secondary} bold>
+                    Covered by autocapture ({autocapturedEvents.length} event
+                    {autocapturedEvents.length === 1 ? '' : 's'} — no track()
+                    needed)
+                  </Text>
+                  {autocapturedEvents.map((event) => (
+                    <Text key={`a:${event.name}`} color={Colors.body}>
+                      {Icons.bullet} <Text bold>{event.name}</Text>
+                      <Text color={Colors.muted}> {event.description}</Text>
+                    </Text>
+                  ))}
+                </Box>
+              )}
             </Box>
           )}
 

@@ -44,13 +44,18 @@
  *      `formatToolCallLabel`, so we just take the most recent entry.
  *      Same staleness window as tier 4.
  *
- *   6. **Active canonical task's `activeForm`** — the original behavior.
- *      Used when none of the live signals above are recent. Implemented
- *      by walking `CANONICAL_STEPS` in order and short-circuiting on the
- *      first in_progress row, NOT `tasks.find(InProgress)`. The latter
- *      mislabels the pill with `detect`'s text whenever two rows are
- *      ever in_progress at once. Defensive fallback: same step's
- *      canonical label, never another step's text.
+ *   6. **Active canonical task's `activeForm`** — SUPPRESSED. The
+ *      `ProgressList` already renders the in-progress task's `activeForm`
+ *      as its own row above the pill (per #688, the pill is now flush
+ *      with the content, immediately under the Tasks list). Repeating
+ *      that same string in the pill produces an obvious visible
+ *      duplicate (e.g. Tasks list shows `› Detecting project setup` and
+ *      the pill below shows `◇ Detecting project setup`). When the
+ *      resolver would otherwise fall through to this tier, it returns
+ *      `undefined` so no pill is rendered — the higher-priority tiers
+ *      (file writes, tool activity, event-plan-await, currentActivity,
+ *      postAgentSteps) carry richer signal that the task list does NOT
+ *      already display, so they continue to render normally.
  *
  *   7. **Trailing free-form `pushStatus` line** — cold-start fallback,
  *      before any task has flipped to in_progress.
@@ -181,33 +186,33 @@ export function resolveRunStatusPill(
     }
   }
 
-  // Tier 6 — canonical in-progress task's activeForm. The safe, boring
-  // fallback when nothing more specific is fresh.
+  // Tier 6 — SUPPRESSED. The `ProgressList` above the pill already shows
+  // the in-progress canonical task's `activeForm` (or its label as a
+  // fallback). Repeating that exact string in the pill produces a visible
+  // duplicate now that #688 made the pill flush with content (Tasks list
+  // shows `› Detecting project setup` and the pill below shows
+  // `◇ Detecting project setup`). When we would otherwise fall through to
+  // this tier, return `undefined` so no pill is rendered. Higher-priority
+  // tiers (1-5) keep firing because their messages carry signal that the
+  // Tasks list does NOT already show: a fresh file path, a tool call, the
+  // event-plan await prompt, a compaction stall, or a post-agent step.
   //
-  // Walk `CANONICAL_STEPS` in order and short-circuit on the first
-  // in_progress row. Crucially, this is NOT `store.tasks.find(t =>
-  // t.status === InProgress)`: if anything (mid-batch render, future
-  // setter that bypasses the renderJourneyTasks frontier cascade) ever
-  // leaves two rows as in_progress at the same time, `find` returns the
-  // FIRST match — which would be `detect`, silently mislabelling the
-  // pill with detect's text while the user visibly watches a later step
-  // run. A user reported exactly this: pill read "Detecting your
-  // project setup" while the task list correctly showed detect ✓,
-  // install ✓, plan in_progress, wire pending. Walking CANONICAL_STEPS
-  // in order — keyed by canonical step index, with `tasks[i]` paired
-  // 1:1 with `CANONICAL_STEPS[i]` — anchors the pill to whichever step
-  // is current. The defensive fallback to the SAME step's canonical
-  // label (rather than `defaultActiveForm` of any other step) makes
-  // sure that even if the agent never set an `activeForm` we surface
-  // the SAME step's text, never a different step's.
+  // We still walk `CANONICAL_STEPS` in order to detect whether ANY
+  // canonical row is in_progress — if so we ALSO skip tier 7 below,
+  // because `statusMessages` is a cold-start signal and would be stale
+  // narration ("Now let me plan the events…") once a real task is
+  // running. This is the same priority shape as before, just with the
+  // tier-6 message dropped.
   const tasks = store.tasks;
+  let anyCanonicalInProgress = false;
   for (let i = 0; i < CANONICAL_STEPS.length; i++) {
     const task = tasks[i];
     if (!task) continue;
     if (task.status !== TaskStatus.InProgress) continue;
-    if (task.activeForm && task.activeForm.trim()) return task.activeForm;
-    return CANONICAL_STEPS[i].label;
+    anyCanonicalInProgress = true;
+    break;
   }
+  if (anyCanonicalInProgress) return undefined;
 
   // Tier 7 — trailing free-form `pushStatus` line. Cold-start gap before
   // the first canonical task has flipped to in_progress.

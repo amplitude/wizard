@@ -932,6 +932,179 @@ export function truncateLogMessage(
   return message.slice(0, headroom) + suffix;
 }
 
+// ── SSE-frame suppression ───────────────────────────────────────────
+//
+// When the Anthropic gateway terminates a streaming response with a 4xx
+// (most commonly a `400 terminated` mid-stream — see
+// `classifyApiErrorSubtype` in `agent-runner.ts`), the SDK throws an
+// error whose `.message` includes the raw SSE response body that was
+// in flight. That body is hundreds of `event:` / `data:` framing lines
+// plus `partial_json` `tool_use` deltas — protocol noise that is
+// completely useless to a human operator. Worse, some of those deltas
+// include in-flight tool arguments that look like file-path fragments
+// (`"nwarner/w...", "rktree-", "repos/Nex..."`) which then surface to
+// the user as if they were actual log content.
+//
+// This helper detects those frames and replaces them with a single
+// summary marker so the user-visible log shows ONE readable line per
+// upstream failure instead of dozens of garbled bytes. The detection
+// list is intentionally duplicated from `agent-interface.ts`'s
+// `STREAM_EVENT_TYPES` set: keeping `agent-events.ts` self-contained
+// (no imports from `agent-interface.ts`) avoids a circular dependency
+// — `agent-interface.ts` already imports from this module.
+
+const STREAM_EVENT_TYPE_NAMES: ReadonlyArray<string> = [
+  'message_start',
+  'message_delta',
+  'message_stop',
+  'content_block_start',
+  'content_block_delta',
+  'content_block_stop',
+  'ping',
+  'stream_event',
+];
+
+/**
+ * True if `line` (already trimmed of leading whitespace) looks like an
+ * Anthropic SSE protocol frame. Mirrors the prefix-based detector used
+ * by `looksLikeStreamEventLine` in `agent-interface.ts` but kept inline
+ * to avoid pulling agent-interface into the agent-events module
+ * (circular import). Cheap: just three prefix lookups against a small
+ * fixed-size array.
+ */
+function isStreamEventFrameLine(trimmed: string): boolean {
+  if (trimmed.length < 9) return false;
+  const first = trimmed[0];
+  if (first === 'e') {
+    for (const t of STREAM_EVENT_TYPE_NAMES) {
+      if (trimmed.startsWith(`event: ${t}`)) return true;
+    }
+    return false;
+  }
+  if (first === 'd') {
+    for (const t of STREAM_EVENT_TYPE_NAMES) {
+      if (trimmed.startsWith(`data: {"type":"${t}"`)) return true;
+    }
+    return false;
+  }
+  if (first === '{') {
+    for (const t of STREAM_EVENT_TYPE_NAMES) {
+      if (trimmed.startsWith(`{"type":"${t}"`)) return true;
+    }
+    return false;
+  }
+  return false;
+}
+
+/**
+ * Strip Anthropic SSE protocol noise from an error / log message, replacing
+ * runs of frame lines with a single `[N SSE frames suppressed]` marker.
+ * Preserves any non-frame content (so a real error riding alongside the
+ * SSE body — `TypeError: ...`, the upstream HTTP status line — survives).
+ *
+ *   in:  `API Error: 400 event: message_start\n` +
+ *        `data: {"type":"message_start",...}\n` +
+ *        `event: content_block_delta\n` +
+ *        `data: {"type":"content_block_delta",...}\n`
+ *   out: `API Error: 400 [4 SSE frames suppressed]`
+ *
+ * Pure for unit testing — no I/O, no UI calls.
+ *
+ * @param message - The raw error / log message to sanitize.
+ * @returns The message with SSE frame runs collapsed to a marker.
+ */
+export function suppressSseFrames(message: string): string {
+  // Fast path: message has none of the obvious markers — return as-is so
+  // the common (non-SSE) case stays zero-cost.
+  if (
+    !message.includes('event: ') &&
+    !message.includes('data: {"type":"') &&
+    !message.includes('{"type":"')
+  ) {
+    return message;
+  }
+
+  const lines = message.split('\n');
+  const out: string[] = [];
+  let suppressedRun = 0;
+  // The first line of an SDK error often looks like
+  // `API Error: 400 event: message_start ...` — i.e. the leading text
+  // and the FIRST SSE frame share a single line. Detect that and split
+  // the frame off so we don't drop the prefix.
+  const firstFrameInline = /(.*?)(event:\s+(?:[a-z_]+))(.*)$/i;
+
+  const flushSuppressed = (): void => {
+    if (suppressedRun > 0) {
+      out.push(
+        `[${suppressedRun} SSE frame${
+          suppressedRun === 1 ? '' : 's'
+        } suppressed]`,
+      );
+      suppressedRun = 0;
+    }
+  };
+
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const trimmed = line.trimStart();
+
+    // Mid-stream split: if this is the first line and the SSE frame
+    // begins partway through (after some prefix like `API Error: 400 `),
+    // emit the prefix as kept text and count the inline frame.
+    if (i === 0 && !isStreamEventFrameLine(trimmed)) {
+      const m = firstFrameInline.exec(line);
+      if (m) {
+        const prefix = m[1].trimEnd();
+        const frameType = m[2].slice('event:'.length).trim();
+        if (STREAM_EVENT_TYPE_NAMES.includes(frameType)) {
+          if (prefix) out.push(prefix);
+          suppressedRun = 1;
+          continue;
+        }
+      }
+    }
+
+    if (isStreamEventFrameLine(trimmed)) {
+      suppressedRun++;
+      continue;
+    }
+    // Blank lines between SSE frames are protocol filler — fold them
+    // into the suppressed run so we don't emit a stray empty line in
+    // the middle of the marker.
+    if (suppressedRun > 0 && trimmed === '') {
+      suppressedRun++;
+      continue;
+    }
+    flushSuppressed();
+    out.push(line);
+  }
+  flushSuppressed();
+  return out.join('\n');
+}
+
+/**
+ * One-shot "make this error message safe to log" pipeline:
+ *
+ *   1. Strip any embedded SSE protocol frames (replacing with a marker
+ *      that tells the operator how many were suppressed).
+ *   2. Cap the result at `MAX_LOG_MESSAGE_LENGTH` so even the marker-
+ *      stripped form can't blow past the on-disk log budget.
+ *
+ * Use this at every callsite that logs an error message coming from
+ * the Anthropic SDK or the LLM gateway — the SDK occasionally
+ * serializes the entire failing response body into the error string,
+ * and our raw `logToFile(...)` calls would otherwise dump tens of KB
+ * of `event:` / `data:` lines into the user-visible log.
+ *
+ * Pure for unit testing.
+ */
+export function sanitizeErrorMessageForLog(
+  message: string,
+  max = MAX_LOG_MESSAGE_LENGTH,
+): string {
+  return truncateLogMessage(suppressSseFrames(message), max);
+}
+
 /**
  * Map a Claude write-tool name to the operation kind the wire format
  * exposes. `Write` always creates (or overwrites), `Edit` / `MultiEdit` /
