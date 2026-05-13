@@ -78,20 +78,29 @@ export const App = ({ store }: AppProps) => {
   // frame normally on both transitions (in and out). The full-screen
   // view's own useInput owns Y/S/F and the feedback flow.
   const pendingPrompt = store.pendingPrompt;
-  // Keep the EventPlanFullScreen mounted across two states:
+  // Keep the EventPlanFullScreen mounted across three states:
   //   1. The agent has a plan awaiting approval (normal case).
   //   2. The user just submitted feedback and we're waiting for the
-  //      agent to emit a revised plan. Without this second branch the
-  //      screen unmounts the moment `resolveEventPlan` fires — the
-  //      user briefly lands on the Run/Setup tab view and assumes
-  //      their feedback was ignored, then the screen re-appears 10–60s
-  //      later when the revised plan arrives. Bug report:
-  //      "why does the feedback/approval screen go away while its
-  //      working on the feedback?".
+  //      agent to emit a revised plan. Without this branch the screen
+  //      unmounts the moment `resolveEventPlan` fires — the user
+  //      briefly lands on the Run/Setup tab view and assumes their
+  //      feedback was ignored, then the screen re-appears 10–60s later
+  //      when the revised plan arrives. Bug report: "why does the
+  //      feedback/approval screen go away while its working on the
+  //      feedback?".
+  //   3. An in-flight revision was just abandoned (Esc or 5-minute
+  //      watchdog) and we need the user to read the abandon/timeout
+  //      banner above the original plan. The cancel path flips
+  //      `pendingEventPlanFeedback → null`, so without this third
+  //      branch the screen would unmount the moment the banner is set,
+  //      destroying the banner before the user ever sees it. (Bugbot
+  //      HIGH — comment 3235276649.)
   const pendingEventPlanFeedback = store.session.pendingEventPlanFeedback;
+  const eventPlanRevisionBanner = store.session.eventPlanRevisionBanner;
   const showEventPlan =
     (pendingPrompt !== null && pendingPrompt.kind === 'event-plan') ||
-    pendingEventPlanFeedback !== null;
+    pendingEventPlanFeedback !== null ||
+    eventPlanRevisionBanner !== null;
 
   return (
     <CommandModeContext.Provider value={store.commandMode}>

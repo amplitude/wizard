@@ -21,17 +21,55 @@
  * Keyboard surface:
  *   - Options mode: `Y` / `S` / `F`, plus ↑/↓ / PgUp / PgDn for scroll
  *   - Feedback mode: free-text input, Enter sends, Esc cancels
+ *   - Revising state: Esc cancels the revision (preserves original plan)
+ *
+ * Revising recovery (this file, below):
+ *   - Progressive coaching tiers escalate at 30s / 60s / 180s so the user
+ *     never stares at "the agent is working" forever.
+ *   - Esc clears `pendingEventPlanFeedback` and surfaces an abandonment
+ *     banner above the original plan ("feedback wasn't applied…").
+ *   - A 5-minute watchdog fires the same cancel path with a timeout
+ *     banner so a stuck agent can't trap the wizard indefinitely.
  */
 
 import { Box, Text, useInput } from 'ink';
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 
 import { BrailleSpinner } from '../components/BrailleSpinner.js';
-import { useTimedCoaching } from '../hooks/useTimedCoaching.js';
+import { useScreenInput } from '../hooks/useScreenInput.js';
 import { useWizardStore } from '../hooks/useWizardStore.js';
 import type { WizardStore } from '../store.js';
 import { Colors, Icons, Layout } from '../styles.js';
 import type { PlannedEvent } from '../store.js';
+
+/**
+ * Revising-state escalation thresholds. Exported so tests can pin the
+ * boundaries without time-travelling around magic numbers.
+ *
+ * Names match the tier VALUE rendered by `revisingCoachingCopy`, not
+ * an ordinal "second / third / fourth" position — `REVISION_TIER_1_MS`
+ * is the threshold at which `revisingTier` flips to 1, etc. The earlier
+ * `_TWO / _THREE / _FOUR` naming was off by one and Bugbot-flagged
+ * (comment 3235276642) as confusing for future threshold edits.
+ *
+ *   tier 1 (>= 30s)  — "taking a bit longer than usual"
+ *   tier 2 (>= 60s)  — "may have decided your feedback wasn't actionable…"
+ *   tier 3 (>= 3min) — strong nudge to press Esc
+ *   watchdog (5min)  — auto-cancel the revision with a timeout banner
+ */
+export const REVISION_TIER_1_MS = 30_000;
+export const REVISION_TIER_2_MS = 60_000;
+export const REVISION_TIER_3_MS = 3 * 60_000;
+export const REVISION_WATCHDOG_MS = 5 * 60_000;
+
+/** Tick cadence for the elapsed counter while revising. */
+const REVISION_TICK_MS = 1_000;
+
+/** Banner copy strings — exported for test pinning. */
+export const REVISION_ABANDONED_BANNER =
+  "(feedback wasn't applied — agent didn't return a revised plan)";
+export const REVISION_TIMEOUT_BANNER =
+  'Revision timed out after 5min. Original plan preserved.';
 
 /**
  * Rows of chrome consumed by everything OTHER than the events list:
@@ -43,11 +81,50 @@ import type { PlannedEvent } from '../store.js';
  */
 const CHROME_ROWS = 7;
 
+/**
+ * Additional rows consumed when the abandon/timeout banner is showing
+ * above the title. The banner renders with `wrap="wrap"` — its copy is
+ * ~50–60 chars so on a 120-col terminal it's one row, and on a narrow
+ * 60-col terminal it can wrap to two. Reserve two rows so the events
+ * list can never get silently clipped past the viewport when the
+ * banner is up (Bugbot MEDIUM — comment 3235276632).
+ */
+const BANNER_ROWS = 2;
+
 interface EventPlanFullScreenProps {
   store: WizardStore;
   events: PlannedEvent[];
   width: number;
   height: number;
+}
+
+/**
+ * Progressive coaching copy for the revising state. Tiers escalate as
+ * `revisingElapsedMs` crosses the `REVISION_TIER_*_MS` thresholds — the
+ * goal is that a user who typed a non-actionable thing like "hey" reads
+ * the screen and eventually presses Esc instead of staring at a forever
+ * spinner. Exported so tests can pin the exact strings.
+ */
+export function revisingCoachingCopy(tier: number): string {
+  if (tier >= 3) {
+    return "Agent hasn't returned. Your feedback may not have been actionable (e.g. too vague, contradictory). Press [Esc] to keep the original plan.";
+  }
+  if (tier >= 2) {
+    return "The agent may have decided your feedback wasn't actionable. Press [Esc] to keep the original plan and continue, or wait another minute.";
+  }
+  if (tier >= 1) {
+    return 'Taking a bit longer than usual — the agent is still working.';
+  }
+  return 'This typically takes 10–30s — hang tight.';
+}
+
+/** Format `elapsedMs` as `12s` or `1m 42s`. */
+export function formatElapsed(elapsedMs: number): string {
+  const totalSeconds = Math.max(0, Math.floor(elapsedMs / 1000));
+  if (totalSeconds < 60) return `${totalSeconds}s`;
+  const minutes = Math.floor(totalSeconds / 60);
+  const seconds = totalSeconds % 60;
+  return `${minutes}m ${seconds}s`;
 }
 
 export const EventPlanFullScreen = ({
@@ -76,12 +153,44 @@ export const EventPlanFullScreen = ({
   const [cursorVisible, setCursorVisible] = useState(true);
   const [scrollOffset, setScrollOffset] = useState(0);
 
+  // Abandonment banner — surfaced above the original plan list after
+  // the user (or the watchdog) cancels an in-flight revision. Lives in
+  // session state (NOT local React state) because the cancel path
+  // also clears `pendingEventPlanFeedback`, and `pendingEventPlanFeedback
+  // → null` used to unmount this whole screen via App.tsx's
+  // `showEventPlan` check, destroying any component-local banner before
+  // the user ever read it. App.tsx now also keeps the screen mounted
+  // while the banner is non-null. (Bugbot HIGH — comment 3235276649.)
+  const abandonedBanner = store.session.eventPlanRevisionBanner;
+
+  // "Banner-only" state: the user already resolved the original
+  // `confirm_event_plan` prompt with feedback (so $pendingPrompt is
+  // null) and then either pressed Esc or hit the 5-minute watchdog
+  // (clearing pendingEventPlanFeedback while raising the banner).
+  // EventPlanFullScreen is only mounted here because the banner is
+  // non-null — there's no prompt left to approve / skip / feedback.
+  // Y/S/F would all silently no-op against the resolveEventPlan guard,
+  // which Bugbot MEDIUM (comment 3235413202) flagged as a trap UX. We
+  // render a [Dismiss] hint instead, and treat any keypress as
+  // "ack the banner, take me back to the run view". The agent moves
+  // on through whatever phase it's in next.
+  const pendingPrompt = store.pendingPrompt;
+  const bannerOnly =
+    abandonedBanner !== null && pendingPrompt === null && !isRevising;
+
   // Rows available for the events list itself, derived from the current
   // viewport height. Sizing the window here (instead of from a hard cap
   // like MAX_VISIBLE_EVENTS) means events can never be silently clipped
   // by Yoga's overflow="hidden" — anything that doesn't fit goes behind
   // a scroll indicator the user can reach with the arrow keys.
-  const eventsBudget = Math.max(1, height - CHROME_ROWS);
+  //
+  // When the abandon/timeout banner is up the title block grows by 1–2
+  // rows (long copy may wrap on narrow terminals), so we widen the
+  // chrome budget accordingly. Without this the visible slice would
+  // overestimate available rows and the bottom events would be silently
+  // clipped under `overflow="hidden"`. (Bugbot MEDIUM — 3235276632.)
+  const chromeRows = CHROME_ROWS + (abandonedBanner !== null ? BANNER_ROWS : 0);
+  const eventsBudget = Math.max(1, height - chromeRows);
   const needsScroll = events.length > eventsBudget;
   // Reserve one row for the scroll-state indicator when scrolling is on.
   const visibleCount = needsScroll
@@ -100,18 +209,92 @@ export const EventPlanFullScreen = ({
     return () => clearInterval(id);
   }, [planInputMode]);
 
-  // Coaching escalation while we wait for the agent's revised plan.
-  // tier 0 (< 5s): just the spinner; tier 1 (>= 5s): add a "typically
-  // 10–30s" hint so the user knows the wait is normal. progressSignal
-  // pinned to the feedback text so a brand-new round-trip restarts
-  // the timer cleanly.
-  const { tier: revisingCoachingTier } = useTimedCoaching({
-    thresholds: [5],
-    progressSignal: pendingFeedback,
-  });
+  // Elapsed-since-feedback-sent tracking for the revising state. We can't
+  // reuse `useTimedCoaching` here because (a) we need millisecond
+  // granularity for the watchdog and (b) we want a real `Date.now()`
+  // baseline that survives Ink re-renders. The baseline pins on the
+  // feedback text so a fresh round-trip restarts the timer cleanly.
+  const [revisingElapsedMs, setRevisingElapsedMs] = useState(0);
+  const revisingStartRef = useRef<number | null>(null);
+  // Guard so the watchdog fires exactly once per pending-feedback
+  // instance — without it a rapid burst of timer ticks past the
+  // threshold could call the cancel path repeatedly.
+  const watchdogFiredRef = useRef(false);
+
+  useEffect(() => {
+    if (!isRevising) {
+      revisingStartRef.current = null;
+      watchdogFiredRef.current = false;
+      setRevisingElapsedMs(0);
+      return;
+    }
+    revisingStartRef.current = Date.now();
+    watchdogFiredRef.current = false;
+    setRevisingElapsedMs(0);
+    const id = setInterval(() => {
+      if (revisingStartRef.current === null) return;
+      const elapsed = Date.now() - revisingStartRef.current;
+      setRevisingElapsedMs(elapsed);
+      if (
+        elapsed >= REVISION_WATCHDOG_MS &&
+        !watchdogFiredRef.current &&
+        store.session.pendingEventPlanFeedback !== null
+      ) {
+        watchdogFiredRef.current = true;
+        // Set the banner FIRST so the next render (driven by the
+        // clear-feedback emitChange) already has both pieces of state
+        // ready — otherwise there's a one-frame window where
+        // pendingEventPlanFeedback is null and the banner is still null,
+        // which would briefly render the plain plan list before the
+        // banner pops in.
+        store.setEventPlanRevisionBanner(REVISION_TIMEOUT_BANNER);
+        store.clearPendingEventPlanFeedback();
+      }
+    }, REVISION_TICK_MS);
+    return () => clearInterval(id);
+    // pendingFeedback pinned so a fresh feedback round restarts cleanly;
+    // `store` is stable for the lifetime of the screen so it does not
+    // need to be a dependency.
+  }, [isRevising, pendingFeedback]);
+
+  // Tier derivation from elapsed ms. Plain number comparison so test
+  // fixtures can step the clock and assert tier copy directly.
+  let revisingTier = 0;
+  if (revisingElapsedMs >= REVISION_TIER_1_MS) revisingTier = 1;
+  if (revisingElapsedMs >= REVISION_TIER_2_MS) revisingTier = 2;
+  if (revisingElapsedMs >= REVISION_TIER_3_MS) revisingTier = 3;
+
+  // Esc cancels the revision: clears the pending feedback (returning the
+  // user to the original plan) and raises an abandonment banner so the
+  // next render explains why the input was discarded. Active only while
+  // revising; the main `useInput` below already handles Esc inside the
+  // feedback typing mode.
+  useScreenInput(
+    (_char, key) => {
+      if (!key.escape) return;
+      if (store.session.pendingEventPlanFeedback === null) return;
+      // Banner first (same ordering rationale as the watchdog) — the
+      // emitChange from clearPendingEventPlanFeedback then drives a
+      // single render with both the banner present AND the original
+      // plan visible.
+      store.setEventPlanRevisionBanner(REVISION_ABANDONED_BANNER);
+      store.clearPendingEventPlanFeedback();
+    },
+    { isActive: isRevising },
+  );
 
   useInput(
     (char, key) => {
+      // Banner-only state: there's no prompt to act on. Treat any key
+      // as "dismiss banner and return to the run view" so the user
+      // isn't trapped staring at non-functional Y/S/F hints. (Bugbot
+      // MEDIUM — comment 3235413202.) Ctrl/meta combos pass through
+      // untouched so Ctrl+C still exits.
+      if (bannerOnly) {
+        if (key.ctrl || key.meta) return;
+        store.setEventPlanRevisionBanner(null);
+        return;
+      }
       if (planInputMode === 'feedback') {
         if (key.return) {
           const text = planFeedbackText.trim();
@@ -177,6 +360,7 @@ export const EventPlanFullScreen = ({
   // approval UI so the user never glimpses the old plan list with
   // their feedback typed below it during the round-trip.
   if (isRevising) {
+    const coachingCopy = revisingCoachingCopy(revisingTier);
     return (
       <Box
         flexDirection="column"
@@ -205,18 +389,21 @@ export const EventPlanFullScreen = ({
               </Text>
             </Text>
           </Box>
-          {revisingCoachingTier >= 1 && (
-            <Box marginTop={1}>
-              <Text color={Colors.muted}>
-                This typically takes 10–30s — hang tight.
-              </Text>
-            </Box>
-          )}
+          <Box marginTop={1}>
+            <Text color={Colors.muted} wrap="wrap">
+              {coachingCopy}
+            </Text>
+          </Box>
+          <Box marginTop={1}>
+            <Text color={Colors.subtle}>
+              elapsed: {formatElapsed(revisingElapsedMs)}
+            </Text>
+          </Box>
         </Box>
         <Box flexShrink={0} marginTop={1}>
           <Text color={Colors.muted}>
-            The plan will reappear here automatically once the agent
-            finishes.
+            [Esc] keep original plan · the revised plan will appear here
+            automatically once the agent finishes.
           </Text>
         </Box>
       </Box>
@@ -233,6 +420,11 @@ export const EventPlanFullScreen = ({
     >
       {/* Title — pinned to top */}
       <Box flexDirection="column" flexShrink={0}>
+        {abandonedBanner !== null && (
+          <Text color={Colors.warning} wrap="wrap">
+            {Icons.warning} {abandonedBanner}
+          </Text>
+        )}
         <Text color={Colors.muted}>Suggested events for your app:</Text>
         <Text color={Colors.heading} bold>
           Instrumentation Plan ({events.length} event
@@ -275,9 +467,17 @@ export const EventPlanFullScreen = ({
         )}
       </Box>
 
-      {/* Action hint — pinned to bottom, always visible */}
+      {/* Action hint — pinned to bottom, always visible. Three modes:
+          - banner-only (no prompt to act on, user just needs to ack
+            the abandon/timeout banner)
+          - feedback typing
+          - normal Y/S/F options */}
       <Box flexShrink={0} marginTop={1} flexDirection="column">
-        {planInputMode === 'feedback' ? (
+        {bannerOnly ? (
+          <Text color={Colors.muted}>
+            [Any key] dismiss · the agent is moving on to the next step
+          </Text>
+        ) : planInputMode === 'feedback' ? (
           <Box gap={1}>
             <Text color={Colors.muted}>Feedback: </Text>
             <Text>

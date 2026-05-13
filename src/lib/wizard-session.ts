@@ -757,6 +757,24 @@ export interface WizardSession {
   pendingEventPlanFeedback: string | null;
 
   /**
+   * Sticky banner surfaced above the original plan list after an
+   * in-flight revision was abandoned. Set by EventPlanFullScreen on
+   * either the Esc cancel path or the 5-minute watchdog timeout — both
+   * also flip `pendingEventPlanFeedback` back to null, which used to
+   * unmount EventPlanFullScreen and destroy a component-local banner
+   * before the user ever read it (Bugbot HIGH — comment 3235276649).
+   *
+   * Living in session state lets the banner survive the unmount and
+   * lets App.tsx keep EventPlanFullScreen mounted as long as the
+   * banner is non-null, so the user actually sees "(feedback wasn't
+   * applied…)" / "Revision timed out…". Cleared automatically when:
+   *   - a fresh `promptEventPlan` round lands (next agent question)
+   *   - the user approves/skips the current plan
+   *   - the user reopens feedback mode (new revision starts)
+   */
+  eventPlanRevisionBanner: string | null;
+
+  /**
    * True once the user has approved the agent's proposed event plan
    * (Y on the EventPlanFullScreen). Drives the Events tab body in
    * RunScreen — pre-approval it still says "Waiting for the agent to
@@ -1340,6 +1358,7 @@ export function buildSession(args: {
 
     postAgentSteps: [],
     pendingEventPlanFeedback: null,
+    eventPlanRevisionBanner: null,
     eventPlanApproved: false,
     runPhase: RunPhase.Idle,
     runStartedAt: null,
