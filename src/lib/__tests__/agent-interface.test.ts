@@ -562,9 +562,27 @@ describe('runAgent', () => {
       // The Claude SDK retries 401s up to ~10 times with exponential backoff
       // (~3 min total). A 401 won't recover within a run, so we short-circuit
       // after AUTH_RETRY_LIMIT to surface AUTH_ERROR immediately.
-      let aborted = false;
+      //
+      // Production observation (run fe1fead2 / 2026-05-10): the previous
+      // implementation called `controller.abort('auth_failed')` but kept
+      // draining the for-await loop. The SDK kept emitting api_retry
+      // messages for attempts N+1, N+2, ... and the wizard kept logging
+      // "Auth retries exceeded threshold — aborting agent query" for each
+      // one before the SDK finally errored at max_retries: 10 — ~30s of
+      // dead spinner time after the first abort.
+      //
+      // The fix throws AbortError synchronously the first time the
+      // threshold is crossed, so the for-await unwinds immediately. We
+      // verify that by counting how many messages the generator was asked
+      // for: it must be exactly AUTH_RETRY_LIMIT (i.e. the wizard stopped
+      // pulling after the threshold-crossing message processed). The
+      // generator's post-threshold trailing yields are never delivered.
+      let messagesDelivered = 0;
       function* authRetryStormGenerator() {
-        for (let i = 0; i < AUTH_RETRY_LIMIT; i++) {
+        // Yield up to 10 (the SDK's real max_retries) so the test would
+        // catch a regression where the wizard drains past the threshold.
+        for (let i = 0; i < 10; i++) {
+          messagesDelivered++;
           yield {
             type: 'system',
             subtype: 'api_retry',
@@ -574,11 +592,6 @@ describe('runAgent', () => {
             retry_delay_ms: 1000,
           };
         }
-        // After the threshold, the generator should never deliver another
-        // useful message — controller.abort('auth_failed') will cause the
-        // SDK iterator to throw on next iteration in real life.
-        aborted = true;
-        throw Object.assign(new Error('aborted'), { name: 'AbortError' });
       }
 
       mockQuery.mockReturnValue(authRetryStormGenerator());
@@ -591,7 +604,10 @@ describe('runAgent', () => {
       );
 
       expect(result.error).toBe(AgentErrorType.AUTH_ERROR);
-      expect(aborted).toBe(true);
+      // Strict bound: the wizard MUST stop draining the SDK retry stream
+      // the moment AUTH_RETRY_LIMIT is hit. Pre-fix this would have been
+      // 10 (the SDK's full retry budget); the regression test is the count.
+      expect(messagesDelivered).toBe(AUTH_RETRY_LIMIT);
       expect(mockSpinner.stop).toHaveBeenCalledWith('Authentication failed');
       // Lifecycle event must fire exactly once at the abort boundary so
       // orchestrators observe exhaustion before the downstream
