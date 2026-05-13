@@ -26,9 +26,11 @@ import type {
   SetupContextData,
   SetupCompleteData,
   FileChangeErrorClass,
+  ColdStartPhase,
 } from '../lib/agent-events';
 import {
   EVENT_DATA_VERSIONS,
+  buildColdStartBreakdown,
   buildProgressEstimate,
   classifyRunError,
   nextDecisionId,
@@ -1164,6 +1166,35 @@ export class AgentUI implements WizardUI {
     emit(
       'progress',
       `progress_estimate: ${payload.stage} ${payload.current}/${payload.total} (${payload.percent}%)`,
+      {
+        data: payload,
+      },
+    );
+  }
+
+  // ── PR B5: cold_start_breakdown (per-phase timing) ──────────────────
+  //
+  // The coarse `run_phase: cold_start` envelope tells a parent agent
+  // "the wizard is cold-starting". `cold_start_breakdown` tells them
+  // WHICH of the five cold-start phases consumed the time. Emitted at
+  // the END of each phase boundary by the runner (skill staging,
+  // package-manager detection, framework preflight, MCP bootstrap,
+  // gateway probe). See `EVENT_DATA_VERSIONS.cold_start_breakdown` for
+  // the full contract.
+
+  emitColdStartBreakdown(args: {
+    phase: ColdStartPhase;
+    startedAt: number;
+    finishedAt: number;
+  }): void {
+    const payload = buildColdStartBreakdown(
+      args.phase,
+      args.startedAt,
+      args.finishedAt,
+    );
+    emit(
+      'progress',
+      `cold_start_breakdown: ${payload.phase} (${payload.durationMs}ms)`,
       {
         data: payload,
       },

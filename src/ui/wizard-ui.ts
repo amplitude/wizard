@@ -674,6 +674,36 @@ export interface WizardUI {
   }): void;
 
   /**
+   * Emitted at the END of each cold-start phase boundary with the
+   * phase's measured duration. Parent agents subscribing to NDJSON use
+   * these to render which phase is currently active during the spinner
+   * (subscribe and update on each fire), surface per-phase diagnostics
+   * on a slow cold start, and aggregate per-phase timings across runs.
+   *
+   * Always emitted in a `try/finally` boundary by the runner so a
+   * thrown phase still ships its timing breadcrumb. See
+   * `ColdStartPhase` in `agent-events.ts` for the five canonical phase
+   * ids.
+   *
+   * Optional — only AgentUI emits. InkUI / LoggingUI no-op (the TUI
+   * already surfaces the labeled activity line; CI logs the per-phase
+   * step messages).
+   */
+  emitColdStartBreakdown?(args: {
+    /** Which cold-start phase this breakdown covers. */
+    phase:
+      | 'skill_staging'
+      | 'package_manager_detection'
+      | 'framework_detection'
+      | 'mcp_bootstrap'
+      | 'gateway_probe';
+    /** ms timestamp captured before the phase began. */
+    startedAt: number;
+    /** ms timestamp captured in the `finally` after the phase exited. */
+    finishedAt: number;
+  }): void;
+
+  /**
    * Emitted just before the Claude Agent SDK runs an auto- or manual-
    * triggered context compaction. Pairs with `emitCompactionCompleted`
    * so orchestrators can render a "still working — compacting context"

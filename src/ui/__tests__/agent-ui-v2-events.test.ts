@@ -17,6 +17,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { AgentUI } from '../agent-ui.js';
 import {
   EVENT_DATA_VERSIONS,
+  buildColdStartBreakdown,
   buildProgressEstimate,
   classifyFileChangeError,
   deriveStallTier,
@@ -846,10 +847,234 @@ describe('EVENT_DATA_VERSIONS (v2 entries registered)', () => {
     ['file_change_failed', 1],
     ['attempt_started', 1],
     ['progress_estimate', 1],
+    ['cold_start_breakdown', 1],
   ] as const)('registers %s at version %d', (event, version) => {
     expect(
       (EVENT_DATA_VERSIONS as Readonly<Record<string, number>>)[event],
     ).toBe(version);
+  });
+});
+
+// ── PR B5: cold_start_breakdown (per-phase timing) ──────────────────────
+
+describe('AgentUI.emitColdStartBreakdown (PR B5: per-phase cold-start timing)', () => {
+  let writes: string[];
+  let restore: () => void;
+
+  beforeEach(() => {
+    ({ writes, restore } = setupStdoutSpy());
+  });
+  afterEach(() => restore());
+
+  it('emits a progress: cold_start_breakdown with phase/startedAt/finishedAt/durationMs', () => {
+    const ui = new AgentUI();
+    ui.emitColdStartBreakdown?.({
+      phase: 'skill_staging',
+      startedAt: 1_700_000_000_000,
+      finishedAt: 1_700_000_001_250,
+    });
+    const event = lastEvent(writes);
+    expect(event.v).toBe(1);
+    expect(event.type).toBe('progress');
+    expect(event.message).toBe('cold_start_breakdown: skill_staging (1250ms)');
+    expect(event.data).toMatchObject({
+      event: 'cold_start_breakdown',
+      phase: 'skill_staging',
+      startedAt: 1_700_000_000_000,
+      finishedAt: 1_700_000_001_250,
+      durationMs: 1_250,
+    });
+    expect(event.data_version).toBe(EVENT_DATA_VERSIONS.cold_start_breakdown);
+  });
+
+  it('accepts all five documented cold-start phases', () => {
+    const ui = new AgentUI();
+    const phases = [
+      'skill_staging',
+      'package_manager_detection',
+      'framework_detection',
+      'mcp_bootstrap',
+      'gateway_probe',
+    ] as const;
+    for (const phase of phases) {
+      ui.emitColdStartBreakdown?.({
+        phase,
+        startedAt: 0,
+        finishedAt: 100,
+      });
+    }
+    const events = eventsOfType(writes, 'progress').filter(
+      (e) => e.data?.event === 'cold_start_breakdown',
+    );
+    expect(events.map((e) => e.data?.phase)).toEqual([...phases]);
+  });
+
+  it('floors durationMs at 0 when finishedAt < startedAt (non-monotonic clock)', () => {
+    // NTP slew / container pause can produce a finishedAt < startedAt.
+    // The wire contract guarantees `durationMs >= 0` so consumers can
+    // safely sum durations without sentinel checks.
+    const ui = new AgentUI();
+    ui.emitColdStartBreakdown?.({
+      phase: 'mcp_bootstrap',
+      startedAt: 1_000,
+      finishedAt: 500,
+    });
+    const event = lastEvent(writes);
+    expect(event.data).toMatchObject({
+      phase: 'mcp_bootstrap',
+      // finishedAt clamped to startedAt so the invariant
+      // `finishedAt >= startedAt` holds on the wire too.
+      startedAt: 1_000,
+      finishedAt: 1_000,
+      durationMs: 0,
+    });
+  });
+
+  it('preserves @timestamp as an ISO string', () => {
+    const ui = new AgentUI();
+    ui.emitColdStartBreakdown?.({
+      phase: 'gateway_probe',
+      startedAt: 0,
+      finishedAt: 100,
+    });
+    const event = lastEvent(writes);
+    expect(typeof event['@timestamp']).toBe('string');
+    expect(() => new Date(event['@timestamp'])).not.toThrow();
+  });
+
+  it('stamps the registered data_version', () => {
+    const ui = new AgentUI();
+    ui.emitColdStartBreakdown?.({
+      phase: 'framework_detection',
+      startedAt: 0,
+      finishedAt: 0,
+    });
+    const event = lastEvent(writes);
+    expect(event.data_version).toBe(EVENT_DATA_VERSIONS.cold_start_breakdown);
+  });
+
+  it('emits independently for each phase (one envelope per call)', () => {
+    // Per-phase emission is the wire contract: a parent agent driving
+    // the cold-start spinner subscribes and updates UI on each fire.
+    // Two calls = two envelopes; no batching at the emitter.
+    const ui = new AgentUI();
+    ui.emitColdStartBreakdown?.({
+      phase: 'skill_staging',
+      startedAt: 0,
+      finishedAt: 100,
+    });
+    ui.emitColdStartBreakdown?.({
+      phase: 'package_manager_detection',
+      startedAt: 100,
+      finishedAt: 250,
+    });
+    const events = eventsOfType(writes, 'progress').filter(
+      (e) => e.data?.event === 'cold_start_breakdown',
+    );
+    expect(events.length).toBe(2);
+    expect(events[0].data).toMatchObject({
+      phase: 'skill_staging',
+      durationMs: 100,
+    });
+    expect(events[1].data).toMatchObject({
+      phase: 'package_manager_detection',
+      durationMs: 150,
+    });
+  });
+});
+
+describe('emitColdStartBreakdown no-op on non-AgentUI implementations', () => {
+  it('is optional on the WizardUI base interface (LoggingUI does not implement)', async () => {
+    // Only AgentUI emits this event. The optional method signature on
+    // WizardUI is the load-bearing contract that lets the runner call
+    // `getUI().emitColdStartBreakdown?.(...)` without crashing in TUI /
+    // CI mode where the labeled activity line / step logs already
+    // cover the user-facing UX.
+    const { LoggingUI } = await import('../logging-ui.js');
+    const logging = new LoggingUI();
+    expect(
+      (logging as unknown as { emitColdStartBreakdown?: unknown })
+        .emitColdStartBreakdown,
+    ).toBeUndefined();
+  });
+});
+
+describe('buildColdStartBreakdown (pure helper)', () => {
+  it('returns the canonical payload for a normal phase', () => {
+    expect(buildColdStartBreakdown('skill_staging', 100, 350)).toEqual({
+      event: 'cold_start_breakdown',
+      phase: 'skill_staging',
+      startedAt: 100,
+      finishedAt: 350,
+      durationMs: 250,
+    });
+  });
+
+  it('floors durationMs at 0 when finishedAt < startedAt', () => {
+    // A non-monotonic clock could push finishedAt below startedAt.
+    // The helper floors durationMs and bumps finishedAt up to startedAt
+    // so `finishedAt - startedAt === durationMs` always holds on the
+    // wire.
+    expect(buildColdStartBreakdown('gateway_probe', 1_000, 500)).toEqual({
+      event: 'cold_start_breakdown',
+      phase: 'gateway_probe',
+      startedAt: 1_000,
+      finishedAt: 1_000,
+      durationMs: 0,
+    });
+  });
+
+  it('handles zero-duration phases (startedAt === finishedAt)', () => {
+    expect(buildColdStartBreakdown('mcp_bootstrap', 42, 42)).toEqual({
+      event: 'cold_start_breakdown',
+      phase: 'mcp_bootstrap',
+      startedAt: 42,
+      finishedAt: 42,
+      durationMs: 0,
+    });
+  });
+});
+
+describe('cold_start_breakdown emission survives a thrown phase', () => {
+  // Reproduces the runner contract: each phase is wrapped in a
+  // `try/finally` so the breakdown event always ships, even when the
+  // wrapped phase throws. Orchestrators see a timing breadcrumb for
+  // the failing phase (paired with the subsequent thrown error
+  // envelope) instead of a silent gap on the wire.
+  let writes: string[];
+  let restore: () => void;
+
+  beforeEach(() => {
+    ({ writes, restore } = setupStdoutSpy());
+  });
+  afterEach(() => restore());
+
+  it('emits the breakdown when the phase body throws', async () => {
+    const ui = new AgentUI();
+
+    // Mirror the runner's try/finally pattern exactly.
+    const runPhase = async (): Promise<void> => {
+      const startedAt = Date.now();
+      try {
+        await Promise.reject(new Error('phase boom'));
+      } finally {
+        ui.emitColdStartBreakdown?.({
+          phase: 'framework_detection',
+          startedAt,
+          finishedAt: Date.now(),
+        });
+      }
+    };
+
+    await expect(runPhase()).rejects.toThrow('phase boom');
+    const events = eventsOfType(writes, 'progress').filter(
+      (e) => e.data?.event === 'cold_start_breakdown',
+    );
+    expect(events.length).toBe(1);
+    expect(events[0].data).toMatchObject({
+      event: 'cold_start_breakdown',
+      phase: 'framework_detection',
+    });
   });
 });
 

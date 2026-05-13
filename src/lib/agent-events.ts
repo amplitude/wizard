@@ -382,6 +382,32 @@ export const EVENT_DATA_VERSIONS = {
    * orchestrator can branch on the kind rather than the message.
    */
   file_change_failed: 1,
+  /**
+   * `cold_start_breakdown` — per-phase timing rollup emitted at the
+   * END of each cold-start phase boundary. The coarse `run_phase:
+   * cold_start` envelope tells an orchestrator "the wizard is
+   * cold-starting"; this event tells them WHICH phase consumed the
+   * time. Cold start is 5-30s of perceived silence on the spinner,
+   * and the lion's share is one of a handful of identifiable
+   * phases (skill staging, package-manager probing, framework
+   * preflight, MCP bootstrap, gateway probe). Pinning each phase
+   * with a measured `durationMs` lets the parent agent:
+   *
+   *   - render which phase is CURRENTLY active during the spinner
+   *     (subscribe to the events as they fire),
+   *   - surface "your cold start is slow because phase X took Ys"
+   *     diagnostics on a hung run,
+   *   - aggregate per-phase timings across runs for performance
+   *     tracking without re-parsing log lines.
+   *
+   * Critical: each phase emits in a `try/finally` boundary inside
+   * the runner so a thrown phase still ships its timing breadcrumb
+   * — the orchestrator sees "framework_detection took 800ms" even
+   * when a later mcp_bootstrap blows up. Absence of a phase event
+   * on the wire means the runner exited before that phase ran (or
+   * before it got far enough to register a start time).
+   */
+  cold_start_breakdown: 1,
 } as const;
 
 /** All NDJSON event-level types. */
@@ -1126,6 +1152,104 @@ export interface FileChangeFailedData {
   errorMessage: string;
 }
 
+/**
+ * Phases of cold start the wizard times explicitly. Five discrete
+ * blocks; a single run emits each phase at most once. See
+ * `EVENT_DATA_VERSIONS.cold_start_breakdown` for the orchestrator-facing
+ * contract.
+ *
+ *   skill_staging             — bundled-skill copy + on-disk integration
+ *                                skill resolution
+ *   package_manager_detection — npm / yarn / pnpm / bun / pip probe
+ *   framework_detection       — preflight context build (project-size
+ *                                scan, framework refinement)
+ *   mcp_bootstrap             — wizard-tools MCP server boot + Amplitude
+ *                                MCP config
+ *   gateway_probe             — LLM-gateway liveness + optional AI SDK
+ *                                streaming probe
+ *
+ * Adding a new phase is a `data_version` bump on
+ * `cold_start_breakdown` (see `EVENT_DATA_VERSIONS`). Renaming an
+ * existing variant is also a bump because orchestrators key off the
+ * literal string.
+ */
+export type ColdStartPhase =
+  | 'skill_staging'
+  | 'package_manager_detection'
+  | 'framework_detection'
+  | 'mcp_bootstrap'
+  | 'gateway_probe';
+
+/**
+ * Wire shape of the `data` field on a `cold_start_breakdown` envelope.
+ * Emitted at the END of each cold-start phase boundary — see
+ * `EVENT_DATA_VERSIONS.cold_start_breakdown` for the full contract.
+ *
+ * Timing fields are in milliseconds, derived from `Date.now()` at the
+ * phase boundaries:
+ *
+ *   startedAt   — ms timestamp captured BEFORE the phase work begins
+ *   finishedAt  — ms timestamp captured in the `finally` after the phase
+ *                  exits (success OR thrown)
+ *   durationMs  — `finishedAt - startedAt`, floored at 0 (guards against
+ *                  a non-monotonic clock pushing the value negative)
+ *
+ * Orchestrators that just want the duration read `durationMs`; consumers
+ * doing cross-phase correlation (e.g. drawing a timeline) read
+ * `startedAt` / `finishedAt`.
+ */
+export interface ColdStartBreakdownData {
+  event: 'cold_start_breakdown';
+  /** Which cold-start phase this breakdown covers. */
+  phase: ColdStartPhase;
+  /**
+   * ms timestamp captured immediately before the phase began. Same
+   * epoch as `Date.now()`.
+   */
+  startedAt: number;
+  /**
+   * ms timestamp captured in the `finally` block after the phase
+   * exited (either via successful return or thrown). Same epoch as
+   * `startedAt`.
+   */
+  finishedAt: number;
+  /**
+   * `finishedAt - startedAt`, floored at 0. A non-monotonic clock can
+   * occasionally produce `finishedAt < startedAt` (NTP slew, container
+   * pause); the floor keeps the wire contract `>= 0` so consumers can
+   * safely sum durations without sentinel checks.
+   */
+  durationMs: number;
+}
+
+/**
+ * Pure helper — derive the `cold_start_breakdown` payload from a
+ * `(phase, startedAt, finishedAt)` triple. Floors `durationMs` at 0
+ * so a non-monotonic clock can't ship a negative duration.
+ *
+ * Pure for unit testing — used by both the emitter and the
+ * regression suite.
+ */
+export function buildColdStartBreakdown(
+  phase: ColdStartPhase,
+  startedAt: number,
+  finishedAt: number,
+): ColdStartBreakdownData {
+  // Floor finishedAt at startedAt so durationMs is always >= 0. Cheaper
+  // than `Math.max(0, finishedAt - startedAt)` AND preserves the
+  // invariant `finishedAt >= startedAt` on the wire (an orchestrator
+  // computing `finishedAt - startedAt` itself stays consistent with
+  // our durationMs).
+  const safeFinishedAt = Math.max(startedAt, finishedAt);
+  return {
+    event: 'cold_start_breakdown',
+    phase,
+    startedAt,
+    finishedAt: safeFinishedAt,
+    durationMs: safeFinishedAt - startedAt,
+  };
+}
+
 export type InnerAgentLifecycleData =
   | InnerAgentStartedData
   | ToolCallData
@@ -1140,7 +1264,8 @@ export type InnerAgentLifecycleData =
   | CurrentFileData
   | StallStatusData
   | RunResumedData
-  | AttemptStartedData;
+  | AttemptStartedData
+  | ColdStartBreakdownData;
 
 /**
  * Coarse-grained orchestrator-facing phase boundaries for a wizard run.

@@ -1236,6 +1236,30 @@ export async function initializeAgent(
     const useDirectApiKey = !!process.env.ANTHROPIC_API_KEY;
     const useLocalClaude = !config.amplitudeBearerToken && !useDirectApiKey;
 
+    // PR B5: per-phase cold-start timing breakdown emitter. Each phase
+    // boundary (gateway_probe, mcp_bootstrap) below is wrapped in a
+    // `try/finally` so the breakdown event always ships, even when the
+    // phase throws — orchestrators see a timing breadcrumb for the
+    // failing phase rather than a silent gap on the wire. No-op on
+    // InkUI / LoggingUI (only AgentUI implements the method).
+    const emitColdStartPhase = (
+      phase: 'mcp_bootstrap' | 'gateway_probe',
+      startedAt: number,
+    ): void => {
+      try {
+        getUI().emitColdStartBreakdown?.({
+          phase,
+          startedAt,
+          finishedAt: Date.now(),
+        });
+      } catch (err) {
+        logToFile(
+          `[agent-interface] emitColdStartBreakdown(${phase}) threw`,
+          err,
+        );
+      }
+    };
+
     if (useDirectApiKey) {
       // An inherited ANTHROPIC_AUTH_TOKEN from an outer agent session would
       // override ANTHROPIC_API_KEY in some SDK paths. Clear it so the user's
@@ -1251,8 +1275,18 @@ export async function initializeAgent(
       // Configure LLM gateway environment variables (inherited by SDK subprocess)
       const gatewayUrl = getLlmGatewayUrlFromHost(config.amplitudeApiHost);
 
-      // Fail fast if the gateway isn't responding rather than hanging indefinitely
-      const alive = await checkGatewayLiveness(gatewayUrl);
+      // Fail fast if the gateway isn't responding rather than hanging
+      // indefinitely. Wrapped in `try/finally` so the `gateway_probe`
+      // breakdown event ships even when the gateway is unreachable —
+      // orchestrators see the probe's timing on the wire (and the
+      // accompanying thrown error envelope) instead of a silent stall.
+      const gatewayProbeStartedAt = Date.now();
+      let alive = false;
+      try {
+        alive = await checkGatewayLiveness(gatewayUrl);
+      } finally {
+        emitColdStartPhase('gateway_probe', gatewayProbeStartedAt);
+      }
       if (!alive) {
         throw new Error(
           `Could not reach the Amplitude LLM gateway (${gatewayUrl}). ` +
@@ -1465,12 +1499,22 @@ export async function initializeAgent(
 
     // Add in-process wizard tools (env files, package manager detection).
     // The status reporter is wired up per-run by runAgent via setStatusReporter.
-    const wizardToolsServer = await createWizardToolsServer({
-      workingDirectory: config.workingDirectory,
-      detectPackageManager: config.detectPackageManager,
-      skillsBaseUrl: config.skillsBaseUrl,
-      statusReporter: () => _activeStatusReporter,
-    });
+    // Wrapped in `try/finally` so the `mcp_bootstrap` breakdown event
+    // ships even when wizard-tools-server creation throws — orchestrators
+    // see the boot's timing on the wire (paired with the thrown error
+    // envelope) instead of a silent stall.
+    const mcpBootstrapStartedAt = Date.now();
+    let wizardToolsServer: Awaited<ReturnType<typeof createWizardToolsServer>>;
+    try {
+      wizardToolsServer = await createWizardToolsServer({
+        workingDirectory: config.workingDirectory,
+        detectPackageManager: config.detectPackageManager,
+        skillsBaseUrl: config.skillsBaseUrl,
+        statusReporter: () => _activeStatusReporter,
+      });
+    } finally {
+      emitColdStartPhase('mcp_bootstrap', mcpBootstrapStartedAt);
+    }
     mcpServers['wizard-tools'] = wizardToolsServer;
 
     const agentRunConfig: AgentRunConfig = {
