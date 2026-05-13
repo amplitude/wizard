@@ -1392,6 +1392,65 @@ export function buildAgentEnv(
 }
 
 /**
+ * Claude Code built-in tools the wizard never invokes. Each name maps to a
+ * JSONSchema (~250–400 tokens) the SDK otherwise embeds in every turn's
+ * system prefix. Disallowing them shaves ~3–6K tokens off cold start and
+ * pushes the first-compaction watermark out by ~5–10 turns.
+ *
+ * Justifications by category:
+ *   - Task / TaskOutput / TaskStop — commandments forbid spawning subagents
+ *     (`commandments.ts`: "Do not spawn subagents unless explicitly
+ *     instructed.").
+ *   - CronCreate / CronDelete / CronList / ScheduleWakeup — wizard runs are
+ *     synchronous and bounded; no scheduled callbacks.
+ *   - EnterWorktree / ExitWorktree — wizard operates on the user's installDir
+ *     directly, never branches a worktree.
+ *   - EnterPlanMode / ExitPlanMode — plan-mode is unused; commandments and
+ *     skills already pin down the workflow.
+ *   - AskUserQuestion — user prompts go through the `wizard-tools` MCP
+ *     (`confirm`, `choose`, `confirm_event_plan`), not the built-in.
+ *   - NotebookEdit — wizard writes source files via Write/Edit/MultiEdit;
+ *     no Jupyter-notebook integrations exist.
+ *   - ReadMcpResourceTool — wizard never reads MCP resources by URI;
+ *     resource discovery uses ListMcpResourcesTool only (which stays allowed).
+ *
+ * Override: set `AMPLITUDE_WIZARD_BUILTIN_TOOL_FILTER=full` to re-enable all
+ * built-ins for one run (debugging or experiments that need a normally-dead
+ * tool). Mirrors `AMPLITUDE_WIZARD_MCP_TOOL_FILTER=full` for the MCP surface.
+ */
+export const DISALLOWED_BUILTIN_TOOLS: readonly string[] = [
+  'Task',
+  'TaskOutput',
+  'TaskStop',
+  'CronCreate',
+  'CronDelete',
+  'CronList',
+  'EnterWorktree',
+  'ExitWorktree',
+  'ScheduleWakeup',
+  'EnterPlanMode',
+  'ExitPlanMode',
+  'AskUserQuestion',
+  'NotebookEdit',
+  'ReadMcpResourceTool',
+];
+
+/**
+ * Build the disallowed built-in tools list, honoring the
+ * `AMPLITUDE_WIZARD_BUILTIN_TOOL_FILTER=full` escape hatch.
+ *
+ * Exported for unit testing.
+ */
+export function buildDisallowedBuiltinTools(
+  env: NodeJS.ProcessEnv = process.env,
+): string[] {
+  if (env.AMPLITUDE_WIZARD_BUILTIN_TOOL_FILTER === 'full') {
+    return [];
+  }
+  return [...DISALLOWED_BUILTIN_TOOLS];
+}
+
+/**
  * Initialize agent configuration for the LLM gateway
  */
 export async function initializeAgent(
@@ -1642,6 +1701,26 @@ export async function initializeAgent(
       );
     }
 
+    // Disallow Claude Code built-ins the wizard never invokes (Task,
+    // CronCreate, NotebookEdit, …). See `DISALLOWED_BUILTIN_TOOLS` for the
+    // per-tool justification. Saves ~3–6K tokens of dead JSONSchema per turn.
+    // Opt out via `AMPLITUDE_WIZARD_BUILTIN_TOOL_FILTER=full`.
+    const disallowedBuiltinTools = buildDisallowedBuiltinTools();
+    if (disallowedBuiltinTools.length > 0) {
+      logToFile(
+        `Built-in tool surface capped: disallow ${disallowedBuiltinTools.length} unused tools (set AMPLITUDE_WIZARD_BUILTIN_TOOL_FILTER=full to opt out)`,
+      );
+    } else if (process.env.AMPLITUDE_WIZARD_BUILTIN_TOOL_FILTER === 'full') {
+      logToFile(
+        'Built-in tool surface uncapped (AMPLITUDE_WIZARD_BUILTIN_TOOL_FILTER=full)',
+      );
+    }
+
+    const combinedDisallowedTools = [
+      ...disallowedAmplitudeTools,
+      ...disallowedBuiltinTools,
+    ];
+
     for (const [name, { url }] of Object.entries(
       config.additionalMcpServers ?? {},
     )) {
@@ -1662,8 +1741,8 @@ export async function initializeAgent(
       workingDirectory: config.workingDirectory,
       mcpServers,
       disallowedTools:
-        disallowedAmplitudeTools.length > 0
-          ? disallowedAmplitudeTools
+        combinedDisallowedTools.length > 0
+          ? combinedDisallowedTools
           : undefined,
       // Mode → model alias. Default 'standard' = current behavior;
       // see `docs/internal/agent-mode-flag.md` for the full mapping.
@@ -3013,10 +3092,12 @@ export async function runAgent(
             cwd: agentConfig.workingDirectory,
             permissionMode: 'acceptEdits',
             mcpServers: agentConfig.mcpServers,
-            // Drop unused Amplitude MCP tools from the prompt entirely.
-            // Built in `initializeAgent` from `AMPLITUDE_MCP_TOOL_ALLOWLIST`;
-            // saves ~15-18K tokens of dead JSONSchema per turn. Opt out via
-            // `AMPLITUDE_WIZARD_MCP_TOOL_FILTER=full`.
+            // Drop unused Amplitude MCP tools AND unused Claude Code built-ins
+            // from the prompt entirely. Built in `initializeAgent` from
+            // `AMPLITUDE_MCP_TOOL_ALLOWLIST` + `DISALLOWED_BUILTIN_TOOLS`;
+            // saves ~18-24K tokens of dead JSONSchema per turn combined.
+            // Opt out via `AMPLITUDE_WIZARD_MCP_TOOL_FILTER=full` and/or
+            // `AMPLITUDE_WIZARD_BUILTIN_TOOL_FILTER=full`.
             ...(agentConfig.disallowedTools &&
             agentConfig.disallowedTools.length > 0
               ? { disallowedTools: agentConfig.disallowedTools }
