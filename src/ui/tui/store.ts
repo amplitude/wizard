@@ -147,9 +147,55 @@ export type PendingPrompt =
       resolve: (value: EventPlanDecision) => void;
     };
 
+/**
+ * Build the internal session store.
+ *
+ * Patches nanostores' `map.setKey` to mutate the underlying object
+ * in-place instead of allocating a fresh `{ ...prev, [key]: value }`
+ * spread.
+ *
+ * **Why this matters (env-picker race fix):** bin.ts holds a `session`
+ * reference that it mutates in-place during checkpoint hydration,
+ * `resolveCredentials`, and `applyEnvSelectionDeferral`. It then calls
+ * `tui.store.session = session` to re-emit. With nanostores' default
+ * setKey behavior, the FIRST in-store setter (e.g. `concludeIntro`
+ * fired when the user clicks Continue on the checkpoint Resume prompt
+ * while `resolveCredentials` is still awaiting) replaces
+ * `$session.value` with a new `{ ...spread, introConcluded: true }`
+ * object. After that point, bin.ts's `session` ref is detached from
+ * `$session.value`; subsequent in-place mutations by the deferral
+ * (`session.pendingEnvSelection = true`, `session.credentials = null`)
+ * never reach the store. The final `tui.store.session = session` then
+ * REPLACES the store's accumulated state with the stale bin.ts ref,
+ * wiping the user's `introConcluded = true` progress and producing
+ * either a bump back to Intro or a stall on Setup with no env-picker
+ * surface.
+ *
+ * Patching setKey to mutate in-place keeps `$session.value` and the
+ * bin.ts `session` ref pointing at the same object for the entire
+ * run, so external mutations propagate transparently and store
+ * setters don't clobber them. `notify()` still fires per key for the
+ * React `useSyncExternalStore` bridge (which reads `$version`); the
+ * only observable behavior change is that listeners using
+ * `listenKeys` would see the new value via both args of their
+ * callback. The wizard's UI doesn't use `listenKeys` anywhere — the
+ * canonical sync path is `emitChange()` → `$version` bump, which is
+ * unaffected.
+ */
+function createSessionStore() {
+  const m = map<WizardSession>(buildSession({}));
+  m.setKey = function setKeyInPlace(key, value) {
+    if (m.value[key] !== value) {
+      m.value[key] = value;
+      m.notify(m.value, key);
+    }
+  };
+  return m;
+}
+
 export class WizardStore {
   // ── Internal nanostore atoms ─────────────────────────────────────
-  private $session = map<WizardSession>(buildSession({}));
+  private $session = createSessionStore();
   private $statusMessages = atom<string[]>([]);
   private $tasks = atom<TaskItem[]>([]);
   private $eventPlan = atom<PlannedEvent[]>([]);
