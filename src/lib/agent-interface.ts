@@ -688,6 +688,192 @@ export function stripStreamEventNoise(data: string): {
 }
 
 /**
+ * Match a stderr block that contains the SDK's `task_notification` →
+ * `sendRequest` → `Error("Stream closed")` race (Claude Agent SDK 0.2.121).
+ *
+ * When the agent spawns a background task (e.g. a long-running install)
+ * the SDK's notification handler at `cli.js:9207-9212` tries to deliver
+ * the task-completion via `sendRequest`. If the input stream has begun
+ * closing (which it always has during teardown / between attempts), the
+ * SDK throws `Error("Stream closed")`. The throw includes a ~10-line
+ * stack-trace blob that gets dumped wholesale to stderr and lands in
+ * `log.txt`, looking like a hard crash to the user.
+ *
+ * Detection is intentionally generous — the blob arrives in a single
+ * batched chunk and we check for both signals (`Error: Stream closed`
+ * and the `cli.js:9212` source location or `sendRequest` frame) so we
+ * don't accidentally collapse some other module's "Stream closed" line.
+ *
+ * Exported for unit tests.
+ */
+const SDK_STREAM_CLOSED_RE =
+  /Error:\s*Stream closed[\s\S]*?(?:cli\.js:9\d{3}|sendRequest|task_notification)/i;
+
+/**
+ * Heuristic guess at the call-site context that triggered the SDK
+ * Stream-closed race. The hottest path is `task_notification` (background
+ * task completion), but the same race can fire on other control-request
+ * subtypes if teardown wins. Returned as the analytics property `context`
+ * so we can correlate frequency with specific subtypes when filing the
+ * upstream Anthropic SDK issue.
+ */
+function detectSdkStreamClosedContext(
+  data: string,
+): 'task_notification' | 'unknown' {
+  return /task_notification/i.test(data) ? 'task_notification' : 'unknown';
+}
+
+/**
+ * Per-line matchers for the SDK race noise. Mirrors
+ * `partitionHookBridgeRace` / `stripStreamEventNoise`: chunk-level
+ * matching would drop genuine errors that happen to ride alongside the
+ * SDK noise in a single batched stderr chunk, so we identify only the
+ * noise lines and let everything else pass through.
+ *
+ * - `Error: Stream closed` (the trigger line)
+ * - stack-frame lines pointing at `cli.js:9NNN` or naming `sendRequest`
+ * - `at next (1:11)` / `at <anonymous> ...` continuation frames
+ * - decompiled-source dump lines `9NNN | ...`
+ * - the `Error in hook callback hook_<n>:` originator line that
+ *   precedes the dump
+ */
+const SDK_STREAM_CLOSED_TRIGGER_LINE_RE =
+  /\b(?:error|Error):\s*Stream closed\b/;
+const SDK_STREAM_CLOSED_SDK_FRAME_RE =
+  /(?:cli\.js:9\d{3}|\bsendRequest\b|\btask_notification\b)/i;
+const SDK_STREAM_CLOSED_STACK_FRAME_RE =
+  /^\s*at\s+(?:[\w$<>.]+\s+\([^)]*cli\.js:\d+:\d+\)|<anonymous>\s+\([^)]*cli\.js:\d+:\d+\)|next\s+\(\d+:\d+\)|[\w$]+\s+\([^)]*cli\.js:\d+:\d+\))\s*$/;
+const SDK_STREAM_CLOSED_DECOMPILED_LINE_RE = /^\s*9\d{3}\s*\|/;
+const SDK_STREAM_CLOSED_HOOK_ORIGIN_RE = /^Error in hook callback\s+hook_\d+:/;
+
+function isSdkStreamClosedNoiseLine(line: string): boolean {
+  return (
+    SDK_STREAM_CLOSED_TRIGGER_LINE_RE.test(line) ||
+    SDK_STREAM_CLOSED_STACK_FRAME_RE.test(line) ||
+    SDK_STREAM_CLOSED_DECOMPILED_LINE_RE.test(line) ||
+    SDK_STREAM_CLOSED_HOOK_ORIGIN_RE.test(line)
+  );
+}
+
+/**
+ * Detect (and collapse) a CLI-stderr block dominated by the SDK's
+ * `task_notification` → `Stream closed` race (see `SDK_STREAM_CLOSED_RE`).
+ * When matched, the multi-line stack-trace + decompiled-source dump is
+ * replaced with a single succinct line so the Logs tab stays readable
+ * and the per-line "errors" count (driven by the literal token "error"
+ * in `src/ui/tui/utils/log-viewer.ts`) does not balloon by ~10× per
+ * occurrence. Crucially the replacement line uses the word `failure`-
+ * free phrasing so the LogViewer regex does not classify it as an
+ * error — the SDK-side throw is harmless to the run, the wizard
+ * recovers transparently.
+ *
+ * Splits line-by-line (NOT chunk-level) so a genuine error riding in
+ * the same batched stderr write as the SDK noise is preserved in the
+ * passthrough. The returned `collapsedLine` replaces only the noise
+ * lines; the caller is responsible for emitting the passthrough lines
+ * separately if any survive.
+ *
+ * Returns `null` if the chunk does not contain the SDK race, so the
+ * caller can fall through to its existing logging path unchanged.
+ *
+ * Exported for unit tests.
+ */
+export function collapseSdkStreamClosedNoise(data: string): {
+  collapsedLine: string;
+  suppressedLines: number;
+  context: 'task_notification' | 'unknown';
+  passthrough: string;
+} | null {
+  // Cheap chunk-level guard: must contain BOTH the trigger and an SDK
+  // signal somewhere in the chunk. Avoids walking lines for every
+  // unrelated stderr write.
+  if (!SDK_STREAM_CLOSED_RE.test(data)) return null;
+
+  const hadTrailingNewline = data.endsWith('\n');
+  const lines = data.split('\n');
+  if (hadTrailingNewline) lines.pop();
+
+  let suppressed = 0;
+  let sawSdkFrame = false;
+  const kept: string[] = [];
+  for (const line of lines) {
+    if (isSdkStreamClosedNoiseLine(line)) {
+      suppressed++;
+      if (SDK_STREAM_CLOSED_SDK_FRAME_RE.test(line)) sawSdkFrame = true;
+      continue;
+    }
+    kept.push(line);
+  }
+
+  // Confirm the noise window itself contained an SDK frame — otherwise
+  // a bare "Error: Stream closed" line from userland accidentally
+  // caught by the cheap chunk-level RE should NOT be collapsed.
+  if (suppressed === 0 || !sawSdkFrame) return null;
+
+  const context = detectSdkStreamClosedContext(data);
+  // Drop blank/whitespace-only lines from the passthrough — they're
+  // typically the formatting separators inside the SDK dump itself
+  // (between the decompiled-source block and the stack trace) and
+  // would otherwise leak through as a stray empty log line.
+  const meaningfulKept = kept.filter((l) => l.trim().length > 0);
+  const passthrough =
+    meaningfulKept.length === 0
+      ? ''
+      : meaningfulKept.join('\n') + (hadTrailingNewline ? '\n' : '');
+  return {
+    collapsedLine: `[CLI stderr] SDK stream-closed race during ${context} (suppressed ${suppressed} stack-trace line${
+      suppressed === 1 ? '' : 's'
+    }; benign — run continues)`,
+    suppressedLines: suppressed,
+    context,
+    passthrough,
+  };
+}
+
+/**
+ * True if `err` is the SDK's `task_notification` → `sendRequest` race
+ * surfaced as `Error: Stream closed`. Both the `canUseTool` callback
+ * and the `gatedPreToolUse` hook can hit this — the SDK's permission
+ * delivery path is shared. Exported for unit tests so we can pin the
+ * matching rules without re-implementing them in the test file.
+ */
+export function isSdkStreamClosedError(err: unknown): boolean {
+  return err instanceof Error && err.message.includes('Stream closed');
+}
+
+/**
+ * Run an SDK control-request callback (canUseTool or PreToolUse hook)
+ * and convert a `Stream closed` throw into the caller-supplied "allow"
+ * result. The SDK 0.2.121 race fires when the input stream begins
+ * closing mid-permission-check (typically during `task_notification`
+ * or end-of-attempt teardown); letting it propagate causes the SDK to
+ * surface `Tool permission request failed: Error: Stream closed` to
+ * the agent, which then retries the same tool — wasting turns on a
+ * benign upstream bug.
+ *
+ * `allowResult` differs by callsite (canUseTool wants
+ * `{ behavior: 'allow', ... }`; PreToolUse wants `{}`), so callers
+ * pass their own.
+ *
+ * Exported for unit tests.
+ */
+export async function swallowSdkStreamClosed<T>(
+  run: () => Promise<T> | T,
+  allowResult: T,
+  onSwallow: (err: Error) => void,
+): Promise<T> {
+  try {
+    return await run();
+  } catch (err) {
+    if (isSdkStreamClosedError(err)) {
+      onSwallow(err as Error);
+      return allowResult;
+    }
+    throw err;
+  }
+}
+
+/**
  * Prompt injected by the Stop hook when the most recent
  * `confirm_event_plan` decision was `feedback` and the agent has not
  * called the tool again. Tells the agent to revise IN-PROCESS — without
@@ -2952,14 +3138,54 @@ export async function runAgent(
                   input: redactToolLogPayload(input),
                 });
               }
-              const result = wizardCanUseTool(
-                toolName,
-                input as Record<string, unknown>,
+              // SDK 0.2.121 race: a control_request can throw
+              // `Error: Stream closed` when the input stream begins
+              // closing mid-permission-check (typically during
+              // task_notification or a teardown-pending attempt).
+              // Letting that throw propagate causes the SDK to send
+              // the agent a `Tool permission request failed: Error:
+              // Stream closed` tool_result, which the agent then
+              // retries — wasting turns on a benign upstream race.
+              // Allow the tool through; the upstream stream is dying
+              // anyway and our hook gates already vetted intent.
+              return swallowSdkStreamClosed(
+                () => {
+                  const result = wizardCanUseTool(
+                    toolName,
+                    input as Record<string, unknown>,
+                  );
+                  if (logThis) {
+                    logToFile(
+                      'canUseTool result:',
+                      redactToolLogPayload(result),
+                    );
+                  }
+                  return result;
+                },
+                // Pass the original input through as `updatedInput` —
+                // the SDK uses this as the actual arguments when it
+                // executes the tool. An empty object would strip
+                // `command` / `file_path` / etc. on the rare race where
+                // the SDK still dispatches a tool whose canUseTool was
+                // submitted before the stream closed.
+                {
+                  behavior: 'allow',
+                  updatedInput: input as Record<string, unknown>,
+                } as ReturnType<typeof wizardCanUseTool>,
+                () => {
+                  logToFile(
+                    'canUseTool: SDK stream closed mid-permission-check; allowing tool to proceed (SDK race)',
+                  );
+                  try {
+                    analytics.wizardCapture('sdk transient stream closed', {
+                      context: 'unknown',
+                      'tool name': toolName,
+                    });
+                  } catch {
+                    // Analytics must never break tool gating.
+                  }
+                },
               );
-              if (logThis) {
-                logToFile('canUseTool result:', redactToolLogPayload(result));
-              }
-              return Promise.resolve(result);
             },
             tools: { type: 'preset', preset: 'claude_code' },
             // Capture stderr from CLI subprocess for debugging.
@@ -2980,11 +3206,45 @@ export async function runAgent(
               const race = partitionHookBridgeRace(data);
               hookBridgeRaceSuppressed += race.suppressed;
               const stream = stripStreamEventNoise(race.passthrough);
-              if (stream.passthrough.length > 0) {
-                logToFile('CLI stderr:', stream.passthrough);
+              if (stream.passthrough.length === 0) return;
+              // SDK 0.2.121 task_notification race: the multi-line
+              // `Error: Stream closed` stack-trace + decompiled cli.js
+              // source dump shows up here as one batched chunk. Collapse
+              // to a single line so the Logs tab stays usable and the
+              // per-entry error counter doesn't get inflated by ~10×
+              // per occurrence. Analytics fires once per occurrence
+              // (NOT per line) so we can track upstream-issue frequency.
+              const sdkRace = collapseSdkStreamClosedNoise(stream.passthrough);
+              if (sdkRace) {
+                logToFile(sdkRace.collapsedLine);
                 if (options.debug) {
-                  debug('CLI stderr:', stream.passthrough);
+                  debug(sdkRace.collapsedLine);
                 }
+                try {
+                  analytics.wizardCapture('sdk transient stream closed', {
+                    context: sdkRace.context,
+                    'suppressed lines': sdkRace.suppressedLines,
+                  });
+                } catch {
+                  // Analytics must never break the stderr pipeline.
+                }
+                // Any genuine error lines that rode alongside the SDK
+                // noise in the same batched chunk survive in
+                // `passthrough` — emit them so we don't swallow real
+                // errors. (`partitionHookBridgeRace` /
+                // `stripStreamEventNoise` already enforce the same
+                // line-level invariant upstream.)
+                if (sdkRace.passthrough.length > 0) {
+                  logToFile('CLI stderr:', sdkRace.passthrough);
+                  if (options.debug) {
+                    debug('CLI stderr:', sdkRace.passthrough);
+                  }
+                }
+                return;
+              }
+              logToFile('CLI stderr:', stream.passthrough);
+              if (options.debug) {
+                debug('CLI stderr:', stream.passthrough);
               }
             },
             hooks: (() => {
@@ -3135,8 +3395,32 @@ export async function runAgent(
                   .catch((err: unknown) => {
                     logToFile('inner PreToolUse observer threw:', err);
                   });
-                const gate = Promise.resolve(
-                  gatedPreToolUse(input, toolUseID, hookOpts),
+                // SDK 0.2.121 race: the gate itself can throw
+                // `Error: Stream closed` when the SDK is mid-teardown
+                // (task_notification path most commonly). Treat that as
+                // "allow" — the upstream stream is dying anyway and
+                // letting it propagate causes the SDK to surface
+                // `Tool permission request failed` to the agent, which
+                // wastes a retry. See `canUseTool` above for the same
+                // pattern; both paths can race independently.
+                const gate = swallowSdkStreamClosed(
+                  () => gatedPreToolUse(input, toolUseID, hookOpts),
+                  {} as Record<string, unknown>,
+                  () => {
+                    const toolUseId =
+                      typeof toolUseID === 'string' ? toolUseID : undefined;
+                    logToFile(
+                      'gatedPreToolUse: SDK stream closed mid-permission-check; allowing tool to proceed (SDK race)',
+                    );
+                    try {
+                      analytics.wizardCapture('sdk transient stream closed', {
+                        context: 'unknown',
+                        ...(toolUseId ? { 'tool use id': toolUseId } : {}),
+                      });
+                    } catch {
+                      // Analytics must never break the gate.
+                    }
+                  },
                 );
                 const [, gateResult] = await Promise.all([observer, gate]);
                 return gateResult;

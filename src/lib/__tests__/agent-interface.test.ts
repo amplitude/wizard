@@ -4179,6 +4179,118 @@ describe('partitionHookBridgeRace', () => {
   });
 });
 
+describe('swallowSdkStreamClosed (canUseTool / gatedPreToolUse race guard)', () => {
+  // Covers Part 1 of the SDK 0.2.121 hotfix: a control-request that
+  // throws `Error: Stream closed` mid-permission-check (typically
+  // during task_notification or end-of-attempt teardown) must NOT be
+  // surfaced to the agent — the SDK would otherwise wrap it as
+  // "Tool permission request failed", and the agent would retry the
+  // same tool. The wrapper translates a Stream-closed throw into a
+  // caller-supplied "allow" sentinel and emits an analytics event so
+  // we can track upstream-issue frequency.
+  let swallowSdkStreamClosed: typeof import('../agent-interface').swallowSdkStreamClosed;
+  let isSdkStreamClosedError: typeof import('../agent-interface').isSdkStreamClosedError;
+
+  beforeEach(async () => {
+    ({ swallowSdkStreamClosed, isSdkStreamClosedError } = await import(
+      '../agent-interface'
+    ));
+  });
+
+  it('detects only Stream-closed throws via isSdkStreamClosedError', () => {
+    expect(isSdkStreamClosedError(new Error('Stream closed'))).toBe(true);
+    expect(
+      isSdkStreamClosedError(new Error('something Stream closed here')),
+    ).toBe(true);
+    expect(isSdkStreamClosedError(new Error('TypeError: foo'))).toBe(false);
+    expect(isSdkStreamClosedError('Stream closed')).toBe(false); // non-Error
+    expect(isSdkStreamClosedError(undefined)).toBe(false);
+  });
+
+  it('returns the run() result when no error is thrown', async () => {
+    const onSwallow = vi.fn();
+    const result = await swallowSdkStreamClosed(
+      () => Promise.resolve({ behavior: 'allow' as const }),
+      { behavior: 'allow' as const, updatedInput: {} },
+      onSwallow,
+    );
+    expect(result).toEqual({ behavior: 'allow' });
+    expect(onSwallow).not.toHaveBeenCalled();
+  });
+
+  it('returns the allow sentinel when run() throws Stream closed', async () => {
+    // canUseTool shape: behavior=allow with empty updatedInput. The
+    // payload here is what the SDK would receive in lieu of the throw
+    // — proving the agent never sees "Tool permission request failed".
+    const allow = { behavior: 'allow' as const, updatedInput: {} };
+    const onSwallow = vi.fn();
+    const result = await swallowSdkStreamClosed(
+      () => {
+        throw new Error('Stream closed');
+      },
+      allow,
+      onSwallow,
+    );
+    expect(result).toEqual(allow);
+    expect(onSwallow).toHaveBeenCalledTimes(1);
+    expect(onSwallow).toHaveBeenCalledWith(expect.any(Error));
+  });
+
+  it('returns the gatedPreToolUse-shaped allow ({}) when the hook throws Stream closed', async () => {
+    // PreToolUse hook returns `{}` for "no decision / allow". This
+    // pins the second callsite shape so a refactor can't silently
+    // change the contract.
+    const onSwallow = vi.fn();
+    const result = await swallowSdkStreamClosed(
+      () => Promise.reject(new Error('Stream closed during sendRequest')),
+      {} as Record<string, unknown>,
+      onSwallow,
+    );
+    expect(result).toEqual({});
+    expect(onSwallow).toHaveBeenCalledTimes(1);
+  });
+
+  it('rethrows non-Stream-closed errors so genuine bugs still surface', async () => {
+    // Critical: we MUST NOT swallow other errors. If a real bug shows
+    // up in wizardCanUseTool or createPreToolUseHook, the agent needs
+    // to see it (or, more commonly, the run needs to crash visibly).
+    const onSwallow = vi.fn();
+    await expect(
+      swallowSdkStreamClosed(
+        () => {
+          throw new Error('TypeError: Cannot read property foo of undefined');
+        },
+        { behavior: 'allow' as const, updatedInput: {} },
+        onSwallow,
+      ),
+    ).rejects.toThrow('TypeError');
+    expect(onSwallow).not.toHaveBeenCalled();
+  });
+
+  it('fires analytics callback exactly once per swallow', async () => {
+    // The runAgent wiring uses onSwallow to call
+    // analytics.wizardCapture('sdk transient stream closed', ...).
+    // Two consecutive races must produce two events — never zero,
+    // never duplicated within a single throw.
+    const onSwallow = vi.fn();
+    await swallowSdkStreamClosed(
+      () => {
+        throw new Error('Stream closed');
+      },
+      {} as Record<string, unknown>,
+      onSwallow,
+    );
+    await swallowSdkStreamClosed(
+      () => {
+        throw new Error('Stream closed');
+      },
+      {} as Record<string, unknown>,
+      onSwallow,
+    );
+    expect(onSwallow).toHaveBeenCalledTimes(2);
+  });
+});
+
 describe('looksLikeStreamEventLine', () => {
   it('matches bare-JSON stream events', () => {
     expect(
