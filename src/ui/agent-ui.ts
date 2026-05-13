@@ -25,9 +25,11 @@ import type {
   VerificationResultData,
   SetupContextData,
   SetupCompleteData,
+  FileChangeErrorClass,
 } from '../lib/agent-events';
 import {
   EVENT_DATA_VERSIONS,
+  buildProgressEstimate,
   classifyRunError,
   nextDecisionId,
   truncateLogMessage,
@@ -1081,7 +1083,21 @@ export class AgentUI implements WizardUI {
 
   // ── Post-agent step lifecycle ───────────────────────────────────────
 
+  // PR B4: track the post-agent step queue locally so `setPostAgentStep`
+  // can emit a `progress_estimate` rollup at each terminal-state
+  // transition (`completed` / `skipped`). Without the seeded total we
+  // couldn't compute the percent — orchestrators would see fine-grained
+  // `post_agent_step` events but no canonical progress bar to render.
+  private _postAgentStepIds: string[] = [];
+  private _postAgentStepDone = new Set<string>();
+
   seedPostAgentSteps(steps: PostAgentStep[]): void {
+    // Reset the per-run tracking. A second `seedPostAgentSteps` call
+    // is rare but supported (e.g. agent run + verify run on the same
+    // session); the prior queue's progress shouldn't bleed into the
+    // new one.
+    this._postAgentStepIds = steps.map((s) => s.id);
+    this._postAgentStepDone = new Set<string>();
     emit('progress', `post_agent_seeded: ${steps.length} step(s)`, {
       data: {
         event: 'post_agent_seeded',
@@ -1106,6 +1122,52 @@ export class AgentUI implements WizardUI {
         reason: patch.reason,
       },
     });
+    // PR B4: emit the orchestrator-facing rollup on terminal-state
+    // transitions. `in_progress` / `pending` aren't terminal — we
+    // don't bump `current` for them (a step bouncing back to
+    // `pending` from `in_progress` shouldn't lower the percent on
+    // the wire).
+    if (
+      (patch.status === 'completed' || patch.status === 'skipped') &&
+      this._postAgentStepIds.includes(id) &&
+      !this._postAgentStepDone.has(id)
+    ) {
+      this._postAgentStepDone.add(id);
+      this.emitProgressEstimate({
+        stage: 'post_agent_steps',
+        current: this._postAgentStepDone.size,
+        total: this._postAgentStepIds.length,
+      });
+    }
+  }
+
+  // ── PR B4: progress_estimate (orchestrator rollup) ──────────────────
+  //
+  // Multi-item operations (post-agent step queue, MCP install across
+  // editors, event-plan write) advertise a single canonical
+  // `(stage, current, total, percent)` envelope at every meaningful
+  // boundary. Orchestrators that want to render a progress bar
+  // subscribe to `progress_estimate` and ignore the fine-grained
+  // per-item events.
+
+  emitProgressEstimate(args: {
+    stage: string;
+    current: number;
+    total: number;
+  }): void {
+    const payload = buildProgressEstimate(args.stage, args.current, args.total);
+    if (payload === null) {
+      // total < 1 — no-op. Orchestrators must not see a
+      // `progress_estimate` for a zero-item operation.
+      return;
+    }
+    emit(
+      'progress',
+      `progress_estimate: ${payload.stage} ${payload.current}/${payload.total} (${payload.percent}%)`,
+      {
+        data: payload,
+      },
+    );
   }
 
   // ── Session state ───────────────────────────────────────────────────
@@ -1267,6 +1329,45 @@ export class AgentUI implements WizardUI {
       `transient_retry: attempt ${data.attempt}/${data.totalAttempts} in ${data.nextRetryInMs}ms (${data.reason})`,
       {
         data: { event: 'transient_retry', ...data },
+      },
+    );
+  }
+
+  // ── PR B4: attempt_started ──────────────────────────────────────────
+  //
+  // `transient_retry` answers "the wizard decided to retry; sleeping Ns".
+  // `attempt_started` answers "attempt N is now actually running" —
+  // emitted at the top of each outer-loop iteration AFTER the backoff
+  // sleep has elapsed and a fresh AbortController has been wired up.
+  // The two together let orchestrators render a faithful retry-lifecycle
+  // banner without timing inference.
+
+  emitAttemptStarted(data: {
+    attemptNumber: number;
+    totalBudget: number;
+    reason: 'cold_start' | 'stall_retry' | 'auth_refresh' | 'network_retry';
+    backoffMs?: number;
+  }): void {
+    const suffix =
+      data.backoffMs !== undefined && data.backoffMs > 0
+        ? ` after ${data.backoffMs}ms backoff`
+        : '';
+    emit(
+      'progress',
+      `attempt_started: ${data.attemptNumber}/${data.totalBudget} (${data.reason})${suffix}`,
+      {
+        data: {
+          event: 'attempt_started',
+          attemptNumber: data.attemptNumber,
+          totalBudget: data.totalBudget,
+          reason: data.reason,
+          // Only include backoffMs when explicitly provided — omitting
+          // it on the wire keeps the cold-start envelope minimal
+          // (orchestrators read absence as "no backoff preceded").
+          ...(data.backoffMs !== undefined
+            ? { backoffMs: data.backoffMs }
+            : {}),
+        },
       },
     );
   }
@@ -1437,7 +1538,7 @@ export class AgentUI implements WizardUI {
   emitFileChangeFailed(data: {
     path: string;
     operation: 'create' | 'modify' | 'delete';
-    errorClass: 'permission' | 'not_found' | 'syntax' | 'generic';
+    errorClass: FileChangeErrorClass;
     errorMessage: string;
   }): void {
     emit(

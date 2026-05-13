@@ -17,6 +17,7 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { AgentUI } from '../agent-ui.js';
 import {
   EVENT_DATA_VERSIONS,
+  buildProgressEstimate,
   classifyFileChangeError,
   deriveStallTier,
 } from '../../lib/agent-events.js';
@@ -355,9 +356,15 @@ describe('AgentUI.emitFileChangeFailed (v2: write-failure event)', () => {
     expect(event.data_version).toBe(EVENT_DATA_VERSIONS.file_change_failed);
   });
 
-  it('accepts all four documented errorClass values', () => {
+  it('accepts all five documented errorClass values', () => {
     const ui = new AgentUI();
-    const classes = ['permission', 'not_found', 'syntax', 'generic'] as const;
+    const classes = [
+      'permission',
+      'not_found',
+      'syntax',
+      'timeout',
+      'generic',
+    ] as const;
     for (const errorClass of classes) {
       ui.emitFileChangeFailed?.({
         path: '/abs/a',
@@ -398,6 +405,13 @@ describe('classifyFileChangeError', () => {
       'permission',
     );
     expect(classifyFileChangeError('Permission Denied')).toBe('permission');
+    // PR B4 — extended patterns
+    expect(classifyFileChangeError('EPERM: operation not permitted')).toBe(
+      'permission',
+    );
+    expect(classifyFileChangeError('EROFS: read-only file system')).toBe(
+      'permission',
+    );
   });
 
   it('classifies not-found failures', () => {
@@ -405,6 +419,8 @@ describe('classifyFileChangeError', () => {
       'not_found',
     );
     expect(classifyFileChangeError('file not found')).toBe('not_found');
+    // PR B4 — extended pattern
+    expect(classifyFileChangeError('Path does not exist')).toBe('not_found');
   });
 
   it('classifies edit syntax failures', () => {
@@ -416,11 +432,408 @@ describe('classifyFileChangeError', () => {
     expect(classifyFileChangeError('SyntaxError: Unexpected token')).toBe(
       'syntax',
     );
+    // PR B4 — extended patterns
+    expect(classifyFileChangeError('Old string did not match in file')).toBe(
+      'syntax',
+    );
+    expect(classifyFileChangeError('Unexpected token } in JSON')).toBe(
+      'syntax',
+    );
+    expect(classifyFileChangeError('Invalid JSON: trailing comma')).toBe(
+      'syntax',
+    );
+  });
+
+  it('classifies timeout failures (PR B4)', () => {
+    // ETIMEDOUT from Node fs / network — transient, retry-safe.
+    expect(classifyFileChangeError('ETIMEDOUT: operation timed out')).toBe(
+      'timeout',
+    );
+    expect(classifyFileChangeError('Operation timed out after 30s')).toBe(
+      'timeout',
+    );
+    expect(classifyFileChangeError('Request timeout')).toBe('timeout');
+    expect(classifyFileChangeError('deadline exceeded')).toBe('timeout');
+  });
+
+  it('prefers timeout over not_found when both signals appear', () => {
+    // The SDK occasionally surfaces ETIMEDOUT wrapped with secondary
+    // text that mentions "not found" — we want the timeout signal to
+    // win so retry-aware consumers don't treat a transient as a
+    // permanent failure. Tests the explicit ordering in the
+    // classifier.
+    expect(classifyFileChangeError('ETIMEDOUT (path not found in cache)')).toBe(
+      'timeout',
+    );
+  });
+
+  it('does NOT misclassify ENOENT for filenames containing the word "timeout" (Bugbot 3217634988)', () => {
+    // Regression: the broad `lower.includes('timeout')` check would
+    // fire on filenames like `request-timeout.ts`, causing ENOENT
+    // errors to be classified as 'timeout' (transient) instead of
+    // 'not_found' (permanent). Retry-aware orchestrators would burn
+    // retry budget re-issuing writes against files that genuinely
+    // don't exist. The fix swaps the bare substring for specific
+    // tokens that match real timeout phrasing but never a file path.
+    expect(
+      classifyFileChangeError(
+        'ENOENT: no such file or directory, open src/lib/request-timeout.ts',
+      ),
+    ).toBe('not_found');
+    expect(
+      classifyFileChangeError('File not found: utils/timeout-handler.js'),
+    ).toBe('not_found');
+    // Real timeout patterns must still classify correctly — these are
+    // the patterns the fix keeps after dropping the broad substring.
+    expect(classifyFileChangeError('Connection timeout: 30s')).toBe('timeout');
+    expect(classifyFileChangeError('Read timeout after 5000ms')).toBe(
+      'timeout',
+    );
+    expect(classifyFileChangeError('timeout: 1000ms')).toBe('timeout');
   });
 
   it('defaults to generic for unrecognized failures', () => {
     expect(classifyFileChangeError('something exploded')).toBe('generic');
     expect(classifyFileChangeError('')).toBe('generic');
+  });
+});
+
+// ── PR B4: attempt_started ──────────────────────────────────────────
+
+describe('AgentUI.emitAttemptStarted (PR B4: retry lifecycle)', () => {
+  let writes: string[];
+  let restore: () => void;
+
+  beforeEach(() => {
+    ({ writes, restore } = setupStdoutSpy());
+  });
+  afterEach(() => restore());
+
+  it('emits a progress: attempt_started for the cold-start attempt without backoffMs', () => {
+    const ui = new AgentUI();
+    ui.emitAttemptStarted?.({
+      attemptNumber: 1,
+      totalBudget: 4,
+      reason: 'cold_start',
+    });
+    const event = lastEvent(writes);
+    expect(event.type).toBe('progress');
+    expect(event.message).toBe('attempt_started: 1/4 (cold_start)');
+    expect(event.data).toMatchObject({
+      event: 'attempt_started',
+      attemptNumber: 1,
+      totalBudget: 4,
+      reason: 'cold_start',
+    });
+    // Cold-start envelope must not carry backoffMs on the wire — the
+    // absence is the contract orchestrators read as "no preceding sleep".
+    expect(event.data).not.toHaveProperty('backoffMs');
+    expect(event.data_version).toBe(EVENT_DATA_VERSIONS.attempt_started);
+  });
+
+  it('emits a stall_retry attempt with backoffMs surfaced', () => {
+    const ui = new AgentUI();
+    ui.emitAttemptStarted?.({
+      attemptNumber: 2,
+      totalBudget: 4,
+      reason: 'stall_retry',
+      backoffMs: 2_500,
+    });
+    const event = lastEvent(writes);
+    expect(event.message).toBe(
+      'attempt_started: 2/4 (stall_retry) after 2500ms backoff',
+    );
+    expect(event.data).toMatchObject({
+      event: 'attempt_started',
+      attemptNumber: 2,
+      totalBudget: 4,
+      reason: 'stall_retry',
+      backoffMs: 2_500,
+    });
+  });
+
+  it('accepts all four documented reason values', () => {
+    const ui = new AgentUI();
+    const reasons = [
+      'cold_start',
+      'stall_retry',
+      'auth_refresh',
+      'network_retry',
+    ] as const;
+    for (const reason of reasons) {
+      ui.emitAttemptStarted?.({
+        attemptNumber: 1,
+        totalBudget: 4,
+        reason,
+      });
+    }
+    const events = eventsOfType(writes, 'progress').filter(
+      (e) => e.data?.event === 'attempt_started',
+    );
+    expect(events.map((e) => e.data?.reason)).toEqual([...reasons]);
+  });
+
+  it('omits backoffMs from the wire when 0 is passed (matches cold-start contract)', () => {
+    // Defensive: if a caller explicitly forwards backoffMs=0, the
+    // emitter still includes it on the wire (the emitter's contract is
+    // "include when explicitly provided"). The CALLER in
+    // agent-interface.ts gates on `> 0` — these two test cases pin
+    // both halves of the contract.
+    const ui = new AgentUI();
+    ui.emitAttemptStarted?.({
+      attemptNumber: 3,
+      totalBudget: 4,
+      reason: 'network_retry',
+      backoffMs: 0,
+    });
+    const event = lastEvent(writes);
+    // Explicit 0 IS included on the wire (caller's choice).
+    expect(event.data).toMatchObject({ backoffMs: 0 });
+  });
+
+  it('stamps the registered data_version', () => {
+    const ui = new AgentUI();
+    ui.emitAttemptStarted?.({
+      attemptNumber: 1,
+      totalBudget: 4,
+      reason: 'cold_start',
+    });
+    const event = lastEvent(writes);
+    expect(event.data_version).toBe(EVENT_DATA_VERSIONS.attempt_started);
+  });
+
+  it('preserves @timestamp as an ISO string', () => {
+    const ui = new AgentUI();
+    ui.emitAttemptStarted?.({
+      attemptNumber: 1,
+      totalBudget: 4,
+      reason: 'cold_start',
+    });
+    const event = lastEvent(writes);
+    expect(typeof event['@timestamp']).toBe('string');
+    expect(() => new Date(event['@timestamp'])).not.toThrow();
+  });
+});
+
+describe('emitAttemptStarted no-op on non-AgentUI implementations', () => {
+  it('is optional on the WizardUI base interface (InkUI / LoggingUI do not implement)', async () => {
+    // Smoke check: only AgentUI provides the method. The optional
+    // method signature on WizardUI is the load-bearing contract that
+    // lets agent-interface.ts call `getUI().emitAttemptStarted?.(...)`
+    // without crashing in TUI / CI mode.
+    const { LoggingUI } = await import('../logging-ui.js');
+    const logging = new LoggingUI();
+    expect(
+      (logging as unknown as { emitAttemptStarted?: unknown })
+        .emitAttemptStarted,
+    ).toBeUndefined();
+  });
+});
+
+// ── PR B4: progress_estimate ────────────────────────────────────────
+
+describe('AgentUI.emitProgressEstimate (PR B4: rollup)', () => {
+  let writes: string[];
+  let restore: () => void;
+
+  beforeEach(() => {
+    ({ writes, restore } = setupStdoutSpy());
+  });
+  afterEach(() => restore());
+
+  it('emits a progress: progress_estimate with stage/current/total/percent', () => {
+    const ui = new AgentUI();
+    ui.emitProgressEstimate?.({
+      stage: 'mcp_install',
+      current: 2,
+      total: 4,
+    });
+    const event = lastEvent(writes);
+    expect(event.type).toBe('progress');
+    expect(event.message).toBe('progress_estimate: mcp_install 2/4 (50%)');
+    expect(event.data).toMatchObject({
+      event: 'progress_estimate',
+      stage: 'mcp_install',
+      current: 2,
+      total: 4,
+      percent: 50,
+    });
+    expect(event.data_version).toBe(EVENT_DATA_VERSIONS.progress_estimate);
+  });
+
+  it('no-ops when total < 1 (no zero-item operations on the wire)', () => {
+    const ui = new AgentUI();
+    ui.emitProgressEstimate?.({
+      stage: 'event_plan_write',
+      current: 0,
+      total: 0,
+    });
+    const events = eventsOfType(writes, 'progress').filter(
+      (e) => e.data?.event === 'progress_estimate',
+    );
+    expect(events.length).toBe(0);
+  });
+
+  it('clamps current to the [0, total] window', () => {
+    const ui = new AgentUI();
+    ui.emitProgressEstimate?.({
+      stage: 'mcp_install',
+      current: 10,
+      total: 4,
+    });
+    const event = lastEvent(writes);
+    expect(event.data).toMatchObject({ current: 4, percent: 100 });
+  });
+
+  it('emits a post_agent_steps rollup at terminal-state transitions only', () => {
+    const ui = new AgentUI();
+    ui.seedPostAgentSteps([
+      {
+        id: 'commit-events',
+        label: 'Commit events',
+        activeForm: 'Committing events',
+        status: 'pending',
+      },
+      {
+        id: 'create-dashboard',
+        label: 'Create dashboard',
+        activeForm: 'Creating dashboard',
+        status: 'pending',
+      },
+    ]);
+    // in_progress is NOT terminal — must not bump the estimate.
+    ui.setPostAgentStep('commit-events', { status: 'in_progress' });
+    let progressEstimates = eventsOfType(writes, 'progress').filter(
+      (e) => e.data?.event === 'progress_estimate',
+    );
+    expect(progressEstimates.length).toBe(0);
+
+    // completed IS terminal — bumps to 1/2 (50%).
+    ui.setPostAgentStep('commit-events', { status: 'completed' });
+    progressEstimates = eventsOfType(writes, 'progress').filter(
+      (e) => e.data?.event === 'progress_estimate',
+    );
+    expect(progressEstimates.length).toBe(1);
+    expect(progressEstimates[0].data).toMatchObject({
+      stage: 'post_agent_steps',
+      current: 1,
+      total: 2,
+      percent: 50,
+    });
+
+    // skipped also counts as terminal — bumps to 2/2 (100%).
+    ui.setPostAgentStep('create-dashboard', {
+      status: 'skipped',
+      reason: 'no events',
+    });
+    progressEstimates = eventsOfType(writes, 'progress').filter(
+      (e) => e.data?.event === 'progress_estimate',
+    );
+    expect(progressEstimates.length).toBe(2);
+    expect(progressEstimates[1].data).toMatchObject({
+      current: 2,
+      total: 2,
+      percent: 100,
+    });
+  });
+
+  it('idempotent on duplicate terminal-state transitions', () => {
+    // A step that lands on `completed` twice (e.g. retry path that
+    // re-emits) must not double-count the rollup. The Set-based
+    // dedup in AgentUI guarantees the count is monotone.
+    const ui = new AgentUI();
+    ui.seedPostAgentSteps([
+      {
+        id: 'commit-events',
+        label: 'Commit events',
+        activeForm: 'Committing events',
+        status: 'pending',
+      },
+    ]);
+    ui.setPostAgentStep('commit-events', { status: 'completed' });
+    ui.setPostAgentStep('commit-events', { status: 'completed' });
+    const progressEstimates = eventsOfType(writes, 'progress').filter(
+      (e) => e.data?.event === 'progress_estimate',
+    );
+    expect(progressEstimates.length).toBe(1);
+    expect(progressEstimates[0].data).toMatchObject({ current: 1, total: 1 });
+  });
+
+  it('resets the queue on a second seedPostAgentSteps call', () => {
+    const ui = new AgentUI();
+    ui.seedPostAgentSteps([
+      {
+        id: 's1',
+        label: 'Step 1',
+        activeForm: '...',
+        status: 'pending',
+      },
+    ]);
+    ui.setPostAgentStep('s1', { status: 'completed' });
+    // Re-seed with a different queue — the old `s1` completion
+    // should not bleed into the new total.
+    ui.seedPostAgentSteps([
+      {
+        id: 'a',
+        label: 'A',
+        activeForm: '...',
+        status: 'pending',
+      },
+      {
+        id: 'b',
+        label: 'B',
+        activeForm: '...',
+        status: 'pending',
+      },
+    ]);
+    ui.setPostAgentStep('a', { status: 'completed' });
+    const progressEstimates = eventsOfType(writes, 'progress').filter(
+      (e) => e.data?.event === 'progress_estimate',
+    );
+    // First seed: 1 progress_estimate. Second seed's first step: 1 more.
+    expect(progressEstimates.length).toBe(2);
+    expect(progressEstimates[1].data).toMatchObject({ current: 1, total: 2 });
+  });
+});
+
+describe('buildProgressEstimate (pure helper)', () => {
+  it('computes percent correctly', () => {
+    expect(buildProgressEstimate('s', 0, 4)).toMatchObject({ percent: 0 });
+    expect(buildProgressEstimate('s', 1, 4)).toMatchObject({ percent: 25 });
+    expect(buildProgressEstimate('s', 2, 4)).toMatchObject({ percent: 50 });
+    expect(buildProgressEstimate('s', 3, 4)).toMatchObject({ percent: 75 });
+    expect(buildProgressEstimate('s', 4, 4)).toMatchObject({ percent: 100 });
+  });
+
+  it('rounds percent (no fractional values on the wire)', () => {
+    // 1/3 ≈ 33.333 → 33 (Math.round)
+    expect(buildProgressEstimate('s', 1, 3)).toMatchObject({ percent: 33 });
+    // 2/3 ≈ 66.667 → 67
+    expect(buildProgressEstimate('s', 2, 3)).toMatchObject({ percent: 67 });
+  });
+
+  it('clamps negative current to 0', () => {
+    expect(buildProgressEstimate('s', -5, 4)).toMatchObject({
+      current: 0,
+      percent: 0,
+    });
+  });
+
+  it('clamps current > total to total', () => {
+    expect(buildProgressEstimate('s', 99, 4)).toMatchObject({
+      current: 4,
+      percent: 100,
+    });
+  });
+
+  it('floors fractional current', () => {
+    expect(buildProgressEstimate('s', 2.9, 4)).toMatchObject({ current: 2 });
+  });
+
+  it('returns null for total < 1 (no zero-item rollups)', () => {
+    expect(buildProgressEstimate('s', 0, 0)).toBeNull();
+    expect(buildProgressEstimate('s', 0, -1)).toBeNull();
+    expect(buildProgressEstimate('s', 0, NaN)).toBeNull();
   });
 });
 
@@ -431,6 +844,8 @@ describe('EVENT_DATA_VERSIONS (v2 entries registered)', () => {
     ['stall_status', 1],
     ['run_resumed', 1],
     ['file_change_failed', 1],
+    ['attempt_started', 1],
+    ['progress_estimate', 1],
   ] as const)('registers %s at version %d', (event, version) => {
     expect(
       (EVENT_DATA_VERSIONS as Readonly<Record<string, number>>)[event],

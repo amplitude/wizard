@@ -268,6 +268,50 @@ export const EVENT_DATA_VERSIONS = {
    */
   transient_retry: 1,
   /**
+   * `attempt_started` — emitted at the TOP of each outer retry-loop
+   * iteration in `agent-interface.ts` so orchestrators can tell when
+   * a retry attempt actually BEGINS (vs `transient_retry`, which
+   * fires WHEN the wizard decides to retry, well before backoff has
+   * elapsed). Pair with the existing `auth_retry_exhausted` and
+   * `transient_retry` envelopes to render an accurate attempt lifecycle.
+   *
+   *   transient_retry  → "decided to retry; sleeping Ns"
+   *   attempt_started  → "attempt N now beginning"
+   *   ...inner work...
+   *   transient_retry  → "decided to retry; sleeping Ns" (if it fails)
+   *   ...
+   *   auth_retry_exhausted | run_error → terminal
+   *
+   * `reason` discriminates why we entered this attempt:
+   *   - `cold_start`    — first attempt of the run (attempt 1)
+   *   - `stall_retry`   — previous attempt hit the stall timer
+   *   - `auth_refresh`  — previous attempt failed auth and we refreshed tokens
+   *   - `network_retry` — previous attempt failed with a transient API error
+   *                       (502 / 503 / 504 / ECONNRESET / `terminated`)
+   */
+  attempt_started: 1,
+  /**
+   * `progress_estimate` — emitted at every meaningful step boundary
+   * inside a multi-item operation (post-agent step queue,
+   * multi-editor MCP install, multi-event plan write). Carries the
+   * canonical `(stage, current, total, percent)` tuple so an
+   * orchestrator can render a progress bar without re-deriving it
+   * from a stream of finer-grained events.
+   *
+   *   `stage`   — short stable id of the operation
+   *               (e.g. `'post_agent_steps'`)
+   *   `current` — items completed so far (0..total)
+   *   `total`   — total items in the operation
+   *   `percent` — `Math.round(100 * current / total)` (0..100)
+   *
+   * Distinct from `post_agent_step` / `tool_call`: those are
+   * fine-grained per-item events; `progress_estimate` is the
+   * orchestrator-facing rollup. An orchestrator that wants to render
+   * a single progress bar subscribes to `progress_estimate` and
+   * ignores the fine-grained stream.
+   */
+  progress_estimate: 1,
+  /**
    * `compaction_started` — emitted by the PreCompact hook just before
    * the SDK summarises conversation history. Lets orchestrators render
    * a "compacting…" indicator during what would otherwise be silent
@@ -573,6 +617,54 @@ export interface NeedsInputWireData<V = string> {
 export type NeedsInputEvent<V = string> = AgentEventEnvelope<
   NeedsInputWireData<V>
 >;
+
+// ── waiting_for_user (documented alias for `needs_input`) ───────────
+//
+// Orchestrators reading the protocol docs see two names for the same
+// concept ("needs_input" in the wire / source, "waiting for user" in
+// human-facing copy and some early design notes). PR B2 deferred
+// reconciling these because `NeedsInputData` already provides the
+// typed schema and the wire emitter was settled.
+//
+// This module re-exports the same schema under the `waiting_for_user`
+// name so orchestrator authors can import whichever spelling matches
+// their mental model. The two are intentionally type-identical — adding
+// fields to `NeedsInputData` automatically picks them up here, and we
+// never emit a second envelope for the same event.
+//
+// CRITICAL: this is a documentation + type alias only. There is NO
+// `waiting_for_user` envelope on the wire — orchestrators that want
+// to subscribe still subscribe to `type === 'needs_input'`. We do not
+// register a separate `EVENT_DATA_VERSIONS.waiting_for_user` entry
+// because there is no separate event to version.
+
+/**
+ * Type alias for `NeedsInputData`. Documented name for the same wire
+ * event — orchestrators that prefer the "waiting for user" phrasing
+ * can import this type without changing the underlying schema. See
+ * `NeedsInputData` for the full contract.
+ *
+ * Use this for prompt-handling code paths where the human-facing copy
+ * reads "waiting for user input" but you want the typed schema. The
+ * wire-format `event` discriminator on `data` remains `'needs_input'`.
+ */
+export type WaitingForUserData<V = string> = NeedsInputData<V>;
+
+/**
+ * Type alias for `NeedsInputWireData`. The wire-format shape (with
+ * `event: 'needs_input'` discriminator) read from NDJSON. There is no
+ * separate `waiting_for_user` wire event — this is purely a name
+ * orchestrators may import when the readability of their consumer
+ * code benefits from it.
+ */
+export type WaitingForUserWireData<V = string> = NeedsInputWireData<V>;
+
+/**
+ * Type alias for `NeedsInputEvent`. The full envelope shape for the
+ * NDJSON `needs_input` line under its alternate name. See
+ * `NeedsInputEvent` for the canonical export.
+ */
+export type WaitingForUserEvent<V = string> = NeedsInputEvent<V>;
 
 /**
  * Wire shape of the `data` field on a `decision_auto` envelope.
@@ -891,6 +983,112 @@ export interface RunResumedData {
 }
 
 /**
+ * `progress_estimate` — orchestrator-facing rollup for multi-item
+ * operations. See `EVENT_DATA_VERSIONS.progress_estimate` for the full
+ * contract. The `stage` strings the wizard emits today:
+ *
+ *   `'post_agent_steps'`  — post-agent queue advance (commit-events,
+ *                           create-dashboard, etc.)
+ *   `'mcp_install'`       — multi-editor MCP install loop
+ *   `'event_plan_write'`  — event-plan track() write loop
+ *
+ * Additional `stage` strings are added as new long-running operations
+ * land. Orchestrators MUST treat `stage` as opaque — branching on
+ * specific stage strings is fine, but the absence of one shouldn't
+ * change consumer behaviour.
+ */
+export interface ProgressEstimateData {
+  event: 'progress_estimate';
+  /** Stable, opaque stage id (e.g. `'post_agent_steps'`). */
+  stage: string;
+  /** Items completed so far. Monotonically non-decreasing. */
+  current: number;
+  /** Total items in this stage. Must be >= 1 (no zero-total stages). */
+  total: number;
+  /** Pre-computed `Math.round(100 * current / total)` (0..100). */
+  percent: number;
+}
+
+/**
+ * Pure helper — derive the `progress_estimate` payload from a
+ * `(stage, current, total)` triple. Clamps `current` to the
+ * `[0, total]` window so a misbehaving caller can't ship a percent
+ * outside `[0, 100]`. Returns `null` when `total < 1` (no work to
+ * do — orchestrators should not see a `progress_estimate` for a
+ * zero-item operation).
+ *
+ * Pure for unit testing — used by both the emitter and the
+ * regression suite.
+ */
+export function buildProgressEstimate(
+  stage: string,
+  current: number,
+  total: number,
+): ProgressEstimateData | null {
+  if (!Number.isFinite(total) || total < 1) return null;
+  const clamped = Math.max(0, Math.min(total, Math.floor(current)));
+  const percent = Math.round((100 * clamped) / total);
+  return {
+    event: 'progress_estimate',
+    stage,
+    current: clamped,
+    total,
+    percent,
+  };
+}
+
+/**
+ * Reason an outer-loop attempt began. Discriminates the four canonical
+ * entry paths the runner takes. See `EVENT_DATA_VERSIONS.attempt_started`
+ * for the orchestrator-facing contract.
+ */
+export type AttemptStartedReason =
+  | 'cold_start'
+  | 'stall_retry'
+  | 'auth_refresh'
+  | 'network_retry';
+
+/**
+ * `attempt_started` — emitted at the TOP of each outer retry-loop
+ * iteration, AFTER any backoff sleep has elapsed and a fresh
+ * AbortController has been wired up but BEFORE the inner SDK query
+ * actually fires. Orchestrators that subscribed to `transient_retry`
+ * (the "deciding to retry" signal) pair it with `attempt_started`
+ * (the "now actually running" signal) to render an accurate retry
+ * lifecycle banner.
+ *
+ *   transient_retry → "decided to retry in Ns"
+ *   ...backoff sleep...
+ *   attempt_started → "attempt N now running"
+ *   ...
+ *
+ * `backoffMs` carries the actual sleep that just elapsed (zero for
+ * the cold-start attempt). Useful for accounting / metrics: a
+ * stack-aware orchestrator can sum the inter-attempt sleeps without
+ * re-parsing `transient_retry` events.
+ */
+export interface AttemptStartedData {
+  event: 'attempt_started';
+  /** 1-indexed attempt number for this run. `1` on cold start. */
+  attemptNumber: number;
+  /**
+   * Total attempt budget for this run (`MAX_RETRIES + 1` in
+   * `agent-interface.ts`). Lets orchestrators render
+   * "attempt N/M" without knowing the wizard's constant.
+   */
+  totalBudget: number;
+  /** Why this attempt began. */
+  reason: AttemptStartedReason;
+  /**
+   * Backoff that just elapsed before this attempt. `0` for the
+   * cold-start attempt (no preceding sleep). Matches the value
+   * passed to `emitTransientRetry`'s `nextRetryInMs` on the
+   * decision envelope that paired with this attempt.
+   */
+  backoffMs?: number;
+}
+
+/**
  * `file_change_failed` — emitted at PostToolUse for write tools
  * (Edit / Write / MultiEdit / NotebookEdit) when the tool reported
  * a failure. Pairs with the preceding `file_change_planned` for
@@ -902,12 +1100,22 @@ export interface RunResumedData {
  *   - `permission` — EACCES / "permission denied"
  *   - `not_found`  — ENOENT / "no such file"
  *   - `syntax`     — agent-side string-match failure on Edit / MultiEdit
+ *   - `timeout`    — ETIMEDOUT / "operation timed out" / SDK timeout —
+ *                   transient; an orchestrator can safely re-issue the
+ *                   write without changing the input. Distinct from
+ *                   `generic` so retry-aware consumers don't burn
+ *                   budget on a permanent failure.
  *   - `generic`    — anything else
+ *
+ * Adding a new variant is a `data_version` bump on `file_change_failed`
+ * (see `EVENT_DATA_VERSIONS`). Renaming an existing variant is also a
+ * bump because orchestrators key off the literal string.
  */
 export type FileChangeErrorClass =
   | 'permission'
   | 'not_found'
   | 'syntax'
+  | 'timeout'
   | 'generic';
 export interface FileChangeFailedData {
   event: 'file_change_failed';
@@ -931,7 +1139,8 @@ export type InnerAgentLifecycleData =
   | DiscoveryFactData
   | CurrentFileData
   | StallStatusData
-  | RunResumedData;
+  | RunResumedData
+  | AttemptStartedData;
 
 /**
  * Coarse-grained orchestrator-facing phase boundaries for a wizard run.
@@ -1554,7 +1763,10 @@ export function classifyFileChangeError(message: string): FileChangeErrorClass {
   if (
     lower.includes('permission denied') ||
     lower.includes('eacces') ||
-    lower.includes('write_refused')
+    lower.includes('eperm') ||
+    lower.includes('write_refused') ||
+    lower.includes('read-only file system') ||
+    lower.includes('erofs')
   ) {
     return 'permission';
   }
@@ -1566,14 +1778,39 @@ export function classifyFileChangeError(message: string): FileChangeErrorClass {
     lower.includes('string to replace') ||
     lower.includes('found multiple matches') ||
     lower.includes('found 0 matches') ||
-    lower.includes('syntaxerror')
+    lower.includes('did not match') ||
+    lower.includes('syntaxerror') ||
+    lower.includes('unexpected token') ||
+    lower.includes('invalid json')
   ) {
     return 'syntax';
+  }
+  // Timeout patterns — transient by definition. Check BEFORE not_found
+  // because `ETIMEDOUT` is sometimes wrapped with secondary text that
+  // could trip the `not found` heuristic. Use specific tokens, NOT the
+  // bare `'timeout'` substring — that would misclassify ENOENT errors
+  // for files like `request-timeout.ts` as transient and waste retry
+  // budget on a permanent failure. The patterns below match real
+  // timeout phrasing (Node error code, HTTP/operation phrases) but
+  // never an arbitrary file path.
+  if (
+    lower.includes('etimedout') ||
+    lower.includes('timed out') ||
+    lower.includes('request timeout') ||
+    lower.includes('connection timeout') ||
+    lower.includes('operation timeout') ||
+    lower.includes('read timeout') ||
+    lower.includes('write timeout') ||
+    /timeout:\s*\d/.test(lower) || // `timeout: 30s`, `timeout: 1000ms`
+    lower.includes('deadline exceeded')
+  ) {
+    return 'timeout';
   }
   if (
     lower.includes('no such file') ||
     lower.includes('enoent') ||
-    lower.includes('not found')
+    lower.includes('not found') ||
+    lower.includes('does not exist')
   ) {
     return 'not_found';
   }

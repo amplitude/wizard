@@ -188,8 +188,27 @@ export const addMCPServer = async (
   local?: boolean,
   zone: CloudRegion = 'us',
 ): Promise<void> => {
+  // PR B4: surface a `progress_estimate` rollup so orchestrators can
+  // render a single progress bar for the multi-editor install. Each
+  // client install emits one bump after it completes. Errors don't
+  // bump — the caller is responsible for treating a thrown install
+  // as a halt (orchestrators infer "stuck at X/N" from the absence of
+  // further bumps + the error envelope).
+  const ui = getUI();
+  let installed = 0;
   for (const client of clients) {
     await client.addServer(personalApiKey, selectedFeatures, local, zone);
+    installed++;
+    try {
+      ui.emitProgressEstimate?.({
+        stage: 'mcp_install',
+        current: installed,
+        total: clients.length,
+      });
+    } catch {
+      // UI emit failures must never abort the install loop — the
+      // estimate is cosmetic.
+    }
   }
 };
 

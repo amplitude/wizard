@@ -626,6 +626,54 @@ export interface WizardUI {
   }): void;
 
   /**
+   * Emitted at the top of each outer-loop attempt, AFTER any backoff
+   * sleep has elapsed and a fresh AbortController has been wired up
+   * but BEFORE the inner SDK query fires. Pair with `emitTransientRetry`
+   * (which fires at the DECISION point, before the sleep) to render
+   * an accurate attempt lifecycle: orchestrators see the "deciding to
+   * retry, sleeping Ns" envelope, then the matching "attempt N now
+   * running" envelope once work resumes.
+   *
+   * `backoffMs` carries the actual sleep that elapsed. Omitted on the
+   * wire for the cold-start attempt (no preceding sleep).
+   *
+   * Optional — only AgentUI emits. InkUI / LoggingUI no-op (the
+   * existing retry banner / log line already covers their UX).
+   */
+  emitAttemptStarted?(data: {
+    attemptNumber: number;
+    totalBudget: number;
+    reason: 'cold_start' | 'stall_retry' | 'auth_refresh' | 'network_retry';
+    backoffMs?: number;
+  }): void;
+
+  /**
+   * Orchestrator-facing rollup for multi-item operations. The wizard
+   * emits this at every meaningful step boundary of a long-running
+   * operation (post-agent queue advance, MCP install across editors,
+   * event-plan track() write). Carries the canonical
+   * `(stage, current, total)` triple — the emitter computes
+   * `percent` and clamps `current` to the `[0, total]` window so a
+   * misbehaving caller can't ship `percent > 100`.
+   *
+   * Distinct from the fine-grained per-item events (`post_agent_step`,
+   * `tool_call`): orchestrators that just want a single progress bar
+   * subscribe to `progress_estimate` and ignore the noisier stream.
+   *
+   * Optional — only AgentUI emits. InkUI / LoggingUI no-op (the TUI's
+   * journey stepper / panel already shows progress; CI logs the
+   * per-step lines).
+   */
+  emitProgressEstimate?(args: {
+    /** Stable, opaque stage id (e.g. `'post_agent_steps'`). */
+    stage: string;
+    /** Items completed so far. */
+    current: number;
+    /** Total items in this stage (>= 1). */
+    total: number;
+  }): void;
+
+  /**
    * Emitted just before the Claude Agent SDK runs an auto- or manual-
    * triggered context compaction. Pairs with `emitCompactionCompleted`
    * so orchestrators can render a "still working — compacting context"
@@ -728,7 +776,9 @@ export interface WizardUI {
    * orchestrator can label the failed write on the already-rendered
    * preview without parsing tool_result text. `errorClass`
    * discriminates the common failure modes (permission / not_found /
-   * syntax / generic) so the orchestrator can branch by kind.
+   * syntax / timeout / generic) so the orchestrator can branch by kind
+   * — `timeout` callers can retry without changing input, `permission`
+   * callers should escalate to the user, etc.
    *
    * Optional — only AgentUI emits. InkUI / LoggingUI no-op (the TUI
    * surfaces tool failures via the existing FileWritesPanel; CI logs
@@ -737,7 +787,7 @@ export interface WizardUI {
   emitFileChangeFailed?(data: {
     path: string;
     operation: 'create' | 'modify' | 'delete';
-    errorClass: 'permission' | 'not_found' | 'syntax' | 'generic';
+    errorClass: 'permission' | 'not_found' | 'syntax' | 'timeout' | 'generic';
     errorMessage: string;
   }): void;
 }
