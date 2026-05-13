@@ -181,6 +181,10 @@ describe('applyEnvSelectionDeferral', () => {
     expect(session.selectedAppId).toBeNull();
     // The new assertion that closes the bug — Auth.isComplete reads this.
     expect(session.credentials).toBeNull();
+    // The race-fix flag — gates Auth.isComplete AND every post-Auth show:
+    // predicate so the router collapses back to Auth even if it had
+    // already advanced past Auth on a prior frame (rehydrated rerun).
+    expect(session.pendingEnvSelection).toBe(true);
   });
 
   it('does nothing in --ci mode (structured rejection happens elsewhere)', () => {
@@ -243,6 +247,28 @@ describe('applyEnvSelectionDeferral', () => {
     expect(session.credentials).not.toBeNull();
     expect(session.selectedEnvName).toBe('production');
     expect(session.selectedAppId).toBe('67890');
+    // The flag must NOT be touched for non-environment_selection outcomes —
+    // it's an explicit opt-in per discriminant.
+    expect(session.pendingEnvSelection).toBe(false);
+  });
+
+  it('does not flip pendingEnvSelection when an earlier guard fails', () => {
+    // CI mode short-circuits before the flag-set; the flag must stay false.
+    const session = s({
+      credentials: { ...staleCredentials },
+      selectedEnvName: 'staging',
+      selectedAppId: '12345',
+      ci: true,
+      agent: false,
+    });
+
+    applyEnvSelectionDeferral(session, {
+      outcome: 'needs_user_choice',
+      kind: 'environment_selection',
+      envsWithKey: 2,
+    });
+
+    expect(session.pendingEnvSelection).toBe(false);
   });
 
   it('preserves credentials for outcome=api_key_notice', () => {

@@ -687,6 +687,25 @@ export interface WizardSession {
    */
   apiKeyNotice: string | null;
 
+  /**
+   * True when credential resolution returned `needs_user_choice /
+   * environment_selection` and the wizard needs the user to pick an
+   * env before any setup work proceeds. Set by `applyEnvSelectionDeferral`
+   * in `src/commands/helpers.ts`; cleared when AuthScreen finishes the
+   * env-pick via `setCredentials` for the chosen env.
+   *
+   * Without this flag, a first-run user with rehydrated session state
+   * could advance past Auth before async `resolveCredentials` returned —
+   * the credentials-clear half of PR #747 wasn't enough on its own
+   * because the router walks forward only. Even after the deferral
+   * nulled `credentials`, the router stayed parked on Setup (its
+   * `show:` predicate had already evaluated true on a prior frame) and
+   * never rewound to Auth. The flag gates Auth's `isComplete` AND every
+   * post-Auth `show:` predicate so the router collapses back to Auth as
+   * soon as the deferral fires.
+   */
+  pendingEnvSelection: boolean;
+
   // From OAuth
   credentials: {
     accessToken: string;
@@ -1348,6 +1367,7 @@ export function buildSession(args: {
     authPhase: AuthPhase.Idle,
     credentials: null,
     apiKeyNotice: null,
+    pendingEnvSelection: false,
     serviceStatus: null,
     retryState: null,
     currentActivity: null,

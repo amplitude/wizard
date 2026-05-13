@@ -702,6 +702,18 @@ export function gateCiSignupAcceptToS(
  * `needsEnvPick = projectChosen && hasMultipleEnvs && !selectedEnv` logic
  * renders the picker.
  *
+ * **Why `pendingEnvSelection` is also set** (race-condition fix):
+ *
+ * Clearing `credentials` alone wasn't enough. On a first-run rerun where the
+ * stepper has already rendered frame 1 with `✓ Auth ─ ● Setup ←` (because the
+ * session hydrated with non-null credentials + org + project), the router has
+ * already advanced past Auth. The router walks forward only — null'ing
+ * `credentials` mid-run does not rewind it. The user stays on Setup with no
+ * env-picker surface. Setting `pendingEnvSelection = true` gates both
+ * `Auth.isComplete` AND every post-Auth `show:` predicate, forcing the router
+ * to collapse back to Auth. The flag is cleared by `AuthScreen` once the user
+ * picks an env via `setCredentials` for the chosen environment.
+ *
  * Only the `environment_selection` discriminant nulls credentials. Other
  * `needs_user_choice` `kind`s (if added later — see
  * `ResolveCredentialsResult` in `src/lib/credential-resolution.ts`) MUST opt
@@ -728,6 +740,14 @@ export function applyEnvSelectionDeferral(
   // still selected, `Auth.isComplete` (flows.ts) returns true and the router
   // advances to Setup with no env-picker surface.
   session.credentials = null;
+  // CRITICAL part 2: even with credentials cleared, the router only walks
+  // forward — it doesn't rewind on its own. If a prior frame already had
+  // the router parked on Setup (because credentials/org/project were
+  // populated when the stepper rendered), clearing credentials mid-run
+  // doesn't pull the user back to Auth. `pendingEnvSelection` gates
+  // Auth.isComplete AND every post-Auth `show:` predicate, so the router
+  // collapses back to Auth on the next resolve.
+  session.pendingEnvSelection = true;
   return true;
 }
 

@@ -280,6 +280,9 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
         });
         store.setProjectHasData(false);
         store.setApiKeyNotice(null);
+        // Clear the env-picker deferral now that credentials landed — see
+        // `applyEnvSelectionDeferral` in src/commands/helpers.ts.
+        store.setPendingEnvSelection(false);
         return;
       }
 
@@ -305,6 +308,10 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
         });
         store.setProjectHasData(false);
         store.setApiKeyNotice(null);
+        // Clear the env-picker deferral now that the user has resolved the
+        // env pick by selecting an env with a known API key — see
+        // `applyEnvSelectionDeferral` in src/commands/helpers.ts.
+        store.setPendingEnvSelection(false);
         return;
       }
 
@@ -355,6 +362,9 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
         });
         store.setProjectHasData(false);
         store.setApiKeyNotice(null);
+        // Clear the env-picker deferral — credentials are now resolved
+        // via the backend fetch path. See `applyEnvSelectionDeferral`.
+        store.setPendingEnvSelection(false);
       } else {
         store.setApiKeyNotice(
           "Your API key couldn't be fetched automatically. " +
@@ -475,6 +485,9 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
     });
     // Fresh project: no existing event data — advance past DataSetup
     store.setProjectHasData(false);
+    // Manual API key entry resolves any pending env-picker deferral too —
+    // the user just supplied a key, so the flow should proceed forward.
+    store.setPendingEnvSelection(false);
     // Persist so the user doesn't have to enter it again
     void import('../../../utils/api-key-store.js').then(({ persistApiKey }) => {
       const source = persistApiKey(trimmed, session.installDir);

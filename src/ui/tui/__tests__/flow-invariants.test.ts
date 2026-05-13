@@ -952,3 +952,102 @@ describe('WizardRouter additional invariants', () => {
     );
   });
 });
+
+// ── pendingEnvSelection — env-picker race regression ─────────────────
+//
+// The bug: a first-run user with 2+ environments lands on a rehydrated
+// session that has `credentials`, `selectedOrgName`, `selectedProjectName`
+// all populated (from a checkpoint or stored API key). The stepper renders
+// frame 1 with `✓ Auth ─ ● Setup ←` because Auth.isComplete is true. Async
+// `resolveCredentials` then returns `needs_user_choice/environment_selection`;
+// `applyEnvSelectionDeferral` clears credentials AND sets
+// `pendingEnvSelection: true`. The router walks forward only, so without
+// the flag the user stays parked on Setup with no env-picker surface.
+// The flag gates Auth.isComplete AND every post-Auth `show:` predicate so
+// the router collapses back to Auth on the next resolve.
+
+describe('WizardRouter pendingEnvSelection rewinds the flow to Auth', () => {
+  it('routes a fully-authenticated rehydrated session back to Auth when the flag is set', () => {
+    const session = buildSession({});
+    const router = new WizardRouter(Flow.Wizard);
+
+    // Simulate the rehydrated rerun state that triggered the bug — all
+    // the conditions that normally pass Auth.isComplete are met.
+    session.introConcluded = true;
+    session.region = 'us';
+    applyAuthComplete(session);
+    // The flag is the lone reason Auth must win here.
+    session.pendingEnvSelection = true;
+
+    expect(router.resolve(session)).toBe(Screen.Auth);
+  });
+
+  it('does NOT route to Setup, Run, Mcp, or Outro while pendingEnvSelection is true', () => {
+    const session = buildSession({});
+    const router = new WizardRouter(Flow.Wizard);
+
+    // Walk session forward as if every downstream gate had already passed.
+    session.introConcluded = true;
+    session.region = 'us';
+    applyAuthComplete(session);
+    session.projectHasData = false;
+    session.activationLevel = 'none';
+    session.runPhase = RunPhase.Completed;
+    session.mcpComplete = true;
+    session.dataIngestionConfirmed = true;
+    session.slackComplete = true;
+    // Even in this fully-walked state, flipping the flag must rewind to Auth.
+    session.pendingEnvSelection = true;
+
+    const resolved = router.resolve(session);
+    expect(resolved).toBe(Screen.Auth);
+    expect(resolved).not.toBe(Screen.Setup);
+    expect(resolved).not.toBe(Screen.Run);
+    expect(resolved).not.toBe(Screen.Mcp);
+    expect(resolved).not.toBe(Screen.DataIngestionCheck);
+    expect(resolved).not.toBe(Screen.Slack);
+    expect(resolved).not.toBe(Screen.Outro);
+  });
+
+  it('clearing the flag lets the flow advance normally', () => {
+    const session = buildSession({});
+    const router = new WizardRouter(Flow.Wizard);
+
+    session.introConcluded = true;
+    session.region = 'us';
+    applyAuthComplete(session);
+    session.pendingEnvSelection = true;
+
+    // Flag set: parked on Auth.
+    expect(router.resolve(session)).toBe(Screen.Auth);
+
+    // Flag cleared (simulates AuthScreen finishing setCredentials for the
+    // chosen env): the flow advances to DataSetup as it normally would.
+    session.pendingEnvSelection = false;
+
+    expect(router.resolve(session)).toBe(Screen.DataSetup);
+  });
+
+  it('blocks Auth.isComplete even when credentials + org + project are all set', () => {
+    // Direct unit assertion on the gate predicate — the regression bug was
+    // that Auth.isComplete returned true on the rehydrated session, which
+    // is exactly what this test pins.
+    const session = buildSession({});
+    session.introConcluded = true;
+    session.region = 'us';
+    applyAuthComplete(session);
+
+    const authEntry = FLOWS[Flow.Wizard].find((e) => e.screen === Screen.Auth);
+    if (!authEntry?.isComplete) {
+      throw new Error('Auth entry missing isComplete — test setup error');
+    }
+
+    // Baseline: without the flag, Auth.isComplete is true.
+    session.pendingEnvSelection = false;
+    expect(authEntry.isComplete(session)).toBe(true);
+
+    // With the flag, Auth.isComplete must be false.
+    session.pendingEnvSelection = true;
+    expect(authEntry.isComplete(session)).toBe(false);
+  });
+});

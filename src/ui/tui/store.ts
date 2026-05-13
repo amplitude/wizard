@@ -481,6 +481,22 @@ export class WizardStore {
     this.emitChange();
   }
 
+  /**
+   * Set the env-picker deferral flag. `true` is written by
+   * `applyEnvSelectionDeferral` (helpers.ts) when `resolveCredentials`
+   * returns `needs_user_choice / environment_selection` — it forces the
+   * router to park on Auth even if it had already advanced past Auth on a
+   * prior frame (rehydrated rerun state). `false` is written by AuthScreen
+   * once the user picks an env via `setCredentials` for that environment.
+   *
+   * Distinct setter (not folded into `setCredentials`) so the deferral
+   * write site can flip it without going through credential validation.
+   */
+  setPendingEnvSelection(value: boolean): void {
+    this.$session.setKey('pendingEnvSelection', value);
+    this.emitChange();
+  }
+
   setFrameworkConfig(
     integration: WizardSession['integration'],
     config: WizardSession['frameworkConfig'],
