@@ -83,6 +83,60 @@ const SUPPORT_EMAIL = 'wizard@amplitude.com';
 export const POST_AGENT_STEP_COMMIT_EVENTS = 'commit-events';
 
 /**
+ * Cold-start parallelization helper.
+ *
+ * The agent cold-start used to run three independent steps serially:
+ *   1. `detectPackageManager` (filesystem walk)
+ *   2. AI-SDK gateway probe (LLM round-trip, baked into `getAgent`)
+ *   3. agent-SDK MCP-server bootstrap (also baked into `getAgent`)
+ *
+ * None of them feed each other — `getAgent` only takes a *reference* to
+ * the package-manager detector (so the wizard-tools MCP server can call
+ * it later for genuine mid-run verification), and the probe + MCP
+ * bootstrap are entirely independent of the detector. Running them in
+ * parallel saves 1-3s of dead wall time on every fresh run.
+ *
+ * Semantics:
+ *   - The agent leg uses `Promise.all` fail-fast — if it throws, we want
+ *     to surface that immediately rather than wait for the (best-effort)
+ *     detector to finish.
+ *   - The detector leg is best-effort: a slow / failing scan must not
+ *     block the agent from starting. We absorb its error into `null` so
+ *     the fail-fast contract above only applies to the agent. This
+ *     covers BOTH async rejections AND synchronous throws — the call-site
+ *     wrapper passed in is not `async`, so a detector that throws before
+ *     returning a Promise would otherwise propagate before `initAgent()`
+ *     was ever invoked.
+ *
+ * Pure for unit testing — exported so we can verify the parallelization
+ * exists by mocking each leg with a timing marker and asserting overlap.
+ */
+export async function runColdStartParallel<TPm, TAgent>(
+  detectPackageManager: () => Promise<TPm>,
+  initAgent: () => Promise<TAgent>,
+  onDetectorError?: (err: unknown) => void,
+): Promise<{ packageManagerInfo: TPm | null; agent: TAgent }> {
+  // Wrap the detector in `Promise.resolve().then(...)` so a *synchronous*
+  // throw becomes a rejected promise the `.catch()` below can absorb.
+  // The call-site wrapper (`() => config.detection.detectPackageManager(...)`)
+  // is not `async`, and several concrete detectors are plain functions that
+  // return `Promise.resolve(...)` — without this guard, a sync throw would
+  // propagate before `initAgent()` was ever invoked, violating the
+  // best-effort contract documented above.
+  const detectorPromise: Promise<TPm | null> = Promise.resolve()
+    .then(detectPackageManager)
+    .catch((err) => {
+      onDetectorError?.(err);
+      return null;
+    });
+  const [packageManagerInfo, agent] = await Promise.all([
+    detectorPromise,
+    initAgent(),
+  ]);
+  return { packageManagerInfo, agent };
+}
+
+/**
  * Build the "you can bypass the Amplitude gateway with a direct Anthropic
  * key" hint shown in upstream-failure error messages. Shared by the
  * GATEWAY_DOWN, terminated-400, rate-limit, and generic API_ERROR branches —
@@ -1082,34 +1136,6 @@ async function runAgentWizardBody(
     logToFile('cold-start: setCurrentActivity (project read) failed', err);
   }
 
-  // Pre-flight context block — gives the agent every piece of state the
-  // wizard already discovered (cwd, framework, package manager, env files,
-  // org/project, region, project-binding) so it doesn't reflexively burn
-  // ~30s of cold-start probing for things we can hand it directly. The
-  // discovery tools (`detect_package_manager`, `check_env_keys`, etc.)
-  // remain registered for genuine mid-run verification — only the
-  // start-of-run probe is suppressed (see commandments). Best-effort:
-  // the package-manager scan is wrapped so a slow / failing detector
-  // can't block the agent from starting.
-  let packageManagerInfo: Awaited<
-    ReturnType<typeof config.detection.detectPackageManager>
-  > | null = null;
-  try {
-    packageManagerInfo = await config.detection.detectPackageManager(
-      session.installDir,
-    );
-  } catch (err) {
-    preflightLog.warn('detectPackageManager failed', {
-      'error message': err instanceof Error ? err.message : String(err),
-    });
-  }
-
-  if (packageManagerInfo?.primary) {
-    publishDiscoveryFact('package-manager', {
-      label: 'Package manager',
-      value: packageManagerInfo.primary.label,
-    });
-  }
   if (session.selectedProjectName) {
     publishDiscoveryFact('project', {
       label: 'Project',
@@ -1120,64 +1146,6 @@ async function runAgentWizardBody(
     label: 'Region',
     value: cloudRegion.toUpperCase(),
   });
-
-  // Detect project size up-front and let `buildPreflightContext` make the
-  // gate decision. Internal LLM-reliability research recommends a JIT-
-  // context-loading posture for medium-and-up codebases; the full pre-
-  // flight Markdown dump only pays off on small projects where it
-  // eliminates the cold-start probe without crowding out attention budget.
-  // Detection has a hard 5s wall-clock cap inside `detectProjectSize`;
-  // large projects that hit the cap are treated as "use JIT" so we don't
-  // pay a probe tax to figure out we're large. Logging happens AFTER the
-  // gate so the diagnostic line reflects the authoritative decision the
-  // gate emitted (no risk of divergence between two recomputations).
-  const preflightCtx = await buildPreflightContext({
-    installDir: session.installDir,
-    integration: session.integration,
-    detectedFrameworkLabel: session.detectedFrameworkLabel,
-    frameworkVersion: frameworkVersion ?? null,
-    typescript: typeScriptDetected,
-    packageManagerInfo,
-    userEmail: session.userEmail,
-    selectedOrgId: session.selectedOrgId,
-    selectedOrgName: session.selectedOrgName,
-    selectedProjectId: session.selectedProjectId,
-    selectedProjectName: session.selectedProjectName,
-    selectedEnvName: session.selectedEnvName,
-    cloudRegion,
-    projectBound: fsSync.existsSync(
-      path.join(session.installDir, '.amplitude', 'project-binding.json'),
-    ),
-    frameworkContext,
-  });
-  preflightLog.info('project size detected', {
-    'file count': preflightCtx.projectSize.fileCount,
-    'event count': preflightCtx.projectSize.eventCount,
-    'timed out': preflightCtx.projectSize.timedOut,
-    'cap hit': preflightCtx.projectSize.capHit,
-    'file threshold': preflightCtx.thresholds.fileThreshold,
-    'event threshold': preflightCtx.thresholds.eventThreshold,
-    mode: preflightCtx.jitMode ? 'jit' : 'full',
-  });
-
-  const integrationPrompt =
-    preflightCtx.prompt +
-    '\n' +
-    buildIntegrationPrompt(
-      config,
-      {
-        frameworkVersion: frameworkVersion || 'latest',
-        typescript: typeScriptDetected,
-        projectApiKey,
-        host,
-        appId,
-        cloudRegion,
-      },
-      frameworkContext,
-      skipAmplitudeMcp,
-      integrationSkillIdForPrompt,
-    ) +
-    buildInlineFeatureSection(session.additionalFeatureQueue);
 
   // Initialize and run agent
   const spinner = getUI().spinner();
@@ -1242,31 +1210,120 @@ async function runAgentWizardBody(
     logToFile('cold-start: setCurrentActivity (init) failed', err);
   }
 
-  const agent = await getAgent(
-    {
-      workingDirectory: session.installDir,
-      amplitudeMcpUrl: mcpUrl,
-      amplitudeApiKey: projectApiKey,
-      amplitudeBearerToken: accessToken,
-      amplitudeApiHost: host,
-      additionalMcpServers: config.metadata.additionalMcpServers,
-      detectPackageManager: config.detection.detectPackageManager,
-      wizardFlags,
-      wizardMetadata,
-      skipAmplitudeMcp,
-      skillsBaseUrl,
-      agentSessionId: session.agentSessionId,
-      targetsBrowser: config.metadata.targetsBrowser,
-      mode: session.mode,
-      // Forward orchestrator-supplied context (from `--context-file`
-      // / `AMPLITUDE_WIZARD_CONTEXT`) so it lands in the cached
-      // system-prompt block alongside the commandments. Undefined when
-      // no context was provided — keeps the cached preset stable for
-      // every "no context" run.
-      orchestratorContext: session.orchestratorContext ?? undefined,
-    },
-    sessionToOptions(session),
+  // Cold-start parallelization (perf): the package-manager scan, the AI-SDK
+  // gateway probe, and the agent SDK MCP-server bootstrap are all independent
+  // — none of them feed each other. They used to run serially, costing 1-3s
+  // of dead wall time on every fresh run. Kick them off concurrently via
+  // {@link runColdStartParallel}.
+  //
+  // Data dependencies that gate this:
+  //   - `packageManagerInfo` feeds the preflight context block, which feeds
+  //     `integrationPrompt`. The prompt is consumed by `runAgentDispatch`,
+  //     NOT by `getAgent`, so the prompt build can wait until both halves
+  //     of `Promise.all` resolve.
+  //   - `getAgent` only takes a *reference* to `config.detection.detectPackageManager`
+  //     (so the wizard-tools MCP server can call it later for genuine
+  //     mid-run verification) — it does not call it during init.
+  //   - `wizardFlags` / `wizardMetadata` are computed above; `getAgent` reads
+  //     them as plain values.
+  const { packageManagerInfo, agent } = await runColdStartParallel(
+    () => config.detection.detectPackageManager(session.installDir),
+    () =>
+      getAgent(
+        {
+          workingDirectory: session.installDir,
+          amplitudeMcpUrl: mcpUrl,
+          amplitudeApiKey: projectApiKey,
+          amplitudeBearerToken: accessToken,
+          amplitudeApiHost: host,
+          additionalMcpServers: config.metadata.additionalMcpServers,
+          detectPackageManager: config.detection.detectPackageManager,
+          wizardFlags,
+          wizardMetadata,
+          skipAmplitudeMcp,
+          skillsBaseUrl,
+          agentSessionId: session.agentSessionId,
+          targetsBrowser: config.metadata.targetsBrowser,
+          mode: session.mode,
+          // Forward orchestrator-supplied context (from `--context-file`
+          // / `AMPLITUDE_WIZARD_CONTEXT`) so it lands in the cached
+          // system-prompt block alongside the commandments. Undefined when
+          // no context was provided — keeps the cached preset stable for
+          // every "no context" run.
+          orchestratorContext: session.orchestratorContext ?? undefined,
+        },
+        sessionToOptions(session),
+      ),
+    (err) =>
+      preflightLog.warn('detectPackageManager failed', {
+        'error message': err instanceof Error ? err.message : String(err),
+      }),
   );
+
+  if (packageManagerInfo?.primary) {
+    publishDiscoveryFact('package-manager', {
+      label: 'Package manager',
+      value: packageManagerInfo.primary.label,
+    });
+  }
+
+  // Pre-flight context block — gives the agent every piece of state the
+  // wizard already discovered (cwd, framework, package manager, env files,
+  // org/project, region, project-binding) so it doesn't reflexively burn
+  // ~30s of cold-start probing for things we can hand it directly. The
+  // discovery tools (`detect_package_manager`, `check_env_keys`, etc.)
+  // remain registered for genuine mid-run verification — only the
+  // start-of-run probe is suppressed (see commandments). After #603 the
+  // preflight builder also runs the project-size gate; logging happens
+  // here so the diagnostic line reflects the authoritative jit/full
+  // decision the gate emitted.
+  const preflightCtx = await buildPreflightContext({
+    installDir: session.installDir,
+    integration: session.integration,
+    detectedFrameworkLabel: session.detectedFrameworkLabel,
+    frameworkVersion: frameworkVersion ?? null,
+    typescript: typeScriptDetected,
+    packageManagerInfo,
+    userEmail: session.userEmail,
+    selectedOrgId: session.selectedOrgId,
+    selectedOrgName: session.selectedOrgName,
+    selectedProjectId: session.selectedProjectId,
+    selectedProjectName: session.selectedProjectName,
+    selectedEnvName: session.selectedEnvName,
+    cloudRegion,
+    projectBound: fsSync.existsSync(
+      path.join(session.installDir, '.amplitude', 'project-binding.json'),
+    ),
+    frameworkContext,
+  });
+  preflightLog.info('project size detected', {
+    'file count': preflightCtx.projectSize.fileCount,
+    'event count': preflightCtx.projectSize.eventCount,
+    'timed out': preflightCtx.projectSize.timedOut,
+    'cap hit': preflightCtx.projectSize.capHit,
+    'file threshold': preflightCtx.thresholds.fileThreshold,
+    'event threshold': preflightCtx.thresholds.eventThreshold,
+    mode: preflightCtx.jitMode ? 'jit' : 'full',
+  });
+
+  const integrationPrompt =
+    preflightCtx.prompt +
+    '\n' +
+    buildIntegrationPrompt(
+      config,
+      {
+        frameworkVersion: frameworkVersion || 'latest',
+        typescript: typeScriptDetected,
+        projectApiKey,
+        host,
+        appId,
+        cloudRegion,
+      },
+      frameworkContext,
+      skipAmplitudeMcp,
+      integrationSkillIdForPrompt,
+    ) +
+    buildInlineFeatureSection(session.additionalFeatureQueue);
 
   // Always run observability middleware for structured logging + Sentry breadcrumbs.
   // Retry middleware surfaces transient gateway retries to the UI.
