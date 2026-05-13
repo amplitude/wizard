@@ -29,6 +29,7 @@ import type {
 import {
   EVENT_DATA_VERSIONS,
   classifyRunError,
+  nextDecisionId,
   truncateLogMessage,
   type RecoverableHint,
   type SuggestedAction,
@@ -259,20 +260,31 @@ function lookupDataVersion(
  * wiring (when we honor `--auto-approve` strictly) will add
  * `back_compat` (the `--agent` implies-autoApprove path) so
  * orchestrators can detect and migrate away from the implicit grant.
+ *
+ * `decisionId` MUST be the value returned by the matching
+ * `emitNeedsInput` call. Callers obtain it from `emitNeedsInput`'s
+ * return value rather than minting their own — this is the
+ * single-writer invariant that keeps ids monotonic and unique.
  */
 function emitDecisionAuto(data: {
   code: string;
+  decisionId: string;
   value: unknown;
   reason: 'auto_approve' | 'back_compat';
 }): void {
-  emit('lifecycle', `decision_auto: ${data.code}=${String(data.value)}`, {
-    data: {
-      event: 'decision_auto',
-      code: data.code,
-      value: data.value,
-      reason: data.reason,
+  emit(
+    'lifecycle',
+    `decision_auto: ${data.code}=${String(data.value)} (${data.decisionId})`,
+    {
+      data: {
+        event: 'decision_auto',
+        code: data.code,
+        decisionId: data.decisionId,
+        value: data.value,
+        reason: data.reason,
+      },
     },
-  });
+  );
 }
 
 /**
@@ -842,11 +854,21 @@ export class AgentUI implements WizardUI {
    * audit) before proceeding with `recommended`. When neither
    * `--auto-approve` nor `--yes` is set in agent mode, the caller should
    * emit + exit `ExitCode.INPUT_REQUIRED` (12).
+   *
+   * Returns the freshly-minted `decisionId` (e.g. `dec_001`). Callers
+   * MUST thread this id through to the matching `decision_auto`
+   * (or other resolution envelope) so orchestrators can pair the
+   * request with the response. If the caller supplies a `decisionId`
+   * on `data`, it is honored verbatim (used by test fixtures and the
+   * paged env-picker that wants a stable id across pages); otherwise
+   * a fresh id is minted from the process-local counter.
    */
-  emitNeedsInput<V = string>(data: NeedsInputData<V>): void {
+  emitNeedsInput<V = string>(data: NeedsInputData<V>): string {
+    const decisionId = data.decisionId ?? nextDecisionId();
     const wireData: NeedsInputWireData<V> = {
       event: 'needs_input',
       code: data.code,
+      decisionId,
       ui: data.ui,
       choices: data.choices,
       recommended: data.recommended,
@@ -858,6 +880,7 @@ export class AgentUI implements WizardUI {
       manualEntry: data.manualEntry,
     };
     emit('needs_input', data.message, { data: wireData });
+    return decisionId;
   }
 
   // ── Inner-agent lifecycle ───────────────────────────────────────────
@@ -1648,7 +1671,7 @@ export class AgentUI implements WizardUI {
     // Also emit the structured `needs_input` so new orchestrators can
     // inspect choices + resume flags. Default-yes preserves today's
     // auto-approve semantics.
-    this.emitNeedsInput({
+    const decisionId = this.emitNeedsInput({
       code: 'confirm',
       message,
       ui: {
@@ -1666,9 +1689,13 @@ export class AgentUI implements WizardUI {
     // subscribe to `needs_input` can tell "this was auto-resolved"
     // from "this is awaiting an answer". Order matters: needs_input
     // first, decision_auto after, both before the promise resolves
-    // (and before any subsequent control flow advances).
+    // (and before any subsequent control flow advances). The
+    // `decisionId` returned above ties the two envelopes together
+    // so a `code: 'confirm'` reuse later in the same run can't be
+    // mis-paired with this resolution.
     emitDecisionAuto({
       code: 'confirm',
+      decisionId,
       value: 'yes',
       reason: 'auto_approve',
     });
@@ -1682,7 +1709,7 @@ export class AgentUI implements WizardUI {
     });
     // Pick widget by list size: ≥10 options → searchable, else plain select.
     const component = options.length >= 10 ? 'searchable_select' : 'select';
-    this.emitNeedsInput({
+    const decisionId = this.emitNeedsInput({
       code: 'choice',
       message,
       ui: {
@@ -1698,6 +1725,7 @@ export class AgentUI implements WizardUI {
     });
     emitDecisionAuto({
       code: 'choice',
+      decisionId,
       value: selected,
       reason: 'auto_approve',
     });
@@ -1764,7 +1792,7 @@ export class AgentUI implements WizardUI {
     // contradicted the docstring on `EVENT_DATA_VERSIONS.decision_auto`.
     // Choices are flat strings so orchestrators can `resumeFlags`
     // their way into a different decision if a human is in the loop.
-    this.emitNeedsInput<'approved' | 'skipped' | 'revised'>({
+    const decisionId = this.emitNeedsInput<'approved' | 'skipped' | 'revised'>({
       code: 'event_plan',
       message: `Approve ${events.length} proposed events?`,
       ui: {
@@ -1821,9 +1849,12 @@ export class AgentUI implements WizardUI {
     // Companion `decision_auto` for the needs_input above. Orchestrators
     // subscribed to needs_input → decision_auto pairs can tell that
     // the wizard auto-resolved this prompt rather than awaiting a
-    // human answer.
+    // human answer. `decisionId` carried through from the matching
+    // `emitNeedsInput` call so the pairing is exact even if a second
+    // event_plan prompt fires later in the same run.
     emitDecisionAuto({
       code: 'event_plan',
+      decisionId,
       value: 'approved',
       reason: 'auto_approve',
     });
@@ -2122,7 +2153,7 @@ export class AgentUI implements WizardUI {
     const recommendedReason = recommendedChoice
       ? `Highest-ranked environment in the first available workspace (${recommendedChoice.description}).`
       : undefined;
-    this.emitNeedsInput<string>({
+    const decisionId = this.emitNeedsInput<string>({
       code: 'environment_selection',
       message: `Multiple Amplitude environments available — select one of ${choices.length}.`,
       ui: {
@@ -2232,6 +2263,20 @@ export class AgentUI implements WizardUI {
           level: 'warn',
         },
       );
+      // Companion `decision_auto` for the `needs_input:
+      // environment_selection` emitted above. Closes the
+      // request/response correlation loop — orchestrators that
+      // subscribe to `needs_input` see a matching `decision_auto`
+      // tagged with the same `decisionId` instead of having to
+      // infer "the wizard auto-picked" from the absence of a
+      // resolution envelope. Stringified `appId` echoes the wire
+      // shape on `NeedsInputChoice.value`.
+      emitDecisionAuto({
+        code: 'environment_selection',
+        decisionId,
+        value: String(autoChoice.appId ?? ''),
+        reason: 'auto_approve',
+      });
       return {
         orgId: autoChoice.orgId,
         projectId: autoChoice.projectId,
