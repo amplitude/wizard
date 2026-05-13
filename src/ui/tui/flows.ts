@@ -342,7 +342,14 @@ export const FLOWS: Record<Flow, FlowEntry[]> = {
         // user explicitly confirms (or changes) the org/project that was
         // resolved silently from disk. Set in bin.ts when resolveCredentials
         // populates the session without going through the SUSI picker.
-        !s.requiresAccountConfirmation,
+        !s.requiresAccountConfirmation &&
+        // Env-picker race: when `resolveCredentials` returns
+        // `needs_user_choice / environment_selection`,
+        // `applyEnvSelectionDeferral` clears credentials AND sets this flag
+        // so the router collapses back to Auth even if it already advanced
+        // past Auth on a prior frame (rehydrated rerun state). Cleared by
+        // AuthScreen once `setCredentials` lands the chosen env.
+        !s.pendingEnvSelection,
       // Back from DataSetup — drop the picked org/project/env so the
       // Auth screen re-renders the picker. Credentials stay so we don't
       // force a fresh OAuth round-trip.
@@ -356,7 +363,12 @@ export const FLOWS: Record<Flow, FlowEntry[]> = {
     //     framework detection after `setCredentials()` fires.
     {
       screen: Screen.CreateProject,
-      show: (s) => s.runPhase !== RunPhase.Error && s.createProject.pending,
+      show: (s) =>
+        s.runPhase !== RunPhase.Error &&
+        s.createProject.pending &&
+        // Hidden while the env-picker deferral is active — Auth is the only
+        // legitimate screen until the user picks an env.
+        !s.pendingEnvSelection,
       isComplete: (s) => !s.createProject.pending,
       // CreateProject is always "complete" for users who never entered it
       // (`!pending` is true by default), so we mark it transparent for
@@ -366,8 +378,12 @@ export const FLOWS: Record<Flow, FlowEntry[]> = {
       revert: () => false,
     },
     // 4. Data check — is the project already ingesting events?
+    //    Hidden while `pendingEnvSelection` is active so the router collapses
+    //    back to Auth for the env picker (see Auth entry above for the full
+    //    bug story).
     {
       screen: Screen.DataSetup,
+      show: (s) => !s.pendingEnvSelection,
       isComplete: (s) => s.projectHasData !== null,
       // Reset the activation result so the check re-runs after a back-nav.
       revert: (store) => {
@@ -377,7 +393,7 @@ export const FLOWS: Record<Flow, FlowEntry[]> = {
     // 3a. Activation options (SDK installed but few events — partial activation)
     {
       screen: Screen.ActivationOptions,
-      show: (s) => s.activationLevel === 'partial',
+      show: (s) => s.activationLevel === 'partial' && !s.pendingEnvSelection,
       isComplete: (s) => s.activationOptionsComplete,
       revert: (store) => {
         store.resetActivationOptions();
@@ -386,7 +402,8 @@ export const FLOWS: Record<Flow, FlowEntry[]> = {
     // 3b. Framework setup questions — skipped for full users (already have data)
     {
       screen: Screen.Setup,
-      show: (s) => needsSetup(s) && s.activationLevel !== 'full',
+      show: (s) =>
+        needsSetup(s) && s.activationLevel !== 'full' && !s.pendingEnvSelection,
       isComplete: (s) => !needsSetup(s),
       // Pop the most recently-answered framework question. Returns false
       // when there's nothing user-answered to pop (e.g. every question was
@@ -404,14 +421,14 @@ export const FLOWS: Record<Flow, FlowEntry[]> = {
     //   init code rather than via a wizard prompt.)
     {
       screen: Screen.Run,
-      show: (s) => s.activationLevel !== 'full',
+      show: (s) => s.activationLevel !== 'full' && !s.pendingEnvSelection,
       isComplete: (s) =>
         s.runPhase === RunPhase.Completed || s.runPhase === RunPhase.Error,
     },
     // 4. MCP server setup — skipped on error; full users go straight here
     {
       screen: Screen.Mcp,
-      show: (s) => s.runPhase !== RunPhase.Error,
+      show: (s) => s.runPhase !== RunPhase.Error && !s.pendingEnvSelection,
       isComplete: (s) => s.mcpComplete,
       revert: (store) => {
         store.resetMcp();
@@ -428,7 +445,8 @@ export const FLOWS: Record<Flow, FlowEntry[]> = {
       screen: Screen.DataIngestionCheck,
       show: (s) =>
         s.runPhase !== RunPhase.Error &&
-        (s.activationLevel !== 'full' || s.localInstrumentationComplete),
+        (s.activationLevel !== 'full' || s.localInstrumentationComplete) &&
+        !s.pendingEnvSelection,
       isComplete: (s) => s.dataIngestionConfirmed,
       revert: (store) => {
         store.resetDataIngestion();
@@ -437,13 +455,17 @@ export const FLOWS: Record<Flow, FlowEntry[]> = {
     // 6. Slack integration setup (skipped on error)
     {
       screen: Screen.Slack,
-      show: (s) => s.runPhase !== RunPhase.Error,
+      show: (s) => s.runPhase !== RunPhase.Error && !s.pendingEnvSelection,
       isComplete: (s) => s.slackComplete,
       revert: (store) => {
         store.resetSlack();
       },
     },
-    { screen: Screen.Outro },
+    // Outro is the terminal screen of the Wizard flow. Hidden while
+    // pendingEnvSelection is active so the router doesn't fall through to
+    // it when every preceding entry is hidden — we want Auth to win
+    // unconditionally while the env picker is pending.
+    { screen: Screen.Outro, show: (s) => !s.pendingEnvSelection },
   ],
 
   [Flow.McpAdd]: [
