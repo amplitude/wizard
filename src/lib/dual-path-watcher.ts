@@ -68,8 +68,16 @@ export function startDualPathWatcher(
   opts: DualPathWatcherOptions,
 ): DualPathWatcherHandle {
   const watch = opts.watch ?? defaultWatch;
-  const setIntervalFn = opts.setInterval ?? globalThis.setInterval;
-  const clearIntervalFn = opts.clearInterval ?? globalThis.clearInterval;
+  // Explicit annotations preserve the options-interface's broad
+  // `unknown` shape (declared so tests can override with a fake). Without
+  // them, TypeScript's union inference collapses `opts.setInterval ??
+  // globalThis.setInterval` to `globalThis.setInterval`'s strict
+  // signature, which then rejects the `pollHandle: unknown` we pass to
+  // `clearIntervalFn` below.
+  const setIntervalFn: (handler: () => void, ms: number) => unknown =
+    opts.setInterval ?? globalThis.setInterval;
+  const clearIntervalFn: (handle: unknown) => void =
+    opts.clearInterval ?? (globalThis.clearInterval as (h: unknown) => void);
   const pollMs = opts.pollMs ?? 1000;
 
   const handles: fs.FSWatcher[] = [];

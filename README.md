@@ -222,6 +222,12 @@ Option 4 notes:
 | `verify [--json]` | JSON or human | Cheap, no-network check that SDK + API key + framework are all in place. Exits non-zero on failure. |
 | `auth status [--json]` | JSON or human | Login state + token expiry |
 | `auth token` | raw token or JSON | Print stored OAuth token for scripts |
+| `tasks [--json]` | JSON or human | List orchestration tasks recorded for this project |
+| `task <id> [--json]` | JSON or human | Inspect a single orchestration task |
+| `sessions [--json]` | JSON or human | List wizard sessions recorded for this project |
+| `session <id> [--json]` | JSON or human | Inspect a session and its tasks |
+| `resume <session-id> [--json]` | JSON or human | Print (or run with `--execute`) the resume command for a session |
+| `orchestration status [--json]` | JSON or human | Print the durable orchestration store's last-stopping-point snapshot. See [`docs/orchestration.md`](./docs/orchestration.md) |
 
 All commands auto-emit JSON when stdout is piped. Use `--human` to override
 and force human-readable output. `--json` enables JSON output without the
