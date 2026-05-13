@@ -129,12 +129,13 @@ export const tasksCommand: CommandModule = {
     }),
   handler: (argv) => {
     void (async () => {
-      const opts = await resolveCommonOpts({
-        installDir: argv['install-dir'] as string | undefined,
-        json: argv.json as boolean | undefined,
-        human: argv.human as boolean | undefined,
-      });
+      let opts: CommonOpts | undefined;
       try {
+        opts = await resolveCommonOpts({
+          installDir: argv['install-dir'] as string | undefined,
+          json: argv.json as boolean | undefined,
+          human: argv.human as boolean | undefined,
+        });
         const { getOrchestrationStore } = await import(
           '../lib/orchestration/store.js'
         );
@@ -166,7 +167,7 @@ export const tasksCommand: CommandModule = {
             sessionFilter = asSessionId(sessionFilterRaw);
           } catch (err) {
             const m = err instanceof Error ? err.message : String(err);
-            if (opts.jsonOutput) emitJsonError(m);
+            if (opts?.jsonOutput) emitJsonError(m);
             else getUI().log.error(m);
             process.exit(ExitCode.INVALID_ARGS);
           }
@@ -201,7 +202,7 @@ export const tasksCommand: CommandModule = {
         process.exit(ExitCode.SUCCESS);
       } catch (e) {
         const message = e instanceof Error ? e.message : String(e);
-        if (opts.jsonOutput) emitJsonError(`tasks listing failed: ${message}`);
+        if (opts?.jsonOutput) emitJsonError(`tasks listing failed: ${message}`);
         else getUI().log.error(`Tasks listing failed: ${message}`);
         process.exit(ExitCode.GENERAL_ERROR);
       }
@@ -229,13 +230,14 @@ export const taskCommand: CommandModule = {
       }),
   handler: (argv) => {
     void (async () => {
-      const opts = await resolveCommonOpts({
-        installDir: argv['install-dir'] as string | undefined,
-        json: argv.json as boolean | undefined,
-        human: argv.human as boolean | undefined,
-      });
+      let opts: CommonOpts | undefined;
       const idRaw = argv.id as string;
       try {
+        opts = await resolveCommonOpts({
+          installDir: argv['install-dir'] as string | undefined,
+          json: argv.json as boolean | undefined,
+          human: argv.human as boolean | undefined,
+        });
         const { getOrchestrationStore } = await import(
           '../lib/orchestration/store.js'
         );
@@ -247,7 +249,7 @@ export const taskCommand: CommandModule = {
           id = asTaskId(idRaw);
         } catch (err) {
           const m = err instanceof Error ? err.message : String(err);
-          if (opts.jsonOutput) emitJsonError(m);
+          if (opts?.jsonOutput) emitJsonError(m);
           else getUI().log.error(m);
           process.exit(ExitCode.INVALID_ARGS);
         }
@@ -314,7 +316,7 @@ export const taskCommand: CommandModule = {
         process.exit(ExitCode.SUCCESS);
       } catch (e) {
         const message = e instanceof Error ? e.message : String(e);
-        if (opts.jsonOutput) emitJsonError(`task lookup failed: ${message}`);
+        if (opts?.jsonOutput) emitJsonError(`task lookup failed: ${message}`);
         else getUI().log.error(`Task lookup failed: ${message}`);
         process.exit(ExitCode.GENERAL_ERROR);
       }
@@ -336,12 +338,13 @@ export const sessionsCommand: CommandModule = {
     }),
   handler: (argv) => {
     void (async () => {
-      const opts = await resolveCommonOpts({
-        installDir: argv['install-dir'] as string | undefined,
-        json: argv.json as boolean | undefined,
-        human: argv.human as boolean | undefined,
-      });
+      let opts: CommonOpts | undefined;
       try {
+        opts = await resolveCommonOpts({
+          installDir: argv['install-dir'] as string | undefined,
+          json: argv.json as boolean | undefined,
+          human: argv.human as boolean | undefined,
+        });
         const { getOrchestrationStore } = await import(
           '../lib/orchestration/store.js'
         );
@@ -397,7 +400,7 @@ export const sessionsCommand: CommandModule = {
         process.exit(ExitCode.SUCCESS);
       } catch (e) {
         const message = e instanceof Error ? e.message : String(e);
-        if (opts.jsonOutput)
+        if (opts?.jsonOutput)
           emitJsonError(`sessions listing failed: ${message}`);
         else getUI().log.error(`Sessions listing failed: ${message}`);
         process.exit(ExitCode.GENERAL_ERROR);
@@ -426,13 +429,14 @@ export const sessionCommand: CommandModule = {
       }),
   handler: (argv) => {
     void (async () => {
-      const opts = await resolveCommonOpts({
-        installDir: argv['install-dir'] as string | undefined,
-        json: argv.json as boolean | undefined,
-        human: argv.human as boolean | undefined,
-      });
+      let opts: CommonOpts | undefined;
       const idRaw = argv.id as string;
       try {
+        opts = await resolveCommonOpts({
+          installDir: argv['install-dir'] as string | undefined,
+          json: argv.json as boolean | undefined,
+          human: argv.human as boolean | undefined,
+        });
         const { getOrchestrationStore } = await import(
           '../lib/orchestration/store.js'
         );
@@ -444,7 +448,7 @@ export const sessionCommand: CommandModule = {
           id = asSessionId(idRaw);
         } catch (err) {
           const m = err instanceof Error ? err.message : String(err);
-          if (opts.jsonOutput) emitJsonError(m);
+          if (opts?.jsonOutput) emitJsonError(m);
           else getUI().log.error(m);
           process.exit(ExitCode.INVALID_ARGS);
         }
@@ -490,7 +494,8 @@ export const sessionCommand: CommandModule = {
         process.exit(ExitCode.SUCCESS);
       } catch (e) {
         const message = e instanceof Error ? e.message : String(e);
-        if (opts.jsonOutput) emitJsonError(`session lookup failed: ${message}`);
+        if (opts?.jsonOutput)
+          emitJsonError(`session lookup failed: ${message}`);
         else getUI().log.error(`Session lookup failed: ${message}`);
         process.exit(ExitCode.GENERAL_ERROR);
       }
@@ -525,14 +530,15 @@ export const resumeCommand: CommandModule = {
       }),
   handler: (argv) => {
     void (async () => {
-      const opts = await resolveCommonOpts({
-        installDir: argv['install-dir'] as string | undefined,
-        json: argv.json as boolean | undefined,
-        human: argv.human as boolean | undefined,
-      });
+      let opts: CommonOpts | undefined;
       const sessionIdRaw = argv['session-id'] as string;
       const execute = Boolean(argv.execute);
       try {
+        opts = await resolveCommonOpts({
+          installDir: argv['install-dir'] as string | undefined,
+          json: argv.json as boolean | undefined,
+          human: argv.human as boolean | undefined,
+        });
         const { getOrchestrationStore } = await import(
           '../lib/orchestration/store.js'
         );
@@ -547,7 +553,7 @@ export const resumeCommand: CommandModule = {
           sessionId = asSessionId(sessionIdRaw);
         } catch (err) {
           const m = err instanceof Error ? err.message : String(err);
-          if (opts.jsonOutput) emitJsonError(m);
+          if (opts?.jsonOutput) emitJsonError(m);
           else getUI().log.error(m);
           process.exit(ExitCode.INVALID_ARGS);
         }
@@ -619,7 +625,7 @@ export const resumeCommand: CommandModule = {
           // CLI failure.
           child.on('error', (err) => {
             const message = err instanceof Error ? err.message : String(err);
-            if (opts.jsonOutput)
+            if (opts?.jsonOutput)
               emitJsonError(`Failed to spawn resume command: ${message}`);
             else
               getUI().log.error(`Failed to spawn resume command: ${message}`);
@@ -633,7 +639,7 @@ export const resumeCommand: CommandModule = {
         process.exit(ExitCode.SUCCESS);
       } catch (e) {
         const message = e instanceof Error ? e.message : String(e);
-        if (opts.jsonOutput) emitJsonError(`resume failed: ${message}`);
+        if (opts?.jsonOutput) emitJsonError(`resume failed: ${message}`);
         else getUI().log.error(`Resume failed: ${message}`);
         process.exit(ExitCode.GENERAL_ERROR);
       }
@@ -660,12 +666,13 @@ export const orchestrationCommand: CommandModule = {
           }),
         (argv) => {
           void (async () => {
-            const opts = await resolveCommonOpts({
-              installDir: argv['install-dir'],
-              json: argv.json as boolean | undefined,
-              human: argv.human as boolean | undefined,
-            });
+            let opts: CommonOpts | undefined;
             try {
+              opts = await resolveCommonOpts({
+                installDir: argv['install-dir'],
+                json: argv.json as boolean | undefined,
+                human: argv.human as boolean | undefined,
+              });
               const { getOrchestrationStore } = await import(
                 '../lib/orchestration/store.js'
               );
@@ -734,7 +741,7 @@ export const orchestrationCommand: CommandModule = {
               process.exit(ExitCode.SUCCESS);
             } catch (e) {
               const message = e instanceof Error ? e.message : String(e);
-              if (opts.jsonOutput)
+              if (opts?.jsonOutput)
                 emitJsonError(`orchestration status failed: ${message}`);
               else getUI().log.error(`Orchestration status failed: ${message}`);
               process.exit(ExitCode.GENERAL_ERROR);
