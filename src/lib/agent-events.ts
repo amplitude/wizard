@@ -264,6 +264,63 @@ export const EVENT_DATA_VERSIONS = {
    * cycle when surfacing "the agent forgot X" failures.
    */
   compaction_completed: 1,
+  /**
+   * `discovery_fact` — mirrors the TUI's cold-start "discovery feed"
+   * chips onto NDJSON so parent agents (Claude Code, Cursor, Codex)
+   * can render the same vertical / app-type / framework / package-
+   * manager / region facts the wizard surfaces in Ink. Cosmetic only
+   * (the agent already receives these values via the preflight
+   * context block), but lets orchestrators pin a "here's what we
+   * detected" header without parsing every status message. Each
+   * fact carries a stable `id` so re-publishing on a retry path is
+   * a no-op on the receiving end — orchestrators key off the id to
+   * upsert chips.
+   */
+  discovery_fact: 1,
+  /**
+   * `current_file` — coarse rollup of the file the inner agent is
+   * currently editing, debounced to ~1 emission per 250ms per
+   * (path, operation) tuple. Distinct from `tool_call` /
+   * `file_change_planned` / `file_change_applied`, which are
+   * fine-grained: orchestrators that want a single "now editing X"
+   * header subscribe to `current_file`, while audit-trail consumers
+   * keep parsing the existing fine-grained events. Debouncing
+   * happens at the wire-boundary emitter; the consumer sees one
+   * event per logical activity transition rather than one per write.
+   */
+  current_file: 1,
+  /**
+   * `stall_status` — coaching-tier mirror of the TUI's stall hints.
+   * Tiers escalate as silence grows: `noticed` at 10s, `concerning`
+   * at 30s, `critical` at 60s. Carries the duration since last
+   * activity plus an optional human-readable hint orchestrators can
+   * surface verbatim. Distinct from `heartbeat` (which fires on a
+   * fixed cadence regardless of progress) — `stall_status` only
+   * fires when the wizard has been quiet long enough to deserve
+   * escalated UX.
+   */
+  stall_status: 1,
+  /**
+   * `run_resumed` — emitted as the first envelope after `run_started`
+   * when the wizard restarts from a checkpoint (post-crash,
+   * post-SIGINT, post-token-expiry). Lets orchestrators distinguish
+   * "fresh run from cold" from "resumed run from checkpoint" without
+   * parsing the run-start status. Carries the checkpoint timestamp,
+   * the last-known phase, and a free-form summary of what state was
+   * restored (e.g. "region+org+project bound, framework=Next.js").
+   */
+  run_resumed: 1,
+  /**
+   * `file_change_failed` — emitted at PostToolUse when a write tool
+   * (Edit / Write / MultiEdit / NotebookEdit) reports an error.
+   * Distinct from a generic `tool_call` failure: pairs with the
+   * preceding `file_change_planned` (same path) so an orchestrator
+   * can show "tried to edit X, failed because Y" without parsing
+   * tool_result text. `errorClass` discriminates the common failure
+   * modes (permission, not-found, syntax, generic) so the
+   * orchestrator can branch on the kind rather than the message.
+   */
+  file_change_failed: 1,
 } as const;
 
 /** All NDJSON event-level types. */
@@ -612,15 +669,161 @@ export interface VerificationResultData {
   failures?: string[];
 }
 
+/**
+ * `discovery_fact` — wire shape of a single cold-start discovery chip
+ * mirrored from the TUI's `DiscoveryFeed`. Stable `id` enables
+ * orchestrator-side upsert so a re-publish on retry is idempotent.
+ * `label` / `value` are pre-formatted, human-readable strings (e.g.
+ * `"Framework"` / `"Next.js (App Router)"`) — orchestrators render
+ * them verbatim. Per-fact `discoveredAt` lets orchestrators sort
+ * chips chronologically or hide stale ones.
+ */
+export interface DiscoveryFactData {
+  event: 'discovery_fact';
+  id: string;
+  label: string;
+  value: string;
+  /** Wall-clock ms when the fact was first published. */
+  discoveredAt: number;
+}
+
+/**
+ * `current_file` — coarse "now editing X" rollup emitted from the
+ * write-tool hook, debounced so that repeated edits to the same
+ * file inside a 250ms window collapse into a single event. The
+ * `relativePath` (when resolvable against `installDir`) is the
+ * orchestrator-friendly version; absolute `path` is preserved for
+ * audit. `operation` mirrors `FileChangeAppliedData['operation']`
+ * — `'create' | 'modify' | 'delete'`. Distinct from `tool_call`
+ * (which fires per write) so an orchestrator can pin a single
+ * file-focus header without parsing every tool invocation.
+ */
+export interface CurrentFileData {
+  event: 'current_file';
+  /** Raw absolute path the inner agent passed to the tool. */
+  path: string;
+  /**
+   * `path` relativized against the wizard's `installDir`, when
+   * resolvable. Falls back to `path` otherwise so the consumer
+   * always has a renderable string.
+   */
+  relativePath: string;
+  operation: 'create' | 'modify' | 'delete';
+}
+
+/**
+ * `stall_status` — coaching-tier mirror of the TUI's stall hints.
+ * Three escalating tiers fire at 10s / 30s / 60s of silence (no tool
+ * calls or status updates from the inner agent). Each tier emits at
+ * most once per stall window; activity resets the gate. Orchestrators
+ * surface `hint` verbatim when set and otherwise compose their own
+ * copy from `tier + durationMs`.
+ */
+export type StallTier = 'noticed' | 'concerning' | 'critical';
+export interface StallStatusData {
+  event: 'stall_status';
+  tier: StallTier;
+  /** Milliseconds since the last observed activity. Monotonic-ish. */
+  durationMs: number;
+  /**
+   * Wall-clock ms timestamp of the most recent observed activity
+   * the stall detector saw. Lets orchestrators reconcile against
+   * their own clock when rendering "stalled for Ns".
+   */
+  lastActivity: number;
+  /** Optional pre-composed hint string — surface verbatim when set. */
+  hint?: string;
+}
+
+/**
+ * Tier thresholds (ms since last activity). Match the TUI's stall
+ * hint banner so InkUI / AgentUI escalate in lockstep — a parent
+ * agent that subscribes to `stall_status` sees the same coaching
+ * cadence the in-terminal user would.
+ */
+export const STALL_TIER_THRESHOLDS_MS: Readonly<Record<StallTier, number>> =
+  Object.freeze({
+    noticed: 10_000,
+    concerning: 30_000,
+    critical: 60_000,
+  });
+
+/**
+ * Pure helper — derive the highest stall tier reached for a given
+ * silence duration. Returns `null` when below the `noticed` threshold,
+ * which lets callers cleanly suppress emission while the wizard is
+ * still within its expected response window.
+ */
+export function deriveStallTier(durationMs: number): StallTier | null {
+  if (durationMs >= STALL_TIER_THRESHOLDS_MS.critical) return 'critical';
+  if (durationMs >= STALL_TIER_THRESHOLDS_MS.concerning) return 'concerning';
+  if (durationMs >= STALL_TIER_THRESHOLDS_MS.noticed) return 'noticed';
+  return null;
+}
+
+/**
+ * `run_resumed` — emitted at startup, after `run_started`, when the
+ * wizard restarts from a checkpoint (post-crash, post-SIGINT,
+ * post-token-expiry). Lets orchestrators distinguish a fresh cold
+ * start from a continuation without parsing the run-start status
+ * message. Carries the checkpoint timestamp + last-known phase + a
+ * free-form summary of what state was restored.
+ */
+export interface RunResumedData {
+  event: 'run_resumed';
+  /** ISO timestamp of when the checkpoint was last persisted. */
+  from_checkpoint_at: string;
+  /** The most recent `RunPhase` recorded on the checkpoint. */
+  last_phase: RunPhase | 'unknown';
+  /**
+   * Free-form, human-readable summary of restored state (region,
+   * org, project, framework, etc.). Pre-redacted at emit time.
+   */
+  restored_state_summary: string;
+}
+
+/**
+ * `file_change_failed` — emitted at PostToolUse for write tools
+ * (Edit / Write / MultiEdit / NotebookEdit) when the tool reported
+ * a failure. Pairs with the preceding `file_change_planned` for
+ * the same path so an orchestrator can label the failure on the
+ * already-rendered preview without parsing tool_result text.
+ *
+ * `errorClass` discriminates the common failure modes so an
+ * orchestrator can branch by kind:
+ *   - `permission` — EACCES / "permission denied"
+ *   - `not_found`  — ENOENT / "no such file"
+ *   - `syntax`     — agent-side string-match failure on Edit / MultiEdit
+ *   - `generic`    — anything else
+ */
+export type FileChangeErrorClass =
+  | 'permission'
+  | 'not_found'
+  | 'syntax'
+  | 'generic';
+export interface FileChangeFailedData {
+  event: 'file_change_failed';
+  path: string;
+  operation: 'create' | 'modify' | 'delete';
+  errorClass: FileChangeErrorClass;
+  /** Sanitized message — paths / URLs already redacted. */
+  errorMessage: string;
+}
+
 export type InnerAgentLifecycleData =
   | InnerAgentStartedData
   | ToolCallData
   | FileChangePlannedData
   | FileChangeAppliedData
+  | FileChangeFailedData
   | EventPlanProposedData
   | EventPlanConfirmedData
   | VerificationStartedData
-  | VerificationResultData;
+  | VerificationResultData
+  | DiscoveryFactData
+  | CurrentFileData
+  | StallStatusData
+  | RunResumedData;
 
 /**
  * Coarse-grained orchestrator-facing phase boundaries for a wizard run.
@@ -1223,4 +1426,48 @@ export function classifyWriteOperation(
     default:
       return null;
   }
+}
+
+/**
+ * Best-effort classifier for write-tool failure messages. Pure, never
+ * touches I/O — safe to call from any emit path. Patterns are
+ * intentionally permissive: a `'permission denied'` substring covers
+ * both EACCES from Node and the inner agent's own "write_refused"
+ * messaging. Defaults to `'generic'` so an unrecognized failure still
+ * lands on the wire with a usable discriminator.
+ *
+ * Match order matters: `syntax` is checked BEFORE `not_found` because
+ * Edit / MultiEdit string-match failures look like "String to replace
+ * not found in file" — the more-specific "string to replace" signal
+ * wins over the generic "not found" substring.
+ */
+export function classifyFileChangeError(message: string): FileChangeErrorClass {
+  const lower = message.toLowerCase();
+  if (
+    lower.includes('permission denied') ||
+    lower.includes('eacces') ||
+    lower.includes('write_refused')
+  ) {
+    return 'permission';
+  }
+  // Edit / MultiEdit string-match failures surface as
+  // "String to replace not found" or "found N matches" from the SDK.
+  // Check this BEFORE the generic 'not found' so the syntax signal
+  // wins for those Edit-specific messages.
+  if (
+    lower.includes('string to replace') ||
+    lower.includes('found multiple matches') ||
+    lower.includes('found 0 matches') ||
+    lower.includes('syntaxerror')
+  ) {
+    return 'syntax';
+  }
+  if (
+    lower.includes('no such file') ||
+    lower.includes('enoent') ||
+    lower.includes('not found')
+  ) {
+    return 'not_found';
+  }
+  return 'generic';
 }

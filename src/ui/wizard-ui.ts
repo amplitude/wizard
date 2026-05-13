@@ -652,4 +652,92 @@ export interface WizardUI {
     postTokens?: number;
     durationMs?: number;
   }): void;
+
+  /**
+   * Coarse-grained "now editing X" rollup mirroring write-tool calls
+   * onto a single NDJSON event. Distinct from the fine-grained
+   * `tool_call` / `file_change_planned` / `file_change_applied`
+   * series — orchestrators that want a single "active file" header
+   * subscribe to `current_file`; audit-trail consumers keep parsing
+   * the fine-grained events. Debounced to ~1 emission per 250ms per
+   * (path, operation) tuple at the wire boundary.
+   *
+   * Optional — only AgentUI emits to NDJSON. InkUI / LoggingUI no-op
+   * (the TUI already renders an active-file row; CI logs the
+   * per-file plan/apply pair).
+   */
+  emitCurrentFile?(data: {
+    path: string;
+    relativePath: string;
+    operation: 'create' | 'modify' | 'delete';
+  }): void;
+
+  /**
+   * Coaching-tier mirror of the wizard's stall detector onto NDJSON.
+   * Three escalating tiers fire at 10s / 30s / 60s of silence; each
+   * tier emits at most once per stall window. Lets parent agents
+   * surface escalating UX ("the wizard's been quiet for 10s…" →
+   * "concerning…" → "consider retrying") in lockstep with the TUI's
+   * stall hints. Distinct from `heartbeat` (fixed cadence regardless
+   * of progress).
+   *
+   * Optional — only AgentUI emits. InkUI / LoggingUI no-op (the TUI
+   * has its own stall-hint banner).
+   */
+  emitStallStatus?(data: {
+    tier: 'noticed' | 'concerning' | 'critical';
+    durationMs: number;
+    lastActivity: number;
+    hint?: string;
+  }): void;
+
+  /**
+   * Reset the per-window stall-tier guard. Optional — AgentUI tracks
+   * the gate, InkUI / LoggingUI no-op. Callers invoke this when the
+   * inner agent resumes producing tool calls / status updates so the
+   * next stall window starts fresh.
+   */
+  resetStallStatus?(): void;
+
+  /**
+   * Emitted as the first envelope after `run_started` when the wizard
+   * restarts from a checkpoint (post-crash, post-SIGINT, post-token-
+   * expiry). Lets orchestrators distinguish a fresh cold start from
+   * a resumed run without parsing the run-start status. Carries the
+   * checkpoint timestamp + last-known phase + a free-form summary of
+   * restored state (region, org, project, framework — pre-redacted).
+   *
+   * Optional — only AgentUI emits.
+   */
+  emitRunResumed?(data: {
+    fromCheckpointAt: string;
+    lastPhase:
+      | 'cold_start'
+      | 'agent_running'
+      | 'finalizing'
+      | 'completed'
+      | 'error'
+      | 'unknown';
+    restoredStateSummary: string;
+  }): void;
+
+  /**
+   * Emitted at PostToolUse for write tools (Edit / Write / MultiEdit
+   * / NotebookEdit) when the tool reports a failure. Pairs with the
+   * preceding `recordFileChangePlanned` for the same path so an
+   * orchestrator can label the failed write on the already-rendered
+   * preview without parsing tool_result text. `errorClass`
+   * discriminates the common failure modes (permission / not_found /
+   * syntax / generic) so the orchestrator can branch by kind.
+   *
+   * Optional — only AgentUI emits. InkUI / LoggingUI no-op (the TUI
+   * surfaces tool failures via the existing FileWritesPanel; CI logs
+   * the stderr stream).
+   */
+  emitFileChangeFailed?(data: {
+    path: string;
+    operation: 'create' | 'modify' | 'delete';
+    errorClass: 'permission' | 'not_found' | 'syntax' | 'generic';
+    errorMessage: string;
+  }): void;
 }

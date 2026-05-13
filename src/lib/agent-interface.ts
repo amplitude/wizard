@@ -62,6 +62,7 @@ import {
 import { createInnerLifecycleHooks } from './inner-lifecycle';
 import {
   classifyWriteOperation,
+  deriveStallTier,
   sanitizeErrorMessageForLog,
   truncateLogMessage,
 } from './agent-events';
@@ -2061,6 +2062,23 @@ export async function runAgent(
     return { plannedEvents: lastParsedEventPlan };
   };
 
+  // Wall-clock anchor for stall-tier detection. Updated whenever the
+  // inner agent surfaces a tool call or status — see the
+  // `onActivity()` helper below. Distinct from `startTime` (which never
+  // moves after attempt #1) so the heartbeat tick can compute
+  // "milliseconds since last activity" with a single subtraction.
+  let lastActivityAt = Date.now();
+  const onActivity = (): void => {
+    lastActivityAt = Date.now();
+    // Activity resumed — clear the per-window stall-tier guard so the
+    // next 10s of silence can re-trigger 'noticed'.
+    try {
+      getUI().resetStallStatus?.();
+    } catch {
+      // never throw from telemetry path
+    }
+  };
+
   // Heartbeat interval — fires unconditionally every 10s so AgentUI's
   // `progress: heartbeat` NDJSON event lands on a fixed cadence even
   // when the agent is mid-tool-call and nobody has called pushStatus
@@ -2075,6 +2093,43 @@ export async function runAgent(
       elapsedMs: Date.now() - startTime,
       attempt: attemptCount > 0 ? attemptCount : undefined,
     });
+    // v2 protocol: derive + emit a `stall_status` coaching tier from
+    // the silence window. AgentUI dedups per-tier so only the first
+    // hit of each (noticed / concerning / critical) lands on the wire
+    // per stall window. InkUI / LoggingUI no-op via the optional
+    // method shape.
+    //
+    // Mirror the guard the stall-abort timer at line ~2751 already
+    // applies: when a wizard-tools blocking prompt is active
+    // (`confirm`, `choose`, `confirm_event_plan`), the inner agent
+    // intentionally produces no SDK messages while the human reads
+    // the prompt. Without this guard, `lastActivityAt` grows stale
+    // and the heartbeat fires `stall_status: critical` ("Likely
+    // stalled — retry imminent") to orchestrators while the user
+    // is just thinking. An orchestrator acting on that false signal
+    // might abort or restart a healthy run.
+    if (isWizardPromptActive()) {
+      return;
+    }
+    const stallMs = Date.now() - lastActivityAt;
+    const tier = deriveStallTier(stallMs);
+    if (tier) {
+      try {
+        getUI().emitStallStatus?.({
+          tier,
+          durationMs: stallMs,
+          lastActivity: lastActivityAt,
+          hint:
+            tier === 'noticed'
+              ? 'Agent has been quiet — still working on the previous step.'
+              : tier === 'concerning'
+              ? 'Agent has been silent for 30s+. Check status or consider retrying.'
+              : 'Agent has been silent for 60s+. Likely stalled — retry imminent.',
+        });
+      } catch {
+        // Telemetry must never break the run loop.
+      }
+    }
   }, 10_000);
 
   // Dual-path watchers for the canonical `.amplitude/{events,dashboard}.json`
@@ -2322,6 +2377,10 @@ export async function runAgent(
         recentStatuses.push(report.detail);
         if (recentStatuses.length > 3) recentStatuses.shift();
         agentState.recordStatus(report.code, report.detail);
+        // Activity signal for v2 stall_status — onStatus fires for any
+        // structured pushStatus the inner agent emits. See `onActivity`
+        // declaration above the heartbeat interval.
+        onActivity();
       },
       onError(report) {
         // First error wins — stall/retry loop reads this after the attempt.
@@ -2993,7 +3052,10 @@ export async function runAgent(
               // are observers — they never deny or alter SDK behavior. We
               // chain them with our authoritative gates below so the
               // allowlist still runs for every tool call.
-              const inner = createInnerLifecycleHooks({ phase: 'wizard' });
+              const inner = createInnerLifecycleHooks({
+                phase: 'wizard',
+                installDir: agentConfig.workingDirectory,
+              });
               const innerHooks = inner.hooks();
               const gatedPreToolUse = createPreToolUseHook({
                 onCircuitBreakerTripped: config?.onCircuitBreakerTripped,
@@ -3375,6 +3437,12 @@ export async function runAgent(
           // drop the rolling pill buffer so the next paragraph starts fresh
           // instead of carrying tail words from the previous one.
           resetStreamPill();
+
+          // v2 protocol: a non-stream_event message is the canonical signal
+          // that the inner agent is producing work. Reset the stall-tier
+          // anchor + AgentUI per-window guard so the next 10s of silence
+          // can re-trigger 'noticed'.
+          onActivity();
 
           // Pass receivedSuccessResult so handleSDKMessage can suppress user-facing error
           // output for post-success cleanup errors while still logging them to file

@@ -1270,6 +1270,169 @@ export class AgentUI implements WizardUI {
     );
   }
 
+  // ── v2 protocol: current_file rollup ────────────────────────────────
+  //
+  // Today every Edit / Write tool call emits its own fine-grained
+  // `tool_call` + `file_change_planned` / `file_change_applied`. That's
+  // great for an audit log but noisy for an orchestrator that just wants
+  // a "now editing X" header. `current_file` is the coarse rollup —
+  // debounced so repeated edits to the same file inside a 250ms window
+  // collapse into a single event. Pinning a per-(path, op) tuple at the
+  // emitter rather than wire-side gives parent agents a stable signal
+  // they can subscribe to without bookkeeping.
+
+  private _lastCurrentFile: {
+    path: string;
+    operation: 'create' | 'modify' | 'delete';
+    at: number;
+  } | null = null;
+  /** Debounce window — same (path, operation) inside this window no-ops. */
+  private static readonly CURRENT_FILE_DEBOUNCE_MS = 250;
+
+  emitCurrentFile(data: {
+    path: string;
+    relativePath: string;
+    operation: 'create' | 'modify' | 'delete';
+  }): void {
+    const now = Date.now();
+    const last = this._lastCurrentFile;
+    if (
+      last &&
+      last.path === data.path &&
+      last.operation === data.operation &&
+      now - last.at < AgentUI.CURRENT_FILE_DEBOUNCE_MS
+    ) {
+      // Same file + op inside the debounce window — drop. The
+      // orchestrator already has a chip for this file; the duplicate
+      // would just churn rendering.
+      return;
+    }
+    this._lastCurrentFile = {
+      path: data.path,
+      operation: data.operation,
+      at: now,
+    };
+    emit('progress', `current_file: ${data.operation} ${data.relativePath}`, {
+      data: {
+        event: 'current_file',
+        path: data.path,
+        relativePath: data.relativePath,
+        operation: data.operation,
+      },
+    });
+  }
+
+  // ── v2 protocol: stall_status coaching tiers ────────────────────────
+  //
+  // The wizard's stall detector fires at 10s / 30s / 60s of silence.
+  // Mirror that escalation onto NDJSON so parent agents can render the
+  // same coaching tier ("the wizard's been quiet for 10s" → "concerning"
+  // → "critical, consider retrying") in lockstep with the TUI. Per-tier
+  // dedup at the wire boundary so a runaway emitter can't spam
+  // orchestrators — a tier fires at most once per stall window, reset
+  // by `resetStallStatus()` when activity resumes.
+
+  private _lastStallTier: 'noticed' | 'concerning' | 'critical' | null = null;
+
+  emitStallStatus(data: {
+    tier: 'noticed' | 'concerning' | 'critical';
+    durationMs: number;
+    lastActivity: number;
+    hint?: string;
+  }): void {
+    if (this._lastStallTier === data.tier) {
+      // Same tier already emitted this window. Caller should invoke
+      // `resetStallStatus()` when activity resumes.
+      return;
+    }
+    this._lastStallTier = data.tier;
+    emit('progress', `stall_status: ${data.tier} (${data.durationMs}ms)`, {
+      data: {
+        event: 'stall_status',
+        tier: data.tier,
+        durationMs: data.durationMs,
+        lastActivity: data.lastActivity,
+        ...(data.hint ? { hint: data.hint } : {}),
+      },
+    });
+  }
+
+  /**
+   * Reset the per-window stall-tier guard. Callers invoke this when
+   * the inner agent resumes producing tool calls / status updates —
+   * the next stall window starts fresh and the 'noticed' tier can
+   * fire again.
+   */
+  resetStallStatus(): void {
+    this._lastStallTier = null;
+  }
+
+  // ── v2 protocol: run_resumed checkpoint signal ──────────────────────
+  //
+  // When the wizard restarts from a checkpoint (post-crash, post-SIGINT,
+  // post-token-expiry), the first envelope after `run_started` should be
+  // `run_resumed` so an orchestrator can render "continuing from where
+  // we left off" instead of "fresh run". Distinct from
+  // `checkpoint_loaded` (which fires only when `--resume` finds a fresh
+  // file): `run_resumed` carries the orchestrator-facing summary needed
+  // to drive UX, not just the load event.
+
+  emitRunResumed(data: {
+    fromCheckpointAt: string;
+    lastPhase:
+      | 'cold_start'
+      | 'agent_running'
+      | 'finalizing'
+      | 'completed'
+      | 'error'
+      | 'unknown';
+    restoredStateSummary: string;
+  }): void {
+    emit(
+      'lifecycle',
+      `run_resumed (last_phase=${data.lastPhase}, from=${data.fromCheckpointAt})`,
+      {
+        data: {
+          event: 'run_resumed',
+          from_checkpoint_at: data.fromCheckpointAt,
+          last_phase: data.lastPhase,
+          restored_state_summary: data.restoredStateSummary,
+        },
+      },
+    );
+  }
+
+  // ── v2 protocol: file_change_failed (write-tool error) ──────────────
+  //
+  // PostToolUse hooks see `is_error: true` on the tool_response object.
+  // Today the generic `tool_call` event captures the input but not the
+  // outcome. `file_change_failed` pairs with the preceding
+  // `file_change_planned` so an orchestrator can label "tried to edit
+  // X, failed because Y" on the already-rendered preview without
+  // parsing tool_result text.
+
+  emitFileChangeFailed(data: {
+    path: string;
+    operation: 'create' | 'modify' | 'delete';
+    errorClass: 'permission' | 'not_found' | 'syntax' | 'generic';
+    errorMessage: string;
+  }): void {
+    emit(
+      'error',
+      `file_change_failed: ${data.operation} ${data.path} (${data.errorClass})`,
+      {
+        level: 'error',
+        data: {
+          event: 'file_change_failed',
+          path: data.path,
+          operation: data.operation,
+          errorClass: data.errorClass,
+          errorMessage: data.errorMessage,
+        },
+      },
+    );
+  }
+
   // Security: stack traces redacted from NDJSON output to prevent path/secret leakage
   setRunError(error: Error): Promise<boolean> {
     let sanitized: string;
@@ -1451,10 +1614,27 @@ export class AgentUI implements WizardUI {
     }
   }
 
-  pushDiscoveryFact(): void {
-    // No-op for NDJSON consumers — discovery facts are a TUI-only
-    // cosmetic feed; the same values are already surfaced via the
-    // preflight context block and existing `progress` events.
+  /**
+   * Emit a `progress: discovery_fact` event mirroring the TUI's
+   * cold-start "discovery feed" chip. Lets parent agents render the
+   * same vertical / app-type / framework / package-manager / region
+   * facts the wizard surfaces in Ink. Idempotent on the receiving
+   * end via the stable `id` — orchestrators upsert chips keyed off
+   * it. Cosmetic only; the values are already on the wire via the
+   * preflight context block and session_state events.
+   */
+  pushDiscoveryFact(
+    fact: import('../lib/wizard-session.js').DiscoveryFact,
+  ): void {
+    emit('progress', `discovery_fact: ${fact.label} = ${fact.value}`, {
+      data: {
+        event: 'discovery_fact',
+        id: fact.id,
+        label: fact.label,
+        value: fact.value,
+        discoveredAt: fact.discoveredAt,
+      },
+    });
   }
 
   // ── Prompts (auto-approve) ──────────────────────────────────────────

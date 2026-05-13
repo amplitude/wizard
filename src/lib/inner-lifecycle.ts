@@ -35,9 +35,11 @@
  * ```
  */
 
+import nodePath from 'node:path';
 import { getUI } from '../ui/index.js';
 import { AgentUI } from '../ui/agent-ui.js';
 import {
+  classifyFileChangeError,
   classifyWriteOperation,
   summarizeToolInput,
   type InnerAgentStartedData,
@@ -67,6 +69,90 @@ export interface InnerLifecycleConfig {
   model?: string;
   /** Optional plan ID when running under `apply --plan-id`. */
   planId?: string;
+  /**
+   * Wizard install directory — when supplied, used to relativize the
+   * absolute `path` the inner agent passes to write tools so the
+   * `current_file` event ships a renderable `relativePath`. Falls back
+   * to basename when the file lives outside `installDir`. Optional
+   * because hook factories that don't have it (probe calls, tests) can
+   * still emit the raw path safely.
+   */
+  installDir?: string;
+}
+
+/**
+ * Best-effort relativization for the `current_file` event. Returns
+ * `path.relative(installDir, abs)` when `abs` lives inside `installDir`,
+ * otherwise falls back to the basename so orchestrators still see a
+ * renderable short label. Pure — no I/O, no throws.
+ */
+function relativizeForCurrentFile(
+  abs: string,
+  installDir: string | undefined,
+): string {
+  if (!installDir) return abs;
+  try {
+    const rel = nodePath.relative(installDir, abs);
+    if (!rel || rel.startsWith('..')) return nodePath.basename(abs);
+    return rel;
+  } catch {
+    return abs;
+  }
+}
+
+/**
+ * Inspect a PostToolUse hook input for a tool-result error. The SDK
+ * surfaces failures via either `tool_response.is_error` /
+ * `tool_response.error` (newer hook shape) or a stringified result
+ * containing common error markers. Returns the sanitized message when
+ * a failure is detected, null when the tool succeeded. Pure — no
+ * I/O, no throws.
+ */
+export function extractToolFailureMessage(
+  input: Record<string, unknown>,
+): string | null {
+  const result =
+    typeof input.tool_response !== 'undefined'
+      ? input.tool_response
+      : typeof input.tool_result !== 'undefined'
+      ? input.tool_result
+      : null;
+  if (result === null || result === undefined) return null;
+  if (typeof result === 'object') {
+    const obj = result as Record<string, unknown>;
+    // Newer SDK shape: `{ is_error: true, error: 'msg' }` or `{ error: 'msg' }`
+    // — flag a failure when either the explicit `is_error: true` boolean is
+    // set, OR when an `error` string is present AND `is_error` isn't
+    // explicitly `false`. Some SDK paths attach an informational `error`
+    // string to a successful response (`{ is_error: false, error: 'recovered' }`);
+    // treating that as a failure would skip `recordFileChangeApplied`,
+    // skip the post-write ledger entry, and falsely emit
+    // `file_change_failed` for a successful write.
+    const isExplicitlyOk = obj.is_error === false;
+    const hasErrorString = !!(obj.error && typeof obj.error === 'string');
+    if (!isExplicitlyOk && (obj.is_error === true || hasErrorString)) {
+      const msg = typeof obj.error === 'string' ? obj.error : 'tool error';
+      return msg;
+    }
+    // Fallback: peek at a stringified `content[0].text` shape some SDK
+    // versions use for tool errors. `Array.isArray` narrows `obj.content`
+    // to `any[]` because `unknown[]` isn't expressible from the runtime
+    // check — but we treat each entry as `unknown` and re-narrow before
+    // reading any property.
+    if (Array.isArray(obj.content) && obj.content.length > 0) {
+      const first: unknown = obj.content[0];
+      if (
+        typeof first === 'object' &&
+        first !== null &&
+        typeof (first as Record<string, unknown>).text === 'string' &&
+        ((first as Record<string, unknown>).type === 'tool_result_error' ||
+          obj.is_error === true)
+      ) {
+        return (first as { text: string }).text;
+      }
+    }
+  }
+  return null;
 }
 
 /**
@@ -194,6 +280,20 @@ export function createInnerLifecycleHooks(config: InnerLifecycleConfig): {
           // when inner-lifecycle hooks fire from a probe call). Swallow —
           // a missing pre-event is harmless, the apply-side handles it.
         }
+        // v2 protocol: coarser `current_file` rollup. AgentUI debounces
+        // repeated edits to the same (path, op) inside 250ms, so a tight
+        // edit chain collapses into one orchestrator-facing event. InkUI
+        // / LoggingUI no-op — they already have their own "active file"
+        // surfaces via `recordFileChangePlanned`.
+        try {
+          getUI().emitCurrentFile?.({
+            path,
+            relativePath: relativizeForCurrentFile(path, config.installDir),
+            operation,
+          });
+        } catch {
+          // Same swallow rationale as recordFileChangePlanned above.
+        }
         // Capture the pre-write content into the rollback ledger so a
         // cancelled / errored run can revert this file. No-op when no
         // ledger has been initialised (probe calls, unit tests).
@@ -233,6 +333,27 @@ export function createInnerLifecycleHooks(config: InnerLifecycleConfig): {
         ? obj.path
         : null;
     if (path) {
+      // v2 protocol: gate on tool_result outcome. If the write tool
+      // surfaced an error, emit `file_change_failed` and SKIP
+      // `recordFileChangeApplied` — which would falsely advertise a
+      // successful write to the orchestrator's audit trail. The
+      // pre-write entry stays in the rollback ledger so a cancelled
+      // run can still restore the original on-disk state.
+      const failureMessage = extractToolFailureMessage(input);
+      if (failureMessage !== null) {
+        try {
+          getUI().emitFileChangeFailed?.({
+            path,
+            operation,
+            errorClass: classifyFileChangeError(failureMessage),
+            errorMessage: failureMessage,
+          });
+        } catch {
+          // See preToolUse — same defensive swallow.
+        }
+        return Promise.resolve({});
+      }
+
       const content = typeof obj.content === 'string' ? obj.content : null;
       // Use `content !== null` not `content` — empty string `''` is falsy
       // and would drop `bytes` from the event. Outer agents need to
