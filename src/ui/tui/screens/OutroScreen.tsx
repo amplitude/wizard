@@ -24,6 +24,8 @@ import {
   TerminalLink,
 } from '../primitives/index.js';
 import { buildChangedFileList } from '../primitives/ChangedFilesView.js';
+import { DiffViewer } from '../components/DiffViewer.js';
+import { summarizeLedgerDiffs } from '../../../lib/file-change-diff.js';
 import { peekSetupComplete } from '../../../lib/setup-complete-registry.js';
 import { useScreenInput } from '../hooks/useScreenInput.js';
 import {
@@ -129,6 +131,26 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
   useEffect(() => {
     store.setCommandMode(false);
   }, [store]);
+
+  // Memoize the diff summary so we don't re-run `structuredPatch` on every
+  // render frame (Bugbot: outro is mounted post-run, ledger is frozen, so a
+  // single computation per mount is correct). The ledger reference itself is
+  // stable for the lifetime of the wizard run.
+  //
+  // `includePatch: false` skips the redundant `createPatch` call per entry —
+  // we only render DiffViewer in summary mode here (no `filePath` prop), and
+  // summary mode reads `additions`/`deletions`/`operation` only, never the
+  // unified-patch text. Computing the patch for every file (up to the ledger
+  // FIFO cap) doubled the diff work and could cause a visible hang on outro
+  // mount after a large run.
+  const meaningfulDiffs = useMemo(() => {
+    const diffs = summarizeLedgerDiffs(getFileChangeLedger(), {
+      includePatch: false,
+    });
+    return diffs.filter(
+      (d) => d.additions > 0 || d.deletions > 0 || d.operation !== 'modify',
+    );
+  }, []);
 
   const [showReport, setShowReport] = useState(false);
   const [showChangedFiles, setShowChangedFiles] = useState(false);
@@ -826,6 +848,20 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
                     : 'Open it now to see your first charts populate as users hit the app.'}
                 </Text>
               </Box>
+            </Box>
+          )}
+
+          {/* Per-file diff summary — additive, complements the
+              setup-report. Shows +N/-M counts so users see the
+              magnitude of each change at a glance. Sourced from the
+              session-scoped FileChangeLedger; empty when capture
+              didn't fire (probe runs, full-activation re-runs). */}
+          {meaningfulDiffs.length > 0 && (
+            <Box marginTop={1}>
+              <DiffViewer
+                diffs={meaningfulDiffs}
+                installDir={installDir}
+              />
             </Box>
           )}
 

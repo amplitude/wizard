@@ -59,6 +59,9 @@ importers:
       cross-spawn:
         specifier: ^7.0.6
         version: 7.0.6
+      diff:
+        specifier: ^9.0.0
+        version: 9.0.0
       dotenv:
         specifier: 16.4.7
         version: 16.4.7
@@ -2067,6 +2070,10 @@ packages:
 
   diff@4.0.4:
     resolution: {integrity: sha512-X07nttJQkwkfKfvTPG/KSnE2OMdcUCao6+eXF3wmnIQRn2aPAHH3VxDbDOdegkd6JbPsXqShpvEOHfAT+nCNwQ==}
+    engines: {node: '>=0.3.1'}
+
+  diff@9.0.0:
+    resolution: {integrity: sha512-svtcdpS8CgJyqAjEQIXdb3OjhFVVYjzGAPO8WGCmRbrml64SPw/jJD4GoE98aR7r25A0XcgrK3F02yw9R/vhQw==}
     engines: {node: '>=0.3.1'}
 
   dotenv@16.4.7:
@@ -5636,6 +5643,8 @@ snapshots:
   depd@2.0.0: {}
 
   diff@4.0.4: {}
+
+  diff@9.0.0: {}
 
   dotenv@16.4.7: {}
 
