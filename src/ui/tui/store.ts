@@ -1898,7 +1898,25 @@ export class WizardStore {
 
   setOutroData(data: OutroData): void {
     this.$session.setKey('outroData', data);
-    analytics.wizardCapture('outro reached', { 'outro kind': data.kind });
+    // Speed-to-finish trending: include the wall-clock duration of the
+    // user-blocking wizard run (Running → outro) alongside the segmentation
+    // properties needed to slice trends — framework, activation level, and
+    // whether this was a fresh signup vs returning sign-in. `runStartedAt`
+    // is stamped on the transition to RunPhase.Running (see `setRunPhase`);
+    // it can be null on paths where the outro fires without the agent ever
+    // running (e.g. early auth cancel) — emit `null` so chart filters can
+    // exclude those rows cleanly.
+    const startedAt = this.session.runStartedAt;
+    const durationMs =
+      startedAt !== null ? Math.max(0, Date.now() - startedAt) : null;
+    analytics.wizardCapture('outro reached', {
+      'outro kind': data.kind,
+      'duration ms': durationMs,
+      integration: this.session.integration,
+      'detected framework': this.session.detectedFrameworkLabel,
+      'activation level': this.session.activationLevel,
+      'returning user': !isCreateAccountOnboarding(this.session),
+    });
     this.emitChange();
   }
 
