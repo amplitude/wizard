@@ -104,12 +104,14 @@ export type SignupAttemptStatus =
   | 'needs_information'
   /**
    * Server returned `needs_information` with a `required` shape the wizard
-   * doesn't know how to collect (anything other than exactly `['full_name']`
-   * — including unknown new fields, an empty array, or a mix with unknown
-   * fields). Treated as a terminal abandon → user falls back to OAuth.
-   * Distinct from `signup_error` so the wire-contract drift is visible in
-   * the funnel — if this status starts firing, the server has added a
-   * required field the wizard doesn't yet handle.
+   * doesn't know how to collect — i.e. anything outside a non-empty subset
+   * of `KNOWN_REQUIRED_KEYS` (unknown new fields, an empty array, or a mix
+   * that includes an unknown field). Also fires when `'terms_acceptance'`
+   * is in `required` but the BE's `documents` payload is malformed.
+   * Treated as a terminal abandon → user falls back to OAuth. Distinct
+   * from `signup_error` so the wire-contract drift is visible in the
+   * funnel: if this status starts firing, the server has added a required
+   * field (or doc kind) the wizard doesn't yet handle.
    */
   | 'needs_information_unsupported'
   | 'signup_error'
@@ -245,14 +247,13 @@ export async function performSignupOrAuth(
   const directSignupInput: DirectSignupInput = { ...input, email: input.email };
 
   // Source tag for the `'legal document source'` telemetry property,
-  // derived from what the attempt's body WILL carry:
-  //   - 'with_required_fields' input → URLs in body → use the source the parser
-  //     recorded (passed in via input.legalDocumentSource).
-  //   - 'email_only' input → body has no terms_acceptance slot → 'unused'.
-  // The `needs_information` arm overrides this with `result.legalDocumentSource`
-  // because that arm reports what BE produced, not what the caller sent.
+  // derived from what the body WILL carry: an input that has no
+  // `legalDocumentSource` won't emit a `terms_acceptance` slot, so the
+  // attempt's source is `'unused'`. The `needs_information` arm
+  // overrides this with `result.legalDocumentSource` since that reports
+  // what BE produced, not what the caller sent.
   const inputSource: LegalDocumentSource | 'unused' =
-    input.kind === 'with_required_fields'
+    input.kind === 'with_required_fields' && input.legalDocumentSource
       ? input.legalDocumentSource
       : 'unused';
 
@@ -385,13 +386,13 @@ export async function performSignupOrAuth(
         zone: input.zone,
       },
     );
-    // `fullName` is required by the server when this success arm fires.
-    // On a follow-up call, `input.fullName` is present (discriminated
-    // union enforces it). On an initial-call success arm, the BE returned
-    // tokens straight away without needing the field — fall back to an
-    // empty string here.
+    // Display-name placeholder for the pending-sentinel `StoredUser`
+    // when the post-signup fetch fails. Empty when the caller didn't
+    // supply `fullName` — the next successful user fetch overwrites it.
     const fullNameForFallback =
-      input.kind === 'with_required_fields' ? input.fullName : '';
+      input.kind === 'with_required_fields' && input.fullName
+        ? input.fullName
+        : '';
     const parts = fullNameForFallback.trim().split(/\s+/);
     user = {
       id: 'pending',

@@ -36,7 +36,10 @@ import { DEFAULT_AMPLITUDE_ZONE } from '../../../lib/constants.js';
 import { createLogger } from '../../../lib/observability/logger.js';
 import { assertNever } from '../../../utils/assert-never.js';
 import type { SignupOrAuthInput } from '../../../utils/signup-or-auth.js';
-import { FollowUpSessionReadySchema } from '../../../lib/account-creation-flow.js';
+import type {
+  LegalDocumentBundle,
+  LegalDocumentSource,
+} from '../../../utils/direct-signup.js';
 
 const log = createLogger('signing-up-screen');
 
@@ -49,11 +52,7 @@ export const SigningUpScreen = ({ store }: SigningUpScreenProps) => {
 
   const { session } = store;
   const email = session.signupEmail;
-  // Derived for `useAsyncEffect`'s deps and the rendered header. The
-  // input-construction switch below reads directly from session for
-  // the discriminated-union narrowing.
-  const fullName =
-    session.tosAccepted === true ? (session.signupFullName ?? null) : null;
+  const signupFullName = session.signupFullName;
 
   useAsyncEffect(
     async (signal) => {
@@ -63,45 +62,61 @@ export const SigningUpScreen = ({ store }: SigningUpScreenProps) => {
         readDisk: false,
       });
 
-      // Discriminator is BE-driven: `signupRequiredFields !== null`
-      // means BE returned `needs_information` at least once during
-      // this ceremony, so this is a follow-up call. The flow's
-      // `requiredSatisfied` predicate (Step 8 in the spec) prevents
-      // SigningUp re-firing with incomplete data, so the defensive
-      // narrowing guard below should be unreachable in production —
-      // it exists to satisfy the type system without `!` non-null
-      // assertions.
-      const hasRequiredFields = session.signupRequiredFields !== null;
+      // `signupRequiredFields !== null` means the BE returned
+      // `needs_information` at least once this ceremony, so this is a
+      // follow-up call. The flow's `requiredSatisfied` predicate keeps
+      // us out of SigningUp until each required-key has its session
+      // value populated; the per-field null checks below narrow
+      // `string | null` to `string` for the wrapper input.
+      const requiredFields = session.signupRequiredFields;
 
       let input: SignupOrAuthInput;
-      if (hasRequiredFields) {
-        // Narrow + validate the session fields a with_required_fields input needs.
-        // The schema's strictness matches what the prior manual null-
-        // check ladder did (just non-null on each field) — centralized
-        // so the "what makes a with_required_fields session complete" contract
-        // lives next to the related ProvisioningReadySchema.
-        const ready = FollowUpSessionReadySchema.safeParse(session);
-        if (!ready.success) {
-          // Invariant violation: flow gate should prevent reaching
-          // SigningUp in follow-up mode without complete data. If we
-          // hit this branch, route to OAuth via abandonment instead
-          // of crashing on a null access.
-          log.error(
-            'signup: re-fired in follow-up mode without complete data; abandoning',
-          );
-          store.setSignupAbandoned(true);
-          return;
+      if (requiredFields !== null) {
+        // Per-RequiredKey exhaustive switch: validates session readiness AND
+        // collects the input slot for each requested key. `assertNever`
+        // makes adding a new `RequiredKey` (e.g. `phone_number`) a compile
+        // error here until the contributor maps it to a session field and
+        // an input slot — otherwise the new key would silently be treated
+        // as "not collected" and abandon every ceremony.
+        let inputFullName: string | undefined;
+        let inputLegalDocumentBundle: LegalDocumentBundle | undefined;
+        let inputLegalDocumentSource: LegalDocumentSource | undefined;
+        for (const key of requiredFields) {
+          switch (key) {
+            case 'full_name':
+              if (session.signupFullName === null) {
+                log.error(
+                  'signup: re-fired in follow-up mode without full_name; abandoning',
+                );
+                store.setSignupAbandoned(true);
+                return;
+              }
+              inputFullName = session.signupFullName;
+              break;
+            case 'terms_acceptance':
+              if (
+                session.legalDocumentBundle === null ||
+                session.legalDocumentSource === null
+              ) {
+                log.error(
+                  'signup: re-fired in follow-up mode without terms_acceptance state; abandoning',
+                );
+                store.setSignupAbandoned(true);
+                return;
+              }
+              inputLegalDocumentBundle = session.legalDocumentBundle;
+              inputLegalDocumentSource = session.legalDocumentSource;
+              break;
+            default:
+              assertNever(key);
+          }
         }
         input = {
           kind: 'with_required_fields',
           email,
-          // Spread the schema-narrowed fields. `legalDocumentSource` is
-          // the parser-recorded source, passed through so telemetry on
-          // success / error arms can tag this follow-up's URL origin
-          // accurately, without re-reading from the session.
-          fullName: ready.data.signupFullName,
-          legalDocumentBundle: ready.data.legalDocumentBundle,
-          legalDocumentSource: ready.data.legalDocumentSource,
+          fullName: inputFullName,
+          legalDocumentBundle: inputLegalDocumentBundle,
+          legalDocumentSource: inputLegalDocumentSource,
           zone,
           signal,
         };
@@ -159,7 +174,7 @@ export const SigningUpScreen = ({ store }: SigningUpScreenProps) => {
           // Defensive guard against a stuck-spinner deadlock: if the
           // server is asking for a field we already populated, the
           // ceremony can't make progress — `useAsyncEffect`'s deps
-          // (`[email, fullName]`) won't change on the next
+          // (`[email, signupFullName]`) won't change on the next
           // `setSignupRequiredFields` write, the screen won't re-mount,
           // and no further effect will fire. Without this guard the
           // user wedges on the spinner forever with no escape besides
@@ -169,10 +184,15 @@ export const SigningUpScreen = ({ store }: SigningUpScreenProps) => {
           // a complete body and the server is still asking for these
           // fields), but the cost of the guard is one switch and the
           // failure mode it prevents has zero in-band recovery.
+          //
+          // Per-key arms read raw session fields, mirroring
+          // `flows.ts:requiredSatisfied`. Reading a `tosAccepted`-gated
+          // derivation would have miscoded full_name-only flows as
+          // unsatisfied even after the user supplied a name.
           const alreadySatisfied = result.requiredFields.every((field) => {
             switch (field) {
               case 'full_name':
-                return fullName !== null;
+                return session.signupFullName !== null;
               case 'terms_acceptance':
                 return session.tosAccepted === true;
               default:
@@ -211,14 +231,27 @@ export const SigningUpScreen = ({ store }: SigningUpScreenProps) => {
           assertNever(result);
       }
     },
-    [email, fullName],
+    // Deps read raw session fields rather than `tosAccepted`-gated
+    // derivations — full_name-only flows never set `tosAccepted`, so a
+    // derived `fullName` would stay null even after the user supplied
+    // a name and the effect would miss re-firings keyed on it. (Same
+    // staleness pattern bugbot caught in the deadlock guard above.)
+    [email, signupFullName],
   );
 
   // Render mimics the previous input screen so the screen swap feels
   // continuous: same heading, the submitted value as a static line, and
   // a spinner.
+  //
+  // "Creating…" runs on every follow-up POST regardless of which fields
+  // the user collected — `signupRequiredFields !== null` is the load-
+  // bearing condition (BE has acknowledged the email and asked for at
+  // least one field; we're committing the account). Conditioning on
+  // `fullName !== null` was correct when full_name was always required
+  // but rendered "Checking…" on terms-only follow-ups, which became
+  // user-visible after BA-149 enabled that combination.
   const headerLabel =
-    session.signupRequiredFields !== null && fullName !== null
+    session.signupRequiredFields !== null
       ? 'Creating your account…'
       : 'Checking your account…';
 
@@ -234,7 +267,7 @@ export const SigningUpScreen = ({ store }: SigningUpScreenProps) => {
       {email && (
         <Box flexDirection="column" marginBottom={1}>
           <Text>{email}</Text>
-          {fullName && <Text>{fullName}</Text>}
+          {signupFullName && <Text>{signupFullName}</Text>}
         </Box>
       )}
 

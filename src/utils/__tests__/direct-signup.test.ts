@@ -53,6 +53,27 @@ const INITIAL_INPUT = {
   zone: 'us',
 } as const;
 
+// Follow-up POST shapes that carry only one of the `with_required_fields`
+// slots — the body builder emits each slot only when its source field
+// is supplied.
+const FULL_NAME_ONLY_INPUT = {
+  kind: 'with_required_fields',
+  email: 'ada@example.com',
+  fullName: 'Ada Lovelace',
+  zone: 'us',
+} as const;
+
+const TERMS_ONLY_INPUT = {
+  kind: 'with_required_fields',
+  email: 'ada@example.com',
+  legalDocumentBundle: {
+    terms_of_service: 'https://amplitude.com/terms',
+    privacy_policy: 'https://amplitude.com/privacy',
+  },
+  legalDocumentSource: 'server',
+  zone: 'us',
+} as const;
+
 describe('performDirectSignup', () => {
   it('happy path: exchanges oauth code for tokens and returns success', async () => {
     server.use(
@@ -221,13 +242,14 @@ describe('performDirectSignup', () => {
 
   // ── needs_information `required` shape gate (schema-layer) ───────────
   //
-  // The schema's `.refine()` enforces that `required` is exactly
-  // `['full_name']`. Any other shape (additional fields, missing fields,
-  // empty array, substituted field) means the server's contract has
-  // drifted past what this client supports — the parse fails, and the
-  // type-aware fall-through detects `type === 'needs_information'` and
-  // returns `kind: 'error'` with `code: 'unsupported_required_shape'`.
-  // The wrapper maps that code to a distinct telemetry status.
+  // The schema accepts any non-empty subset of `KNOWN_REQUIRED_KEYS` via
+  // `z.array(z.enum(KNOWN_REQUIRED_KEYS)).nonempty()`. Any shape outside
+  // that (unknown kinds, empty array, or a mix that includes an unknown
+  // kind) means the server's contract has drifted past what this client
+  // supports — the parse fails, the type-aware fall-through detects
+  // `type === 'needs_information'`, and returns `kind: 'error'` with
+  // `code: 'unsupported_required_shape'`. The wrapper maps that code to
+  // a distinct telemetry status.
 
   it.each([
     ['unknown field only', ['company']],
@@ -392,18 +414,10 @@ describe('performDirectSignup', () => {
     }
   });
 
-  it('flag-ON with terms_acceptance alone (no full_name required) is unsupported_required_shape', async () => {
-    // Wire-contract guard: the wizard cannot honestly satisfy a
-    // `needs_information` response that requires `terms_acceptance`
-    // without also requiring `full_name`. TUI: signupFullName is only
-    // collectable when 'full_name' ∈ required. Non-TUI: helpers.ts
-    // already sent fullName in the first POST body; a `terms_acceptance`-
-    // only follow-up implies the body was rejected with nothing the
-    // wizard can re-collect on the spot. Either way, surface as
-    // `unsupported_required_shape` so the wrapper tags
-    // `needs_information_unsupported` telemetry and the drift is
-    // observable in dashboards instead of silently falling through to
-    // OAuth.
+  it('flag-ON with terms_acceptance alone (no full_name required) returns needs_information', async () => {
+    // `terms_acceptance` alone is a valid `needs_information.required`
+    // subset; the wrapper must surface it so the ToS screen renders
+    // and the follow-up POST carries only the terms_acceptance slot.
     server.use(
       http.post(PROVISIONING_URL, () =>
         HttpResponse.json({
@@ -439,9 +453,14 @@ describe('performDirectSignup', () => {
       zone: 'us',
     });
 
-    expect(result.kind).toBe('error');
-    if (result.kind === 'error') {
-      expect(result.code).toBe('unsupported_required_shape');
+    expect(result.kind).toBe('needs_information');
+    if (result.kind === 'needs_information') {
+      expect(result.requiredFields).toEqual(['terms_acceptance']);
+      expect(result.legalDocumentSource).toBe('server');
+      expect(result.legalDocumentBundle).toEqual({
+        terms_of_service: 'https://amplitude.com/terms',
+        privacy_policy: 'https://amplitude.com/privacy',
+      });
     }
   });
 
@@ -588,6 +607,52 @@ describe('performDirectSignup', () => {
     expect(observedBody).not.toBeNull();
     expect(observedBody!).not.toHaveProperty('terms_acceptance');
     expect(observedBody!).not.toHaveProperty('full_name');
+  });
+
+  // Per-combination body shapes — `fullName` and `legalDocumentBundle`
+  // are independently optional on `with_required_fields`, so the body
+  // builder emits each slot only when its source field is defined.
+  it('with_required_fields body: fullName-only input emits full_name and omits terms_acceptance', async () => {
+    let observedBody: Record<string, unknown> | null = null;
+    server.use(
+      http.post(PROVISIONING_URL, async ({ request }) => {
+        observedBody = (await request.json()) as Record<string, unknown>;
+        return HttpResponse.json({ type: 'oauth', oauth: { code: 'c' } });
+      }),
+      http.post(TOKEN_URL, () => HttpResponse.json(VALID_TOKEN_RESPONSE)),
+    );
+
+    await performDirectSignup(FULL_NAME_ONLY_INPUT);
+
+    expect(observedBody).not.toBeNull();
+    expect(observedBody!.full_name).toBe('Ada Lovelace');
+    expect(observedBody!).not.toHaveProperty('terms_acceptance');
+  });
+
+  it('with_required_fields body: terms-only input emits terms_acceptance and omits full_name', async () => {
+    let observedBody: Record<string, unknown> | null = null;
+    server.use(
+      http.post(PROVISIONING_URL, async ({ request }) => {
+        observedBody = (await request.json()) as Record<string, unknown>;
+        return HttpResponse.json({ type: 'oauth', oauth: { code: 'c' } });
+      }),
+      http.post(TOKEN_URL, () => HttpResponse.json(VALID_TOKEN_RESPONSE)),
+    );
+
+    await performDirectSignup(TERMS_ONLY_INPUT);
+
+    expect(observedBody).not.toBeNull();
+    expect(observedBody!).not.toHaveProperty('full_name');
+    expect(observedBody!.terms_acceptance).toEqual({
+      terms_of_service: {
+        url: 'https://amplitude.com/terms',
+        accepted: true,
+      },
+      privacy_policy: {
+        url: 'https://amplitude.com/privacy',
+        accepted: true,
+      },
+    });
   });
 
   it('returns requires_redirect on requires_auth response', async () => {

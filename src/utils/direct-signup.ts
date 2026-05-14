@@ -223,18 +223,23 @@ function isCallerAbort(error: unknown, signal?: AbortSignal): boolean {
  *   The BE decides what's needed and responds `needs_information`,
  *   `requires_redirect` (existing user), or `oauth` (success).
  *
- * - `kind: 'with_required_fields'` — the wizard received `needs_information` on a
- *   prior call, the user has now satisfied every required field, and
- *   we're submitting the complete body. `fullName` and
- *   `legalDocumentBundle` are both required at the type level — the
- *   discriminated union enforces that callers can't construct a
- *   `'with_required_fields'` shape without all of them.
+ * - `kind: 'with_required_fields'` — the wizard received `needs_information`
+ *   on a prior call and the user has satisfied the fields the BE
+ *   requested in that response. Each of `fullName` and
+ *   `legalDocumentBundle` is independently optional: present iff the BE
+ *   asked for the corresponding `RequiredKey` AND the user collected it.
+ *   The body builder in `performDirectSignup` emits each request slot
+ *   only when its source field is defined, so the POST body mirrors the
+ *   BE-supplied `required` array exactly.
  *
- * Why this is binary: the wizard's flow gate (`requiredSatisfied` in
- * `flows.ts`) prevents `SigningUp` from re-firing until every required
- * field is collected. There's no "I have full_name but not yet
- * terms_acceptance" intermediate state that hits the network — re-fires
- * only happen after all required fields are filled.
+ * Why the kind discriminator is binary even though the fields aren't:
+ * the wizard's flow gate (`requiredSatisfied` in `flows.ts`) prevents
+ * `SigningUp` from re-firing until every BE-required field is collected.
+ * So `'with_required_fields'` always means "this is the follow-up POST
+ * after `needs_information`" — never a partial-progress retry. What the
+ * BE asked for determines which optional fields are populated; the kind
+ * itself just tells callers (and the body builder) whether they're on
+ * the probe path or the follow-up path.
  */
 export type SignupShape<Email extends string | null> =
   | {
@@ -255,17 +260,36 @@ export type SignupShape<Email extends string | null> =
   | {
       kind: 'with_required_fields';
       email: Email;
-      fullName: string;
-      legalDocumentBundle: LegalDocumentBundle;
       /**
-       * Where `legalDocumentBundle`'s URLs originated. The body builder in
-       * `performDirectSignup` doesn't read this — the request body only
-       * needs the URLs. The field exists so the wrapper's telemetry layer
-       * can tag the `'legal document source'` event on follow-up arms
-       * (success / error / etc.) without re-deriving the source or
+       * Present when the caller has supplied a full name. Two paths:
+       * TUI flow — `SignupFullName` screen collected it after the BE
+       * asked for `'full_name'` in `needs_information.required`;
+       * non-TUI flow — the operator passed `--full-name`, populating
+       * `session.signupFullName` upfront and `helpers.ts` forwards it
+       * regardless of any BE round-trip. The body builder in
+       * `performDirectSignup` omits the `full_name` slot when this is
+       * undefined.
+       */
+      fullName?: string;
+      /**
+       * Present when the caller has terms-acceptance state to send.
+       * Same two-path pattern as `fullName`: TUI collects via the ToS
+       * screen after the BE asks for `'terms_acceptance'`; non-TUI uses
+       * `LOCAL_DOC_URLS` upfront. The body builder omits the
+       * `terms_acceptance` slot when this is undefined. Co-varies with
+       * `legalDocumentSource` — either both fields are present together
+       * or both are absent.
+       */
+      legalDocumentBundle?: LegalDocumentBundle;
+      /**
+       * Where `legalDocumentBundle`'s URLs originated. Only meaningful when
+       * `legalDocumentBundle` is set. The body builder doesn't read this —
+       * the request body only needs the URLs. The field exists so the
+       * wrapper's telemetry layer can tag the `'legal document source'`
+       * event on follow-up arms without re-deriving the source or
        * re-threading it through session reads.
        */
-      legalDocumentSource: LegalDocumentSource;
+      legalDocumentSource?: LegalDocumentSource;
       zone: AmplitudeZone;
       signal?: AbortSignal;
     };
@@ -323,11 +347,6 @@ export async function performDirectSignup(
     kind: input.kind,
   });
 
-  // Build the request body via discriminated switch — `'email_only'` shapes
-  // produce the bare envelope, `'with_required_fields'` shapes add `full_name` and
-  // `terms_acceptance`. The type system enforces "with_required_fields always has
-  // both collected fields" at the call site, so the body construction
-  // here doesn't need runtime guards on optional fields.
   const baseBody = {
     email: input.email,
     scopes: ['openid', 'offline'],
@@ -336,23 +355,28 @@ export async function performDirectSignup(
     redirect_uri: `http://localhost:${OAUTH_PORT}/callback`,
   };
 
-  const requestBody: Record<string, unknown> =
-    input.kind === 'email_only'
-      ? baseBody
-      : {
-          ...baseBody,
-          full_name: input.fullName,
-          terms_acceptance: {
-            terms_of_service: {
-              url: input.legalDocumentBundle.terms_of_service,
-              accepted: true,
-            },
-            privacy_policy: {
-              url: input.legalDocumentBundle.privacy_policy,
-              accepted: true,
-            },
-          },
-        };
+  // Each `with_required_fields` slot is emitted only when its source
+  // field is supplied — the BE's `required` array can be any non-empty
+  // subset of `KNOWN_REQUIRED_KEYS`, so per-field emission stays
+  // uniform regardless of how many keys exist.
+  const requestBody: Record<string, unknown> = { ...baseBody };
+  if (input.kind === 'with_required_fields') {
+    if (input.fullName !== undefined) {
+      requestBody.full_name = input.fullName;
+    }
+    if (input.legalDocumentBundle !== undefined) {
+      requestBody.terms_acceptance = {
+        terms_of_service: {
+          url: input.legalDocumentBundle.terms_of_service,
+          accepted: true,
+        },
+        privacy_policy: {
+          url: input.legalDocumentBundle.privacy_policy,
+          accepted: true,
+        },
+      };
+    }
+  }
 
   let response;
   try {
@@ -432,37 +456,6 @@ export async function performDirectSignup(
       legalDocumentSource = 'local';
       normalizedRequired = [...requiredFromBE, 'terms_acceptance'];
       // === END SPOOF ===
-    }
-
-    // Wire-contract guard: the wizard cannot honestly satisfy a
-    // `needs_information` response that requires `terms_acceptance`
-    // without also requiring `full_name`.
-    //   - TUI: signupFullName is only collectable via the SignupFullName
-    //     screen, which renders only when 'full_name' ∈ required. With
-    //     'full_name' absent, ToS shows, user accepts, SigningUp re-fires,
-    //     and FollowUpSessionReadySchema rejects on null signupFullName —
-    //     a silent fall-through to OAuth with no observability of the
-    //     wire-contract drift.
-    //   - Non-TUI (helpers.ts): the first POST already carried fullName
-    //     in the body, so the BE asking for needs_information with
-    //     'terms_acceptance' alone implies our payload was rejected and
-    //     more is needed — also unsatisfiable on the spot.
-    // Surface as `unsupported_required_shape` so the wrapper tags
-    // `needs_information_unsupported` telemetry and the drift shows up
-    // in dashboards instead of looking like an OAuth fallback.
-    if (
-      normalizedRequired.includes('terms_acceptance') &&
-      !normalizedRequired.includes('full_name')
-    ) {
-      log.warn(
-        '[direct-signup] needs_information requires terms_acceptance without full_name — unsupported shape',
-      );
-      return {
-        kind: 'error',
-        code: 'unsupported_required_shape',
-        message:
-          'Server requested terms_acceptance without full_name — wizard cannot collect this shape.',
-      };
     }
 
     return {

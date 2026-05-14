@@ -41,27 +41,3 @@ export function accountCreationProvisioningInputsReady(
 ): session is ReadyForAccountCreationProvisioning {
   return ProvisioningReadySchema.safeParse(session).success;
 }
-
-/**
- * Schema-backed readiness check for the session state that
- * `SigningUpScreen` needs to build a `kind: 'with_required_fields'` input. Matches
- * the prior manual null-check ladder exactly: each field must be
- * non-null, but no additional shape validation (e.g. URL regex) is
- * performed — the underlying types already constrain inner shapes, and
- * the upstream parser is the trust boundary for URL validation.
- *
- * Centralized here (rather than inlined at the screen) so the "what
- * makes a complete with_required_fields session" contract has one home, alongside
- * the related `ProvisioningReadySchema`.
- */
-export const FollowUpSessionReadySchema = z.object({
-  signupFullName: z.string(),
-  legalDocumentBundle: z.object({
-    terms_of_service: z.string(),
-    privacy_policy: z.string(),
-  }),
-  legalDocumentSource: z.enum(['server', 'local']),
-});
-
-/** Narrowed session subset after `FollowUpSessionReadySchema.safeParse` succeeds. */
-export type FollowUpSessionReady = z.infer<typeof FollowUpSessionReadySchema>;

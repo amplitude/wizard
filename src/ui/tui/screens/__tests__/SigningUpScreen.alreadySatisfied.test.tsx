@@ -63,6 +63,47 @@ describe('SigningUpScreen alreadySatisfied', () => {
     unmount();
   });
 
+  it("abandons in full_name-only flow when server re-requests 'full_name' (tosAccepted stays null)", async () => {
+    // Regression test for BA-149: in full_name-only flows the ToS screen
+    // never runs, so `session.tosAccepted` stays `null`. The outer-scope
+    // derived `fullName` in SigningUpScreen is gated on
+    // `tosAccepted === true`, which would have made the alreadySatisfied
+    // guard's full_name arm read `false` even though `signupFullName` was
+    // populated — letting the screen fall through to a stuck-spinner
+    // deadlock on a server bug. The fix reads `session.signupFullName`
+    // directly, matching the gate in `flows.ts:requiredSatisfied`.
+    const mod = await import('../../../../utils/signup-or-auth.js');
+    (mod.performSignupOrAuth as ReturnType<typeof vi.fn>).mockResolvedValue({
+      kind: 'needs_information',
+      requiredFields: ['full_name'],
+      legalDocumentBundle: null,
+      legalDocumentSource: 'server',
+    });
+
+    const { SigningUpScreen } = await import('../SigningUpScreen.js');
+    const { makeStoreForSnapshot } = await import(
+      '../../__tests__/snapshot-utils.js'
+    );
+
+    const store = makeStoreForSnapshot({
+      introConcluded: true,
+      region: 'us',
+      signupEmail: 'ada@example.com',
+      // Critical setup: name is supplied (we already sent it), but
+      // tosAccepted stays null because no ToS screen ran in this flow.
+      signupFullName: 'Ada Lovelace',
+      tosAccepted: null,
+    });
+
+    const { unmount } = render(<SigningUpScreen store={store} />);
+    await new Promise((r) => setTimeout(r, 50));
+
+    expect(store.session.signupAbandoned).toBe(true);
+    expect(store.session.signupRequiredFields).toBe(null);
+
+    unmount();
+  });
+
   it('does NOT abandon when server requests a field we have not yet supplied', async () => {
     // Negative case: pins the *other* side of the alreadySatisfied check so
     // a future refactor that inverts the predicate would fail one of these
