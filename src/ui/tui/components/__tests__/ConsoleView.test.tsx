@@ -218,3 +218,81 @@ describe('ConsoleView command-feedback rendering', () => {
     unmount();
   });
 });
+
+describe('ConsoleView screenError key handling', () => {
+  it('R clears screenError (existing shortcut still works)', async () => {
+    const store = makeStore();
+    store.setScreenError(new Error('boom'));
+
+    const { stdin, unmount } = render(
+      <ConsoleView store={store} width={80} height={24} />,
+    );
+    // Yield so the dormant useInput handler mounts and sees screenError.
+    await new Promise((r) => setTimeout(r, 10));
+
+    expect(store.screenError).not.toBeNull();
+
+    stdin.write('r');
+    await new Promise((r) => setTimeout(r, 20));
+
+    expect(store.screenError).toBeNull();
+    unmount();
+  });
+
+  it('Enter clears screenError (regression: banner shows [R] retry but users press Enter)', async () => {
+    // PR A13 / audit iteration #10: the screen-error banner advertises
+    // [R] retry, but the keyboard handler only matched 'r'/'R'. Users
+    // focused on a prompt below the banner often try Enter as the
+    // default action — accept it as a retry trigger.
+    const store = makeStore();
+    store.setScreenError(new Error('boom'));
+
+    const { stdin, unmount } = render(
+      <ConsoleView store={store} width={80} height={24} />,
+    );
+    await new Promise((r) => setTimeout(r, 10));
+
+    expect(store.screenError).not.toBeNull();
+
+    // `\r` is what ink-testing-library maps to key.return.
+    stdin.write('\r');
+    await new Promise((r) => setTimeout(r, 20));
+
+    expect(store.screenError).toBeNull();
+    unmount();
+  });
+
+  it('Enter does NOT clear screenError while pendingPrompt is active (Bugbot regression — picker owns Enter)', async () => {
+    // Follow-up to the above: when `screenError` co-exists with a
+    // `pendingPrompt` (e.g. an in-flight promptChoice rendering a
+    // PickerMenu), the picker's own useScreenInput listens for Enter
+    // to commit the focused selection. Accepting Enter at the
+    // ConsoleView level would fire BOTH — clearing the error AND
+    // committing an unintended picker option. The fix gates the Enter
+    // branch on `!pendingPrompt`; `R`/`r` still work unambiguously.
+    const store = makeStore();
+    store.setScreenError(new Error('boom'));
+    // Set a `confirm`-kind pending prompt via the public API. The
+    // returned promise resolves when the prompt is answered — we don't
+    // await it because the test just needs pendingPrompt to be set.
+    void store.promptConfirm('Proceed?');
+
+    const { stdin, unmount } = render(
+      <ConsoleView store={store} width={80} height={24} />,
+    );
+    await new Promise((r) => setTimeout(r, 10));
+
+    expect(store.screenError).not.toBeNull();
+
+    // Enter must NOT clear the error while a prompt is in flight.
+    stdin.write('\r');
+    await new Promise((r) => setTimeout(r, 20));
+    expect(store.screenError).not.toBeNull();
+
+    // `R` still works — letter shortcuts don't collide with picker keys.
+    stdin.write('R');
+    await new Promise((r) => setTimeout(r, 20));
+    expect(store.screenError).toBeNull();
+    unmount();
+  });
+});
