@@ -30,6 +30,7 @@ export const FLASK_AGENT_CONFIG: FrameworkConfig<FlaskContext> = {
     glyph: '🧪',
     glyphColor: BrandColors.gray10,
     integration: Integration.flask,
+    targetsBackend: true,
     beta: true,
     docsUrl: 'https://amplitude.com/docs/sdks/analytics/python',
     unsupportedVersionDocsUrl:
