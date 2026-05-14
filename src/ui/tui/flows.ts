@@ -143,10 +143,12 @@ function needsSetup(session: WizardSession): boolean {
  *   1. `pendingOrgs` is populated (so `resolveCredentials` ran and the
  *      org/project list is available — distinguishes the SUSI/checkpoint
  *      path from the manual-API-key path, where `pendingOrgs` is null).
- *   2. The session has a resolved org and project ID — i.e. we know which
- *      project the user is going against, just not which env within it.
- *   3. That resolved project has ≥ 2 environments with usable API keys.
- *   4. The user hasn't picked an env yet (`selectedEnvName === null`).
+ *   2. The resolver-targeted project (either the user's pre-selected
+ *      project, or — when nothing's been picked yet — `pendingOrgs[0]
+ *      .projects[0]`, which is what `resolveCredentials` itself used when
+ *      it landed at `needs_user_choice/environment_selection`) has ≥ 2
+ *      environments with usable API keys.
+ *   3. The user hasn't picked an env yet (`selectedEnvName === null`).
  *
  * When ALL of those hold, `Auth.isComplete` must return false so the router
  * keeps the user on AuthScreen until they pick an env (or hit Esc / manually
@@ -160,36 +162,64 @@ function needsSetup(session: WizardSession): boolean {
  * the same "env still needs picking" state, but one is mutable state and
  * the other is derived structure — so any single bug that clobbers the
  * flag is now also caught by the structural check (and vice versa).
+ *
+ * **Restart-after-reset fix (#778 follow-up):** when `git reset --hard`
+ * wipes `<installDir>/.amplitude/` and `PR #778`'s `loadCheckpoint`
+ * invalidates the per-user checkpoint, the session reaches Auth with
+ * `selectedOrgId === null` AND `selectedProjectId === null` —
+ * `resolveCredentials` never sets those in the multi-env defer branch.
+ * The previous guard 2 short-circuited to `false` in that case, so the
+ * structural gate left only `pendingEnvSelection` standing — and a
+ * silent clear of that flag landed the user on Setup with no picker.
+ * The fallback below mirrors `resolveCredentials`' own "first project
+ * of first org" heuristic (`credential-resolution.ts` ~line 483) so the
+ * structural gate covers the no-pre-selection path too. Once the user
+ * picks an org/project via AuthScreen, guard 2 takes over with the
+ * specific selection.
  */
 function needsEnvPickStillRequired(session: WizardSession): boolean {
   // Guard 1: pendingOrgs must be populated. The manual-API-key path
   // (apiKeyNotice resolver outcome) doesn't populate pendingOrgs, so this
   // check leaves that path's `Auth.isComplete` semantics unchanged.
   const pendingOrgs = session.pendingOrgs;
-  if (pendingOrgs === null) return false;
+  if (pendingOrgs === null || pendingOrgs.length === 0) return false;
 
-  // Guard 2: a project must be resolved on the session. Without it we
-  // can't look up the env count, and that's fine — the existing
-  // `selectedProjectId/Name !== null` gate above already keeps Auth from
-  // completing in this state.
-  const orgId = session.selectedOrgId;
-  const projectId = session.selectedProjectId;
-  if (orgId === null || projectId === null) return false;
-
-  // Guard 3 + 4: the resolved project has ≥ 2 envs with API keys AND the
-  // user hasn't picked one yet. Either condition false means the env
-  // picker isn't a required step.
+  // Guard 3: the user hasn't picked an env yet. Either picking an env
+  // (real or via auto-select) flips `selectedEnvName` non-null and lets
+  // the structural gate stop blocking.
   if (session.selectedEnvName !== null) return false;
 
-  // Find the project in pendingOrgs. If it's not there (stale checkpoint
-  // selectedProjectId, user switched accounts, etc.), let other gates
-  // handle it — the AuthScreen's stale-org useEffect at line 134-151 will
-  // clear selectedOrgId, which flips guard 2 to false on the next render.
-  const org = pendingOrgs.find((o) => o.id === orgId);
-  if (!org) return false;
-  const project = org.projects.find((p) => p.id === projectId);
-  if (!project) return false;
+  // Resolve the project this run is targeting. Two valid sources:
+  //   (a) `selectedOrgId/ProjectId` — the user (or AuthScreen's
+  //       auto-resolve effect for single-org+single-project) has picked.
+  //       Use that exact (org, project) tuple.
+  //   (b) Neither is set yet — typical post-#778 restart-after-reset:
+  //       fall back to `pendingOrgs[0].projects[0]`, the same tuple
+  //       `resolveCredentials` walked when it landed at
+  //       `needs_user_choice/environment_selection`. Without this
+  //       fallback, the structural gate gives up the moment the user
+  //       reaches Auth without a pre-selected project — and the env
+  //       picker hang reproduces if `pendingEnvSelection` gets clobbered.
+  const orgId = session.selectedOrgId;
+  const projectId = session.selectedProjectId;
+  let project: (typeof pendingOrgs)[number]['projects'][number] | undefined;
+  if (orgId !== null && projectId !== null) {
+    // (a) Specific selection. Stale ID → bail; the existing stale-org
+    //     useEffect in AuthScreen handles that case.
+    const org = pendingOrgs.find((o) => o.id === orgId);
+    if (!org) return false;
+    project = org.projects.find((p) => p.id === projectId);
+    if (!project) return false;
+  } else {
+    // (b) No selection yet. Use the same first-org/first-project
+    //     heuristic `resolveCredentials` did so the gate detects the
+    //     exact (org, project, envsWithKey) tuple the deferral was
+    //     triggered against.
+    project = pendingOrgs[0]?.projects?.[0];
+    if (!project) return false;
+  }
 
+  // Guard 2: the targeted project has ≥ 2 envs with API keys.
   const selectableEnvs = (project.environments ?? []).filter(
     (e) => e.app?.apiKey,
   );

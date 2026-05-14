@@ -158,4 +158,47 @@ describe('AuthScreen snapshots', () => {
     expect(frame).toContain('Framework: Next.js');
     expect(frame).toContain('Select your organization');
   });
+
+  // Regression: env-picker hang after `git reset --hard` + restart.
+  // self-heal clears the stored API key, the session checkpoint is
+  // invalidated, and `resolveCredentials` lands at
+  // `needs_user_choice/environment_selection` →
+  // `applyEnvSelectionDeferral` sets `pendingEnvSelection = true`. The
+  // user expects the env picker to render so they can pick an env. This
+  // pins that contract.
+  it('renders env picker when pendingEnvSelection is true (restart-after-reset)', () => {
+    const store = makeStoreForSnapshot({
+      introConcluded: true,
+      region: 'us',
+      pendingEnvSelection: true,
+      pendingOrgs: [
+        {
+          id: 'org-1',
+          name: 'Acme',
+          projects: [
+            {
+              id: 'ws-1',
+              name: 'Solo Project',
+              environments: [
+                {
+                  rank: 1,
+                  name: 'Development',
+                  app: { id: '111', apiKey: 'dev-key' },
+                },
+                {
+                  rank: 2,
+                  name: 'Production',
+                  app: { id: '222', apiKey: 'prod-key' },
+                },
+              ],
+            },
+          ],
+        },
+      ],
+    });
+    const { frame } = renderSnapshot(<AuthScreen store={store} />, store);
+    expect(frame).toContain('Select an environment');
+    expect(frame).toContain('Development');
+    expect(frame).toContain('Production');
+  });
 });
