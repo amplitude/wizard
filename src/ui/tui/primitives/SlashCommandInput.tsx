@@ -215,24 +215,34 @@ export const SlashCommandInput = ({
                 {visible.map((c, vi) => {
                   const i = startIdx + vi;
                   const isFocused = i === clampedIndex;
+                  // Each row is a SINGLE <Text> with `wrap="truncate-end"`
+                  // so on narrow terminals the row collapses uniformly
+                  // instead of letting the description wrap into a 2nd
+                  // line and misaligning with neighbouring rows. The
+                  // previous implementation was a row-flex <Box> with
+                  // three <Text> siblings; at narrow widths Yoga had no
+                  // width budget to share among them and adjacent rows'
+                  // descriptions visually overlapped on real terminals
+                  // ("/login        tRe-authenticateter region…"). Inline
+                  // child <Text>s preserve per-segment colors.
                   return (
-                    <Box key={c.cmd} gap={1}>
+                    <Text key={c.cmd} wrap="truncate-end">
                       <Text
                         color={isFocused ? Colors.primary : undefined}
                         bold={isFocused}
                       >
                         {isFocused ? Icons.triangleSmallRight : ' '}
-                      </Text>
+                      </Text>{' '}
                       <Text
                         color={isFocused ? Colors.primary : undefined}
                         bold={isFocused}
                       >
                         {c.cmd.padEnd(maxCmdLen)}
-                      </Text>
+                      </Text>{' '}
                       <Text color={!isFocused ? Colors.muted : undefined}>
                         {c.desc}
                       </Text>
-                    </Box>
+                    </Text>
                   );
                 })}
                 {hasMore && startIdx + MAX_VISIBLE < total && (
