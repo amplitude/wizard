@@ -39,6 +39,7 @@ import {
   appIdResponseSchema,
   buildColdStartBreakdown,
   buildProgressEstimate,
+  classifyModel,
   classifyRunError,
   nextDecisionId,
   ToolCallStats,
@@ -958,12 +959,35 @@ export class AgentUI implements WizardUI {
 
   /**
    * Inner Claude SDK has booted and is about to start its first turn.
-   * Carries the model name and the wizard phase (plan / apply / verify /
-   * wizard) so the outer agent can attribute downstream events.
+   * Carries the structured `ModelDescriptor` block (vendor / family /
+   * alias / tier / displayName) and the wizard phase (plan / apply /
+   * verify / wizard) so the outer agent can attribute downstream events
+   * and branch on the model tier without string-matching.
+   *
+   * Accepts the raw SDK alias as a `string` for caller convenience —
+   * `classifyModel()` does the structuring at the emit boundary so
+   * every callsite ships a v2-shaped envelope without each one having
+   * to know the classification rules.
    */
-  emitInnerAgentStarted(data: Omit<InnerAgentStartedData, 'event'>): void {
-    emit('lifecycle', `inner_agent_started: ${data.model}`, {
-      data: { event: 'inner_agent_started', ...data },
+  emitInnerAgentStarted(args: {
+    model: string;
+    phase: InnerAgentStartedData['phase'];
+    planId?: string;
+  }): void {
+    const descriptor = classifyModel(args.model);
+    const data: InnerAgentStartedData = {
+      event: 'inner_agent_started',
+      model: descriptor,
+      phase: args.phase,
+      ...(args.planId ? { planId: args.planId } : {}),
+    };
+    // Log-line summary uses the displayName when classify produced one
+    // (e.g. `'Sonnet 4.6'`) so the human-readable wire matches the
+    // structured payload. Falls back to the raw alias for unknown
+    // models so logs stay informative.
+    const label = descriptor.displayName ?? descriptor.alias;
+    emit('lifecycle', `inner_agent_started: ${label}`, {
+      data,
     });
   }
 

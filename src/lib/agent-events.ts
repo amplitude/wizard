@@ -123,7 +123,28 @@ export const EVENT_DATA_VERSIONS = {
    */
   run_phase: 1,
   nested_agent: 1,
-  inner_agent_started: 1,
+  /**
+   * v2 — replaced `model: string` (raw SDK alias like `claude-sonnet-4-6`
+   * or `anthropic/claude-haiku-4-5-20251001`) with a structured
+   * `ModelDescriptor` block (`{ vendor, family, alias, tier, displayName }`).
+   * Two independent cross-audit subagents (Desktop POV, Codex POV)
+   * flagged the raw-string shape as the biggest vendor-neutral-
+   * rendering cliff in the wire today — a Codex parent had no way to
+   * detect "this run is on Claude Sonnet 4.6" without string-matching,
+   * and Desktop had no way to colorize Sonnet vs Haiku vs Opus speaker
+   * bubbles without hard-coding its own substring matcher.
+   *
+   * This is a BREAKING shape change — `model` flipped from `string` to
+   * `object`. v1 receivers that branched on `typeof data.model ===
+   * 'string'` will now see an object where they expected a string.
+   * Orchestrators that want the raw alias for logging continue to find
+   * it at `data.model.alias` (the SDK string is preserved verbatim,
+   * with any `anthropic/` prefix stripped). Consumers that want
+   * structured branching read `data.model.tier` / `data.model.family`
+   * / `data.model.vendor` / `data.model.displayName` and branch on
+   * `data_version >= 2`.
+   */
+  inner_agent_started: 2,
   // Project create. Discriminators must match the actual `data.event`
   // strings emitted by AgentUI — bugbot caught a previous mismatch
   // (`project_created` vs the emitted `project_create_success`) that
@@ -984,10 +1005,164 @@ export function __resetDecisionIdCounterForTests(): void {
 // Stop) on the inner Claude SDK. They land on the SAME stdout NDJSON stream
 // as the rest of the agent-mode events, so outer agents only need one parser.
 
-/** `inner_agent_started` — emitted at SessionStart of the inner Claude run. */
+/**
+ * Vendor-neutral model identifier emitted on `inner_agent_started`.
+ *
+ * Raw SDK aliases (e.g. `claude-sonnet-4-6`,
+ * `anthropic/claude-haiku-4-5-20251001`, `claude-opus-4-7`) can't be
+ * branched on programmatically without string-matching — and string-
+ * matching breaks across vendors (`gpt-4o`, `mistral-large-2`, …) and
+ * inside the same vendor as new aliases ship. This structured shape
+ * lets orchestrators (Codex parents, Desktop renderers, log
+ * aggregators) decide e.g. "this run is on a Claude Haiku tier model"
+ * by reading `tier === 'haiku'` rather than substring-matching the
+ * alias.
+ *
+ *   vendor       — coarse provider bucket. `'other'` for non-Claude.
+ *   family       — model family within the vendor (`claude` / `gpt` /
+ *                  `gemini` / `other`).
+ *   alias        — raw SDK alias, with any `anthropic/` prefix stripped
+ *                  but otherwise preserved verbatim so orchestrators
+ *                  that need the exact string for logging / billing
+ *                  can recover it.
+ *   tier         — speed/cost tier within the family (`haiku` /
+ *                  `sonnet` / `opus` for Claude; the generic
+ *                  `fast` / `standard` / `thorough` buckets are
+ *                  reserved for non-Claude families; `other` when
+ *                  unknown). Absent when we can't classify confidently.
+ *   displayName  — short human-readable name (e.g. `'Sonnet 4.6'`,
+ *                  `'Haiku 4.5'`) for direct rendering by orchestrator
+ *                  UIs. Absent when no canonical short name is known.
+ */
+export interface ModelDescriptor {
+  vendor: 'anthropic' | 'openai' | 'google' | 'other';
+  family: 'claude' | 'gpt' | 'gemini' | 'other';
+  alias: string;
+  tier?:
+    | 'haiku'
+    | 'sonnet'
+    | 'opus'
+    | 'fast'
+    | 'standard'
+    | 'thorough'
+    | 'other';
+  displayName?: string;
+}
+
+/**
+ * Classify a raw SDK model alias into a structured `ModelDescriptor`.
+ *
+ * Pure / synchronous / no I/O — safe to call from any emit boundary
+ * (SessionStart hook, `run-agent.ts` boot, etc.). Strips an
+ * `anthropic/` prefix (the SDK sometimes namespaces) and lowercases
+ * for matching, but preserves the cleaned alias verbatim on the
+ * descriptor so orchestrators that want the exact string for logging
+ * can recover it.
+ *
+ * Match precedence (first match wins):
+ *   - `claude-opus-N-M*`   → tier `'opus'`,    displayName `'Opus N.M'`
+ *   - `claude-sonnet-N-M*` → tier `'sonnet'`,  displayName `'Sonnet N.M'`
+ *   - `claude-haiku-N-M*`  → tier `'haiku'`,   displayName `'Haiku N.M'`
+ *   - `gpt-*`              → vendor `'openai'`, family `'gpt'`
+ *   - `gemini-*`           → vendor `'google'`, family `'gemini'`
+ *   - anything else        → vendor `'other'`, family `'other'` —
+ *                            raw alias preserved on the descriptor.
+ *
+ * Date suffixes (`-20251001`) and patch-level segments past `N.M` are
+ * intentionally NOT surfaced in `displayName` so the rendered label
+ * stays stable across point releases of the same tier.
+ */
+export function classifyModel(rawAlias: string): ModelDescriptor {
+  // Strip a leading `anthropic/` namespace (the SDK sometimes uses it
+  // for explicit provider routing). Preserve the rest verbatim — that
+  // becomes `descriptor.alias` so orchestrators can recover the SDK
+  // string when they need it for logging or telemetry.
+  const stripped = rawAlias.startsWith('anthropic/')
+    ? rawAlias.slice('anthropic/'.length)
+    : rawAlias;
+  const lower = stripped.toLowerCase();
+
+  // `claude-<tier>-<major>-<minor>[-<dateOrPatch>]` — pull `<major>.<minor>`
+  // for the displayName, ignore any trailing date/patch segments so the
+  // label stays stable across point releases.
+  const claudeMatch = /^claude-(opus|sonnet|haiku)-(\d+)-(\d+)(?:[-.]|$)/.exec(
+    lower,
+  );
+  if (claudeMatch) {
+    const tier = claudeMatch[1] as 'opus' | 'sonnet' | 'haiku';
+    const major = claudeMatch[2];
+    const minor = claudeMatch[3];
+    const tierLabel =
+      tier === 'opus' ? 'Opus' : tier === 'sonnet' ? 'Sonnet' : 'Haiku';
+    return {
+      vendor: 'anthropic',
+      family: 'claude',
+      alias: stripped,
+      tier,
+      displayName: `${tierLabel} ${major}.${minor}`,
+    };
+  }
+
+  // Bare `claude-*` alias we couldn't classify into a known tier —
+  // still attribute the vendor/family so orchestrators can branch on
+  // "is this Claude?" even before they recognize the specific tier.
+  if (
+    lower.startsWith('claude-') ||
+    lower.startsWith('claude/') ||
+    lower === 'claude'
+  ) {
+    return {
+      vendor: 'anthropic',
+      family: 'claude',
+      alias: stripped,
+      tier: 'other',
+    };
+  }
+
+  if (lower.startsWith('gpt-') || lower.startsWith('gpt/') || lower === 'gpt') {
+    return {
+      vendor: 'openai',
+      family: 'gpt',
+      alias: stripped,
+      tier: 'other',
+    };
+  }
+
+  if (
+    lower.startsWith('gemini-') ||
+    lower.startsWith('gemini/') ||
+    lower === 'gemini'
+  ) {
+    return {
+      vendor: 'google',
+      family: 'gemini',
+      alias: stripped,
+      tier: 'other',
+    };
+  }
+
+  return {
+    vendor: 'other',
+    family: 'other',
+    alias: stripped,
+    tier: 'other',
+  };
+}
+
+/**
+ * `inner_agent_started` — emitted at SessionStart of the inner Claude run.
+ *
+ * v2 — `model` flipped from raw `string` (e.g. `'claude-sonnet-4-6'`)
+ * to a structured `ModelDescriptor` block. See
+ * `EVENT_DATA_VERSIONS.inner_agent_started` for the full migration
+ * notes. Orchestrators that need the raw SDK alias keep finding it
+ * at `data.model.alias`; orchestrators that want vendor-neutral
+ * branching read `data.model.tier` / `.family` / `.vendor` /
+ * `.displayName`.
+ */
 export interface InnerAgentStartedData {
   event: 'inner_agent_started';
-  model: string;
+  model: ModelDescriptor;
   /** 'plan' / 'apply' / 'verify' / 'wizard' depending on the entry command. */
   phase: 'plan' | 'apply' | 'verify' | 'wizard';
   /** Optional plan ID when running under `apply --plan-id`. */
