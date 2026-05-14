@@ -61,16 +61,18 @@ describe('SlashCommandInput Tab accepts highlighted suggestion', () => {
     await waitForFrame();
     await waitForFrame();
 
-    // `/d` filters to /debug + /diagnostics. The first match is
-    // highlighted by default — Tab should accept it.
-    view.stdin.write('/d');
+    // `/de` filters to /debug only. The first match is highlighted by
+    // default — Tab should accept it. We use `/de` rather than `/d`
+    // because new commands like `/diff` later landed on main and would
+    // otherwise sort ahead of /debug, breaking the assertion when this
+    // branch merges with main.
+    view.stdin.write('/de');
     await waitForFrame();
     view.stdin.write(TAB);
     await waitForFrame();
 
     const frameAfterTab = sanitize(view.lastFrame());
-    // The first cmd-prefix match for `/d` is /debug (matches before
-    // /diagnostics in the COMMANDS array).
+    // The first cmd-prefix match for `/de` is /debug.
     expect(frameAfterTab).toContain('/debug');
     // Palette stays open so the user can keep typing args. Enter
     // submits the completed value.
@@ -84,9 +86,17 @@ describe('SlashCommandInput Tab accepts highlighted suggestion', () => {
   it('completes the second match when the user navigates to it', async () => {
     let submitted: string | null = null;
 
+    // Use a self-contained commands list so the test doesn't depend on
+    // the COMMANDS-array ordering (which can shift when new commands
+    // like /diff/help land between branches).
+    const testCommands = [
+      { cmd: '/foo-first', desc: 'first option' },
+      { cmd: '/foo-second', desc: 'second option' },
+    ];
+
     const view = render(
       <SlashCommandInput
-        commands={commands}
+        commands={testCommands}
         isActive
         onSubmit={(v) => {
           submitted = v;
@@ -102,10 +112,10 @@ describe('SlashCommandInput Tab accepts highlighted suggestion', () => {
     // can race with the trailing Tab and the highlight never moves.
     view.stdin.write('/');
     await waitForFrame();
-    view.stdin.write('d');
+    view.stdin.write('f');
     await waitForFrame();
     await waitForFrame();
-    // Move highlight from /debug → /diagnostics.
+    // Move highlight from /foo-first → /foo-second.
     view.stdin.write(DOWN);
     await waitForFrame();
     await waitForFrame();
@@ -114,11 +124,11 @@ describe('SlashCommandInput Tab accepts highlighted suggestion', () => {
     await waitForFrame();
 
     const frameAfterTab = sanitize(view.lastFrame());
-    expect(frameAfterTab).toContain('/diagnostics');
+    expect(frameAfterTab).toContain('/foo-second');
 
     view.stdin.write('\r');
     await waitForFrame();
-    expect(submitted).toBe('/diagnostics');
+    expect(submitted).toBe('/foo-second');
     view.unmount();
   });
 
