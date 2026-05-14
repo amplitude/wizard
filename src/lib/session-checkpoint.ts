@@ -7,12 +7,16 @@
  */
 
 import { readFileSync, unlinkSync, existsSync } from 'fs';
+import * as path from 'node:path';
 import { atomicWriteJSON } from '../utils/atomic-write.js';
 import {
   ensureDir,
   getCheckpointFile,
+  getProjectBindingFile,
   getRunDir,
 } from '../utils/storage-paths.js';
+import { AMPLI_CONFIG_FILENAME } from './ampli-config.js';
+import { logToFile } from '../utils/debug.js';
 import { z } from 'zod';
 
 import type { WizardSession } from './wizard-session';
@@ -159,6 +163,10 @@ export function saveCheckpoint(
  * - the checkpoint is older than 24 hours
  * - the checkpoint belongs to a different project directory
  * - the file is malformed or fails validation
+ * - the checkpoint records a project selection but the companion
+ *   `<installDir>/.amplitude/project-binding.json` is missing (typical
+ *   post-`git reset --hard` state — the on-disk checkpoint is then
+ *   deleted as part of the load so the next run starts fresh)
  */
 export async function loadCheckpoint(
   installDir: string,
@@ -184,6 +192,36 @@ export async function loadCheckpoint(
 
   // Must match the current project directory
   if (checkpoint.installDir !== installDir) return null;
+
+  // Companion-file check: when the checkpoint records a prior project
+  // selection but the canonical project-binding file is missing on disk,
+  // the user has wiped the per-project metadata (typical `git reset --hard`
+  // or `rm .amplitude/project-binding.json` symptom). Restoring from this
+  // checkpoint would lead the wizard to believe the project is set up
+  // while downstream code finds no binding/events, causing the Setup
+  // stepper to stall with no actionable next step. Invalidate the
+  // checkpoint here so the user is routed back through SUSI cleanly.
+  //
+  // Note: `self-heal.ts` already handles the case where the whole
+  // `<installDir>/.amplitude/` directory is missing; this check covers
+  // the narrower case where the directory exists (e.g. only the
+  // gitignored `dashboard.json` survives) but the load-bearing
+  // `project-binding.json` is gone.
+  if (
+    checkpointHasMeaningfulSelection(checkpoint) &&
+    !hasProjectBinding(installDir)
+  ) {
+    logToFile(
+      '[session-checkpoint] invalidating stale checkpoint: project metadata missing in installDir',
+    );
+    try {
+      unlinkSync(filePath);
+    } catch {
+      // Best-effort — if deletion fails, the staleness check will expire
+      // it. We still return null so the caller starts fresh.
+    }
+    return null;
+  }
 
   // Self-heal: if integration is a known framework, derive the display
   // label from the registry instead of trusting the persisted value.
@@ -289,6 +327,56 @@ async function deriveFrameworkLabel(
   if (!known) return persistedLabel;
   const { FRAMEWORK_REGISTRY } = await import('./registry.js');
   return FRAMEWORK_REGISTRY[integration].metadata.name;
+}
+
+/**
+ * True when the checkpoint records a non-default selection
+ * (org/project picked, framework detected, or intro concluded). An
+ * empty / freshly-stamped checkpoint must NOT trigger invalidation —
+ * there's nothing to be stale about. Mirrors the heuristic in
+ * `self-heal.ts#checkpointHasMeaningfulSelection` but operates on the
+ * already-parsed Zod payload instead of re-reading the file.
+ */
+function checkpointHasMeaningfulSelection(checkpoint: Checkpoint): boolean {
+  return (
+    isNonEmpty(checkpoint.selectedProjectId) ||
+    isNonEmpty(checkpoint.selectedOrgId) ||
+    isNonEmpty(checkpoint.integration) ||
+    checkpoint.detectionComplete === true ||
+    checkpoint.introConcluded === true
+  );
+}
+
+function isNonEmpty(value: unknown): boolean {
+  return typeof value === 'string' && value.trim().length > 0;
+}
+
+/**
+ * True when either the canonical `project-binding.json` or the legacy
+ * `ampli.json` exists in the install dir. Either file is sufficient to
+ * prove the project was previously bound — bare absence of both is the
+ * load-bearing signal that downstream code (event plan, dashboard,
+ * framework agent) will have nothing to resume against.
+ *
+ * `existsSync` failures (EACCES / EIO) are treated as "present" so we
+ * don't aggressively invalidate a checkpoint when the filesystem is
+ * temporarily misbehaving — better to surface a downstream error than
+ * to silently wipe state.
+ */
+function hasProjectBinding(installDir: string): boolean {
+  const canonical = getProjectBindingFile(installDir);
+  const legacy = path.join(installDir, AMPLI_CONFIG_FILENAME);
+  try {
+    if (existsSync(canonical)) return true;
+  } catch {
+    return true;
+  }
+  try {
+    if (existsSync(legacy)) return true;
+  } catch {
+    return true;
+  }
+  return false;
 }
 
 /**

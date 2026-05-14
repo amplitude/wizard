@@ -48,10 +48,41 @@ export function getRetryStatusText(
   // HTTP code — users don't read HTTP, they read "uh oh".
   const base = phraseForStatus(retryState.errorStatus);
 
+  // Sustained-storm suffix: once we're past the grace window AND the storm
+  // has been going long enough to look like a real problem (≥ 5 attempts),
+  // surface a `next in Ns` countdown so the user has a concrete expectation
+  // instead of a vague "is it stuck?" feeling. This is the *only* place
+  // attempt-count signal is allowed to leak into the calm chip — for
+  // transient blips the spinner alone still conveys liveness. The previous
+  // copy ("still trying") said nothing useful; the backoff seconds answer
+  // the implicit question the user is already asking by attempt 5.
   if (retryState.attempt >= SUSTAINED_ATTEMPT_THRESHOLD) {
+    const backoffSec = backoffSecondsFromState(retryState, now);
+    if (backoffSec !== null && backoffSec > 0) {
+      return `${base} (still trying — next in ${backoffSec}s)`;
+    }
     return `${base} (still trying)`;
   }
   return base;
+}
+
+/**
+ * Compute the visible backoff seconds for the current retry state, rounded
+ * down so the chip never advertises a longer wait than the user will actually
+ * experience. Returns `null` when no useful countdown is available
+ * (nextRetryAtMs is in the past or unset relative to `now`).
+ *
+ * Exported for tests so the rounding contract is verifiable independently
+ * of the chip's full rendering pipeline.
+ */
+export function backoffSecondsFromState(
+  retryState: RetryState,
+  now: number,
+): number | null {
+  if (!retryState.nextRetryAtMs) return null;
+  const remainingMs = retryState.nextRetryAtMs - now;
+  if (remainingMs <= 0) return null;
+  return Math.max(1, Math.floor(remainingMs / 1000));
 }
 
 function phraseForStatus(status: number | null): string {

@@ -15,7 +15,16 @@
  */
 
 import React from 'react';
-import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
+import {
+  describe,
+  it,
+  expect,
+  vi,
+  beforeAll,
+  afterAll,
+  beforeEach,
+  afterEach,
+} from 'vitest';
 import {
   existsSync,
   mkdirSync,
@@ -45,6 +54,22 @@ import {
 
 describe('OutroScreen — preserveFiles prompt (AUTH_ERROR carve-out)', () => {
   let installDir: string;
+
+  // Stub process.exit at the file level so the fire-and-forget
+  // `wizardSuccessExit` chain triggered by the K keystroke can't escape
+  // a single test's lifetime and throw via vitest's interceptor under
+  // CI load. The previous per-test `vi.spyOn(process, 'exit')` /
+  // `mockRestore()` pattern had a race where the async chain landed
+  // after the spy was restored, hitting the real `process.exit`.
+  let exitSpy: ReturnType<typeof vi.spyOn<typeof process, 'exit'>> | undefined;
+  beforeAll(() => {
+    exitSpy = vi
+      .spyOn(process, 'exit')
+      .mockImplementation(() => undefined as never);
+  });
+  afterAll(() => {
+    exitSpy?.mockRestore();
+  });
 
   beforeEach(() => {
     installDir = mkdtempSync(join(tmpdir(), 'outro-preserve-'));
@@ -111,11 +136,6 @@ describe('OutroScreen — preserveFiles prompt (AUTH_ERROR carve-out)', () => {
         preserveFiles: true,
       },
     });
-    // Don't drive process.exit during the test.
-    const exitSpy = vi
-      .spyOn(process, 'exit')
-      .mockImplementation(() => undefined as never);
-
     const { stdin, unmount } = render(<OutroScreen store={store} />);
     // Two ticks so the screen mounts and the input handler is active.
     await new Promise((r) => setImmediate(r));
@@ -130,7 +150,6 @@ describe('OutroScreen — preserveFiles prompt (AUTH_ERROR carve-out)', () => {
     expect(readFileSync(tracked, 'utf8')).toBe('export const wired = true;\n');
 
     unmount();
-    exitSpy.mockRestore();
   });
 
   // ── R → revert (ledger rolled back, confirmation shown) ────────────────
@@ -160,9 +179,6 @@ describe('OutroScreen — preserveFiles prompt (AUTH_ERROR carve-out)', () => {
         preserveFiles: true,
       },
     });
-    const exitSpy = vi
-      .spyOn(process, 'exit')
-      .mockImplementation(() => undefined as never);
 
     const { stdin, lastFrame, unmount } = render(<OutroScreen store={store} />);
     await new Promise((r) => setImmediate(r));
@@ -183,7 +199,6 @@ describe('OutroScreen — preserveFiles prompt (AUTH_ERROR carve-out)', () => {
     expect(finalFrame).toMatch(/Reverted the wizard/i);
 
     unmount();
-    exitSpy.mockRestore();
   });
 
   it('emits an analytics event for the K resolution', async () => {
@@ -197,9 +212,6 @@ describe('OutroScreen — preserveFiles prompt (AUTH_ERROR carve-out)', () => {
         preserveFiles: true,
       },
     });
-    const exitSpy = vi
-      .spyOn(process, 'exit')
-      .mockImplementation(() => undefined as never);
 
     const { analytics } = await import('../../../../utils/analytics.js');
     const wizardCaptureSpy = vi
@@ -225,7 +237,6 @@ describe('OutroScreen — preserveFiles prompt (AUTH_ERROR carve-out)', () => {
 
     wizardCaptureSpy.mockRestore();
     unmount();
-    exitSpy.mockRestore();
   });
 
   it('emits an analytics event with file counts for the R resolution', async () => {
@@ -245,9 +256,6 @@ describe('OutroScreen — preserveFiles prompt (AUTH_ERROR carve-out)', () => {
         preserveFiles: true,
       },
     });
-    const exitSpy = vi
-      .spyOn(process, 'exit')
-      .mockImplementation(() => undefined as never);
 
     const { analytics } = await import('../../../../utils/analytics.js');
     const wizardCaptureSpy = vi
@@ -275,6 +283,5 @@ describe('OutroScreen — preserveFiles prompt (AUTH_ERROR carve-out)', () => {
 
     wizardCaptureSpy.mockRestore();
     unmount();
-    exitSpy.mockRestore();
   });
 });

@@ -340,11 +340,14 @@ describe('EventPlanFullScreen — revising recovery', () => {
         // tier. `revisingCoachingCopy` is asserted verbatim in the pure
         // helper block above — this section verifies the tier WIRING.
 
-        // 40s in — past REVISION_TIER_1_MS (30s).
+        // 40s in — past REVISION_TIER_1_MS (30s). The interval-driven
+        // elapsed setState can land one REVISION_TICK_MS (1s) early
+        // under CI clock pressure on Node 20/22/24, so accept the
+        // 39s/40s window as long as the tier-1 copy is up.
         await advance(40_000);
         let frame = lastFrame() ?? '';
         expect(frame).toContain('Taking a bit longer than usual');
-        expect(frame).toContain('elapsed: 40s');
+        expect(frame).toMatch(/elapsed: (39|40)s/);
 
         // 90s in — past REVISION_TIER_2_MS (60s).
         await advance(50_000);
@@ -352,13 +355,13 @@ describe('EventPlanFullScreen — revising recovery', () => {
         expect(frame).toContain(
           "The agent may have decided your feedback wasn't actionable",
         );
-        expect(frame).toContain('elapsed: 1m 30s');
+        expect(frame).toMatch(/elapsed: 1m (29|30)s/);
 
         // 3m30s in — past REVISION_TIER_3_MS (180s).
         await advance(120_000);
         frame = lastFrame() ?? '';
         expect(frame).toContain("Agent hasn't returned.");
-        expect(frame).toContain('elapsed: 3m 30s');
+        expect(frame).toMatch(/elapsed: 3m (29|30)s/);
       },
     );
 

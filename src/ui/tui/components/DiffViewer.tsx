@@ -186,21 +186,28 @@ export const DiffViewer = ({
         <Text color={Colors.muted}> / </Text>
         <Text color={Colors.error}>-{totalDel}</Text>
       </Box>
+      {/* Render each file row as a SINGLE <Text> with `wrap="truncate-end"`
+          so the whole row collapses uniformly when narrower than the
+          combined natural width. The previous version composed a row out
+          of seven separate <Text> siblings inside a default-row <Box>; on
+          narrow terminals Yoga had no width budget to share among them
+          and the result was rows mashed together with missing prefixes
+          and stray fragments of neighbouring rows ("NEW report.md ·
+          +78/-0AddToLibrary.tsx · +2/-0"). One <Text> per row guarantees
+          one terminal line per row no matter the width. We render with
+          inline child <Text>s so each segment keeps its color. */}
       {diffs.map((d) => (
-        <Box key={d.path}>
-          <Text> </Text>
+        <Text key={d.path} wrap="truncate-end">
+          {' '}
           <Text color={OP_COLORS[d.operation]} bold>
             {OP_LABELS[d.operation]}
-          </Text>
-          <Text> </Text>
-          <Text color={Colors.body} wrap="truncate-end">
-            {displayPath(d.path, installDir)}
-          </Text>
+          </Text>{' '}
+          <Text color={Colors.body}>{displayPath(d.path, installDir)}</Text>
           <Text color={Colors.subtle}> {Icons.dot} </Text>
           <Text color={Colors.success}>+{d.additions}</Text>
           <Text color={Colors.muted}>/</Text>
           <Text color={Colors.error}>-{d.deletions}</Text>
-        </Box>
+        </Text>
       ))}
       <Box marginTop={1}>
         <Text color={Colors.muted}>

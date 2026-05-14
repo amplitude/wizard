@@ -110,6 +110,27 @@ export class WizardRouter {
   }
 
   /**
+   * Drop every overlay currently on the stack.
+   *
+   * Wired into hard-reset handlers in the store (`setRegionForced`,
+   * `resetForFreshStart`, `cancelWizard`) so an overlay (e.g. `Overlay.Mcp`,
+   * `Overlay.Slack`) cannot keep rendering against a session whose
+   * credentials / org / project have just been nuked. Without this,
+   * `SlackScreen` silently swallows the null-token path and
+   * `McpScreen.installer.detectClients()` continues against the wrong zone.
+   *
+   * Mirrors `popOverlay`'s contract (no subscription notification of its
+   * own — callers bump `$version` via `emitChange()`); only the array is
+   * mutated here.
+   */
+  clearOverlays(): void {
+    // Length-zero short-circuit keeps the no-overlay hot path branch-free
+    // for store resets that fire on every cancel/region-switch.
+    if (this.overlays.length === 0) return;
+    this.overlays.length = 0;
+  }
+
+  /**
    * Find the index of the entry that resolve() would currently land on.
    * Returns flow.length when every entry is complete (i.e. on the trailing
    * fallback screen).

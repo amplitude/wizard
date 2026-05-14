@@ -883,6 +883,84 @@ describe('WizardStore', () => {
       store.setRegion('eu');
       expect(store.currentScreen).toBe(Screen.Auth);
     });
+
+    // ── Overlay stack invalidation (audit #5) ──────────────────────
+    //
+    // The three hard-reset handlers (`setRegionForced`,
+    // `resetForFreshStart`, `cancelWizard`) all nuke session state, but
+    // they used to leave `router.overlays` untouched. If `Overlay.Mcp`
+    // or `Overlay.Slack` was up when the user typed `/region`, the
+    // overlay kept rendering against a session whose credentials and
+    // org/project were now null — `SlackScreen` swallows the null-token
+    // path silently and `McpScreen.installer.detectClients()` would
+    // run its zone-scoped installer against the wrong region. The fix
+    // wires `router.clearOverlays()` into each reset handler. These
+    // tests pin the contract: overlays are gone after the reset, and
+    // `currentScreen` resolves to a sensible flow screen — never an
+    // orphaned overlay rendering against wiped state.
+    it('setRegionForced clears any active overlay so it does not orphan against the wiped session', () => {
+      const store = createStore();
+      store.concludeIntro();
+      store.setRegion('us');
+      store.setCredentials({
+        accessToken: 'tok',
+        projectApiKey: 'pk',
+        host: 'https://api2.amplitude.com',
+        appId: 1,
+      });
+      store.session.selectedOrgName = 'Acme';
+      store.session.selectedOrgId = 'org-1';
+      store.session.selectedProjectName = 'Amplitude';
+      store.session.selectedProjectId = 'ws-1';
+      store.session.selectedAppId = 'app-1';
+
+      store.pushOverlay(Overlay.Mcp);
+      expect(store.router.hasOverlay).toBe(true);
+      expect(store.currentScreen).toBe(Overlay.Mcp);
+
+      store.setRegionForced();
+
+      expect(store.router.hasOverlay).toBe(false);
+      // Lands on RegionSelect — the flow's normal /region landing pad —
+      // not on the now-orphaned Overlay.Mcp.
+      expect(store.currentScreen).toBe(Screen.RegionSelect);
+    });
+
+    it('cancelWizard clears any active overlay so Outro is not masked', () => {
+      const store = createStore();
+      store.concludeIntro();
+      store.setRegion('us');
+      store.setCredentials({
+        accessToken: 'tok',
+        projectApiKey: 'pk',
+        host: 'https://api2.amplitude.com',
+        appId: 1,
+      });
+      store.pushOverlay(Overlay.Slack);
+      expect(store.router.hasOverlay).toBe(true);
+
+      store.cancelWizard('user pressed esc');
+
+      expect(store.router.hasOverlay).toBe(false);
+      // Cancel fast-path: router.resolve sees outroData.kind === Cancel
+      // and routes to Outro. Without clearOverlays this would still be
+      // Overlay.Slack because overlays beat the fast-path in resolve().
+      expect(store.currentScreen).toBe(Screen.Outro);
+    });
+
+    it('resetForFreshStart clears any active overlay so the flow restarts cleanly', () => {
+      const store = createStore();
+      store.concludeIntro();
+      store.setRegion('us');
+      store.pushOverlay(Overlay.Mcp);
+      expect(store.router.hasOverlay).toBe(true);
+
+      store.resetForFreshStart();
+
+      expect(store.router.hasOverlay).toBe(false);
+      // intro is reset → first flow screen is Intro again.
+      expect(store.currentScreen).toBe(Screen.Intro);
+    });
   });
 
   // ── runSignupAttempt wrapper ──────────────────────────────────────

@@ -43,6 +43,8 @@ import {
 } from '../../../utils/wizard-abort.js';
 import { getLogFilePath } from '../../../lib/observability/index.js';
 import { writeBugReport } from '../../../lib/bug-report.js';
+import { HotkeyPills, type HotkeyPill } from '../components/HotkeyPills.js';
+import { buildLastActivityFooter } from './outro-last-activity.js';
 import { toWizardDashboardOpenUrl } from '../../../utils/dashboard-open-url.js';
 import {
   getDashboardFile,
@@ -627,7 +629,23 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
 
   if (showReport) {
     return (
-      <Box flexDirection="column" flexGrow={1} paddingX={2} paddingY={1}>
+      // `overflow="hidden"` is critical: ReportViewer's content height is
+      // a sibling-aware estimate (`siblingRows` deducted from the content
+      // area). If marked-terminal renders a markdown table whose row
+      // count exceeds that estimate (long-running setup with 20+ events,
+      // or a viewport shorter than the estimate accounted for), the
+      // overflow must clip rather than overdraw the `[O] Open in browser
+      // · [Esc] Back` strip that sits directly below it. This matches
+      // App.tsx's content-area Box which already sets `overflow="hidden"`
+      // — duplicated here so the showReport sub-tree is robust on its
+      // own.
+      <Box
+        flexDirection="column"
+        flexGrow={1}
+        paddingX={2}
+        paddingY={1}
+        overflow="hidden"
+      >
         {/* Header: bold accent title + small dim subtitle. The previous
             "(Esc to go back)" inline next to the title visually competed
             with the title itself — pulled down to the dedicated key-hint
@@ -690,7 +708,20 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
   // ── Main outro views ─────────────────────────────────────────────────
 
   return (
-    <Box flexDirection="column" flexGrow={1} paddingX={2} paddingY={1}>
+    // `overflow="hidden"` defends against content overflowing the parent's
+    // computed content area on real terminals. Without it, a tall success
+    // body (changes + events + dashboard CTA + diff summary + report
+    // hint + D-key hint) could push the PickerMenu off the bottom and
+    // visually overlap the ConsoleView chrome below — the family of
+    // overdraw bugs in the PR description (e.g. "[3] Exit setup
+    // reportmplitude.com)" where picker rows mash into other content).
+    <Box
+      flexDirection="column"
+      flexGrow={1}
+      paddingX={2}
+      paddingY={1}
+      overflow="hidden"
+    >
       {/* ── Success ───────────────────────────────────────────────────── */}
       {outroData.kind === OutroKind.Success && (
         <Box flexDirection="column">
@@ -741,11 +772,15 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
             </Text>
           )}
 
-          {/* Changes summary */}
+          {/* Changes summary. Each bullet is a single <Text> with
+              `wrap="truncate-end"` so a long change description can
+              never wrap to a 2nd line and visually merge with the next
+              bullet (e.g. "tracking plang Yarn V1" — bullet 1 wrapping
+              into bullet 2 on a real terminal). */}
           {outroData.changes && outroData.changes.length > 0 && (
             <Box flexDirection="column" marginTop={1}>
               {outroData.changes.map((change, i) => (
-                <Text key={i} color={Colors.body}>
+                <Text key={i} color={Colors.body} wrap="truncate-end">
                   {Icons.bullet} {change}
                 </Text>
               ))}
@@ -912,6 +947,31 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
               <Text color={Colors.body}>{outroData.message}</Text>
             </Box>
           )}
+          {/* Last-activity anchor — when the run actually started AND any
+              task transitioned past pending, surface a one-line
+              "Started at HH:MM:SS · Step: <label>" so the user has a
+              concrete entry-point into the log file before they open it.
+              The bullets below ("Press L to open the log", "--debug",
+              "Press C to write a bug report") all reference the log
+              indirectly; this line tells the user *where* in the log to
+              look. Rendered as a muted sub-line so it sits visually
+              under the error message rather than competing with the
+              actionable bullets that follow. */}
+          {(() => {
+            const footer = buildLastActivityFooter({
+              runStartedAt: store.session.runStartedAt,
+              tasks: store.tasks,
+            });
+            if (!footer) return null;
+            return (
+              <Box marginTop={1}>
+                <Text color={Colors.muted}>
+                  Started at <Text bold>{footer.startedAt}</Text> {Icons.dot}{' '}
+                  Step: <Text bold>{footer.stepLabel}</Text>
+                </Text>
+              </Box>
+            );
+          })()}
           <Box marginTop={1} flexDirection="column">
             <Text color={Colors.secondary}>
               {Icons.arrowRight} Check your API key and network connection
@@ -920,19 +980,8 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
               {Icons.arrowRight} Run the wizard again with{' '}
               <Text bold>--debug</Text> for more detail
             </Text>
-            {showRetryHint && (
-              <Text color={Colors.secondary}>
-                {Icons.arrowRight} Press <Text bold>R</Text> to retry from where
-                we left off
-              </Text>
-            )}
             <Text color={Colors.secondary}>
-              {Icons.arrowRight} Full log: <Text bold>{getLogFilePath()}</Text>{' '}
-              <Text color={Colors.muted}>(press L to open)</Text>
-            </Text>
-            <Text color={Colors.secondary}>
-              {Icons.arrowRight} Press <Text bold>C</Text> to write a sanitized
-              bug report
+              {Icons.arrowRight} Full log: <Text bold>{getLogFilePath()}</Text>
             </Text>
             {bugReportPathState && (
               <Text color={Colors.success}>
@@ -949,6 +998,33 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
               </Text>
             )}
           </Box>
+
+          {/* Hotkey pill bar — high-contrast, accent-coloured `[K] label`
+              row so users scanning the screen for "what can I press?"
+              find the action surface in one glance. Replaces the
+              previous inline "(press L to open)" / "Press C to …"
+              hints, which were rendered in muted secondary text inside
+              the troubleshooting bullets above and easy to miss.
+
+              Pill keys are gated on the same conditions as their input
+              handlers (above) so the bar never advertises a hotkey that
+              would be a no-op. `showPreservePrompt` suppresses the
+              standard bar entirely — the K/R prompt below has its own
+              dedicated affordances and a second pill row would
+              compete with it. */}
+          {!showPreservePrompt && (
+            <Box marginTop={1}>
+              <HotkeyPills
+                pills={(() => {
+                  const pills: HotkeyPill[] = [];
+                  if (showRetryHint) pills.push({ key: 'R', label: 'Retry' });
+                  pills.push({ key: 'L', label: 'Open log' });
+                  pills.push({ key: 'C', label: 'Write bug report' });
+                  return pills;
+                })()}
+              />
+            </Box>
+          )}
 
           {/* Preserve-files prompt — only when the failure class is one
               where the agent's writes are demonstrably consistent (e.g.

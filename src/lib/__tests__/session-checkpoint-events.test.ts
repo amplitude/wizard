@@ -25,6 +25,8 @@ import {
 import {
   CACHE_ROOT_OVERRIDE_ENV,
   getCheckpointFile,
+  getProjectBindingFile,
+  getProjectMetaDir,
 } from '../../utils/storage-paths';
 import { setUI, getUI } from '../../ui';
 import type { WizardSession } from '../wizard-session';
@@ -198,6 +200,16 @@ describe('checkpoint NDJSON emissions', () => {
   });
 
   it('loadCheckpoint emits checkpoint_loaded with the file age', async () => {
+    // The session stub has a meaningful selection (org/project/intro),
+    // so loadCheckpoint requires a companion `project-binding.json` to
+    // restore. Without it, the checkpoint would be invalidated as
+    // "stale after git reset" — see PR #N.
+    fs.mkdirSync(getProjectMetaDir(installDir), { recursive: true });
+    fs.writeFileSync(
+      getProjectBindingFile(installDir),
+      JSON.stringify({ orgId: 'org-1', projectId: 'proj-1', zone: 'us' }),
+    );
+
     saveCheckpoint(makeSession(installDir), 'pre_compact');
     savedSpy.mockClear();
 
