@@ -1,6 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import {
   classifyWriteOperation,
+  EVENT_DATA_VERSIONS,
   summarizeForEvent,
   summarizeToolInput,
 } from '../agent-events.js';
@@ -313,6 +314,283 @@ describe('createInnerLifecycleHooks (with AgentUI)', () => {
         'file_change_applied',
     );
     expect(applied).toBeDefined();
+  });
+
+  // ── v2: relativePath on file_change_planned / file_change_applied ─────
+  //
+  // Audit subagent #1: absolute paths in `file_change_*` envelopes leak
+  // the user's home directory into parent-agent transcripts (Claude Code
+  // / Cursor / Codex render the child agent's progress chips verbatim).
+  // Mirror the `relativePath` pattern already on `current_file` (PR #716):
+  //   - present on `file_change_planned` / `file_change_applied` when the
+  //     write lands inside `installDir`,
+  //   - absent (field omitted) when the write lands outside `installDir`
+  //     so a consumer can trust "if `relativePath` is set, it's a privacy-
+  //     safe label."
+  describe('v2: relativePath on file_change_* envelopes', () => {
+    it('PreToolUse emits file_change_planned with relativePath for an in-installDir write', async () => {
+      const installDir = '/Users/dev/project';
+      const lifecycle = createInnerLifecycleHooks({
+        phase: 'apply',
+        installDir,
+      });
+      await lifecycle.hooks().PreToolUse(
+        {
+          tool_name: 'Write',
+          tool_input: {
+            file_path: '/Users/dev/project/src/lib/amplitude.ts',
+            content: 'init',
+          },
+        },
+        undefined,
+        { signal: new AbortController().signal },
+      );
+
+      const planned = eventsOfType('progress').find(
+        (e) =>
+          (e.data as { event?: string } | undefined)?.event ===
+          'file_change_planned',
+      );
+      expect(planned?.data).toMatchObject({
+        event: 'file_change_planned',
+        path: '/Users/dev/project/src/lib/amplitude.ts',
+        relativePath: 'src/lib/amplitude.ts',
+        operation: 'create',
+      });
+    });
+
+    it('PreToolUse OMITS relativePath when the write lands outside installDir', async () => {
+      const installDir = '/Users/dev/project';
+      const lifecycle = createInnerLifecycleHooks({
+        phase: 'apply',
+        installDir,
+      });
+      await lifecycle.hooks().PreToolUse(
+        {
+          tool_name: 'Write',
+          tool_input: { file_path: '/tmp/foo.txt', content: 'oob' },
+        },
+        undefined,
+        { signal: new AbortController().signal },
+      );
+
+      const planned = eventsOfType('progress').find(
+        (e) =>
+          (e.data as { event?: string } | undefined)?.event ===
+          'file_change_planned',
+      );
+      expect(planned?.data).toBeDefined();
+      // path preserved verbatim for audit; relativePath absent so the
+      // consumer doesn't render a misleading basename.
+      expect(planned?.data).toMatchObject({
+        event: 'file_change_planned',
+        path: '/tmp/foo.txt',
+        operation: 'create',
+      });
+      expect(
+        (planned?.data as Record<string, unknown>)['relativePath'],
+      ).toBeUndefined();
+    });
+
+    it('PostToolUse emits file_change_applied with relativePath for an in-installDir write', async () => {
+      const installDir = '/Users/dev/project';
+      const lifecycle = createInnerLifecycleHooks({
+        phase: 'apply',
+        installDir,
+      });
+      await lifecycle.hooks().PostToolUse(
+        {
+          tool_name: 'Edit',
+          tool_input: {
+            file_path: '/Users/dev/project/src/index.ts',
+            content: 'hello',
+          },
+          tool_response: { is_error: false },
+        },
+        undefined,
+        { signal: new AbortController().signal },
+      );
+
+      const applied = eventsOfType('result').find(
+        (e) =>
+          (e.data as { event?: string } | undefined)?.event ===
+          'file_change_applied',
+      );
+      expect(applied?.data).toMatchObject({
+        event: 'file_change_applied',
+        path: '/Users/dev/project/src/index.ts',
+        relativePath: 'src/index.ts',
+        operation: 'modify',
+        bytes: 5,
+      });
+    });
+
+    it('PostToolUse OMITS relativePath when the write lands outside installDir', async () => {
+      const installDir = '/Users/dev/project';
+      const lifecycle = createInnerLifecycleHooks({
+        phase: 'apply',
+        installDir,
+      });
+      await lifecycle.hooks().PostToolUse(
+        {
+          tool_name: 'Write',
+          tool_input: { file_path: '/tmp/foo.txt', content: 'oob' },
+          tool_response: { is_error: false },
+        },
+        undefined,
+        { signal: new AbortController().signal },
+      );
+
+      const applied = eventsOfType('result').find(
+        (e) =>
+          (e.data as { event?: string } | undefined)?.event ===
+          'file_change_applied',
+      );
+      expect(applied?.data).toMatchObject({
+        event: 'file_change_applied',
+        path: '/tmp/foo.txt',
+        operation: 'create',
+      });
+      expect(
+        (applied?.data as Record<string, unknown>)['relativePath'],
+      ).toBeUndefined();
+    });
+
+    it('OMITS relativePath when installDir is not configured', async () => {
+      // Probe calls / tests that don't thread installDir must still emit
+      // a well-formed envelope — just without the privacy-safe label.
+      const lifecycle = createInnerLifecycleHooks({ phase: 'apply' });
+      await lifecycle.hooks().PreToolUse(
+        {
+          tool_name: 'Write',
+          tool_input: {
+            file_path: '/Users/dev/project/src/anywhere.ts',
+            content: 'x',
+          },
+        },
+        undefined,
+        { signal: new AbortController().signal },
+      );
+
+      const planned = eventsOfType('progress').find(
+        (e) =>
+          (e.data as { event?: string } | undefined)?.event ===
+          'file_change_planned',
+      );
+      expect(planned?.data).toBeDefined();
+      expect(
+        (planned?.data as Record<string, unknown>)['relativePath'],
+      ).toBeUndefined();
+    });
+
+    it('stamps data_version: 2 on file_change_planned and file_change_applied', async () => {
+      // Registry-coherence pin: a future shape bump forces an
+      // EVENT_DATA_VERSIONS update in lockstep. Asserts via the registry
+      // (not a hardcoded 2) so the test stays useful after a v3 bump
+      // — it then verifies "whatever the registry says" is on the wire.
+      const installDir = '/Users/dev/project';
+      const lifecycle = createInnerLifecycleHooks({
+        phase: 'apply',
+        installDir,
+      });
+      await lifecycle.hooks().PreToolUse(
+        {
+          tool_name: 'Write',
+          tool_input: {
+            file_path: '/Users/dev/project/a.ts',
+            content: 'x',
+          },
+        },
+        undefined,
+        { signal: new AbortController().signal },
+      );
+      await lifecycle.hooks().PostToolUse(
+        {
+          tool_name: 'Write',
+          tool_input: {
+            file_path: '/Users/dev/project/a.ts',
+            content: 'x',
+          },
+          tool_response: { is_error: false },
+        },
+        undefined,
+        { signal: new AbortController().signal },
+      );
+
+      const allEvents = writes.map((l) => JSON.parse(l.trim()) as NDJSONEvent);
+      const planned = allEvents.find(
+        (e) =>
+          (e.data as { event?: string } | undefined)?.event ===
+          'file_change_planned',
+      );
+      const applied = allEvents.find(
+        (e) =>
+          (e.data as { event?: string } | undefined)?.event ===
+          'file_change_applied',
+      );
+      expect(
+        (planned as { data_version?: number } | undefined)?.data_version,
+      ).toBe(EVENT_DATA_VERSIONS.file_change_planned);
+      expect(
+        (applied as { data_version?: number } | undefined)?.data_version,
+      ).toBe(EVENT_DATA_VERSIONS.file_change_applied);
+      // Defensive: pin to current v2 so a regression that resets the
+      // registry to 1 would also trip this assertion.
+      expect(EVENT_DATA_VERSIONS.file_change_planned).toBe(2);
+      expect(EVENT_DATA_VERSIONS.file_change_applied).toBe(2);
+    });
+
+    it('the wire shape passes validateEnvelopeOrLog (envelope is schema-valid)', () => {
+      // Mirrors the "round-trips through validateEnvelopeOrLog" assertion
+      // used by other v2 event tests (agent-ui-response-schema, agent-ui-
+      // v2-events). The validator routes failures to a lazy file logger;
+      // we can't intercept that side channel here, so the strongest
+      // observable assertion is the structural envelope shape: v=1, ISO
+      // timestamp, type from the registered enum, non-empty message, a
+      // data block with the discriminator + relativePath, and a
+      // data_version stamp that matches the registry. If
+      // validateEnvelopeOrLog flagged a coherence issue it would log
+      // `data_version mismatch on 'file_change_planned'`; the
+      // data_version assertion below pins that path.
+      const ui = new AgentUI();
+      ui.emitFileChangePlanned({
+        path: '/Users/dev/project/src/lib/amplitude.ts',
+        relativePath: 'src/lib/amplitude.ts',
+        operation: 'create',
+      });
+      ui.emitFileChangeApplied({
+        path: '/Users/dev/project/src/lib/amplitude.ts',
+        relativePath: 'src/lib/amplitude.ts',
+        operation: 'create',
+        bytes: 42,
+      });
+      const allEvents = writes.map((l) => JSON.parse(l.trim()) as NDJSONEvent);
+      const planned = allEvents.find(
+        (e) =>
+          (e.data as { event?: string } | undefined)?.event ===
+          'file_change_planned',
+      );
+      const applied = allEvents.find(
+        (e) =>
+          (e.data as { event?: string } | undefined)?.event ===
+          'file_change_applied',
+      );
+      for (const e of [planned, applied]) {
+        expect(e).toBeDefined();
+        expect(e?.v).toBe(1);
+        expect(typeof e?.['@timestamp']).toBe('string');
+        expect(() => new Date(e?.['@timestamp'] ?? '')).not.toThrow();
+        expect(e?.message).toBeTruthy();
+        expect(typeof (e as { data_version?: number }).data_version).toBe(
+          'number',
+        );
+      }
+      // Privacy-safe label shows up in the human-readable `message` too
+      // — confirms the emitter prefers `relativePath` for the progress
+      // line so a tail -f of NDJSON doesn't leak the home dir either.
+      expect(planned?.message).toContain('src/lib/amplitude.ts');
+      expect(planned?.message).not.toContain('/Users/dev/project');
+    });
   });
 
   it('PostToolUse records the tool outcome on the AgentUI accumulator (success)', async () => {

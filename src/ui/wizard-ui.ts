@@ -286,6 +286,16 @@ export interface WizardUI {
    */
   recordFileChangePlanned(data: {
     path: string;
+    /**
+     * Optional privacy-safe label: `path` relativized against
+     * `installDir`. AgentUI ships it on the `file_change_planned`
+     * envelope (v2) so parent agents render `src/foo.ts` instead of
+     * `/Users/<name>/.../src/foo.ts`. TUI / CI implementations ignore
+     * the field — they already relativize for display via their own
+     * heuristics. Omitted by callers when the file lives outside
+     * `installDir`.
+     */
+    relativePath?: string;
     operation: 'create' | 'modify' | 'delete';
   }): void;
 
@@ -298,6 +308,13 @@ export interface WizardUI {
    */
   recordFileChangeApplied(data: {
     path: string;
+    /**
+     * Optional privacy-safe label: `path` relativized against
+     * `installDir`. See `recordFileChangePlanned.relativePath` for
+     * rationale. AgentUI ships it on the `file_change_applied`
+     * envelope (v2).
+     */
+    relativePath?: string;
     operation: 'create' | 'modify' | 'delete';
     bytes?: number;
   }): void;
