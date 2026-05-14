@@ -447,6 +447,46 @@ describe('WizardStore', () => {
       expect(listener).toHaveBeenCalled();
     });
 
+    it('setOutroData emits speed-to-finish properties on outro reached', () => {
+      // Contract: the `outro reached` event is the canonical "end of
+      // run" signal used to chart median/p90 time-to-finish over time.
+      // It must include `'duration ms'` (Running → outro wall clock)
+      // and the segmentation properties needed to slice the trend.
+      const store = createStore();
+      store.session.integration = Integration.Nextjs;
+      store.session.detectedFrameworkLabel = 'Next.js (App Router)';
+      store.session.activationLevel = 'partial';
+      store.setRunPhase(RunPhase.Running);
+      store.setOutroData({ kind: OutroKind.Success });
+
+      const call = wizardCaptureMock.mock.calls.find(
+        ([eventName]) => eventName === 'outro reached',
+      );
+      expect(call).toBeDefined();
+      const props = call![1] as Record<string, unknown>;
+      expect(props['outro kind']).toBe(OutroKind.Success);
+      expect(props['integration']).toBe(Integration.Nextjs);
+      expect(props['detected framework']).toBe('Next.js (App Router)');
+      expect(props['activation level']).toBe('partial');
+      expect(typeof props['duration ms']).toBe('number');
+      expect(props['duration ms'] as number).toBeGreaterThanOrEqual(0);
+      expect(typeof props['returning user']).toBe('boolean');
+    });
+
+    it('setOutroData emits null duration when runStartedAt is null', () => {
+      // Some outro paths fire before the run ever transitions to Running
+      // (e.g. early auth cancel). Emit `null` so chart filters can drop
+      // those rows cleanly instead of computing a misleading zero.
+      const store = createStore();
+      store.setOutroData({ kind: OutroKind.Cancel });
+      const call = wizardCaptureMock.mock.calls.find(
+        ([eventName]) => eventName === 'outro reached',
+      );
+      expect(call).toBeDefined();
+      const props = call![1] as Record<string, unknown>;
+      expect(props['duration ms']).toBeNull();
+    });
+
     it('setFrameworkContext sets key-value pairs', () => {
       const store = createStore();
       store.setFrameworkContext('packageManager', 'pnpm');
