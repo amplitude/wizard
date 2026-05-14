@@ -122,7 +122,10 @@ export function extractToolFailureMessage(
   if (typeof result === 'object') {
     const obj = result as Record<string, unknown>;
     // Newer SDK shape: `{ is_error: true, error: 'msg' }` or `{ error: 'msg' }`.
-    if (obj.is_error === true || (obj.error && typeof obj.error === 'string')) {
+    if (
+      obj.is_error === true ||
+      (obj.is_error !== false && obj.error && typeof obj.error === 'string')
+    ) {
       const msg = typeof obj.error === 'string' ? obj.error : 'tool error';
       return msg;
     }
