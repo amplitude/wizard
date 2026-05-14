@@ -1000,6 +1000,15 @@ export class WizardStore {
   }
 
   cancelWizard(reason: string): void {
+    // Drop any active overlay (Mcp / Slack / Outage / etc.) BEFORE the
+    // session tear-down. The router's overlay stack is a separate axis
+    // from the flow cursor, and an in-flight overlay would otherwise keep
+    // rendering against a session whose credentials have been nuked by
+    // the impending Outro fast-path — `SlackScreen` silently swallows the
+    // null-token path and `McpScreen.installer.detectClients()` keeps
+    // running against the now-orphaned session. The audit signal that
+    // motivated this lives in `clearOverlays`'s doc comment.
+    this.router.clearOverlays();
     this.setOutroData({
       kind: 'cancel' as const,
       message: reason,
@@ -1019,6 +1028,14 @@ export class WizardStore {
    * into the target region previously.
    */
   setRegionForced(): void {
+    // Mid-session region change is a hard reset: credentials, org/project,
+    // and ceremony state all get wiped below. Any overlay (`Overlay.Mcp`,
+    // `Overlay.Slack`, etc.) still on the router's stack would continue
+    // rendering against a session whose `credentials` / `selectedOrgId`
+    // are now null — `SlackScreen` swallows that as the no-token path,
+    // and `McpScreen.installer.detectClients()` would run its zone-scoped
+    // installer against the old region. Pop them before the tear-down.
+    this.router.clearOverlays();
     this.$session.setKey('regionForced', true);
 
     // Credentials and OAuth intermediates (all zone-scoped)
@@ -1098,6 +1115,12 @@ export class WizardStore {
    * way already.
    */
   resetForFreshStart(): void {
+    // "Start fresh" wipes intro/detection/region/org-project state; any
+    // overlay still on the router's stack would orphan against the wiped
+    // session (see `clearOverlays` doc for the audit finding). Pop them
+    // before the per-key resets so the next `resolve()` lands cleanly on
+    // the start of the Wizard flow.
+    this.router.clearOverlays();
     this.$session.setKey('_restoredFromCheckpoint', false);
     this.$session.setKey('introConcluded', false);
     this.$session.setKey('detectionComplete', false);
