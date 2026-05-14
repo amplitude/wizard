@@ -18,7 +18,7 @@
 import React from 'react';
 import { describe, expect, it, beforeEach, afterEach, vi } from 'vitest';
 import { render } from 'ink-testing-library';
-import { PickerMenu } from '../PickerMenu.js';
+import { PickerMenu, PICKER_FLASH_MS } from '../PickerMenu.js';
 
 const HINT_TEXT = 'Use arrows + Enter to pick';
 
@@ -54,7 +54,8 @@ describe('PickerMenu digit-shortcut UI for large lists', () => {
 
     // Typing `3` should commit index 2.
     view.stdin.write('3');
-    await vi.advanceTimersByTimeAsync(5);
+    // Drain the PICKER_FLASH_MS confirmation flash so onSelect fires.
+    await vi.advanceTimersByTimeAsync(PICKER_FLASH_MS + 5);
     expect(chosen).toBe('v3');
 
     view.unmount();
@@ -88,7 +89,8 @@ describe('PickerMenu digit-shortcut UI for large lists', () => {
     await vi.advanceTimersByTimeAsync(0);
 
     view.stdin.write('3');
-    await vi.advanceTimersByTimeAsync(5);
+    // Drain the PICKER_FLASH_MS confirmation flash so onSelect fires.
+    await vi.advanceTimersByTimeAsync(PICKER_FLASH_MS + 5);
     expect(chosen).toBe('v3');
 
     view.unmount();
@@ -105,7 +107,8 @@ describe('PickerMenu digit-shortcut UI for large lists', () => {
     await vi.advanceTimersByTimeAsync(0);
 
     view.stdin.write('0');
-    await vi.advanceTimersByTimeAsync(5);
+    // Drain the PICKER_FLASH_MS confirmation flash so onSelect fires.
+    await vi.advanceTimersByTimeAsync(PICKER_FLASH_MS + 5);
     expect(chosen).toBe('v10');
 
     view.unmount();
