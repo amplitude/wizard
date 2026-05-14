@@ -33,6 +33,7 @@ import {
   getWhoamiText,
   getDiagnosticsLines,
   getHelpText,
+  getVersionText,
   isKnownCommand,
   parseDiffSlashInput,
   parseFeedbackSlashInput,
@@ -390,6 +391,14 @@ function executeCommand(raw: string, store: WizardStore): string | void {
       store.setCommandFeedback(getHelpText(), 30_000);
       break;
     }
+    case '/version':
+      // Surface wizard + agent-mode protocol + Node/platform versions
+      // inline so users filing a bug report can grab them without
+      // exiting the TUI to run `amplitude-wizard --version` in a shell.
+      // Multi-line, so we render it through the same long-lived
+      // `setCommandFeedback` slot used by /diagnostics.
+      store.setCommandFeedback(getVersionText(), 30_000);
+      break;
     case '/exit':
       store.setOutroData({ kind: OutroKind.Cancel, message: 'Exited.' });
       break;

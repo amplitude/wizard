@@ -5,6 +5,8 @@
  * pulling in React / Ink / store dependencies.
  */
 
+import { AGENT_EVENT_WIRE_VERSION } from '../../lib/agent-events.js';
+import { WIZARD_VERSION } from '../../lib/constants.js';
 import { RunPhase, type WizardSession } from '../../lib/wizard-session.js';
 import {
   getBenchmarkFile,
@@ -73,6 +75,10 @@ export const COMMANDS: CommandDef[] = [
   {
     cmd: '/diagnostics',
     desc: 'Show wizard storage paths (log file, cache, project meta dir)',
+  },
+  {
+    cmd: '/version',
+    desc: 'Show wizard, agent-mode protocol, Node, and platform versions',
   },
   { cmd: '/snake', desc: 'Play Snake' },
   { cmd: '/exit', desc: 'Exit the wizard' },
@@ -283,5 +289,45 @@ export function getHelpText(): string {
   for (const c of COMMANDS) {
     lines.push(`  ${c.cmd.padEnd(width)}  ${c.desc}`);
   }
+  return lines.join('\n');
+}
+
+/**
+ * Runtime info surfaced by `/version`. Injectable so tests can pin the
+ * shape against fixed values without mocking `process` globals.
+ */
+export interface VersionTextRuntime {
+  /** `process.version` — e.g. `v20.11.0`. */
+  nodeVersion: string;
+  /** `process.platform` — e.g. `darwin`, `linux`, `win32`. */
+  platform: NodeJS.Platform;
+  /** `process.arch` — e.g. `arm64`, `x64`. */
+  arch: string;
+}
+
+/**
+ * Build the human-readable text for the `/version` slash command.
+ *
+ * Shows the wizard's package.json version, the agent-mode NDJSON
+ * protocol version, and the Node + platform runtime — i.e. everything
+ * a user filing a bug report would otherwise have to dig out of a
+ * shell. Pure (no I/O) so it can be unit-tested with fixed inputs.
+ *
+ * The protocol version pinned here is the framing-layer wire version
+ * (`AGENT_EVENT_WIRE_VERSION`) — per-event `data_version` lives on
+ * each NDJSON envelope at runtime and isn't surfaced in this summary.
+ */
+export function getVersionText(
+  runtime: VersionTextRuntime = {
+    nodeVersion: process.version,
+    platform: process.platform,
+    arch: process.arch,
+  },
+): string {
+  const lines: string[] = [
+    `Amplitude Wizard v${WIZARD_VERSION}`,
+    `Agent-mode protocol: v${AGENT_EVENT_WIRE_VERSION}`,
+    `Node: ${runtime.nodeVersion} (${runtime.platform} ${runtime.arch})`,
+  ];
   return lines.join('\n');
 }
