@@ -7,8 +7,11 @@ import { Integration } from '../constants';
 import {
   CACHE_ROOT_OVERRIDE_ENV,
   getCheckpointFile,
+  getProjectBindingFile,
+  getProjectMetaDir,
   getRunDir,
 } from '../../utils/storage-paths';
+import { AMPLI_CONFIG_FILENAME } from '../ampli-config';
 
 function checkpointPathFor(installDir: string): string {
   return getCheckpointFile(installDir);
@@ -64,6 +67,15 @@ describe(
       cacheRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'wiz-ckpt-cache-'));
       originalOverride = process.env[CACHE_ROOT_OVERRIDE_ENV];
       process.env[CACHE_ROOT_OVERRIDE_ENV] = cacheRoot;
+      // Default companion state: write a project-binding.json so the
+      // "companion-file invalidation" path doesn't trigger across every
+      // pre-existing test. The companion-file-specific tests below
+      // explicitly remove it.
+      fs.mkdirSync(getProjectMetaDir(installDir), { recursive: true });
+      fs.writeFileSync(
+        getProjectBindingFile(installDir),
+        JSON.stringify({ orgId: 'org-1', projectId: 'proj-1', zone: 'us' }),
+      );
     });
 
     afterEach(() => {
@@ -228,6 +240,137 @@ describe(
       // checkpoint file.
       const loaded = await loadCheckpoint(installDir);
       expect(loaded).toBeNull();
+    });
+
+    // ── Companion-file invalidation ───────────────────────────────────────
+    //
+    // Regression: pre-fix, a `git reset --hard` (or manual deletion of
+    // `<installDir>/.amplitude/project-binding.json`) left the per-user
+    // checkpoint at `~/.amplitude/wizard/runs/<sha>/checkpoint.json`
+    // untouched. On the next run the wizard restored from the checkpoint
+    // and proceeded as if the project were set up, while downstream code
+    // found no binding/events — the Setup stepper hung with no actionable
+    // next step.
+    //
+    // The fix invalidates the checkpoint on load when:
+    //   1. it records a meaningful prior selection (org/project picked,
+    //      framework detected, or intro concluded), AND
+    //   2. neither `<installDir>/.amplitude/project-binding.json` nor the
+    //      legacy `<installDir>/ampli.json` exists.
+    // In that case the on-disk checkpoint file is also deleted so a
+    // second concurrent reader doesn't get a different answer.
+
+    it('invalidates the checkpoint when project-binding.json is missing in installDir', async () => {
+      // Remove the binding that beforeEach wrote, simulating a
+      // `git reset --hard` that wiped the tracked binding file.
+      fs.rmSync(getProjectBindingFile(installDir), { force: true });
+      expect(fs.existsSync(getProjectBindingFile(installDir))).toBe(false);
+
+      // Meaningful prior selection: org + project + framework + intro done.
+      filePath = writeCheckpoint(installDir, {
+        selectedOrgId: 'org-1',
+        selectedProjectId: 'proj-1',
+        selectedProjectName: 'Production',
+        integration: Integration.nextjs,
+        detectionComplete: true,
+        introConcluded: true,
+      });
+
+      const loaded = await loadCheckpoint(installDir);
+
+      // Checkpoint is treated as stale → null returned, no resume.
+      expect(loaded).toBeNull();
+      // And the stale file is removed so a re-run can't accidentally
+      // restore it again.
+      expect(fs.existsSync(filePath)).toBe(false);
+    });
+
+    it('invalidates the checkpoint even when .amplitude/ directory exists but binding is missing', async () => {
+      // Exact bug repro: `git reset --hard` wipes the tracked
+      // `project-binding.json` but leaves the gitignored
+      // `dashboard.json` behind, so the `.amplitude/` dir itself
+      // survives. self-heal's "directory missing" signal does NOT fire
+      // here — only the new companion-file check catches this case.
+      fs.rmSync(getProjectBindingFile(installDir), { force: true });
+      fs.writeFileSync(
+        path.join(getProjectMetaDir(installDir), 'dashboard.json'),
+        JSON.stringify({ url: 'https://app.amplitude.com/dash/1' }),
+      );
+
+      filePath = writeCheckpoint(installDir, {
+        selectedOrgId: 'org-1',
+        selectedProjectId: 'proj-1',
+        integration: Integration.nextjs,
+        detectionComplete: true,
+        introConcluded: true,
+      });
+
+      const loaded = await loadCheckpoint(installDir);
+      expect(loaded).toBeNull();
+      expect(fs.existsSync(filePath)).toBe(false);
+    });
+
+    it('keeps a checkpoint that has no meaningful selection even if binding is missing', async () => {
+      // Brand-new checkpoint stamped before the user picked anything.
+      // Invalidating this would just churn benign state on every cold
+      // start.
+      fs.rmSync(getProjectBindingFile(installDir), { force: true });
+      filePath = writeCheckpoint(installDir, {
+        selectedOrgId: null,
+        selectedProjectId: null,
+        integration: null,
+        detectionComplete: false,
+        introConcluded: false,
+        region: 'us',
+      });
+
+      const loaded = await loadCheckpoint(installDir);
+      // Region still hydrates — the checkpoint is not invalidated.
+      expect(loaded).not.toBeNull();
+      expect(loaded?.region).toBe('us');
+      expect(fs.existsSync(filePath)).toBe(true);
+    });
+
+    it('keeps a checkpoint when project-binding.json is present', async () => {
+      // Healthy returning-user path: binding survived (from beforeEach),
+      // checkpoint restores normally.
+      filePath = writeCheckpoint(installDir, {
+        selectedOrgId: 'org-1',
+        selectedProjectId: 'proj-1',
+        integration: Integration.nextjs,
+        detectionComplete: true,
+        introConcluded: true,
+      });
+
+      const loaded = await loadCheckpoint(installDir);
+      expect(loaded).not.toBeNull();
+      expect(loaded?.selectedProjectId).toBe('proj-1');
+      expect(loaded?.integration).toBe(Integration.nextjs);
+      expect(fs.existsSync(filePath)).toBe(true);
+    });
+
+    it('keeps a checkpoint when only legacy ampli.json is present', async () => {
+      // Pre-G1 layout: legacy `ampli.json` in the project root counts
+      // as a valid binding for the companion-file check, matching the
+      // self-heal heuristic.
+      fs.rmSync(getProjectBindingFile(installDir), { force: true });
+      fs.writeFileSync(
+        path.join(installDir, AMPLI_CONFIG_FILENAME),
+        JSON.stringify({ OrgId: 'org-1', ProjectId: 'proj-1' }),
+      );
+
+      filePath = writeCheckpoint(installDir, {
+        selectedOrgId: 'org-1',
+        selectedProjectId: 'proj-1',
+        integration: Integration.nextjs,
+        detectionComplete: true,
+        introConcluded: true,
+      });
+
+      const loaded = await loadCheckpoint(installDir);
+      expect(loaded).not.toBeNull();
+      expect(loaded?.selectedProjectId).toBe('proj-1');
+      expect(fs.existsSync(filePath)).toBe(true);
     });
   },
 );
