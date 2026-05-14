@@ -60,7 +60,16 @@ export const SlashCommandInput = ({
   }, [isActive]);
 
   const isSlashMode = computeIsSlashMode(value, commands);
-  const query = value.slice(1).toLowerCase();
+  // Match the filter against the first whitespace-delimited word, not the
+  // full value. After Tab fills `/debug ` (Raycast/Slack convention: trailing
+  // space lets the user start typing args) or once the user types
+  // `/debug arg`, the trailing chars would otherwise make `cmd.startsWith`
+  // and the description match fail, emptying `filtered` and tearing down
+  // the palette mid-completion. Slash-mode itself already keys off the
+  // first word (see `computeIsSlashMode`), so this keeps the two checks
+  // consistent.
+  const firstWord = value.split(' ')[0] ?? '';
+  const query = firstWord.slice(1).toLowerCase();
   const filtered = isSlashMode
     ? commands
         .filter(
@@ -92,10 +101,25 @@ export const SlashCommandInput = ({
         return;
       }
       if (key.return) {
-        if (isSlashMode && filtered.length > 0) {
+        // Distinguish "command-only" from "command-with-args":
+        //   - `/he` + Enter (no space) → submit the highlighted palette
+        //     match (`/help`), so partial typing acts like a picker.
+        //   - `/feedback hello world` + Enter (space present) → submit
+        //     the value verbatim so argv survives. Before this split,
+        //     `query` keyed off only the first word, which left
+        //     `filtered` non-empty and caused us to submit the bare
+        //     `/feedback` and silently drop the message (Bugbot
+        //     3220907967).
+        const trimmed = value.trim();
+        // Detect "has args" on the *untrimmed* value so a trailing space
+        // — the universal "now I'm typing args" affordance (and the
+        // exact byte Tab completion plants) — routes to verbatim submit
+        // instead of palette-pick. Bugbot 3221028494.
+        const hasArgs = /\s/.test(value.replace(/^\s+/, ''));
+        if (!hasArgs && isSlashMode && filtered.length > 0) {
           onSubmit(filtered[clampedIndex].cmd);
-        } else if (value.trim()) {
-          onSubmit(value.trim());
+        } else if (trimmed) {
+          onSubmit(trimmed);
         }
         setValue('');
         setSelectedIndex(0);
@@ -115,7 +139,24 @@ export const SlashCommandInput = ({
         if (next === '') onDeactivate();
         return;
       }
-      if (key.ctrl || key.meta || key.tab) return;
+      if (key.tab) {
+        // Raycast/Slack convention: Tab accepts the currently highlighted
+        // suggestion, filling the input with `<cmd> ` (trailing space so the
+        // user can keep typing arguments — e.g. `/feedback ` then a message).
+        // The palette stays open; Enter is still needed to submit.
+        //
+        // No filtered options → swallow Tab (don't fall through to the
+        // ConsoleView Tab handler, which would tear down slash mode to open
+        // Ask). Outside slash mode this handler doesn't fire at all, so the
+        // ConsoleView's pre-activation Tab still opens Ask as before.
+        if (isSlashMode && filtered.length > 0) {
+          const completion = filtered[clampedIndex].cmd + ' ';
+          setValue(completion);
+          setSelectedIndex(0);
+        }
+        return;
+      }
+      if (key.ctrl || key.meta) return;
       if (char) {
         setValue((v) => v + char);
         setSelectedIndex(0);
@@ -174,24 +215,34 @@ export const SlashCommandInput = ({
                 {visible.map((c, vi) => {
                   const i = startIdx + vi;
                   const isFocused = i === clampedIndex;
+                  // Each row is a SINGLE <Text> with `wrap="truncate-end"`
+                  // so on narrow terminals the row collapses uniformly
+                  // instead of letting the description wrap into a 2nd
+                  // line and misaligning with neighbouring rows. The
+                  // previous implementation was a row-flex <Box> with
+                  // three <Text> siblings; at narrow widths Yoga had no
+                  // width budget to share among them and adjacent rows'
+                  // descriptions visually overlapped on real terminals
+                  // ("/login        tRe-authenticateter region…"). Inline
+                  // child <Text>s preserve per-segment colors.
                   return (
-                    <Box key={c.cmd} gap={1}>
+                    <Text key={c.cmd} wrap="truncate-end">
                       <Text
                         color={isFocused ? Colors.primary : undefined}
                         bold={isFocused}
                       >
                         {isFocused ? Icons.triangleSmallRight : ' '}
-                      </Text>
+                      </Text>{' '}
                       <Text
                         color={isFocused ? Colors.primary : undefined}
                         bold={isFocused}
                       >
                         {c.cmd.padEnd(maxCmdLen)}
-                      </Text>
+                      </Text>{' '}
                       <Text color={!isFocused ? Colors.muted : undefined}>
                         {c.desc}
                       </Text>
-                    </Box>
+                    </Text>
                   );
                 })}
                 {hasMore && startIdx + MAX_VISIBLE < total && (
@@ -199,6 +250,18 @@ export const SlashCommandInput = ({
                     {'  '}↓ {total - startIdx - MAX_VISIBLE} more
                   </Text>
                 )}
+                {/*
+                 * Affordance footer: name every key the palette responds to
+                 * so users don't have to guess which of Tab/Enter does what.
+                 * Tab only *completes* the highlighted suggestion (fills the
+                 * input with `<cmd> `); Enter is what actually runs the
+                 * command. Spell them out separately so the hint matches the
+                 * Tab handler at line ~118. Rendered only when there's at
+                 * least one match (see outer guard).
+                 */}
+                <Text color={Colors.muted}>
+                  {'  '}↑↓ navigate · Tab complete · Enter run · Esc cancel
+                </Text>
               </>
             );
           })()}

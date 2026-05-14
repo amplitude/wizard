@@ -42,6 +42,7 @@ import {
   registerSetupComplete,
   resetSetupComplete,
 } from '../../../../lib/setup-complete-registry.js';
+import { TaskStatus } from '../../../wizard-ui.js';
 
 const GATEWAY_DOWN_MESSAGE = `Amplitude LLM gateway unavailable
 
@@ -105,8 +106,7 @@ describe('OutroScreen — error variants', () => {
   });
 
   it('prefers signupMagicLinkUrl over checklist dashboard open URL', () => {
-    const canonicalDashboard =
-      'https://app.amplitude.com/analytics/d/abc123';
+    const canonicalDashboard = 'https://app.amplitude.com/analytics/d/abc123';
     const magic = 'https://app.amplitude.com/provision/magic?token=test';
     const store = makeStoreForSnapshot({
       outroData: {
@@ -390,12 +390,14 @@ describe('OutroScreen — error variants', () => {
       vi.mocked(isInteractiveOutro).mockReturnValue(true);
     });
 
-    it('renders the "Press R to retry" hint on error outros', () => {
+    it('renders the [R] Retry hotkey pill on error outros', () => {
       const store = makeStoreForSnapshot({
         outroData: { kind: OutroKind.Error, message: 'Setup failed.' },
       });
       const { frame } = renderSnapshot(<OutroScreen store={store} />, store);
-      expect(frame).toMatch(/Press\s+R\s+to retry/i);
+      // Error path renders hotkeys as accent-coloured pills in a single
+      // row at the foot of the screen instead of inline "Press X" prose.
+      expect(frame).toMatch(/\[R\]\s+Retry/);
     });
 
     it('renders the retry hint on cancel outros too', () => {
@@ -413,7 +415,10 @@ describe('OutroScreen — error variants', () => {
       });
       const { frame } = renderSnapshot(<OutroScreen store={store} />, store);
       expect(frame).toContain('Setup failed');
-      expect(frame).not.toMatch(/Press\s+R\s+to retry/i);
+      // No retry pill in either the error pill bar or the cancel "press R
+      // now to resume" line — non-interactive mode suppresses both.
+      expect(frame).not.toMatch(/\[R\]\s+Retry/);
+      expect(frame).not.toMatch(/Press\s+R\s+now/i);
     });
 
     it('does NOT render the retry hint on auth-failure error outros', () => {
@@ -429,10 +434,10 @@ describe('OutroScreen — error variants', () => {
       });
       const { frame } = renderSnapshot(<OutroScreen store={store} />, store);
       expect(frame).toContain('Setup failed');
-      expect(frame).not.toMatch(/Press\s+R\s+to retry/i);
+      expect(frame).not.toMatch(/\[R\]\s+Retry/);
     });
 
-    it('renders the retry hint on non-auth error outros (promptLogin missing)', () => {
+    it('renders the [R] Retry pill on non-auth error outros (promptLogin missing)', () => {
       const store = makeStoreForSnapshot({
         outroData: {
           kind: OutroKind.Error,
@@ -440,7 +445,7 @@ describe('OutroScreen — error variants', () => {
         },
       });
       const { frame } = renderSnapshot(<OutroScreen store={store} />, store);
-      expect(frame).toMatch(/Press\s+R\s+to retry/i);
+      expect(frame).toMatch(/\[R\]\s+Retry/);
     });
 
     it('does NOT render the retry hint on success outros', () => {
@@ -449,7 +454,116 @@ describe('OutroScreen — error variants', () => {
       });
       const { frame } = renderSnapshot(<OutroScreen store={store} />, store);
       expect(frame).toContain('Amplitude is live');
-      expect(frame).not.toMatch(/Press\s+R\s+to retry/i);
+      // No retry pill on success — the success view uses PickerMenu.
+      expect(frame).not.toMatch(/\[R\]\s+Retry/);
+    });
+  });
+
+  // ── Last-activity / Step affordance on error outros ────────────────
+  //
+  // Anchors the user in the log file by showing *where* the run was when
+  // it failed: "Started at HH:MM:SS · Step: <label>". Without this, the
+  // error outro is a wall of suggested next-steps and the log file is a
+  // haystack.
+  describe('"Last activity / Step" affordance', () => {
+    it('renders the affordance on error outros when runStartedAt + an in_progress task exist', () => {
+      const store = makeStoreForSnapshot({
+        outroData: { kind: OutroKind.Error, message: 'Setup failed.' },
+        runStartedAt: new Date(2024, 0, 1, 14, 23, 47).getTime(),
+      });
+      store.setTasks([
+        { label: 'Detect', status: TaskStatus.Completed, done: true },
+        {
+          label: 'Install Amplitude',
+          status: TaskStatus.InProgress,
+          done: false,
+        },
+        { label: 'Plan', status: TaskStatus.Pending, done: false },
+      ]);
+      const { frame } = renderSnapshot(<OutroScreen store={store} />, store);
+      // The line carries both anchors: the wall-clock the run began, and
+      // the user-visible step label where it died.
+      expect(frame).toContain('Started at 14:23:47');
+      expect(frame).toContain('Step: Install Amplitude');
+    });
+
+    it('falls back to the most-recent completed task when nothing is in_progress', () => {
+      const store = makeStoreForSnapshot({
+        outroData: { kind: OutroKind.Error, message: 'Setup failed.' },
+        runStartedAt: new Date(2024, 0, 1, 9, 0, 0).getTime(),
+      });
+      store.setTasks([
+        { label: 'Detect', status: TaskStatus.Completed, done: true },
+        {
+          label: 'Install Amplitude',
+          status: TaskStatus.Completed,
+          done: true,
+        },
+        { label: 'Plan', status: TaskStatus.Pending, done: false },
+      ]);
+      const { frame } = renderSnapshot(<OutroScreen store={store} />, store);
+      expect(frame).toContain('Started at 09:00:00');
+      expect(frame).toContain('Step: Install Amplitude');
+    });
+
+    it('hides the affordance entirely when runStartedAt is null', () => {
+      const store = makeStoreForSnapshot({
+        outroData: { kind: OutroKind.Error, message: 'Setup failed.' },
+        runStartedAt: null,
+      });
+      store.setTasks([
+        { label: 'Install', status: TaskStatus.InProgress, done: false },
+      ]);
+      const { frame } = renderSnapshot(<OutroScreen store={store} />, store);
+      expect(frame).not.toMatch(/Started at/);
+      expect(frame).not.toMatch(/Step:/);
+    });
+
+    it('hides the affordance when every task is still pending', () => {
+      const store = makeStoreForSnapshot({
+        outroData: { kind: OutroKind.Error, message: 'Setup failed.' },
+        runStartedAt: Date.now(),
+      });
+      // setTasks is fine with empty too, but pending-only is the more
+      // realistic shape — the run died before any task transitioned.
+      store.setTasks([
+        { label: 'Detect', status: TaskStatus.Pending, done: false },
+        { label: 'Install', status: TaskStatus.Pending, done: false },
+      ]);
+      const { frame } = renderSnapshot(<OutroScreen store={store} />, store);
+      expect(frame).not.toMatch(/Started at/);
+    });
+
+    it('does NOT render on the cancel path (anchor is only useful for failures)', () => {
+      const store = makeStoreForSnapshot({
+        outroData: { kind: OutroKind.Cancel, message: 'Setup cancelled.' },
+        runStartedAt: new Date(2024, 0, 1, 14, 23, 47).getTime(),
+      });
+      store.setTasks([
+        {
+          label: 'Install Amplitude',
+          status: TaskStatus.InProgress,
+          done: false,
+        },
+      ]);
+      const { frame } = renderSnapshot(<OutroScreen store={store} />, store);
+      // Cancel outros lead with "Resume later" guidance — the
+      // last-activity anchor would distract from that. Restrict to
+      // the error path where it actually helps.
+      expect(frame).not.toMatch(/Started at/);
+      expect(frame).not.toMatch(/Step:/);
+    });
+
+    it('does NOT render on the success path', () => {
+      const store = makeStoreForSnapshot({
+        outroData: { kind: OutroKind.Success, changes: ['x'] },
+        runStartedAt: new Date(2024, 0, 1, 14, 23, 47).getTime(),
+      });
+      store.setTasks([
+        { label: 'Wire', status: TaskStatus.Completed, done: true },
+      ]);
+      const { frame } = renderSnapshot(<OutroScreen store={store} />, store);
+      expect(frame).not.toMatch(/Started at/);
     });
   });
 
