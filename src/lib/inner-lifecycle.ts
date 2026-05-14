@@ -154,8 +154,8 @@ export function extractToolContentHead(input: Record<string, unknown>): {
     typeof input.tool_response !== 'undefined'
       ? input.tool_response
       : typeof input.tool_result !== 'undefined'
-      ? input.tool_result
-      : null;
+        ? input.tool_result
+        : null;
   if (result === null || result === undefined) {
     return { content: null, exitCode: undefined };
   }
@@ -224,8 +224,8 @@ export function extractToolFailureMessage(
     typeof input.tool_response !== 'undefined'
       ? input.tool_response
       : typeof input.tool_result !== 'undefined'
-      ? input.tool_result
-      : null;
+        ? input.tool_result
+        : null;
   if (result === null || result === undefined) return null;
   if (typeof result === 'object') {
     const obj = result as Record<string, unknown>;
@@ -334,14 +334,14 @@ export function createInnerLifecycleHooks(config: InnerLifecycleConfig): {
       typeof input.tool_name === 'string'
         ? input.tool_name
         : typeof input.toolName === 'string'
-        ? input.toolName
-        : 'unknown';
+          ? input.toolName
+          : 'unknown';
     const toolInput =
       typeof input.tool_input !== 'undefined'
         ? input.tool_input
         : typeof input.toolInput !== 'undefined'
-        ? input.toolInput
-        : null;
+          ? input.toolInput
+          : null;
     const summary = summarizeToolInput(toolName, toolInput);
     // Capture the SDK's `tool_use_id` so the PostToolUse `tool_response`
     // envelope can correlate with this `tool_call`. Stored in a closure-
@@ -411,8 +411,8 @@ export function createInnerLifecycleHooks(config: InnerLifecycleConfig): {
         typeof obj.file_path === 'string'
           ? obj.file_path
           : typeof obj.path === 'string'
-          ? obj.path
-          : null;
+            ? obj.path
+            : null;
       if (path) {
         try {
           getUI().recordFileChangePlanned({ path, operation });
@@ -454,8 +454,8 @@ export function createInnerLifecycleHooks(config: InnerLifecycleConfig): {
       typeof input.tool_name === 'string'
         ? input.tool_name
         : typeof input.toolName === 'string'
-        ? input.toolName
-        : 'unknown';
+          ? input.toolName
+          : 'unknown';
 
     // Record the run-level tool-call outcome for ALL tools (not just
     // write tools) so `tool_call_summary` carries an accurate
@@ -524,8 +524,8 @@ export function createInnerLifecycleHooks(config: InnerLifecycleConfig): {
           typeof input.tool_input !== 'undefined'
             ? input.tool_input
             : typeof input.toolInput !== 'undefined'
-            ? input.toolInput
-            : null;
+              ? input.toolInput
+              : null;
         const responseSummary = summarizeToolInput(
           toolName,
           toolInputForSummary,
@@ -556,8 +556,8 @@ export function createInnerLifecycleHooks(config: InnerLifecycleConfig): {
       typeof input.tool_input !== 'undefined'
         ? input.tool_input
         : typeof input.toolInput !== 'undefined'
-        ? input.toolInput
-        : null;
+          ? input.toolInput
+          : null;
     const obj =
       toolInput && typeof toolInput === 'object'
         ? (toolInput as Record<string, unknown>)
@@ -566,8 +566,8 @@ export function createInnerLifecycleHooks(config: InnerLifecycleConfig): {
       typeof obj.file_path === 'string'
         ? obj.file_path
         : typeof obj.path === 'string'
-        ? obj.path
-        : null;
+          ? obj.path
+          : null;
     if (path) {
       // v2 protocol: gate on tool_result outcome. If the write tool
       // surfaced an error, emit `file_change_failed` and SKIP
@@ -575,14 +575,13 @@ export function createInnerLifecycleHooks(config: InnerLifecycleConfig): {
       // successful write to the orchestrator's audit trail. The
       // pre-write entry stays in the rollback ledger so a cancelled
       // run can still restore the original on-disk state.
-      const failureMessage = extractToolFailureMessage(input);
-      if (failureMessage !== null) {
+      if (outcomeFailureMessage !== null) {
         try {
           getUI().emitFileChangeFailed?.({
             path,
             operation,
-            errorClass: classifyFileChangeError(failureMessage),
-            errorMessage: failureMessage,
+            errorClass: classifyFileChangeError(outcomeFailureMessage),
+            errorMessage: outcomeFailureMessage,
           });
         } catch {
           // See preToolUse — same defensive swallow.
