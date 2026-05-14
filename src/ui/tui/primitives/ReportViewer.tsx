@@ -112,7 +112,20 @@ export const ReportViewer = ({
     // column widths would stay locked to the cols at first mount.
   }, [filePath, cols]);
 
-  const maxOffset = Math.max(0, lines.length - visibleLines);
+  // Reserve one row inside the budget for the scroll indicator when
+  // the report is taller than the viewport. Without this reserve, the
+  // viewer rendered `visibleLines` body rows AND a scroll-hint row in a
+  // Box with `height={visibleLines}` — total content was `visibleLines +
+  // 1`, but the parent column reserved only `visibleLines` for the
+  // viewer, so the scroll hint overflowed downward and overdrew the next
+  // sibling (the `[O] Open in browser · [Esc] Back` strip in the
+  // showReport view of OutroScreen, the FIRST-row events-table header on
+  // a real terminal). See repro evidence in PR description.
+  const willShowScrollHint = lines.length > visibleLines;
+  const contentLines = willShowScrollHint
+    ? Math.max(1, visibleLines - 1)
+    : visibleLines;
+  const maxOffset = Math.max(0, lines.length - contentLines);
 
   useScreenInput((input, key) => {
     if (key.upArrow || input === 'k') {
@@ -120,25 +133,29 @@ export const ReportViewer = ({
     } else if (key.downArrow || input === 'j') {
       setOffset((o) => Math.min(maxOffset, o + 1));
     } else if (key.pageUp) {
-      setOffset((o) => Math.max(0, o - visibleLines));
+      setOffset((o) => Math.max(0, o - contentLines));
     } else if (key.pageDown) {
-      setOffset((o) => Math.min(maxOffset, o + visibleLines));
+      setOffset((o) => Math.min(maxOffset, o + contentLines));
     }
   });
 
-  const visible = lines.slice(offset, offset + visibleLines);
+  const visible = lines.slice(offset, offset + contentLines);
 
+  // `overflow="hidden"` is a defense-in-depth guarantee: even if a
+  // child Text rendered wider than the column expected (e.g. a long
+  // table row that marked-terminal padded past `cols`), Yoga must clip
+  // rather than spill into the next sibling's row.
   return (
-    <Box flexDirection="column" height={visibleLines}>
+    <Box flexDirection="column" height={visibleLines} overflow="hidden">
       {visible.map((line, i) => (
         <Text key={i} wrap="truncate">
           {line}
         </Text>
       ))}
-      {lines.length > visibleLines && (
-        <Text color={Colors.muted}>
+      {willShowScrollHint && (
+        <Text color={Colors.muted} wrap="truncate">
           {' '}
-          ↑↓ to scroll · {offset + visibleLines}/{lines.length} lines
+          ↑↓ to scroll · {offset + visible.length}/{lines.length} lines
         </Text>
       )}
     </Box>

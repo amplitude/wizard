@@ -629,7 +629,23 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
 
   if (showReport) {
     return (
-      <Box flexDirection="column" flexGrow={1} paddingX={2} paddingY={1}>
+      // `overflow="hidden"` is critical: ReportViewer's content height is
+      // a sibling-aware estimate (`siblingRows` deducted from the content
+      // area). If marked-terminal renders a markdown table whose row
+      // count exceeds that estimate (long-running setup with 20+ events,
+      // or a viewport shorter than the estimate accounted for), the
+      // overflow must clip rather than overdraw the `[O] Open in browser
+      // · [Esc] Back` strip that sits directly below it. This matches
+      // App.tsx's content-area Box which already sets `overflow="hidden"`
+      // — duplicated here so the showReport sub-tree is robust on its
+      // own.
+      <Box
+        flexDirection="column"
+        flexGrow={1}
+        paddingX={2}
+        paddingY={1}
+        overflow="hidden"
+      >
         {/* Header: bold accent title + small dim subtitle. The previous
             "(Esc to go back)" inline next to the title visually competed
             with the title itself — pulled down to the dedicated key-hint
@@ -692,7 +708,20 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
   // ── Main outro views ─────────────────────────────────────────────────
 
   return (
-    <Box flexDirection="column" flexGrow={1} paddingX={2} paddingY={1}>
+    // `overflow="hidden"` defends against content overflowing the parent's
+    // computed content area on real terminals. Without it, a tall success
+    // body (changes + events + dashboard CTA + diff summary + report
+    // hint + D-key hint) could push the PickerMenu off the bottom and
+    // visually overlap the ConsoleView chrome below — the family of
+    // overdraw bugs in the PR description (e.g. "[3] Exit setup
+    // reportmplitude.com)" where picker rows mash into other content).
+    <Box
+      flexDirection="column"
+      flexGrow={1}
+      paddingX={2}
+      paddingY={1}
+      overflow="hidden"
+    >
       {/* ── Success ───────────────────────────────────────────────────── */}
       {outroData.kind === OutroKind.Success && (
         <Box flexDirection="column">
@@ -743,11 +772,15 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
             </Text>
           )}
 
-          {/* Changes summary */}
+          {/* Changes summary. Each bullet is a single <Text> with
+              `wrap="truncate-end"` so a long change description can
+              never wrap to a 2nd line and visually merge with the next
+              bullet (e.g. "tracking plang Yarn V1" — bullet 1 wrapping
+              into bullet 2 on a real terminal). */}
           {outroData.changes && outroData.changes.length > 0 && (
             <Box flexDirection="column" marginTop={1}>
               {outroData.changes.map((change, i) => (
-                <Text key={i} color={Colors.body}>
+                <Text key={i} color={Colors.body} wrap="truncate-end">
                   {Icons.bullet} {change}
                 </Text>
               ))}
