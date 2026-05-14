@@ -197,7 +197,6 @@ describe('COMMANDS registry', () => {
     expect(cmds).toContain('/snake');
   });
 
-
   it('marks credential / region / org-mutating commands as requiresIdle', () => {
     // These commands swap the agent's auth, region, or project context
     // out from under it — they MUST be blocked while a run is active so
