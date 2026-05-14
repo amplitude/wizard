@@ -286,16 +286,25 @@ export class LoggingUI implements WizardUI {
 
   recordFileChangePlanned(data: {
     path: string;
+    /**
+     * v2 protocol: privacy-safe relative path shipped by AgentUI.
+     * Preferred over `path` for the CI log line so a CI archive doesn't
+     * embed the user's home directory. Falls back to `path` when
+     * absent (file outside the install dir or installDir not known).
+     */
+    relativePath?: string;
     operation: 'create' | 'modify' | 'delete';
   }): void {
     // CI logs the plan-then-apply pair as a single line per file. Verbose
     // enough to be useful when scanning a CI run, quiet enough not to drown
     // out the rest of the output.
-    console.log(`◌  ${data.operation} ${data.path}`);
+    const label = data.relativePath ?? data.path;
+    console.log(`◌  ${data.operation} ${label}`);
   }
 
   recordFileChangeApplied(_data: {
     path: string;
+    relativePath?: string;
     operation: 'create' | 'modify' | 'delete';
     bytes?: number;
   }): void {

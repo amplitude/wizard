@@ -2185,6 +2185,15 @@ export class WizardStore {
    */
   recordFileChangePlanned(data: {
     path: string;
+    /**
+     * Privacy-safe relative path shipped by AgentUI on the v2
+     * `file_change_planned` envelope. The TUI store doesn't surface it
+     * — `FileWritesPanel` does its own basename / shortPath transform
+     * for display — but the field is accepted so the abstract
+     * `WizardUI.recordFileChangePlanned` signature stays uniform across
+     * AgentUI / InkUI / LoggingUI.
+     */
+    relativePath?: string;
     operation: 'create' | 'modify' | 'delete';
   }): void {
     const now = Date.now();
@@ -2223,6 +2232,8 @@ export class WizardStore {
    */
   recordFileChangeApplied(data: {
     path: string;
+    /** See `recordFileChangePlanned.relativePath`. Accepted but unused. */
+    relativePath?: string;
     operation: 'create' | 'modify' | 'delete';
     bytes?: number;
   }): void {

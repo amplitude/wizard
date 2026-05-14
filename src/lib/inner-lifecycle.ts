@@ -102,6 +102,36 @@ function relativizeForCurrentFile(
 }
 
 /**
+ * Best-effort relativization for `file_change_planned` /
+ * `file_change_applied` envelopes. Unlike the `current_file` helper above,
+ * this returns `undefined` when the file lives outside `installDir` (i.e.
+ * `path.relative` produced a `..`-prefixed result) so the emitter OMITS
+ * `relativePath` from the wire envelope rather than shipping a misleading
+ * basename. Parent-agent renderers can then trust that "if `relativePath`
+ * is present, it's a privacy-safe label inside the install dir; if it's
+ * absent, fall back to `path`."
+ *
+ * This is the privacy fix from audit subagent #1: the wizard runs as a
+ * child agent under Claude Code / Cursor / Codex, and absolute paths in
+ * `file_change_*` envelopes leaked `/Users/<name>/...` into the parent
+ * agent's transcript. Mirrors the pattern already on `current_file`
+ * (PR #716) but with strict in-dir gating instead of a basename fallback.
+ */
+function relativizeForFileChange(
+  abs: string,
+  installDir: string | undefined,
+): string | undefined {
+  if (!installDir) return undefined;
+  try {
+    const rel = nodePath.relative(installDir, abs);
+    if (!rel || rel.startsWith('..')) return undefined;
+    return rel;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * Inspect a PostToolUse hook input for a tool-result error. The SDK
  * surfaces failures via either `tool_response.is_error` /
  * `tool_response.error` (newer hook shape) or a stringified result
@@ -413,8 +443,18 @@ export function createInnerLifecycleHooks(config: InnerLifecycleConfig): {
           ? obj.path
           : null;
       if (path) {
+        // v2 protocol: when `installDir` is known and `path` lives
+        // inside it, ship a privacy-safe `relativePath` on the wire so
+        // parent agents (Claude Code / Cursor / Codex) don't surface
+        // `/Users/<name>/...` in their transcripts. Omitted otherwise
+        // — see `relativizeForFileChange`.
+        const relativePath = relativizeForFileChange(path, config.installDir);
         try {
-          getUI().recordFileChangePlanned({ path, operation });
+          getUI().recordFileChangePlanned({
+            path,
+            ...(relativePath !== undefined ? { relativePath } : {}),
+            operation,
+          });
         } catch {
           // getUI() throws before the wizard has bootstrapped a UI (e.g.
           // when inner-lifecycle hooks fire from a probe call). Swallow —
@@ -589,6 +629,11 @@ export function createInnerLifecycleHooks(config: InnerLifecycleConfig): {
       }
 
       const content = typeof obj.content === 'string' ? obj.content : null;
+      // v2 protocol: same privacy-safe `relativePath` enrichment as the
+      // PreToolUse path. Pairs cleanly with the preceding
+      // `file_change_planned` (both events get the same label) so an
+      // orchestrator's audit trail stays home-dir-free.
+      const relativePath = relativizeForFileChange(path, config.installDir);
       // Use `content !== null` not `content` — empty string `''` is falsy
       // and would drop `bytes` from the event. Outer agents need to
       // distinguish "byte count unknown" (no content captured) from
@@ -596,6 +641,7 @@ export function createInnerLifecycleHooks(config: InnerLifecycleConfig): {
       try {
         getUI().recordFileChangeApplied({
           path,
+          ...(relativePath !== undefined ? { relativePath } : {}),
           operation,
           ...(content !== null && {
             bytes: Buffer.byteLength(content, 'utf8'),
