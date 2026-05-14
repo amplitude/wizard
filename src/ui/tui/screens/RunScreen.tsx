@@ -34,6 +34,7 @@ import { FileWritesPanel } from '../components/FileWritesPanel.js';
 import { FinalizingPanel } from '../components/FinalizingPanel.js';
 import { ActiveTaskSubsteps } from '../components/ActiveTaskSubsteps.js';
 import { DiscoveryFeed } from '../components/DiscoveryFeed.js';
+import { TypewriterFilename } from '../components/TypewriterFilename.js';
 import { resolveRunStatusPill } from './run-status-pill.js';
 import { useStdoutDimensions } from '../hooks/useStdoutDimensions.js';
 import { useResolvedZone } from '../hooks/useResolvedZone.js';
@@ -436,11 +437,15 @@ const ProgressTab = ({ store }: { store: WizardStore }) => {
                 now={Date.now()}
               />
             </Box>
-            {currentFile && (
-              <Text color={Colors.muted} wrap="truncate-end">
-                {currentFile}
-              </Text>
-            )}
+            {/* Typewriter reveal of the path the agent is currently
+                writing — fed by the same FileChangeLedger entry as the
+                rest of the screen, so no extra signal source. Adds a
+                little texture to the file-write progression and makes
+                the "the agent is doing real work" pulse legible at a
+                glance. The TypewriterFilename component itself caps
+                at one filename, restarts on path change, and clears
+                when the path becomes null. */}
+            {currentFile && <TypewriterFilename path={currentFile} />}
           </Box>
         </Box>
 
@@ -594,7 +599,19 @@ export const RunScreen = ({ store }: RunScreenProps) => {
           {
             id: 'events',
             label: 'Events',
-            component: <EventPlanViewer events={store.eventPlan} />,
+            // `fileWritesTotal` is a monotonic counter that climbs every
+            // time the agent initiates a file write — see store.ts. Using
+            // it as `refreshKey` makes EventPlanViewer re-walk the ledger
+            // exactly when new `track()` callsites can land, no more
+            // often. The user sees pending → wired transitions in
+            // real time without per-frame ledger walks.
+            component: (
+              <EventPlanViewer
+                events={store.eventPlan}
+                refreshKey={store.fileWritesTotal}
+                approved={store.session.eventPlanApproved}
+              />
+            ),
           },
         ]
       : []),

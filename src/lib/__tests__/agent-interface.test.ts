@@ -562,9 +562,27 @@ describe('runAgent', () => {
       // The Claude SDK retries 401s up to ~10 times with exponential backoff
       // (~3 min total). A 401 won't recover within a run, so we short-circuit
       // after AUTH_RETRY_LIMIT to surface AUTH_ERROR immediately.
-      let aborted = false;
+      //
+      // Production observation (run fe1fead2 / 2026-05-10): the previous
+      // implementation called `controller.abort('auth_failed')` but kept
+      // draining the for-await loop. The SDK kept emitting api_retry
+      // messages for attempts N+1, N+2, ... and the wizard kept logging
+      // "Auth retries exceeded threshold — aborting agent query" for each
+      // one before the SDK finally errored at max_retries: 10 — ~30s of
+      // dead spinner time after the first abort.
+      //
+      // The fix throws AbortError synchronously the first time the
+      // threshold is crossed, so the for-await unwinds immediately. We
+      // verify that by counting how many messages the generator was asked
+      // for: it must be exactly AUTH_RETRY_LIMIT (i.e. the wizard stopped
+      // pulling after the threshold-crossing message processed). The
+      // generator's post-threshold trailing yields are never delivered.
+      let messagesDelivered = 0;
       function* authRetryStormGenerator() {
-        for (let i = 0; i < AUTH_RETRY_LIMIT; i++) {
+        // Yield up to 10 (the SDK's real max_retries) so the test would
+        // catch a regression where the wizard drains past the threshold.
+        for (let i = 0; i < 10; i++) {
+          messagesDelivered++;
           yield {
             type: 'system',
             subtype: 'api_retry',
@@ -574,11 +592,6 @@ describe('runAgent', () => {
             retry_delay_ms: 1000,
           };
         }
-        // After the threshold, the generator should never deliver another
-        // useful message — controller.abort('auth_failed') will cause the
-        // SDK iterator to throw on next iteration in real life.
-        aborted = true;
-        throw Object.assign(new Error('aborted'), { name: 'AbortError' });
       }
 
       mockQuery.mockReturnValue(authRetryStormGenerator());
@@ -591,7 +604,10 @@ describe('runAgent', () => {
       );
 
       expect(result.error).toBe(AgentErrorType.AUTH_ERROR);
-      expect(aborted).toBe(true);
+      // Strict bound: the wizard MUST stop draining the SDK retry stream
+      // the moment AUTH_RETRY_LIMIT is hit. Pre-fix this would have been
+      // 10 (the SDK's full retry budget); the regression test is the count.
+      expect(messagesDelivered).toBe(AUTH_RETRY_LIMIT);
       expect(mockSpinner.stop).toHaveBeenCalledWith('Authentication failed');
       // Lifecycle event must fire exactly once at the abort boundary so
       // orchestrators observe exhaustion before the downstream
@@ -4160,6 +4176,118 @@ describe('partitionHookBridgeRace', () => {
       suppressed: 0,
       passthrough: chunk,
     });
+  });
+});
+
+describe('swallowSdkStreamClosed (canUseTool / gatedPreToolUse race guard)', () => {
+  // Covers Part 1 of the SDK 0.2.121 hotfix: a control-request that
+  // throws `Error: Stream closed` mid-permission-check (typically
+  // during task_notification or end-of-attempt teardown) must NOT be
+  // surfaced to the agent — the SDK would otherwise wrap it as
+  // "Tool permission request failed", and the agent would retry the
+  // same tool. The wrapper translates a Stream-closed throw into a
+  // caller-supplied "allow" sentinel and emits an analytics event so
+  // we can track upstream-issue frequency.
+  let swallowSdkStreamClosed: typeof import('../agent-interface').swallowSdkStreamClosed;
+  let isSdkStreamClosedError: typeof import('../agent-interface').isSdkStreamClosedError;
+
+  beforeEach(async () => {
+    ({ swallowSdkStreamClosed, isSdkStreamClosedError } = await import(
+      '../agent-interface'
+    ));
+  });
+
+  it('detects only Stream-closed throws via isSdkStreamClosedError', () => {
+    expect(isSdkStreamClosedError(new Error('Stream closed'))).toBe(true);
+    expect(
+      isSdkStreamClosedError(new Error('something Stream closed here')),
+    ).toBe(true);
+    expect(isSdkStreamClosedError(new Error('TypeError: foo'))).toBe(false);
+    expect(isSdkStreamClosedError('Stream closed')).toBe(false); // non-Error
+    expect(isSdkStreamClosedError(undefined)).toBe(false);
+  });
+
+  it('returns the run() result when no error is thrown', async () => {
+    const onSwallow = vi.fn();
+    const result = await swallowSdkStreamClosed(
+      () => Promise.resolve({ behavior: 'allow' as const }),
+      { behavior: 'allow' as const, updatedInput: {} },
+      onSwallow,
+    );
+    expect(result).toEqual({ behavior: 'allow' });
+    expect(onSwallow).not.toHaveBeenCalled();
+  });
+
+  it('returns the allow sentinel when run() throws Stream closed', async () => {
+    // canUseTool shape: behavior=allow with empty updatedInput. The
+    // payload here is what the SDK would receive in lieu of the throw
+    // — proving the agent never sees "Tool permission request failed".
+    const allow = { behavior: 'allow' as const, updatedInput: {} };
+    const onSwallow = vi.fn();
+    const result = await swallowSdkStreamClosed(
+      () => {
+        throw new Error('Stream closed');
+      },
+      allow,
+      onSwallow,
+    );
+    expect(result).toEqual(allow);
+    expect(onSwallow).toHaveBeenCalledTimes(1);
+    expect(onSwallow).toHaveBeenCalledWith(expect.any(Error));
+  });
+
+  it('returns the gatedPreToolUse-shaped allow ({}) when the hook throws Stream closed', async () => {
+    // PreToolUse hook returns `{}` for "no decision / allow". This
+    // pins the second callsite shape so a refactor can't silently
+    // change the contract.
+    const onSwallow = vi.fn();
+    const result = await swallowSdkStreamClosed(
+      () => Promise.reject(new Error('Stream closed during sendRequest')),
+      {} as Record<string, unknown>,
+      onSwallow,
+    );
+    expect(result).toEqual({});
+    expect(onSwallow).toHaveBeenCalledTimes(1);
+  });
+
+  it('rethrows non-Stream-closed errors so genuine bugs still surface', async () => {
+    // Critical: we MUST NOT swallow other errors. If a real bug shows
+    // up in wizardCanUseTool or createPreToolUseHook, the agent needs
+    // to see it (or, more commonly, the run needs to crash visibly).
+    const onSwallow = vi.fn();
+    await expect(
+      swallowSdkStreamClosed(
+        () => {
+          throw new Error('TypeError: Cannot read property foo of undefined');
+        },
+        { behavior: 'allow' as const, updatedInput: {} },
+        onSwallow,
+      ),
+    ).rejects.toThrow('TypeError');
+    expect(onSwallow).not.toHaveBeenCalled();
+  });
+
+  it('fires analytics callback exactly once per swallow', async () => {
+    // The runAgent wiring uses onSwallow to call
+    // analytics.wizardCapture('sdk transient stream closed', ...).
+    // Two consecutive races must produce two events — never zero,
+    // never duplicated within a single throw.
+    const onSwallow = vi.fn();
+    await swallowSdkStreamClosed(
+      () => {
+        throw new Error('Stream closed');
+      },
+      {} as Record<string, unknown>,
+      onSwallow,
+    );
+    await swallowSdkStreamClosed(
+      () => {
+        throw new Error('Stream closed');
+      },
+      {} as Record<string, unknown>,
+      onSwallow,
+    );
+    expect(onSwallow).toHaveBeenCalledTimes(2);
   });
 });
 

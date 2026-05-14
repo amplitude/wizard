@@ -4,6 +4,13 @@
  *
  * Pattern inspired by Stripe CLI: presents terms and privacy policy
  * links, requires explicit acceptance before proceeding to authentication.
+ *
+ * URL source: reads `session.legalDocumentBundle`, populated by the parser
+ * in `direct-signup.ts` from either the BE-supplied
+ * `needs_information.terms_acceptance.documents` (BE flag ON) or local
+ * constants via the parser's spoof block (BE flag OFF). The screen never
+ * touches `TERMS_OF_SERVICE_URL` / `PRIVACY_POLICY_URL` directly — the
+ * parser is the single boundary that decides URL origin.
  */
 
 import { Box, Text } from 'ink';
@@ -14,14 +21,19 @@ import { PickerMenu } from '../primitives/index.js';
 import { Colors, Icons } from '../styles.js';
 import type { KeyHint } from '../components/KeyHintBar.js';
 import {
-  TERMS_OF_SERVICE_URL,
-  PRIVACY_POLICY_URL,
-} from '../../../lib/constants.js';
+  KNOWN_DOC_KINDS,
+  type DocKind,
+} from '../../../utils/direct-signup.js';
 
 const TOS_EXTRA_HINTS: readonly KeyHint[] = Object.freeze([
   { key: '↑↓', label: 'Navigate' },
   { key: 'Enter', label: 'Select' },
 ]);
+
+const DOC_LABELS: Record<DocKind, string> = {
+  terms_of_service: 'Terms of Service',
+  privacy_policy: 'Privacy Policy',
+};
 
 interface ToSScreenProps {
   store: WizardStore;
@@ -51,6 +63,18 @@ export const ToSScreen = ({ store }: ToSScreenProps) => {
     }
   };
 
+  // The flow's `ToS.show` predicate gates on
+  // `'terms_acceptance' in signupRequiredFields`, which the parser
+  // ensures iff `legalDocumentBundle` is populated. Within this render,
+  // the bundle is invariant non-null — but TypeScript needs an explicit
+  // narrowing guard. The early-return is defensive: if the invariant
+  // ever breaks (predicate weakened, parser bug), the screen renders
+  // nothing instead of crashing on a null access.
+  const urls = store.session.legalDocumentBundle;
+  if (urls === null) {
+    return null;
+  }
+
   return (
     <Box flexDirection="column" flexGrow={1}>
       <Box flexDirection="column" marginBottom={1}>
@@ -69,12 +93,11 @@ export const ToSScreen = ({ store }: ToSScreenProps) => {
           <Text color={Colors.accent}>Privacy Policy</Text> to continue:
         </Text>
         <Box marginTop={1} flexDirection="column">
-          <Text color={Colors.muted}>
-            {Icons.arrowRight} Terms: {TERMS_OF_SERVICE_URL}
-          </Text>
-          <Text color={Colors.muted}>
-            {Icons.arrowRight} Privacy: {PRIVACY_POLICY_URL}
-          </Text>
+          {KNOWN_DOC_KINDS.map((kind) => (
+            <Text key={kind} color={Colors.muted}>
+              {Icons.arrowRight} {DOC_LABELS[kind]}: {urls[kind]}
+            </Text>
+          ))}
         </Box>
       </Box>
 

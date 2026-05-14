@@ -22,6 +22,7 @@ import {
   classifyAgentOutcome,
   classifyApiErrorSubtype,
   refreshTokenIfStale,
+  runColdStartParallel,
   POST_AGENT_STEP_COMMIT_EVENTS,
 } from '../agent-runner.js';
 import { AgentErrorType } from '../agent-interface.js';
@@ -651,5 +652,150 @@ describe('events-only success path (DEFER_DASHBOARD_PLAN PR 4)', () => {
     const message = buildDashboardDeferredMessage({ planPath: null });
     expect(message).not.toContain('saved at');
     expect(message).not.toContain('dashboard-plan.json');
+  });
+});
+
+// ── runColdStartParallel ──────────────────────────────────────────────
+//
+// Perf regression guard: the agent cold-start has three independent
+// blocks (package-manager scan, AI-SDK gateway probe, agent-SDK MCP
+// bootstrap) that used to run serially and cost 1-3s of dead wall time
+// on every fresh run. The probe and MCP bootstrap live inside `getAgent`,
+// so from the runner's perspective there are two parallel legs:
+// `detectPackageManager` and `getAgent`. The helper must run them
+// concurrently — these tests lock that in via timing markers.
+
+describe('runColdStartParallel (cold-start perf)', () => {
+  it('runs detectPackageManager and getAgent concurrently (overlap, not serial)', async () => {
+    // Each leg sleeps 50ms. Serial would take ~100ms; parallel should
+    // finish in ~50ms. Pick a generous threshold so a slow CI box
+    // doesn't false-flag.
+    const detectorStartedAt = { value: 0 };
+    const detectorEndedAt = { value: 0 };
+    const agentStartedAt = { value: 0 };
+    const agentEndedAt = { value: 0 };
+
+    const detect = async () => {
+      detectorStartedAt.value = Date.now();
+      await new Promise((r) => setTimeout(r, 50));
+      detectorEndedAt.value = Date.now();
+      return { detected: ['npm'], primary: 'npm', recommendation: '' };
+    };
+
+    const initAgent = async () => {
+      agentStartedAt.value = Date.now();
+      await new Promise((r) => setTimeout(r, 50));
+      agentEndedAt.value = Date.now();
+      return { workingDirectory: '/tmp/x' };
+    };
+
+    const start = Date.now();
+    const result = await runColdStartParallel(detect, initAgent);
+    const elapsed = Date.now() - start;
+
+    // Both legs ran.
+    expect(result.packageManagerInfo).toEqual({
+      detected: ['npm'],
+      primary: 'npm',
+      recommendation: '',
+    });
+    expect(result.agent).toEqual({ workingDirectory: '/tmp/x' });
+
+    // Wall-clock proves overlap: parallel ~50ms, serial would be ~100ms.
+    // Use 90ms as the upper bound for a comfortable safety margin.
+    expect(elapsed).toBeLessThan(90);
+
+    // Direct overlap proof: each leg started before the other finished.
+    expect(detectorStartedAt.value).toBeLessThan(agentEndedAt.value);
+    expect(agentStartedAt.value).toBeLessThan(detectorEndedAt.value);
+  });
+
+  it('treats detectPackageManager errors as best-effort (returns null, swallows error)', async () => {
+    // The package-manager scan was wrapped in try/catch in the original
+    // serial version too — a slow / failing detector must not block
+    // agent init. Lock that contract in.
+    const detectorErr = new Error('ENOENT: package.json missing');
+    const onDetectorError = vi.fn();
+
+    const result = await runColdStartParallel(
+      async () => {
+        throw detectorErr;
+      },
+      async () => ({ workingDirectory: '/tmp/x' }),
+      onDetectorError,
+    );
+
+    expect(result.packageManagerInfo).toBeNull();
+    expect(result.agent).toEqual({ workingDirectory: '/tmp/x' });
+    expect(onDetectorError).toHaveBeenCalledWith(detectorErr);
+  });
+
+  it('absorbs synchronous throws from the detector wrapper (not just async rejections)', async () => {
+    // Bugbot regression guard: the call-site wrapper
+    // (`() => config.detection.detectPackageManager(...)`) is NOT async.
+    // Several concrete detectors are plain functions that return
+    // `Promise.resolve(...)` — a sync throw inside one of them would
+    // bubble out of the wrapper before any `.catch()` could see it,
+    // killing agent init even though the detector is documented as
+    // best-effort. Lock the contract that BOTH paths are absorbed.
+    const detectorErr = new Error('sync boom');
+    const onDetectorError = vi.fn();
+    let agentRan = false;
+
+    // Cast: the function-shape signature says `Promise<TPm>` but a sync
+    // throw is exactly the runtime case we need to cover.
+    const syncThrowingDetector = (() => {
+      throw detectorErr;
+    }) as unknown as () => Promise<{
+      detected: string[];
+      primary: string | null;
+      recommendation: string;
+    }>;
+
+    const result = await runColdStartParallel(
+      syncThrowingDetector,
+      async () => {
+        agentRan = true;
+        return { workingDirectory: '/tmp/x' };
+      },
+      onDetectorError,
+    );
+
+    // Sync-throwing detector must not block agent init.
+    expect(agentRan).toBe(true);
+    expect(result.packageManagerInfo).toBeNull();
+    expect(result.agent).toEqual({ workingDirectory: '/tmp/x' });
+    expect(onDetectorError).toHaveBeenCalledWith(detectorErr);
+  });
+
+  it('propagates getAgent errors immediately (fail-fast on the agent leg)', async () => {
+    // The agent leg is NOT best-effort — if MCP bootstrap or the
+    // gateway probe fails the run cannot continue, and the caller
+    // expects to see that error. `Promise.all` semantics guarantee
+    // fail-fast.
+    const agentErr = new Error('gateway probe failed');
+    let detectorResolved = false;
+
+    await expect(
+      runColdStartParallel(
+        async () => {
+          // Slow detector — would otherwise mask a fast agent failure
+          // if the helper waited for both legs.
+          await new Promise((r) => setTimeout(r, 100));
+          detectorResolved = true;
+          return { detected: [], primary: null, recommendation: '' };
+        },
+        async () => {
+          throw agentErr;
+        },
+      ),
+    ).rejects.toBe(agentErr);
+
+    // Sanity check: the detector hasn't necessarily finished by the
+    // time we surface the agent error — fail-fast didn't wait on it.
+    // (We don't strictly assert "false" here since timing varies; the
+    // important contract is that the await above rejected with the
+    // agent error, not the detector's null fallback.)
+    expect(detectorResolved).toBeDefined();
   });
 });

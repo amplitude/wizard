@@ -10,12 +10,13 @@
  */
 
 import { Box, Text } from 'ink';
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import * as fs from 'fs';
 import type { WizardStore } from '../store.js';
 import { useWizardStore } from '../hooks/useWizardStore.js';
 import { OutroKind } from '../session-constants.js';
 import { Colors, Icons } from '../styles.js';
+import { GradientText } from '../components/GradientText.js';
 import {
   ChangedFilesView,
   PickerMenu,
@@ -23,6 +24,8 @@ import {
   TerminalLink,
 } from '../primitives/index.js';
 import { buildChangedFileList } from '../primitives/ChangedFilesView.js';
+import { DiffViewer } from '../components/DiffViewer.js';
+import { summarizeLedgerDiffs } from '../../../lib/file-change-diff.js';
 import { peekSetupComplete } from '../../../lib/setup-complete-registry.js';
 import { useScreenInput } from '../hooks/useScreenInput.js';
 import {
@@ -48,7 +51,14 @@ import {
 import { readDraftEventPlanMeta } from '../../../lib/wizard-tools.js';
 import { retryFromCheckpoint } from '../../../lib/retry-from-checkpoint.js';
 import { isInteractiveOutro } from '../utils/outro-mode.js';
-import { executeRollbackWithStatus } from '../../../lib/file-change-ledger.js';
+import {
+  executeRollbackWithStatus,
+  getFileChangeLedger,
+} from '../../../lib/file-change-ledger.js';
+import {
+  classifyPlanAgainstWiredCode,
+  collectWiredEventNames,
+} from '../../../lib/wired-event-instrumentation.js';
 
 const REPORT_FILE = 'amplitude-setup-report.md';
 
@@ -79,6 +89,30 @@ export function exitCodeForOutroKind(kind: OutroKind | undefined): number {
   return ExitCode.SUCCESS;
 }
 
+/**
+ * Format the cancel-outro file-state line from a snapshot of the
+ * ledger's `{ size, rolledBack }` state captured at mount. Pulled out
+ * as a pure helper so the branching (no entries / pending revert /
+ * already reverted) is unit-testable without rendering Ink.
+ *
+ * The wording branches on `rolledBack` because the timing of cleanup
+ * differs between the `wizardAbort` (Ctrl+C, cleanup runs before mount)
+ * and screen-initiated (`/exit`, IntroScreen back-out, etc. — cleanup
+ * runs AFTER any-key) cancel paths. Bugbot caught the past-tense lie
+ * for the latter path on PR #741.
+ */
+export function renderCancelFileStateLine(state: {
+  size: number;
+  rolledBack: boolean;
+}): string {
+  if (state.size === 0) return 'No files were changed.';
+  const noun = state.size === 1 ? 'file' : 'files';
+  if (state.rolledBack) {
+    return `Reverted ${state.size} ${noun} the wizard had started writing.`;
+  }
+  return `${state.size} ${noun} will be reverted before exit.`;
+}
+
 interface OutroScreenProps {
   store: WizardStore;
 }
@@ -97,6 +131,26 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
   useEffect(() => {
     store.setCommandMode(false);
   }, [store]);
+
+  // Memoize the diff summary so we don't re-run `structuredPatch` on every
+  // render frame (Bugbot: outro is mounted post-run, ledger is frozen, so a
+  // single computation per mount is correct). The ledger reference itself is
+  // stable for the lifetime of the wizard run.
+  //
+  // `includePatch: false` skips the redundant `createPatch` call per entry —
+  // we only render DiffViewer in summary mode here (no `filePath` prop), and
+  // summary mode reads `additions`/`deletions`/`operation` only, never the
+  // unified-patch text. Computing the patch for every file (up to the ledger
+  // FIFO cap) doubled the diff work and could cause a visible hang on outro
+  // mount after a large run.
+  const meaningfulDiffs = useMemo(() => {
+    const diffs = summarizeLedgerDiffs(getFileChangeLedger(), {
+      includePatch: false,
+    });
+    return diffs.filter(
+      (d) => d.additions > 0 || d.deletions > 0 || d.operation !== 'modify',
+    );
+  }, []);
 
   const [showReport, setShowReport] = useState(false);
   const [showChangedFiles, setShowChangedFiles] = useState(false);
@@ -132,6 +186,44 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
   // unrelated store events too). The report file is written by the
   // agent before this screen mounts, so a one-shot read is sufficient.
   const [reportExists, setReportExists] = useState(false);
+
+  // Cancel-outro file-state snapshot — addresses TUI Auditor T4 (the
+  // cancel branch never confirmed what was preserved). Captured ONCE on
+  // mount so the count reflects the ledger as of the moment we render,
+  // not the moment a stray re-render happens.
+  //
+  // We capture BOTH the entry count and whether rollback has already
+  // run. Two cancel paths reach this screen and they differ in timing:
+  //
+  //   1. `wizardAbort` (Ctrl+C) — agent-runner's cleanup hook calls
+  //      `ledger.rollback()` synchronously BEFORE the outro mounts. So
+  //      `hasRolledBack` is true and the past-tense "Reverted N files"
+  //      message is honest.
+  //   2. `/exit` / IntroScreen back-out / SetupScreen back-out — these
+  //      call `setOutroData` directly without going through
+  //      `wizardAbort`. The outro mounts BEFORE any cleanup hook fires
+  //      (those fire later, when `wizardSuccessExit` iterates the hook
+  //      registry after the user presses a key). So `hasRolledBack` is
+  //      false and we must promise future-tense ("will be reverted
+  //      before exit") instead of lying past-tense. Bugbot caught the
+  //      lie on PR #741.
+  //
+  // Meanings of `cancelLedgerState`:
+  //   null  → ledger absent (pre-agent cancel, or test fixture with no
+  //           ledger init). We omit the file-state line entirely rather
+  //           than asserting "0 files" with uncertainty.
+  //   { size: 0, … }        → no writes tracked. Render
+  //                            "No files were changed."
+  //   { size: N, rolledBack: true }  → rollback already ran → past tense.
+  //   { size: N, rolledBack: false } → rollback pending → future tense.
+  const [cancelLedgerState] = useState<{
+    size: number;
+    rolledBack: boolean;
+  } | null>(() => {
+    const ledger = getFileChangeLedger();
+    if (!ledger) return null;
+    return { size: ledger.size(), rolledBack: ledger.hasRolledBack() };
+  });
 
   // `isSuccess` / `isError` drive input handling and the action picker.
   // We compute them off the raw session.outroData (so error/cancel paths
@@ -363,6 +455,53 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
   const rawOutroData = store.session.outroData;
   const visibleEvents = store.eventPlan.filter((e) => e.name.trim().length > 0);
 
+  // ── Wired-code classification ──────────────────────────────────────
+  //
+  // The persisted plan (`store.eventPlan`) is the user-approved list of
+  // events the wizard SAID it would set up. The actual on-disk truth
+  // lives in the file-change ledger — every Write / Edit / MultiEdit
+  // the agent ran is captured there with its `afterContent`. We grep
+  // those snapshots for `track("...")` callsites and split the plan
+  // into two buckets:
+  //
+  //   - **Instrumented**: plan event whose name (case-insensitive)
+  //     appears in some `track()` callsite. The celebration shows the
+  //     wired-code casing, not the plan's normalized Title Case.
+  //   - **Covered by autocapture**: plan event NOT found in any wired
+  //     file. Web SDKs autocapture sessions / page views / form
+  //     interactions / clicks, so the agent intentionally skips
+  //     `track()` for these.
+  //
+  // Without this split the outro confidently lists every plan event as
+  // "instrumented in the Wizard API" — even when the agent actually
+  // routed half of them through autocapture. The Setup Report has
+  // always distinguished these; this brings the outro into line.
+  //
+  // Memoize on `visibleEvents` identity — the ledger is per-run and
+  // frozen post-agent, so once the agent finishes the classification is
+  // stable. Without `useMemo`, this IIFE re-walked the ledger and
+  // re-ran `TRACK_CALL_RE` against every wired file on every render
+  // (and every keypress in the outro picker drives a render). When the
+  // ledger isn't initialized (e.g. tests, the synthetic full-activation
+  // success path where the agent never ran), we fall back to
+  // "everything instrumented" so legacy behavior holds.
+  const wiredClassification = useMemo(() => {
+    const ledger = getFileChangeLedger();
+    if (!ledger) {
+      return {
+        instrumented: visibleEvents.map((e) => ({
+          name: e.name,
+          description: e.description,
+        })),
+        autocaptured: [],
+      };
+    }
+    const wiredNames = collectWiredEventNames(ledger.getEntries());
+    return classifyPlanAgainstWiredCode(visibleEvents, wiredNames);
+  }, [visibleEvents]);
+  const instrumentedEvents = wiredClassification.instrumented;
+  const autocapturedEvents = wiredClassification.autocaptured;
+
   // For activationLevel === 'full' users, the agent run is skipped — so
   // `outro()` on InkUI never fires and `outroData` stays null when the
   // router lands them here. Without this defaulting, those users would
@@ -560,12 +699,27 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
               re-runs (returning user, project already healthy) get a
               calmer "your project is healthy" line — the wizard didn't
               just set anything up, so the celebratory tone would feel
-              false. Both paths share every other element below. */}
-          <Text color={Colors.success} bold>
-            {isFullActivationSuccess
-              ? `${Icons.checkmark} Your Amplitude project is healthy`
-              : '🎉 Amplitude is live!'}
-          </Text>
+              false. Both paths share every other element below.
+
+              Wordmark gradient (PR A2 #1): success outros render the
+              heading text with the Amplitude brand violet → blueOnDark
+              gradient — the same brand pairing the IntroScreen logo
+              uses — so the wizard's terminal celebration matches the
+              tone of the rest of the product. The emoji / checkmark
+              prefix stays in a plain <Text> so font rendering of the
+              glyph is unaffected by the per-character color stripe.
+              Error and Cancel outros below keep the minimal monochrome
+              treatment — the gradient is reserved for success states. */}
+          <Box flexDirection="row" gap={1}>
+            <Text color={Colors.success} bold>
+              {isFullActivationSuccess ? Icons.checkmark : '🎉'}
+            </Text>
+            <GradientText>
+              {isFullActivationSuccess
+                ? 'Your Amplitude project is healthy'
+                : 'Amplitude is live!'}
+            </GradientText>
+          </Box>
           {isFullActivationSuccess && (
             <Text color={Colors.body}>
               {store.session.selectedProjectName
@@ -575,8 +729,11 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
           )}
           {!isFullActivationSuccess && visibleEvents.length > 0 && (
             <Text color={Colors.body}>
-              {visibleEvents.length} event
-              {visibleEvents.length !== 1 ? 's' : ''} instrumented
+              {instrumentedEvents.length} event
+              {instrumentedEvents.length !== 1 ? 's' : ''} instrumented
+              {autocapturedEvents.length > 0
+                ? ` · ${autocapturedEvents.length} covered by autocapture`
+                : ''}
               {store.session.selectedEnvName
                 ? ` in ${store.session.selectedEnvName}`
                 : ''}
@@ -595,12 +752,19 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
             </Box>
           )}
 
-          {/* Events added */}
+          {/* Events added — split into two sections so the celebration
+              tells the truth:
+                - Instrumented: plan events whose `track()` call landed
+                  in the wired code (names show with their wired-code
+                  spelling, not the plan's normalized Title Case).
+                - Covered by autocapture: plan events where the agent
+                  intentionally did NOT write a track() call because the
+                  SDK's autocapture surfaces them automatically.
+              The Setup Report has always made this distinction; this
+              block brings the outro into line so all three sources
+              (diff, report, outro) agree. */}
           {visibleEvents.length > 0 && (
             <Box flexDirection="column" marginTop={1}>
-              <Text color={Colors.secondary} bold>
-                Events
-              </Text>
               {/* Draft notice — only when events.json is the wrapper-shaped
                   draft persisted by the outro safety net (i.e. the user
                   gave feedback during confirm_event_plan and the agent
@@ -620,12 +784,39 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
                   )}
                 </Box>
               )}
-              {visibleEvents.map((event) => (
-                <Text key={event.name} color={Colors.body}>
-                  {Icons.diamond} <Text bold>{event.name}</Text>
-                  <Text color={Colors.muted}> {event.description}</Text>
-                </Text>
-              ))}
+              {instrumentedEvents.length > 0 && (
+                <Box flexDirection="column">
+                  <Text color={Colors.secondary} bold>
+                    Instrumented ({instrumentedEvents.length} event
+                    {instrumentedEvents.length === 1 ? '' : 's'} with track()
+                    calls)
+                  </Text>
+                  {instrumentedEvents.map((event) => (
+                    <Text key={`i:${event.name}`} color={Colors.body}>
+                      {Icons.diamond} <Text bold>{event.name}</Text>
+                      <Text color={Colors.muted}> {event.description}</Text>
+                    </Text>
+                  ))}
+                </Box>
+              )}
+              {autocapturedEvents.length > 0 && (
+                <Box
+                  flexDirection="column"
+                  marginTop={instrumentedEvents.length > 0 ? 1 : 0}
+                >
+                  <Text color={Colors.secondary} bold>
+                    Covered by autocapture ({autocapturedEvents.length} event
+                    {autocapturedEvents.length === 1 ? '' : 's'} — no track()
+                    needed)
+                  </Text>
+                  {autocapturedEvents.map((event) => (
+                    <Text key={`a:${event.name}`} color={Colors.body}>
+                      {Icons.bullet} <Text bold>{event.name}</Text>
+                      <Text color={Colors.muted}> {event.description}</Text>
+                    </Text>
+                  ))}
+                </Box>
+              )}
             </Box>
           )}
 
@@ -657,6 +848,20 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
                     : 'Open it now to see your first charts populate as users hit the app.'}
                 </Text>
               </Box>
+            </Box>
+          )}
+
+          {/* Per-file diff summary — additive, complements the
+              setup-report. Shows +N/-M counts so users see the
+              magnitude of each change at a glance. Sourced from the
+              session-scoped FileChangeLedger; empty when capture
+              didn't fire (probe runs, full-activation re-runs). */}
+          {meaningfulDiffs.length > 0 && (
+            <Box marginTop={1}>
+              <DiffViewer
+                diffs={meaningfulDiffs}
+                installDir={installDir}
+              />
             </Box>
           )}
 
@@ -815,6 +1020,23 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
           {outroData.message && (
             <Box marginTop={1}>
               <Text color={Colors.body}>{outroData.message}</Text>
+            </Box>
+          )}
+          {/* File-state line — TUI Auditor T4. "Closure is empathy when
+              the user knows exactly what's on disk." Rendered in muted
+              tone (not warning / not success) so it informs without
+              shouting. Omitted entirely when the ledger is absent — we
+              don't have evidence either way, so asserting "0 files"
+              would be the same uncertainty the audit flagged.
+
+              Past- vs future-tense depends on whether the cleanup hook
+              has already reverted the ledger (see the `cancelLedgerState`
+              capture above and Bugbot finding on PR #741). */}
+          {cancelLedgerState !== null && (
+            <Box marginTop={1}>
+              <Text color={Colors.muted}>
+                {renderCancelFileStateLine(cancelLedgerState)}
+              </Text>
             </Box>
           )}
           {/* Resume-later note — closes the cancel outro on a forward-

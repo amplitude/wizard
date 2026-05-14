@@ -147,9 +147,55 @@ export type PendingPrompt =
       resolve: (value: EventPlanDecision) => void;
     };
 
+/**
+ * Build the internal session store.
+ *
+ * Patches nanostores' `map.setKey` to mutate the underlying object
+ * in-place instead of allocating a fresh `{ ...prev, [key]: value }`
+ * spread.
+ *
+ * **Why this matters (env-picker race fix):** bin.ts holds a `session`
+ * reference that it mutates in-place during checkpoint hydration,
+ * `resolveCredentials`, and `applyEnvSelectionDeferral`. It then calls
+ * `tui.store.session = session` to re-emit. With nanostores' default
+ * setKey behavior, the FIRST in-store setter (e.g. `concludeIntro`
+ * fired when the user clicks Continue on the checkpoint Resume prompt
+ * while `resolveCredentials` is still awaiting) replaces
+ * `$session.value` with a new `{ ...spread, introConcluded: true }`
+ * object. After that point, bin.ts's `session` ref is detached from
+ * `$session.value`; subsequent in-place mutations by the deferral
+ * (`session.pendingEnvSelection = true`, `session.credentials = null`)
+ * never reach the store. The final `tui.store.session = session` then
+ * REPLACES the store's accumulated state with the stale bin.ts ref,
+ * wiping the user's `introConcluded = true` progress and producing
+ * either a bump back to Intro or a stall on Setup with no env-picker
+ * surface.
+ *
+ * Patching setKey to mutate in-place keeps `$session.value` and the
+ * bin.ts `session` ref pointing at the same object for the entire
+ * run, so external mutations propagate transparently and store
+ * setters don't clobber them. `notify()` still fires per key for the
+ * React `useSyncExternalStore` bridge (which reads `$version`); the
+ * only observable behavior change is that listeners using
+ * `listenKeys` would see the new value via both args of their
+ * callback. The wizard's UI doesn't use `listenKeys` anywhere — the
+ * canonical sync path is `emitChange()` → `$version` bump, which is
+ * unaffected.
+ */
+function createSessionStore() {
+  const m = map<WizardSession>(buildSession({}));
+  m.setKey = function setKeyInPlace(key, value) {
+    if (m.value[key] !== value) {
+      m.value[key] = value;
+      m.notify(m.value, key);
+    }
+  };
+  return m;
+}
+
 export class WizardStore {
   // ── Internal nanostore atoms ─────────────────────────────────────
-  private $session = map<WizardSession>(buildSession({}));
+  private $session = createSessionStore();
   private $statusMessages = atom<string[]>([]);
   private $tasks = atom<TaskItem[]>([]);
   private $eventPlan = atom<PlannedEvent[]>([]);
@@ -208,8 +254,15 @@ export class WizardStore {
   /** True while the user is typing a slash command in the command bar. */
   private $commandMode = atom(false);
 
-  /** Transient feedback message shown in the command bar after a command runs. */
-  private $commandFeedback = atom<string | null>(null);
+  /**
+   * Transient feedback message shown in the command bar after a command runs.
+   *
+   * `string[]` is rendered as one line per entry — used by `/diagnostics` and
+   * `/debug` to show storage paths without hard-truncating to `/Users/…` when
+   * the line overflows the terminal. Single-line commands (`/whoami`,
+   * `/region`, etc.) keep passing a `string`.
+   */
+  private $commandFeedback = atom<string | string[] | null>(null);
 
   /** Error caught by the app error boundary — shown in ConsoleView. */
   private $screenError = atom<Error | null>(null);
@@ -274,7 +327,7 @@ export class WizardStore {
     return this.$commandMode.get();
   }
 
-  get commandFeedback(): string | null {
+  get commandFeedback(): string | string[] | null {
     return this.$commandFeedback.get();
   }
 
@@ -471,6 +524,22 @@ export class WizardStore {
 
   setSelectedEnvName(name: string | null): void {
     this.$session.setKey('selectedEnvName', name);
+    this.emitChange();
+  }
+
+  /**
+   * Set the env-picker deferral flag. `true` is written by
+   * `applyEnvSelectionDeferral` (helpers.ts) when `resolveCredentials`
+   * returns `needs_user_choice / environment_selection` — it forces the
+   * router to park on Auth even if it had already advanced past Auth on a
+   * prior frame (rehydrated rerun state). `false` is written by AuthScreen
+   * once the user picks an env via `setCredentials` for that environment.
+   *
+   * Distinct setter (not folded into `setCredentials`) so the deferral
+   * write site can flip it without going through credential validation.
+   */
+  setPendingEnvSelection(value: boolean): void {
+    this.$session.setKey('pendingEnvSelection', value);
     this.emitChange();
   }
 
@@ -761,6 +830,12 @@ export class WizardStore {
     // semantics on the next forward pass).
     this.$session.setKey('signupFullName', null);
     this.$session.setKey('tosAccepted', null);
+    // `legalDocumentBundle` and `legalDocumentSource` are tied to the
+    // same probe response as `tosAccepted` — reset together so a stale
+    // bundle can't ride into a follow-up POST whose acceptance got
+    // cleared, or into a re-probe that should see fresh URLs from BE.
+    this.$session.setKey('legalDocumentBundle', null);
+    this.$session.setKey('legalDocumentSource', null);
     // `signupTokensObtained` gates whether the post-TUI auth task
     // hydrates from disk vs. opens browser OAuth. If we leave a stale
     // `true` after a ceremony reset, the next forward pass would
@@ -815,12 +890,34 @@ export class WizardStore {
 
   resetToS(): void {
     this.$session.setKey('tosAccepted', null);
+    // Intentionally leave `legalDocumentBundle` and `legalDocumentSource`
+    // intact. They're tied to the probe response that drove this
+    // ceremony, not to the acceptance decision. After this revert, the
+    // router immediately re-resolves to the ToS screen (because
+    // `'terms_acceptance'` is still in `signupRequiredFields` and
+    // `tosAccepted` is now null), and `ToSScreen` renders nothing when
+    // the bundle is null — clearing them here would strand the user on
+    // a blank screen with no interactive elements. The stale-bundle
+    // invariant matters only when the *whole* ceremony resets (new
+    // email → new probe response → possibly-new URLs); that's handled
+    // by `_resetCeremonyKeys`, which wipes the bundle alongside the
+    // rest of the ceremony state.
     analytics.wizardCapture('back navigation', { to: 'tos' });
     this.emitChange();
   }
 
-  setSignupRequiredFields(fields: string[] | null): void {
+  setSignupRequiredFields(fields: WizardSession['signupRequiredFields']): void {
     this.$session.setKey('signupRequiredFields', fields);
+    this.emitChange();
+  }
+
+  setLegalDocumentBundle(bundle: WizardSession['legalDocumentBundle']): void {
+    this.$session.setKey('legalDocumentBundle', bundle);
+    this.emitChange();
+  }
+
+  setLegalDocumentSource(source: WizardSession['legalDocumentSource']): void {
+    this.$session.setKey('legalDocumentSource', source);
     this.emitChange();
   }
 
@@ -1118,6 +1215,20 @@ export class WizardStore {
   /** Show an event-plan confirmation. Resolves when the user approves, skips, or gives feedback. */
   promptEventPlan(events: PlannedEvent[]): Promise<EventPlanDecision> {
     return new Promise((resolve) => {
+      // A fresh `confirm_event_plan` call is landing — clear any
+      // in-flight "Revising your plan…" state from the previous round
+      // so EventPlanFullScreen flips back to the normal plan list
+      // (now showing the revised events) instead of the spinner.
+      if (this.$session.get().pendingEventPlanFeedback !== null) {
+        this.$session.setKey('pendingEventPlanFeedback', null);
+      }
+      // Drop any stale abandonment / timeout banner — the user just got
+      // a fresh plan, so "(feedback wasn't applied…)" is no longer
+      // relevant. Without this an Esc-then-revised-plan flow would keep
+      // showing the stale banner above the new plan.
+      if (this.$session.get().eventPlanRevisionBanner !== null) {
+        this.$session.setKey('eventPlanRevisionBanner', null);
+      }
       this.$pendingPrompt.set({ kind: 'event-plan', events, resolve });
       this.emitChange();
     });
@@ -1131,9 +1242,79 @@ export class WizardStore {
       'prompt kind': 'event-plan',
       response: typeof decision === 'object' ? 'feedback' : String(decision),
     });
+    // On feedback: stash the user's text so EventPlanFullScreen stays
+    // mounted (App.tsx checks `pendingEventPlanFeedback` alongside the
+    // pending prompt) and can render a "Revising your plan…" state
+    // while the agent re-runs `confirm_event_plan`. Cleared by
+    // `promptEventPlan` when the revised plan lands, by an explicit
+    // approve/skip below, or by the next `setEventPlan` arrival.
+    //
+    // On approve: flip `eventPlanApproved` so the Events tab in
+    // RunScreen swaps the stale "Waiting for the agent to propose
+    // events..." copy for "Approved · wiring N events…". Skipped does
+    // NOT flip the flag — the user opted out, not in.
+    if (typeof decision === 'object' && decision.decision === 'revised') {
+      this.$session.setKey('pendingEventPlanFeedback', decision.feedback);
+      // New revision starts — clear any leftover abandon/timeout banner
+      // from a prior round so the "Revising your plan…" panel doesn't
+      // render with stale "feedback wasn't applied" copy above it.
+      if (this.$session.get().eventPlanRevisionBanner !== null) {
+        this.$session.setKey('eventPlanRevisionBanner', null);
+      }
+    } else {
+      if (this.$session.get().pendingEventPlanFeedback !== null) {
+        this.$session.setKey('pendingEventPlanFeedback', null);
+      }
+      // The user explicitly approved or skipped — they're moving on, so
+      // any "feedback wasn't applied" banner from a previous abandoned
+      // revision is no longer informative.
+      if (this.$session.get().eventPlanRevisionBanner !== null) {
+        this.$session.setKey('eventPlanRevisionBanner', null);
+      }
+      const decisionKind =
+        typeof decision === 'object' ? decision.decision : decision;
+      if (decisionKind === 'approved') {
+        this.$session.setKey('eventPlanApproved', true);
+      }
+    }
     this.$pendingPrompt.set(null);
     this.emitChange();
     prompt.resolve(decision);
+  }
+
+  /**
+   * Drop the in-flight "Revising your plan…" state without resolving a
+   * fresh prompt. EventPlanFullScreen calls this on the Esc recovery
+   * path and from the 5-minute watchdog when the agent never returned a
+   * revised plan — the original `pendingPrompt` is gone by then
+   * (resolved when the user pressed Enter on their feedback), so this
+   * only flips the transient session flag back to null and forces a
+   * re-render. Safe to call when no feedback is pending (no-op).
+   */
+  clearPendingEventPlanFeedback(): void {
+    if (this.$session.get().pendingEventPlanFeedback === null) return;
+    this.$session.setKey('pendingEventPlanFeedback', null);
+    this.emitChange();
+  }
+
+  /**
+   * Raise the abandon/timeout banner above the next render of the
+   * original plan list. Lives in session state (not local React state)
+   * so the banner survives the `pendingEventPlanFeedback → null` flip
+   * that would otherwise unmount EventPlanFullScreen and erase a
+   * component-local value before the user ever sees it.
+   *
+   * Bugbot HIGH (comment 3235276649) — without this lift the entire
+   * Esc-cancel + watchdog UX was dead code in prod (the user just saw
+   * the screen vanish for a tick and then snap back to the unchanged
+   * plan list with no explanation). Tests passed because they rendered
+   * EventPlanFullScreen standalone, bypassing App.tsx's conditional
+   * mount.
+   */
+  setEventPlanRevisionBanner(banner: string | null): void {
+    if (this.$session.get().eventPlanRevisionBanner === banner) return;
+    this.$session.setKey('eventPlanRevisionBanner', banner);
+    this.emitChange();
   }
 
   /** Enter or exit slash command mode. */
@@ -1250,8 +1431,14 @@ export class WizardStore {
     this.$requestedTab.set(null);
   }
 
-  /** Show a transient feedback message in the command bar. Clears after ms. */
-  setCommandFeedback(message: string, ms = 3000): void {
+  /**
+   * Show a transient feedback message in the command bar. Clears after `ms`.
+   *
+   * Pass an array of strings to render one line per entry — used by
+   * `/diagnostics` and `/debug` so multi-line path summaries don't get
+   * hard-truncated to `/Users/…` when the line overflows the terminal.
+   */
+  setCommandFeedback(message: string | string[], ms = 3000): void {
     if (this._feedbackTimer !== null) {
       clearTimeout(this._feedbackTimer);
       this._feedbackTimer = null;
@@ -1711,7 +1898,25 @@ export class WizardStore {
 
   setOutroData(data: OutroData): void {
     this.$session.setKey('outroData', data);
-    analytics.wizardCapture('outro reached', { 'outro kind': data.kind });
+    // Speed-to-finish trending: include the wall-clock duration of the
+    // user-blocking wizard run (Running → outro) alongside the segmentation
+    // properties needed to slice trends — framework, activation level, and
+    // whether this was a fresh signup vs returning sign-in. `runStartedAt`
+    // is stamped on the transition to RunPhase.Running (see `setRunPhase`);
+    // it can be null on paths where the outro fires without the agent ever
+    // running (e.g. early auth cancel) — emit `null` so chart filters can
+    // exclude those rows cleanly.
+    const startedAt = this.session.runStartedAt;
+    const durationMs =
+      startedAt !== null ? Math.max(0, Date.now() - startedAt) : null;
+    analytics.wizardCapture('outro reached', {
+      'outro kind': data.kind,
+      'duration ms': durationMs,
+      integration: this.session.integration,
+      'detected framework': this.session.detectedFrameworkLabel,
+      'activation level': this.session.activationLevel,
+      'returning user': !isCreateAccountOnboarding(this.session),
+    });
     this.emitChange();
   }
 
@@ -2165,6 +2370,19 @@ export class WizardStore {
 
   setEventPlan(events: PlannedEvent[]): void {
     this.$eventPlan.set(events);
+    // A fresh event plan (typically the agent's revised plan after
+    // user feedback) — clear the in-flight "Revising your plan…"
+    // marker so EventPlanFullScreen flips back to the normal plan
+    // list. Guarded so the common no-op case (events arrive without
+    // pending feedback) doesn't churn the session map.
+    if (this.$session.get().pendingEventPlanFeedback !== null) {
+      this.$session.setKey('pendingEventPlanFeedback', null);
+    }
+    // A new plan landed — any stale abandon/timeout banner from a
+    // previous round is no longer informative.
+    if (this.$session.get().eventPlanRevisionBanner !== null) {
+      this.$session.setKey('eventPlanRevisionBanner', null);
+    }
     this.emitChange();
   }
 

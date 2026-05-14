@@ -83,6 +83,7 @@ Machine-consumable execution mode for CI pipelines and agent orchestrators. Uses
 | `mode-config.ts` | `resolveMode()` — determines `ExecutionMode` (`interactive` / `ci` / `agent`) from CLI flags and TTY state |
 | `exit-codes.ts` | `ExitCode` enum — structured exit codes (0 success, 2 invalid args, 3 auth, 4 network, 10 agent failed, 130 cancelled) |
 | `session-checkpoint.ts` | Session checkpointing — saves/loads sanitized wizard state to a temp file for crash recovery. Zod-validated, 24-hour TTL, scoped per install directory |
+| `orchestration/` | **v2 foundation** — durable orchestration store (sessions, tasks, subagents, ownership, last-stopping-point). Source of truth for `wizard tasks / task / sessions / session / resume / orchestration status` and the new MCP-server read tools (deferred to PR 3). See `docs/orchestration.md` |
 
 ### Framework integrations (`src/frameworks/`)
 

@@ -46,10 +46,12 @@
 
 import { Box, Text } from 'ink';
 import { useMemo, type ReactElement } from 'react';
-import path from 'path';
 import { Colors, Icons } from '../styles.js';
 import { BrailleSpinner } from './BrailleSpinner.js';
 import type { FileWriteEntry } from '../store.js';
+import { getFileChangeLedger } from '../../../lib/file-change-ledger.js';
+import { summarizeLedgerPath } from '../../../lib/file-change-diff.js';
+import { displayPath } from '../utils/display-path.js';
 
 /**
  * Per-path aggregation produced by `dedupeByPath` below. Carries the
@@ -184,22 +186,9 @@ const dedupeByPath = (
   );
 };
 
-/**
- * Relativize an absolute path against the install dir for display. Falls
- * back to the basename if the path lives outside the project (rare, but
- * possible — skill installs sometimes touch tmp dirs).
- */
-const displayPath = (raw: string, installDir?: string): string => {
-  if (
-    installDir &&
-    raw.startsWith(installDir) &&
-    (raw.length === installDir.length || raw[installDir.length] === '/')
-  ) {
-    const rel = path.relative(installDir, raw);
-    return rel === '' ? path.basename(raw) : rel;
-  }
-  return raw.startsWith('/') ? path.basename(raw) : raw;
-};
+// `displayPath` lives in `../utils/display-path.ts` so DiffViewer,
+// FileWritesPanel, and ConsoleView all agree on the out-of-project
+// fallback (basename), not just the in-project case.
 
 export const FileWritesPanel = ({
   entries,
@@ -250,6 +239,18 @@ export const FileWritesPanel = ({
             ? `${completedCount}/${totalCount} written`
             : `${totalCount} written`}
         </Text>
+        {/* Discoverability hint for the /diff slash command — addresses the
+            user's "what actually changed?" question right at the moment
+            they're watching files fly by. Only surfaces once at least one
+            write has applied so we don't spam the hint mid-planning. */}
+        {completedCount > 0 && (
+          <>
+            <Text color={Colors.subtle}> {Icons.dot} </Text>
+            <Text color={Colors.muted}>
+              type <Text color={Colors.accent}>/diff</Text> to review
+            </Text>
+          </>
+        )}
       </Box>
       {visible.map(({ entry, editCount }) => (
         <FileWriteRow
@@ -329,21 +330,52 @@ const FileWriteRow = ({
 
   // Trailing detail column. While the row is still planned we show
   // "generating…" with elapsed seconds so a stuck write is visible
-  // (instead of a dead spinner). On apply we show bytes/lines + total
-  // duration so the user can see throughput. When the same path was
+  // (instead of a dead spinner). On apply we prefer the +N/-M diff
+  // counts from the FileChangeLedger (per-write toast surface — see
+  // user request) and fall back to bytes/lines if the ledger has no
+  // record (binary file, capture race, etc.). When the same path was
   // touched more than once, suffix the size hint with `× N` so the
   // user sees both the latest result and the fact that the agent
   // revisited the file.
+  //
+  // The diff summary is computed via `structuredPatch` + `createPatch`
+  // — expensive enough that we MUST NOT re-run it on every spinner
+  // tick. Memoize on (path, completedAt) so the row only diffs once
+  // per applied write. While `status !== 'applied'`, getDiff isn't
+  // called at all (the memo dep keeps the result `null`).
+  // We deliberately key on `completedAt` so a re-applied write (rare,
+  // but the ledger supports it) re-computes the summary.
+  const diffSummary = useMemo(() => {
+    if (status !== 'applied') return null;
+    try {
+      // `includePatch: false` — the row only renders +N/-M counts, never
+      // the unified patch body, so paying the second `createPatch` pass
+      // would be pure waste.
+      return summarizeLedgerPath(getFileChangeLedger(), entry.path, {
+        includePatch: false,
+      });
+    } catch {
+      return null;
+    }
+  }, [status, entry.path, entry.completedAt]);
+
   let detail: string;
   if (status === 'applied') {
     const dur =
       entry.completedAt !== undefined
         ? formatDuration(entry.completedAt - entry.startedAt)
         : '';
-    const sizeHint =
-      typeof entry.bytes === 'number'
-        ? `${entry.bytes.toLocaleString()} bytes`
-        : 'edited';
+    let sizeHint: string;
+    if (
+      diffSummary &&
+      (diffSummary.additions > 0 || diffSummary.deletions > 0)
+    ) {
+      sizeHint = `+${diffSummary.additions}/-${diffSummary.deletions}`;
+    } else if (typeof entry.bytes === 'number') {
+      sizeHint = `${entry.bytes.toLocaleString()} bytes`;
+    } else {
+      sizeHint = 'edited';
+    }
     const sizeHintWithCount =
       editCount > 1 ? `${sizeHint} ${editCount}×` : sizeHint;
     detail = dur ? `${sizeHintWithCount} ${dur}` : sizeHintWithCount;

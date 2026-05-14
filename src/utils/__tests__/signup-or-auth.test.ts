@@ -46,8 +46,14 @@ describe('performSignupOrAuth', () => {
     const { analytics } = await import('../analytics');
 
     const result = await performSignupOrAuth({
+      kind: 'with_required_fields',
       email: null,
       fullName: 'Ada Lovelace',
+      legalDocumentBundle: {
+        terms_of_service: 'https://amplitude.com/terms',
+        privacy_policy: 'https://amplitude.com/privacy',
+      },
+      legalDocumentSource: 'local',
       zone: 'us',
     });
 
@@ -67,8 +73,8 @@ describe('performSignupOrAuth', () => {
     });
 
     const result = await performSignupOrAuth({
+      kind: 'email_only',
       email: 'ada@example.com',
-      fullName: null,
       zone: 'us',
     });
 
@@ -104,15 +110,19 @@ describe('performSignupOrAuth', () => {
     const { analytics } = await import('../analytics');
 
     const result = await performSignupOrAuth({
+      kind: 'email_only',
       email: 'ada@example.com',
-      fullName: null,
       zone: 'us',
     });
 
     expect(result.kind).toBe('error');
     expect(analytics.wizardCapture).toHaveBeenCalledWith(
       AGENTIC_SIGNUP_ATTEMPTED_EVENT,
-      { status: 'needs_information_unsupported', zone: 'us' },
+      {
+        status: 'needs_information_unsupported',
+        zone: 'us',
+        'legal document source': 'unused',
+      },
     );
   });
 
@@ -126,14 +136,18 @@ describe('performSignupOrAuth', () => {
     const { analytics } = await import('../analytics');
 
     await performSignupOrAuth({
+      kind: 'email_only',
       email: 'ada@example.com',
-      fullName: null,
       zone: 'us',
     });
 
     expect(analytics.wizardCapture).toHaveBeenCalledWith(
       AGENTIC_SIGNUP_ATTEMPTED_EVENT,
-      { status: 'signup_error', zone: 'us' },
+      {
+        status: 'signup_error',
+        zone: 'us',
+        'legal document source': 'unused',
+      },
     );
   });
 
@@ -144,8 +158,14 @@ describe('performSignupOrAuth', () => {
     });
 
     const result = await performSignupOrAuth({
+      kind: 'with_required_fields',
       email: 'ada@example.com',
       fullName: 'Ada Lovelace',
+      legalDocumentBundle: {
+        terms_of_service: 'https://amplitude.com/terms',
+        privacy_policy: 'https://amplitude.com/privacy',
+      },
+      legalDocumentSource: 'local',
       zone: 'us',
     });
 
@@ -161,14 +181,27 @@ describe('performSignupOrAuth', () => {
     const { analytics } = await import('../analytics');
 
     await performSignupOrAuth({
+      kind: 'with_required_fields',
       email: 'ada@example.com',
       fullName: 'Ada Lovelace',
+      legalDocumentBundle: {
+        terms_of_service: 'https://amplitude.com/terms',
+        privacy_policy: 'https://amplitude.com/privacy',
+      },
+      legalDocumentSource: 'local',
       zone: 'us',
     });
 
     expect(analytics.wizardCapture).toHaveBeenCalledWith(
       AGENTIC_SIGNUP_ATTEMPTED_EVENT,
-      { status: 'requires_redirect', zone: 'us' },
+      {
+        status: 'requires_redirect',
+        zone: 'us',
+        // Follow-up input → body carried terms_acceptance from local URLs.
+        // Tag reflects what the attempt's body actually had, not what BE
+        // ultimately did with it (existing-user redirect).
+        'legal document source': 'local',
+      },
     );
   });
 
@@ -180,8 +213,14 @@ describe('performSignupOrAuth', () => {
     });
 
     const result = await performSignupOrAuth({
+      kind: 'with_required_fields',
       email: 'ada@example.com',
       fullName: 'Ada Lovelace',
+      legalDocumentBundle: {
+        terms_of_service: 'https://amplitude.com/terms',
+        privacy_policy: 'https://amplitude.com/privacy',
+      },
+      legalDocumentSource: 'local',
       zone: 'us',
     });
 
@@ -200,14 +239,25 @@ describe('performSignupOrAuth', () => {
     const { analytics } = await import('../analytics');
 
     await performSignupOrAuth({
+      kind: 'with_required_fields',
       email: 'ada@example.com',
       fullName: 'Ada Lovelace',
+      legalDocumentBundle: {
+        terms_of_service: 'https://amplitude.com/terms',
+        privacy_policy: 'https://amplitude.com/privacy',
+      },
+      legalDocumentSource: 'local',
       zone: 'us',
     });
 
     expect(analytics.wizardCapture).toHaveBeenCalledWith(
       AGENTIC_SIGNUP_ATTEMPTED_EVENT,
-      { status: 'signup_error', zone: 'us' },
+      {
+        status: 'signup_error',
+        zone: 'us',
+        // Follow-up input → tag reflects the source of URLs the body carried.
+        'legal document source': 'local',
+      },
     );
   });
 
@@ -217,8 +267,14 @@ describe('performSignupOrAuth', () => {
     const { analytics } = await import('../analytics');
 
     await performSignupOrAuth({
+      kind: 'with_required_fields',
       email: 'ada@example.com',
       fullName: 'Ada Lovelace',
+      legalDocumentBundle: {
+        terms_of_service: 'https://amplitude.com/terms',
+        privacy_policy: 'https://amplitude.com/privacy',
+      },
+      legalDocumentSource: 'local',
       zone: 'us',
     });
 
@@ -227,7 +283,13 @@ describe('performSignupOrAuth', () => {
     // failures apart from the server's clean error path in telemetry.
     expect(analytics.wizardCapture).toHaveBeenCalledWith(
       AGENTIC_SIGNUP_ATTEMPTED_EVENT,
-      { status: 'wrapper_exception', zone: 'us' },
+      {
+        status: 'wrapper_exception',
+        zone: 'us',
+        // Follow-up input → tag reflects the source the body would have
+        // carried, even though the throw happened before the request landed.
+        'legal document source': 'local',
+      },
     );
   });
 
@@ -254,8 +316,14 @@ describe('performSignupOrAuth', () => {
     const { replaceStoredUser } = await import('../ampli-settings.js');
 
     const result = await performSignupOrAuth({
+      kind: 'with_required_fields',
       email: 'ada@example.com',
       fullName: 'Ada Lovelace',
+      legalDocumentBundle: {
+        terms_of_service: 'https://amplitude.com/terms',
+        privacy_policy: 'https://amplitude.com/privacy',
+      },
+      legalDocumentSource: 'local',
       zone: 'us',
     });
 
@@ -291,8 +359,14 @@ describe('performSignupOrAuth', () => {
     });
 
     const result = await performSignupOrAuth({
+      kind: 'with_required_fields',
       email: 'ada@example.com',
       fullName: 'Ada Lovelace',
+      legalDocumentBundle: {
+        terms_of_service: 'https://amplitude.com/terms',
+        privacy_policy: 'https://amplitude.com/privacy',
+      },
+      legalDocumentSource: 'local',
       zone: 'us',
     });
 
@@ -322,8 +396,14 @@ describe('performSignupOrAuth', () => {
     const { analytics } = await import('../analytics');
 
     await performSignupOrAuth({
+      kind: 'with_required_fields',
       email: 'ada@example.com',
       fullName: 'Ada Lovelace',
+      legalDocumentBundle: {
+        terms_of_service: 'https://amplitude.com/terms',
+        privacy_policy: 'https://amplitude.com/privacy',
+      },
+      legalDocumentSource: 'local',
       zone: 'us',
     });
 
@@ -334,7 +414,55 @@ describe('performSignupOrAuth', () => {
         zone: 'us',
         'has env with api key': true,
         'user fetch retry count': 0,
+        // Pinning the load-bearing telemetry contract: follow-up success
+        // arms emit the source the parser recorded on the prior probe
+        // (passed through as `input.legalDocumentSource`). Adoption
+        // dashboards slice success outcomes by this tag.
+        'legal document source': 'local',
       },
+    );
+  });
+
+  // A `'with_required_fields'` input may legitimately carry no
+  // `legalDocumentBundle` — the body has no `terms_acceptance` slot,
+  // so the telemetry tag must report `'unused'`, not the (undefined)
+  // `input.legalDocumentSource`.
+  it("with_required_fields without legalDocumentBundle tags 'legal document source' as 'unused' on success", async () => {
+    const { performDirectSignup } = await import('../direct-signup.js');
+    vi.mocked(performDirectSignup).mockResolvedValue({
+      kind: 'success',
+      tokens: {
+        accessToken: 'a',
+        idToken: 'i',
+        refreshToken: 'r',
+        expiresAt: new Date(Date.now() + 3_600_000).toISOString(),
+        zone: 'us',
+      },
+    });
+    const { fetchAmplitudeUser } = await import('../../lib/api.js');
+    vi.mocked(fetchAmplitudeUser).mockResolvedValue({
+      id: 'user-123',
+      firstName: 'Ada',
+      lastName: 'Lovelace',
+      email: 'ada@example.com',
+      orgs: provisionedOrgs,
+    });
+    const { analytics } = await import('../analytics');
+
+    await performSignupOrAuth({
+      kind: 'with_required_fields',
+      email: 'ada@example.com',
+      fullName: 'Ada Lovelace',
+      // No legalDocumentBundle — BE asked for 'full_name' only.
+      zone: 'us',
+    });
+
+    expect(analytics.wizardCapture).toHaveBeenCalledWith(
+      AGENTIC_SIGNUP_ATTEMPTED_EVENT,
+      expect.objectContaining({
+        status: 'success',
+        'legal document source': 'unused',
+      }),
     );
   });
 
@@ -361,8 +489,14 @@ describe('performSignupOrAuth', () => {
     const { replaceStoredUser } = await import('../ampli-settings.js');
 
     await performSignupOrAuth({
+      kind: 'with_required_fields',
       email: 'ada@example.com',
       fullName: 'Ada Lovelace',
+      legalDocumentBundle: {
+        terms_of_service: 'https://amplitude.com/terms',
+        privacy_policy: 'https://amplitude.com/privacy',
+      },
+      legalDocumentSource: 'local',
       zone: 'us',
     });
 
@@ -435,8 +569,14 @@ describe('performSignupOrAuth', () => {
       const { replaceStoredUser } = await import('../ampli-settings.js');
 
       const pending = performSignupOrAuth({
+        kind: 'with_required_fields',
         email: 'ada@example.com',
         fullName: 'Ada Lovelace',
+        legalDocumentBundle: {
+          terms_of_service: 'https://amplitude.com/terms',
+          privacy_policy: 'https://amplitude.com/privacy',
+        },
+        legalDocumentSource: 'local',
         zone: 'us',
       });
       await vi.runAllTimersAsync();
@@ -471,8 +611,14 @@ describe('performSignupOrAuth', () => {
       const { analytics } = await import('../analytics');
 
       const pending = performSignupOrAuth({
+        kind: 'with_required_fields',
         email: 'ada@example.com',
         fullName: 'Ada Lovelace',
+        legalDocumentBundle: {
+          terms_of_service: 'https://amplitude.com/terms',
+          privacy_policy: 'https://amplitude.com/privacy',
+        },
+        legalDocumentSource: 'local',
         zone: 'us',
       });
       await vi.runAllTimersAsync();
@@ -484,6 +630,8 @@ describe('performSignupOrAuth', () => {
           status: 'user_fetch_failed',
           zone: 'us',
           'user fetch retry count': 3,
+          // Follow-up input → source reflects what the body carried.
+          'legal document source': 'local',
         },
       );
     } finally {
@@ -506,8 +654,14 @@ describe('performSignupOrAuth', () => {
     const { analytics } = await import('../analytics');
 
     const result = await performSignupOrAuth({
+      kind: 'with_required_fields',
       email: 'ada@example.com',
       fullName: 'Ada Lovelace',
+      legalDocumentBundle: {
+        terms_of_service: 'https://amplitude.com/terms',
+        privacy_policy: 'https://amplitude.com/privacy',
+      },
+      legalDocumentSource: 'local',
       zone: 'us',
     });
 

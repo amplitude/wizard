@@ -33,6 +33,7 @@ export const FASTAPI_AGENT_CONFIG: FrameworkConfig<FastAPIContext> = {
     glyph: '⚡',
     glyphColor: '#009688',
     integration: Integration.fastapi,
+    targetsBackend: true,
     docsUrl: 'https://amplitude.com/docs/sdks/analytics/python',
     unsupportedVersionDocsUrl:
       'https://amplitude.com/docs/sdks/analytics/python',

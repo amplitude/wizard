@@ -447,6 +447,46 @@ describe('WizardStore', () => {
       expect(listener).toHaveBeenCalled();
     });
 
+    it('setOutroData emits speed-to-finish properties on outro reached', () => {
+      // Contract: the `outro reached` event is the canonical "end of
+      // run" signal used to chart median/p90 time-to-finish over time.
+      // It must include `'duration ms'` (Running → outro wall clock)
+      // and the segmentation properties needed to slice the trend.
+      const store = createStore();
+      store.session.integration = Integration.Nextjs;
+      store.session.detectedFrameworkLabel = 'Next.js (App Router)';
+      store.session.activationLevel = 'partial';
+      store.setRunPhase(RunPhase.Running);
+      store.setOutroData({ kind: OutroKind.Success });
+
+      const call = wizardCaptureMock.mock.calls.find(
+        ([eventName]) => eventName === 'outro reached',
+      );
+      expect(call).toBeDefined();
+      const props = call![1] as Record<string, unknown>;
+      expect(props['outro kind']).toBe(OutroKind.Success);
+      expect(props['integration']).toBe(Integration.Nextjs);
+      expect(props['detected framework']).toBe('Next.js (App Router)');
+      expect(props['activation level']).toBe('partial');
+      expect(typeof props['duration ms']).toBe('number');
+      expect(props['duration ms'] as number).toBeGreaterThanOrEqual(0);
+      expect(typeof props['returning user']).toBe('boolean');
+    });
+
+    it('setOutroData emits null duration when runStartedAt is null', () => {
+      // Some outro paths fire before the run ever transitions to Running
+      // (e.g. early auth cancel). Emit `null` so chart filters can drop
+      // those rows cleanly instead of computing a misleading zero.
+      const store = createStore();
+      store.setOutroData({ kind: OutroKind.Cancel });
+      const call = wizardCaptureMock.mock.calls.find(
+        ([eventName]) => eventName === 'outro reached',
+      );
+      expect(call).toBeDefined();
+      const props = call![1] as Record<string, unknown>;
+      expect(props['duration ms']).toBeNull();
+    });
+
     it('setFrameworkContext sets key-value pairs', () => {
       const store = createStore();
       store.setFrameworkContext('packageManager', 'pnpm');
@@ -728,7 +768,12 @@ describe('WizardStore', () => {
       store.session.signupEmail = 'ada@example.com';
       store.session.signupFullName = 'Ada Lovelace';
       store.session.tosAccepted = true;
-      store.session.signupRequiredFields = ['full_name'];
+      store.session.signupRequiredFields = ['full_name', 'terms_acceptance'];
+      store.session.legalDocumentBundle = {
+        terms_of_service: 'https://amplitude.com/terms',
+        privacy_policy: 'https://amplitude.com/privacy',
+      };
+      store.session.legalDocumentSource = 'local';
       store.session.signupAbandoned = false;
       store.session.signupTokensObtained = true;
       store.session.signupAuth = {
@@ -746,6 +791,11 @@ describe('WizardStore', () => {
       expect(store.session.signupFullName).toBeNull();
       expect(store.session.tosAccepted).toBeNull();
       expect(store.session.signupRequiredFields).toBeNull();
+      // Lock-step with tosAccepted: legal-doc state must reset together so
+      // a stale bundle can't ride into a follow-up POST whose acceptance
+      // got cleared.
+      expect(store.session.legalDocumentBundle).toBeNull();
+      expect(store.session.legalDocumentSource).toBeNull();
       expect(store.session.signupAuth).toBeNull();
       expect(store.session.signupAbandoned).toBe(false);
       expect(store.session.signupTokensObtained).toBe(false);
@@ -2189,7 +2239,12 @@ describe('WizardStore', () => {
       store.session.signupEmail = 'ada@example.com';
       store.session.signupFullName = 'Ada Lovelace';
       store.session.tosAccepted = true;
-      store.session.signupRequiredFields = ['full_name'];
+      store.session.signupRequiredFields = ['full_name', 'terms_acceptance'];
+      store.session.legalDocumentBundle = {
+        terms_of_service: 'https://amplitude.com/terms',
+        privacy_policy: 'https://amplitude.com/privacy',
+      };
+      store.session.legalDocumentSource = 'local';
       store.session.signupAbandoned = false;
       store.session.signupTokensObtained = true;
       store.session.signupAuth = {
@@ -2207,6 +2262,9 @@ describe('WizardStore', () => {
       expect(store.session.signupFullName).toBeNull();
       expect(store.session.tosAccepted).toBeNull();
       expect(store.session.signupRequiredFields).toBeNull();
+      // Lock-step with tosAccepted — same invariant as in setRegionForced.
+      expect(store.session.legalDocumentBundle).toBeNull();
+      expect(store.session.legalDocumentSource).toBeNull();
       expect(store.session.signupAuth).toBeNull();
       expect(store.session.signupAbandoned).toBe(false);
       expect(store.session.signupTokensObtained).toBe(false);
@@ -2319,10 +2377,18 @@ describe('WizardStore', () => {
       const internal = store as unknown as {
         $session: { setKey: (k: string, v: unknown) => void };
       };
-      internal.$session.setKey('signupRequiredFields', ['full_name']);
+      internal.$session.setKey('signupRequiredFields', [
+        'full_name',
+        'terms_acceptance',
+      ]);
       internal.$session.setKey('signupAbandoned', false);
       internal.$session.setKey('signupFullName', 'Ada Lovelace');
       internal.$session.setKey('tosAccepted', true);
+      internal.$session.setKey('legalDocumentBundle', {
+        terms_of_service: 'https://amplitude.com/terms',
+        privacy_policy: 'https://amplitude.com/privacy',
+      });
+      internal.$session.setKey('legalDocumentSource', 'local');
       internal.$session.setKey('signupTokensObtained', true);
       internal.$session.setKey('signupAuth', {
         idToken: 'i',
@@ -2340,11 +2406,99 @@ describe('WizardStore', () => {
       expect(store.session.signupAbandoned).toBe(false);
       expect(store.session.signupFullName).toBeNull();
       expect(store.session.tosAccepted).toBeNull();
+      // Lock-step with tosAccepted: legal-doc state is tied to the same
+      // probe response, so it must reset alongside acceptance to prevent
+      // a stale bundle from riding into a follow-up POST whose acceptance
+      // got cleared.
+      expect(store.session.legalDocumentBundle).toBeNull();
+      expect(store.session.legalDocumentSource).toBeNull();
       // signupTokensObtained gates the post-TUI auth task's "hydrate
       // from disk" branch — leaving it true after a ceremony reset
       // would silently re-use the prior user's tokens on the next
       // forward pass.
       expect(store.session.signupTokensObtained).toBe(false);
+    });
+
+    it('resetToS clears tosAccepted but preserves legalDocument{Bundle,Source}', () => {
+      // The user backs out of the ToS screen post-acceptance. The
+      // router immediately re-resolves to the ToS screen (because
+      // `'terms_acceptance'` is still in `signupRequiredFields` and
+      // `tosAccepted` is now null), and `ToSScreen` reads URLs from the
+      // bundle — clearing them here would strand the user on a blank
+      // screen with no interactive elements. The stale-bundle invariant
+      // matters only when the WHOLE ceremony resets (new email → new
+      // probe response → possibly-new URLs), which is `_resetCeremonyKeys`'
+      // job, asserted in the test below.
+      const store = createStore();
+      const internal = store as unknown as {
+        $session: { setKey: (k: string, v: unknown) => void };
+      };
+      internal.$session.setKey('tosAccepted', true);
+      internal.$session.setKey('legalDocumentBundle', {
+        terms_of_service: 'https://amplitude.com/terms',
+        privacy_policy: 'https://amplitude.com/privacy',
+      });
+      internal.$session.setKey('legalDocumentSource', 'local');
+
+      store.resetToS();
+
+      expect(store.session.tosAccepted).toBeNull();
+      expect(store.session.legalDocumentBundle).toEqual({
+        terms_of_service: 'https://amplitude.com/terms',
+        privacy_policy: 'https://amplitude.com/privacy',
+      });
+      expect(store.session.legalDocumentSource).toBe('local');
+    });
+
+    it('full-ceremony reset (via setSignupEmail(null)) wipes the legal-doc bundle', () => {
+      // Companion guarantee to resetToS's preservation: when the WHOLE
+      // ceremony resets (user backs all the way out to the email
+      // screen), `_resetCeremonyKeys` MUST wipe the bundle + source
+      // alongside tosAccepted. Otherwise a follow-up ceremony with a
+      // different email could send the prior probe's URLs in the
+      // accept-tos body.
+      const store = createStore();
+      const internal = store as unknown as {
+        $session: { setKey: (k: string, v: unknown) => void };
+      };
+      internal.$session.setKey('signupEmail', 'ada@example.com');
+      internal.$session.setKey('tosAccepted', true);
+      internal.$session.setKey('legalDocumentBundle', {
+        terms_of_service: 'https://amplitude.com/terms',
+        privacy_policy: 'https://amplitude.com/privacy',
+      });
+      internal.$session.setKey('legalDocumentSource', 'local');
+
+      store.setSignupEmail(null);
+
+      expect(store.session.signupEmail).toBeNull();
+      expect(store.session.tosAccepted).toBeNull();
+      expect(store.session.legalDocumentBundle).toBeNull();
+      expect(store.session.legalDocumentSource).toBeNull();
+    });
+
+    it('acceptTermsOfService leaves legalDocumentBundle intact', () => {
+      // Forward direction is acceptance, not URL re-supply: the URLs
+      // should already have been written by signup-or-auth on the prior
+      // probe response. acceptTermsOfService just flips the flag.
+      const store = createStore();
+      const internal = store as unknown as {
+        $session: { setKey: (k: string, v: unknown) => void };
+      };
+      internal.$session.setKey('legalDocumentBundle', {
+        terms_of_service: 'https://amplitude.com/terms',
+        privacy_policy: 'https://amplitude.com/privacy',
+      });
+      internal.$session.setKey('legalDocumentSource', 'local');
+
+      store.acceptTermsOfService();
+
+      expect(store.session.tosAccepted).toBe(true);
+      expect(store.session.legalDocumentBundle).toEqual({
+        terms_of_service: 'https://amplitude.com/terms',
+        privacy_policy: 'https://amplitude.com/privacy',
+      });
+      expect(store.session.legalDocumentSource).toBe('local');
     });
 
     it('setSignupFullName with a string fires analytics and sets the value', () => {

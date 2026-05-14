@@ -2,7 +2,10 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   parseFeedbackSlashInput,
   parseCreateProjectSlashInput,
+  parseDiffSlashInput,
+  getHelpText,
   getWhoamiText,
+  getDiagnosticsLines,
   getDiagnosticsText,
   checkCommandBlockedByRun,
   isKnownCommand,
@@ -341,5 +344,121 @@ describe('getDiagnosticsText', () => {
   it('includes a tar command pointing at the run dir for support bundles', () => {
     const text = getDiagnosticsText('/p');
     expect(text).toContain('tar -czf wizard-logs.tar.gz');
+  });
+});
+
+describe('parseDiffSlashInput', () => {
+  it('returns an empty string when no path is given (summary mode)', () => {
+    expect(parseDiffSlashInput('/diff')).toBe('');
+    expect(parseDiffSlashInput('/diff   ')).toBe('');
+  });
+
+  it('returns the trimmed path argument', () => {
+    expect(parseDiffSlashInput('/diff src/foo.ts')).toBe('src/foo.ts');
+    expect(parseDiffSlashInput('  /diff   /abs/path.ts ')).toBe('/abs/path.ts');
+  });
+
+  it('is case-insensitive on the command prefix', () => {
+    expect(parseDiffSlashInput('/DIFF a.ts')).toBe('a.ts');
+  });
+
+  it('returns undefined for other commands', () => {
+    expect(parseDiffSlashInput('/feedback hi')).toBeUndefined();
+    expect(parseDiffSlashInput('/help')).toBeUndefined();
+  });
+});
+
+describe('/diff and /help command registration', () => {
+  it('exposes /diff so the help UI surfaces it', () => {
+    const cmds = COMMANDS.map((c) => c.cmd);
+    expect(cmds).toContain('/diff');
+  });
+
+  it('exposes /help so the help UI surfaces it', () => {
+    const cmds = COMMANDS.map((c) => c.cmd);
+    expect(cmds).toContain('/help');
+  });
+
+  it('/diff is a read-only command — must not be marked requiresIdle', () => {
+    const def = COMMANDS.find((c) => c.cmd === '/diff');
+    expect(def?.requiresIdle).toBeFalsy();
+  });
+
+  it('/help is a read-only command — must not be marked requiresIdle', () => {
+    const def = COMMANDS.find((c) => c.cmd === '/help');
+    expect(def?.requiresIdle).toBeFalsy();
+  });
+
+  it('isKnownCommand recognizes /diff with and without a path', () => {
+    expect(isKnownCommand('/diff')).toBe(true);
+    expect(isKnownCommand('/diff src/foo.ts')).toBe(true);
+  });
+
+  it('isKnownCommand recognizes /help', () => {
+    expect(isKnownCommand('/help')).toBe(true);
+  });
+});
+
+describe('getHelpText', () => {
+  it('lists every registered slash command in the catalogue', () => {
+    const text = getHelpText();
+    for (const c of COMMANDS) {
+      expect(text).toContain(c.cmd);
+      expect(text).toContain(c.desc);
+    }
+  });
+
+  it('starts with a clear header', () => {
+    const text = getHelpText();
+    expect(text).toMatch(/^Available slash commands:/);
+  });
+});
+
+describe('getDiagnosticsLines', () => {
+  let originalCacheOverride: string | undefined;
+
+  beforeEach(() => {
+    originalCacheOverride = process.env[CACHE_ROOT_OVERRIDE_ENV];
+    process.env[CACHE_ROOT_OVERRIDE_ENV] = '/tmp/wizard-diag-lines-test';
+  });
+
+  afterEach(() => {
+    if (originalCacheOverride === undefined) {
+      delete process.env[CACHE_ROOT_OVERRIDE_ENV];
+    } else {
+      process.env[CACHE_ROOT_OVERRIDE_ENV] = originalCacheOverride;
+    }
+  });
+
+  it('returns an array so each storage path renders on its own row', () => {
+    // Regression: /diagnostics used to pack every path into a single feedback
+    // string and the overflow-hidden Text element hard-truncated it to
+    // "/Users/…" — the user could not copy the log file path.
+    const lines = getDiagnosticsLines('/Users/test/project-a');
+    expect(Array.isArray(lines)).toBe(true);
+    expect(lines.length).toBeGreaterThan(5);
+  });
+
+  it('exposes every labelled path (log, checkpoint, events, binding, etc.) as its own line', () => {
+    const lines = getDiagnosticsLines('/Users/test/project-a');
+    const findLine = (label: string) => lines.find((l) => l.includes(label));
+    expect(findLine('log:')).toBeDefined();
+    expect(findLine('log (json):')).toBeDefined();
+    expect(findLine('checkpoint:')).toBeDefined();
+    expect(findLine('events:')).toBeDefined();
+    expect(findLine('binding:')).toBeDefined();
+    expect(findLine('Cache root:')).toBeDefined();
+  });
+
+  it('keeps each path fully expanded (no truncation, no /Users/… ellipsis)', () => {
+    const lines = getDiagnosticsLines('/Users/test/project-a');
+    for (const line of lines) {
+      // No line should be the literal truncated form the bug reproduces.
+      expect(line).not.toMatch(/\/Users\/…/);
+      // Any line that mentions /Users must include a full absolute path.
+      if (line.includes('/Users')) {
+        expect(line).toMatch(/\/Users\/[\w.-]+/);
+      }
+    }
   });
 });

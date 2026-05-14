@@ -31,11 +31,21 @@ import {
   COMMANDS,
   checkCommandBlockedByRun,
   getWhoamiText,
-  getDiagnosticsText,
+  getDiagnosticsLines,
+  getHelpText,
   isKnownCommand,
+  parseDiffSlashInput,
   parseFeedbackSlashInput,
   parseCreateProjectSlashInput,
 } from '../console-commands.js';
+import { getFileChangeLedger } from '../../../lib/file-change-ledger.js';
+import {
+  summarizeLedgerDiffs,
+  summarizeLedgerPath,
+} from '../../../lib/file-change-diff.js';
+import { formatChangeCounts } from './DiffViewer.js';
+import { displayPath } from '../utils/display-path.js';
+import path from 'node:path';
 import { analytics } from '../../../utils/analytics.js';
 import { logToFile } from '../../../utils/debug.js';
 import { trackWizardFeedback } from '../../../utils/track-wizard-feedback.js';
@@ -211,14 +221,18 @@ function executeCommand(raw: string, store: WizardStore): string | void {
             };
             tasks_count?: number;
           };
-          const summary =
-            `flow: ${snapshot.active_flow ?? 'n/a'} | screen: ${
-              snapshot.current_screen ?? 'n/a'
-            } | ` +
-            `integration: ${snapshot.session?.integration ?? 'n/a'} | ` +
-            `zone: ${snapshot.session?.region ?? 'n/a'} | tasks: ${
-              snapshot.tasks_count ?? 0
-            }`;
+          // Multi-line summary so each row stays readable instead of being
+          // hard-truncated by the single overflow-hidden command-feedback
+          // Text element. The snapshot file on disk is the full-fidelity
+          // backup; this panel is what the user actually wanted to read.
+          const summaryLines: string[] = [
+            'Debug snapshot:',
+            `  flow:        ${snapshot.active_flow ?? 'n/a'}`,
+            `  screen:      ${snapshot.current_screen ?? 'n/a'}`,
+            `  integration: ${snapshot.session?.integration ?? 'n/a'}`,
+            `  zone:        ${snapshot.session?.region ?? 'n/a'}`,
+            `  tasks:       ${snapshot.tasks_count ?? 0}`,
+          ];
           try {
             const fs = await import('node:fs');
             const path = await import('node:path');
@@ -231,7 +245,7 @@ function executeCommand(raw: string, store: WizardStore): string | void {
               'utf8',
             );
             store.setCommandFeedback(
-              `${summary} · saved to ${snapshotPath}`,
+              [...summaryLines, '', `Saved to: ${snapshotPath}`],
               30_000,
             );
           } catch {
@@ -239,7 +253,7 @@ function executeCommand(raw: string, store: WizardStore): string | void {
             // — fall back to surfacing the summary alone. Don't write to
             // stderr; corrupting the TUI mid-render is the original bug.
             store.setCommandFeedback(
-              `${summary} · (could not save full snapshot to disk)`,
+              [...summaryLines, '', '(could not save full snapshot to disk)'],
               30_000,
             );
           }
@@ -257,10 +271,19 @@ function executeCommand(raw: string, store: WizardStore): string | void {
       break;
     }
     case '/diagnostics': {
-      // Print the wizard's storage layout to a file so the user can read
-      // it AFTER the wizard exits. Same rationale as /debug: writing to
-      // stderr while Ink owns the terminal corrupts the live frame.
-      const text = getDiagnosticsText(store.session.installDir);
+      // Render the full storage layout INLINE in the feedback panel as
+      // multiple rows so each absolute path stays readable. Previously this
+      // packed everything into a single feedback string, which the
+      // overflow-hidden Text element truncated to "/Users/…" — the user
+      // could see the summary path but not the log path they actually
+      // needed to copy. The on-disk diagnostics.txt is still written as a
+      // shareable backup.
+      const lines = getDiagnosticsLines(store.session.installDir);
+      // Bugbot 3221826573: `getDiagnosticsText` was internally calling
+      // `getDiagnosticsLines(installDir).join('\n')`, so it walked the
+      // storage paths twice for the same install dir. `lines` is
+      // already in hand — derive text from it directly.
+      const text = lines.join('\n');
       void (async () => {
         try {
           const fs = await import('node:fs');
@@ -270,20 +293,101 @@ function executeCommand(raw: string, store: WizardStore): string | void {
           const diagPath = path.join(runDir, 'diagnostics.txt');
           fs.writeFileSync(diagPath, text + '\n', 'utf8');
           store.setCommandFeedback(
-            `Storage paths saved to ${diagPath} · log file: ${getLogFile(
-              store.session.installDir,
-            )}`,
+            [...lines, '', `Saved to: ${diagPath}`],
             30_000,
           );
         } catch {
           store.setCommandFeedback(
-            `Could not write diagnostics file. Log file: ${getLogFile(
-              store.session.installDir,
-            )}`,
+            [...lines, '', '(could not write diagnostics file)'],
             30_000,
           );
         }
       })();
+      break;
+    }
+    case '/diff': {
+      // The slash console is a single-line feedback channel — full
+      // unified-diff rendering belongs in the DiffViewer component the
+      // outro mounts. Here we surface the most actionable information:
+      // a tree of touched files with +N/-M counts (no path arg) or
+      // the additions/deletions for one file (path arg).
+      const arg = parseDiffSlashInput(raw) ?? '';
+      const ledger = getFileChangeLedger();
+      // Detail mode (`/diff <path>`): use the purpose-built single-path
+      // helper so we don't burn `structuredPatch`+`createPatch` on every
+      // unrelated file in the ledger just to discard them. The summary
+      // mode below still needs the full sweep for the +N/-M tree.
+      if (arg) {
+        // Hand the raw arg straight to `summarizeLedgerPath` — it already
+        // normalizes relative paths against the ledger's install dir, so
+        // re-resolving against `store.session.installDir` here would risk
+        // silent divergence (e.g. trailing-slash mismatch) without buying
+        // anything. The fallback below covers the user-friendly suffix
+        // case (`/diff amplitude.ts` matching `<installDir>/src/lib/
+        // amplitude.ts`) by walking entries directly.
+        let found = summarizeLedgerPath(ledger, arg);
+        if (!found) {
+          const entries = ledger?.getEntries() ?? [];
+          const suffix = path.sep + arg;
+          const suffixEntry = entries.find((e) => e.path.endsWith(suffix));
+          if (suffixEntry) {
+            found = summarizeLedgerPath(ledger, suffixEntry.path);
+          }
+        }
+        if (!found) {
+          store.setCommandFeedback(
+            `No diff captured for "${arg}". Try /diff with no argument to see all changed files.`,
+            15_000,
+          );
+          break;
+        }
+        // Surface the patch body in the feedback channel. The slash console
+        // can't easily render syntax-coloured diffs inline, but the unified
+        // patch text is itself readable and copy-pasteable. Relativize the
+        // header path through the same `displayPath` helper the summary
+        // mode + FileWritesPanel + DiffViewer use, so detail mode doesn't
+        // leak the user's absolute home-directory path.
+        const detailRel = displayPath(found.path, store.session.installDir);
+        store.setCommandFeedback(
+          `${found.operation.toUpperCase()} ${detailRel}  ${formatChangeCounts(
+            found.additions,
+            found.deletions,
+          )}\n\n${found.patch}`,
+          60_000,
+        );
+        break;
+      }
+      // Summary mode (no arg): walk the whole ledger. The summary only
+      // renders +/- counts and the operation glyph — no patch text — so
+      // skip the per-entry `createPatch` call (an O(n·m) re-diff that
+      // `summarizeDiff` already did) for the whole ledger.
+      const diffs = summarizeLedgerDiffs(ledger, { includePatch: false });
+      if (diffs.length === 0) {
+        store.setCommandFeedback(
+          'No file changes captured yet — the agent has not written anything in this session.',
+          15_000,
+        );
+        break;
+      }
+      const totalAdd = diffs.reduce((s, d) => s + d.additions, 0);
+      const totalDel = diffs.reduce((s, d) => s + d.deletions, 0);
+      const lines = diffs.map((d) => {
+        // Funnel through the shared `displayPath` helper so the `/diff`
+        // summary, the live FileWritesPanel, and the outro DiffViewer all
+        // agree on the out-of-project fallback (basename, not raw path).
+        const rel = displayPath(d.path, store.session.installDir);
+        return `${d.operation
+          .toUpperCase()
+          .padEnd(6)} ${rel}  ${formatChangeCounts(d.additions, d.deletions)}`;
+      });
+      const summary = `${diffs.length} file${
+        diffs.length === 1 ? '' : 's'
+      } changed (+${totalAdd}/-${totalDel})\n${lines.join('\n')}`;
+      store.setCommandFeedback(summary, 30_000);
+      break;
+    }
+    case '/help': {
+      store.setCommandFeedback(getHelpText(), 30_000);
       break;
     }
     case '/exit':
@@ -363,7 +467,15 @@ export const ConsoleView = ({
 
   const feedback = store.commandFeedback;
   const screenError = store.screenError;
-  const showFeedback = !loading && !!feedback;
+  // Multi-line feedback (e.g. `/diagnostics`, `/debug`) arrives as an array
+  // so each path renders on its own row instead of being hard-truncated to
+  // `/Users/…`. Normalize to `string[]` here so the render code is uniform.
+  const feedbackLines: string[] = Array.isArray(feedback)
+    ? feedback
+    : feedback != null
+      ? [feedback]
+      : [];
+  const showFeedback = !loading && feedbackLines.length > 0;
   const innerWidth = width;
   const separator = Layout.separatorChar.repeat(Math.max(0, innerWidth - 2));
   const pendingPrompt = store.pendingPrompt;
@@ -704,11 +816,19 @@ export const ConsoleView = ({
         <Text color={Colors.border}>{separator}</Text>
       </Box>
 
-      {/* Feedback line */}
+      {/* Feedback line(s) — multi-line for `/diagnostics` / `/debug` so the
+        full storage paths print on their own rows. Single-line commands like
+        `/whoami` render as one row (feedbackLines has length 1). */}
       {showFeedback && (
-        <Box paddingX={Layout.paddingX}>
-          <Text color={Colors.accent}>{Icons.prompt} </Text>
-          <Text color={Colors.secondary}>{feedback}</Text>
+        <Box paddingX={Layout.paddingX} flexDirection="column">
+          {feedbackLines.map((line, idx) => (
+            <Box key={idx}>
+              <Text color={Colors.accent}>
+                {idx === 0 ? `${Icons.prompt} ` : '  '}
+              </Text>
+              <Text color={Colors.secondary}>{line}</Text>
+            </Box>
+          ))}
         </Box>
       )}
 
@@ -754,8 +874,8 @@ export const ConsoleView = ({
                   ? eventPlanPromptShowing
                     ? 'Finish the plan above ([Y]/[S]/[F]) — / and Tab resume after.'
                     : visibleHistory.length > 0
-                      ? 'Press / for commands · Tab to ask · Esc to hide answer'
-                      : 'Press / for commands or Tab to ask a question'
+                    ? 'Press / for commands · Tab to ask · Esc to hide answer'
+                    : 'Press / for commands or Tab to ask a question'
                   : 'Press / for commands'}
               </Text>
             )}

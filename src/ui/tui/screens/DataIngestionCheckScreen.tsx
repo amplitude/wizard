@@ -50,10 +50,20 @@ import { logToFile } from '../../../utils/debug.js';
 import { detectBoundPort } from '../../../utils/port-detection.js';
 import { makeLink } from '../utils/terminal-rendering.js';
 import type { KeyHint } from '../components/KeyHintBar.js';
+import { Sparkline, SPARKLINE_DEFAULT_WIDTH } from '../components/Sparkline.js';
 
 const POLL_INTERVAL_MS = 30_000;
 const MAX_EVENTS_SHOWN = 8;
 const CELEBRATION_DELAY_MS = 3_000;
+
+/**
+ * Width of the events-per-minute sparkline alongside the listening
+ * indicator. One tick = one minute; 20 ticks = a 20-minute rolling
+ * window of the user's app activity. Tick state lives in component
+ * state (a fixed-length ring buffer) — not in WizardSession, because
+ * it's purely a visual hint that resets cleanly between runs.
+ */
+const SPARKLINE_TICK_INTERVAL_MS = 60_000;
 
 // Stable identities so useScreenHints' effect doesn't re-fire every render.
 const VERIFY_EXTRA_HINTS: readonly KeyHint[] = Object.freeze([
@@ -150,7 +160,8 @@ const BROWSER_FRAMEWORKS = new Set<Integration>(
 );
 
 /**
- * Backend / server-side SDKs. For these integrations the App API
+ * Backend / server-side SDKs, derived from each framework config's
+ * `metadata.targetsBackend` flag. For these integrations the App API
  * activation endpoint is unreliable as a success signal — autocapture is
  * irrelevant and the user has no browser tab to "click around" in. We
  * fall back to the data-API event catalog (taxonomy entries), which is
@@ -163,15 +174,11 @@ const BROWSER_FRAMEWORKS = new Set<Integration>(
  * engine integrations are excluded too: the PR's coaching tips are the
  * primary unblock path for them and we don't want to over-trigger.
  */
-export const BACKEND_SDK_INTEGRATIONS: ReadonlySet<Integration> = new Set([
-  Integration.django,
-  Integration.flask,
-  Integration.fastapi,
-  Integration.go,
-  Integration.java,
-  Integration.javascriptNode,
-  Integration.python,
-]);
+export const BACKEND_SDK_INTEGRATIONS: ReadonlySet<Integration> = new Set(
+  Object.values(FRAMEWORK_REGISTRY)
+    .filter((config) => config.metadata.targetsBackend)
+    .map((config) => config.metadata.integration),
+);
 
 interface DataIngestionCheckScreenProps {
   store: WizardStore;
@@ -234,6 +241,23 @@ export const DataIngestionCheckScreen = ({
   useEffect(() => {
     observedEventNamesRef.current = observedEventNames;
   }, [observedEventNames]);
+
+  /**
+   * 20-minute ring buffer of new-event-arrival counts per minute. Drives
+   * the inline sparkline next to the "Listening for events…" line. We
+   * compute the per-minute count as the size delta of
+   * `observedEventNamesRef` at each tick — the existing poller already
+   * tracks observed event NAMES (a Set), so we derive count from set
+   * growth rather than adding a new API call (constraint from the
+   * deferring PR #715).
+   *
+   * Storage choice: component state, NOT WizardSession. The sparkline
+   * is a transient UI hint that should reset cleanly each time the
+   * screen mounts; persisting it across runs would surface stale data
+   * in resumed sessions.
+   */
+  const [eventTicks, setEventTicks] = useState<number[]>(() => []);
+  const lastTickObservedSizeRef = useRef(0);
 
   /**
    * One-shot guard against accidental Enter when the activation API is
@@ -674,6 +698,30 @@ export const DataIngestionCheckScreen = ({
     return () => clearInterval(id);
   }, [lastChecked, pollingStartTime]);
 
+  // Sparkline tick clock — one tick per minute. At each tick we compute
+  // `growthThisMinute = observedEventNames.size - sizeAtLastTick`, push
+  // it into the ring buffer, and trim to the last
+  // SPARKLINE_DEFAULT_WIDTH samples. We stop the interval the moment
+  // polling resolves (celebrating === true) so the sparkline freezes on
+  // the final pre-celebration state. We do NOT push a tick when the
+  // celebration starts mid-minute — the buffer should reflect actual
+  // sampled minutes, not interpolated fractions.
+  useEffect(() => {
+    if (celebrating) return undefined;
+    const id = setInterval(() => {
+      const currentSize = observedEventNamesRef.current.size;
+      const growth = Math.max(0, currentSize - lastTickObservedSizeRef.current);
+      lastTickObservedSizeRef.current = currentSize;
+      setEventTicks((prev) => {
+        const next = [...prev, growth];
+        return next.length > SPARKLINE_DEFAULT_WIDTH
+          ? next.slice(-SPARKLINE_DEFAULT_WIDTH)
+          : next;
+      });
+    }, SPARKLINE_TICK_INTERVAL_MS);
+    return () => clearInterval(id);
+  }, [celebrating]);
+
   // Pick up tracking-plan updates that land AFTER mount. The dual-path
   // watcher in `agent-interface.ts` calls `store.setEventPlan()` when the
   // agent writes `events.json`; if that happens while this screen is
@@ -726,7 +774,8 @@ export const DataIngestionCheckScreen = ({
   // useEscapeBack is disabled so it does not also call store.goBack().
   useEscapeBack(store, {
     enabled: !celebrating && !awaitingSkipConfirm,
-    extraHints: celebrating || awaitingSkipConfirm ? NO_HINTS : VERIFY_EXTRA_HINTS,
+    extraHints:
+      celebrating || awaitingSkipConfirm ? NO_HINTS : VERIFY_EXTRA_HINTS,
   });
 
   useScreenInput((_char, key) => {
@@ -774,8 +823,7 @@ export const DataIngestionCheckScreen = ({
       observedEventNames.size > 0 ||
       (eventTypes !== null && eventTypes.length > 0);
 
-    const wantsSkipVerification =
-      key.return || _char === 'q' || _char === 'Q';
+    const wantsSkipVerification = key.return || _char === 'q' || _char === 'Q';
 
     // Enter or q: advance past verification, with the same two-step guard
     // whether the activation API is up (listening) or unavailable (catalog
@@ -992,16 +1040,24 @@ export const DataIngestionCheckScreen = ({
         </Box>
       )}
 
-      {/* Spinner / polling indicator */}
+      {/* Spinner / polling indicator. Mood = 'listening' here because
+          the copy literally says "Listening for events" — the faster
+          tempo matches the wizard's narrative state (actively
+          watching the inbound stream, not idling).
+
+          Sparkline shows events-per-minute over the last 20 minutes.
+          Empty buffers render nothing (Sparkline returns null) so the
+          line stays compact during the first minute of polling. */}
       {!apiUnavailable && (
         <Box marginTop={1} gap={1} alignItems="center">
-          <BrailleSpinner color={Colors.accent} />
+          <BrailleSpinner color={Colors.accent} mood="listening" />
           <Text color={Colors.secondary}>
             Listening for events{Icons.ellipsis}
             {lastChecked && (
               <Text color={Colors.muted}> (checked {secondsSince}s ago)</Text>
             )}
           </Text>
+          <Sparkline data={eventTicks} />
         </Box>
       )}
 
@@ -1073,10 +1129,13 @@ export const DataIngestionCheckScreen = ({
         </Box>
       )}
 
-      {/* API unavailable: no events yet */}
+      {/* API unavailable: no events yet. Mood = 'waiting' — the
+          fallback path has nothing to listen to (the catalog returned
+          empty), so we're sitting on a polled retry. The slower tempo
+          reads as 'patient' rather than 'stalled'. */}
       {apiUnavailable && eventTypes !== null && eventTypes.length === 0 && (
         <Box marginTop={1} gap={1} alignItems="center">
-          <BrailleSpinner color={Colors.accent} />
+          <BrailleSpinner color={Colors.accent} mood="waiting" />
           <Text color={Colors.secondary}>
             Waiting for events{Icons.ellipsis}
           </Text>

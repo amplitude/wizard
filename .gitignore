@@ -67,6 +67,9 @@ __pycache__/
 /scratch/
 /e2e-tests/fixtures/.tracking/
 
+# Quality A/B harness — operator-run, results are local only.
+/evals/model-quality/results/
+
 # ──────────────────────────────────────────────────────────────
 # Claude Code local state
 # ──────────────────────────────────────────────────────────────

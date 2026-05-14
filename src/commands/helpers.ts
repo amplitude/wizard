@@ -680,6 +680,78 @@ export function gateCiSignupAcceptToS(
 }
 
 /**
+ * When `resolveCredentials` returns `needs_user_choice` / `environment_selection`,
+ * clear any leftover env / app / credentials pre-selection on the session so
+ * `AuthScreen` renders the env picker unambiguously.
+ *
+ * **Why credentials are cleared too** (regression fix):
+ *
+ * `Auth.isComplete` in `src/ui/tui/flows.ts` advances past Auth when
+ * `credentials != null` AND org/project are set — it does NOT gate on
+ * `selectedEnvName` (intentional, so manual-API-key paths still pass through).
+ * If a prior wizard run populated `session.credentials` from a stored API key
+ * OR a checkpoint rehydration carried credentials forward, that flag stays
+ * non-null even after the resolver returns `needs_user_choice` here. The flow
+ * gate then evaluates true, the router advances past Auth to Setup, and the
+ * env picker never renders — the user lands on Setup with no actionable UI
+ * and the only signal of trouble is the `[bin] credential-resolution outcome:
+ * needs_user_choice` line buried in the Logs tab.
+ *
+ * Clearing `credentials` forces `Auth.isComplete` back to false so the router
+ * returns to `AuthScreen`, where the existing
+ * `needsEnvPick = projectChosen && hasMultipleEnvs && !selectedEnv` logic
+ * renders the picker.
+ *
+ * **Why `pendingEnvSelection` is also set** (race-condition fix):
+ *
+ * Clearing `credentials` alone wasn't enough. On a first-run rerun where the
+ * stepper has already rendered frame 1 with `✓ Auth ─ ● Setup ←` (because the
+ * session hydrated with non-null credentials + org + project), the router has
+ * already advanced past Auth. The router walks forward only — null'ing
+ * `credentials` mid-run does not rewind it. The user stays on Setup with no
+ * env-picker surface. Setting `pendingEnvSelection = true` gates both
+ * `Auth.isComplete` AND every post-Auth `show:` predicate, forcing the router
+ * to collapse back to Auth. The flag is cleared by `AuthScreen` once the user
+ * picks an env via `setCredentials` for the chosen environment.
+ *
+ * Only the `environment_selection` discriminant nulls credentials. Other
+ * `needs_user_choice` `kind`s (if added later — see
+ * `ResolveCredentialsResult` in `src/lib/credential-resolution.ts`) MUST opt
+ * in explicitly, because they may have semantics where preserving credentials
+ * is correct.
+ *
+ * Skipped in --agent / --ci mode (those modes emit structured rejections
+ * elsewhere and don't render an interactive picker).
+ *
+ * Returns true when the deferral was applied (caller may want to log).
+ */
+export function applyEnvSelectionDeferral(
+  session: import('../lib/wizard-session').WizardSession,
+  resolution: import('../lib/credential-resolution').ResolveCredentialsResult,
+): boolean {
+  if (resolution.outcome !== 'needs_user_choice') return false;
+  if (resolution.kind !== 'environment_selection') return false;
+  if (session.ci || session.agent) return false;
+  session.selectedEnvName = null;
+  session.selectedAppId = null;
+  // CRITICAL: rerun state (stored API key or checkpoint rehydration) can
+  // leave `session.credentials` non-null even though the resolver just told
+  // us it needs an env pick. With non-null credentials + a rerun org/project
+  // still selected, `Auth.isComplete` (flows.ts) returns true and the router
+  // advances to Setup with no env-picker surface.
+  session.credentials = null;
+  // CRITICAL part 2: even with credentials cleared, the router only walks
+  // forward — it doesn't rewind on its own. If a prior frame already had
+  // the router parked on Setup (because credentials/org/project were
+  // populated when the stepper rendered), clearing credentials mid-run
+  // doesn't pull the user back to Auth. `pendingEnvSelection` gates
+  // Auth.isComplete AND every post-Auth `show:` predicate, so the router
+  // collapses back to Auth on the next resolve.
+  session.pendingEnvSelection = true;
+  return true;
+}
+
+/**
  * Whether the TUI auth task should release its wait and proceed to OAuth.
  *
  * The auth task runs concurrently with the screens, so we need a single
@@ -730,6 +802,7 @@ export const runDirectSignupIfRequested = async (
   const { performSignupOrAuth, trackSignupAttempt } = await import(
     '../utils/signup-or-auth.js'
   );
+  const { LOCAL_DOC_URLS } = await import('../utils/direct-signup.js');
   const { tryResolveZone } = await import('../lib/zone-resolution.js');
 
   // Non-TUI modes have no RegionSelect screen to disambiguate — and the
@@ -748,17 +821,54 @@ export const runDirectSignupIfRequested = async (
   }
   let tokens: Awaited<ReturnType<typeof performSignupOrAuth>>;
   try {
+    // Non-TUI callers send `kind: 'with_required_fields'` with the user data
+    // already collected upstream (--email + --full-name + --accept-tos
+    // gated by `accountCreationProvisioningInputsReady`). They never
+    // traverse the `needs_information` round-trip because they have no
+    // in-band collection screens — sending `kind: 'email_only'` would
+    // mean the BE returns needs_information and the helper routes to
+    // the OAuth fallback, breaking one-shot signup. Build the
+    // follow-up shape with local URL constants since no parser-probe
+    // has run to populate session.legalDocumentBundle.
+    //
+    // Intentional asymmetry vs `SigningUpScreen` (which switches over
+    // `RequiredKey` exhaustively): the non-TUI path pre-commits to a
+    // fixed body and never honors a per-key contract from the BE. If a
+    // future `RequiredKey` is added (e.g. `phone_number`), CI / agent
+    // runs without the matching flag get routed to OAuth fallback via
+    // `needs_information` — observable, not silently broken. Adding a
+    // new field here is a product decision (new `--<field>` flag + its
+    // gate in `gateAgentSignupArguments` / `gateCiSignupAcceptToS`)
+    // rather than a wire-contract correctness fix, so the compile-error
+    // gate the screen has isn't reproduced here.
+    //
     // No `signal` here: CI / agent / classic modes have no in-band
     // cancellation surface (no Esc handler, no unmount lifecycle), so
     // there is nothing to thread through. The TUI path passes a signal
     // from SigningUpScreen's useAsyncEffect; this entry point doesn't.
     tokens = await performSignupOrAuth({
+      kind: 'with_required_fields',
       email: session.signupEmail,
       fullName: session.signupFullName,
+      legalDocumentBundle: LOCAL_DOC_URLS,
+      // Non-TUI path uses local URLs directly (no parser-probe ran to
+      // populate session.legalDocumentSource). Telemetry tag on every
+      // arm reads this directly from `input` rather than from session.
+      legalDocumentSource: 'local',
       zone,
     });
   } catch (err) {
-    trackSignupAttempt({ status: 'wrapper_exception', zone });
+    trackSignupAttempt({
+      status: 'wrapper_exception',
+      zone,
+      // Source matches the input the wrapper received: a
+      // `'with_required_fields'` body built from LOCAL_DOC_URLS. If
+      // `performSignupOrAuth` throws after its internal try/catch (e.g.
+      // `replaceStoredUser` errors), this outer catch is the sole
+      // telemetry emitter — tagging `'unused'` here would misattribute
+      // the URL source in adoption dashboards.
+      'legal document source': 'local',
+    });
     getUI().log.warn(
       `Direct signup errored: ${
         err instanceof Error ? err.message : String(err)

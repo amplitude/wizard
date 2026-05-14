@@ -57,6 +57,14 @@ export const COMMANDS: CommandDef[] = [
     desc: 'Send product feedback',
   },
   { cmd: '/clear', desc: 'Clear the Q&A conversation history' },
+  {
+    cmd: '/diff',
+    desc: 'Show files changed by the agent (or a single file with /diff <path>)',
+  },
+  {
+    cmd: '/help',
+    desc: 'List available slash commands',
+  },
   { cmd: '/debug', desc: 'Print a diagnostic snapshot (safe to share)' },
   {
     cmd: '/diagnostics',
@@ -203,7 +211,18 @@ export function getWhoamiText(
  * so it can be unit-tested without filesystem mocks.
  */
 export function getDiagnosticsText(installDir: string): string {
-  const lines: string[] = [
+  return getDiagnosticsLines(installDir).join('\n');
+}
+
+/**
+ * Multi-line version of {@link getDiagnosticsText} for the in-TUI feedback
+ * panel. Each entry renders as its own row so long absolute paths
+ * (`/Users/…/.amplitude/wizard/runs/<sha>/log.txt`) are never hard-truncated
+ * by a single overflow-hidden Text element — the original bug behind
+ * "log file: /Users/…" in the screenshot.
+ */
+export function getDiagnosticsLines(installDir: string): string[] {
+  return [
     'Wizard storage paths:',
     '',
     'Per-project (this run):',
@@ -224,7 +243,6 @@ export function getDiagnosticsText(installDir: string): string {
     'Tip: tar up the run dir to share with support:',
     `  tar -czf wizard-logs.tar.gz ${getRunDir(installDir)}`,
   ];
-  return lines.join('\n');
 }
 
 /**
@@ -236,4 +254,30 @@ export function parseFeedbackSlashInput(raw: string): string | undefined {
   if (!m) return undefined;
   const body = m[1]?.trim();
   return body || undefined;
+}
+
+/**
+ * Parse `/diff [path]`. Returns:
+ *   - undefined when the line isn't a `/diff` command
+ *   - empty string when no path argument was provided (summary mode)
+ *   - trimmed path string when a path argument was provided
+ */
+export function parseDiffSlashInput(raw: string): string | undefined {
+  const m = /^\s*\/diff(?:\s+(.*))?\s*$/i.exec(raw);
+  if (!m) return undefined;
+  return (m[1] ?? '').trim();
+}
+
+/**
+ * Build the help text for `/help`. Pure (no I/O) so unit tests can lock
+ * the command catalogue without rendering Ink.
+ */
+export function getHelpText(): string {
+  const lines = ['Available slash commands:', ''];
+  // Pad command column for readable column alignment in monospace.
+  const width = COMMANDS.reduce((w, c) => Math.max(w, c.cmd.length), 0);
+  for (const c of COMMANDS) {
+    lines.push(`  ${c.cmd.padEnd(width)}  ${c.desc}`);
+  }
+  return lines.join('\n');
 }
