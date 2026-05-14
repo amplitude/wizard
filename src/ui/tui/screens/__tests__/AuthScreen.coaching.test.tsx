@@ -13,10 +13,26 @@ import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { render } from 'ink-testing-library';
 import { AuthScreen } from '../AuthScreen.js';
 import { makeStoreForSnapshot } from '../../__tests__/snapshot-utils.js';
+import { analytics } from '../../../../utils/analytics.js';
+import { wizardSuccessExit } from '../../../../utils/wizard-abort.js';
 
 vi.mock('opn', () => ({
   default: vi.fn(() => ({ catch: () => undefined })),
 }));
+
+// Mock wizardSuccessExit so the Esc handler can be observed without
+// actually exiting the test process. Only `wizardSuccessExit` is stubbed
+// — the rest of wizard-abort (cleanup registry, abort controller) is
+// preserved because AuthScreen's mount chain reads it.
+vi.mock('../../../../utils/wizard-abort.js', async () => {
+  const actual = await vi.importActual<
+    typeof import('../../../../utils/wizard-abort.js')
+  >('../../../../utils/wizard-abort.js');
+  return {
+    ...actual,
+    wizardSuccessExit: vi.fn(() => Promise.resolve() as Promise<never>),
+  };
+});
 
 describe('AuthScreen — browser-fallback coaching', () => {
   beforeEach(() => {
@@ -207,6 +223,45 @@ describe('AuthScreen — browser-fallback coaching', () => {
     expect(opnDefault).toHaveBeenCalledWith(
       'https://app.amplitude.com/oauth?x=y',
       { wait: false },
+    );
+  });
+
+  // Regression: Esc during the oauth-wait phase used to call
+  // `process.exit(0)` directly, which kills the analytics SDK queue
+  // before the 'auth cancelled by user' event can flush. The same file's
+  // account-confirm Esc handler already routes through
+  // `wizardSuccessExit` for exactly this reason — this test pins the
+  // oauth-wait branch to the same exit primitive so the analytics
+  // event reliably ships.
+  it('routes Esc during oauth-wait through wizardSuccessExit (analytics-clean exit)', async () => {
+    const captureSpy = vi.spyOn(analytics, 'wizardCapture');
+    const store = makeStoreForSnapshot({
+      introConcluded: true,
+      region: 'us',
+      loginUrl: 'https://app.amplitude.com/oauth?x=y',
+      pendingOrgs: null,
+    });
+    const { stdin } = render(<AuthScreen store={store} />);
+
+    // Esc is ASCII 0x1b.
+    stdin.write('\x1b');
+    await vi.advanceTimersByTimeAsync(50);
+
+    // The analytics call must be scheduled *before* the exit primitive
+    // is invoked so the SDK has time to enqueue (and `wizardSuccessExit`
+    // can flush).
+    const captureCallIndex = captureSpy.mock.invocationCallOrder.find(
+      (_value, idx) =>
+        captureSpy.mock.calls[idx]?.[0] === 'auth cancelled by user',
+    );
+    const exitCallIndex =
+      vi.mocked(wizardSuccessExit).mock.invocationCallOrder[0];
+    expect(captureCallIndex).toBeDefined();
+    expect(exitCallIndex).toBeDefined();
+    expect(captureCallIndex).toBeLessThan(exitCallIndex);
+    expect(wizardSuccessExit).toHaveBeenCalledWith(
+      // ExitCode.USER_CANCELLED — imported indirectly via AuthScreen.
+      130,
     );
   });
 });

@@ -29,6 +29,7 @@ export const DJANGO_AGENT_CONFIG: FrameworkConfig<DjangoContext> = {
     glyph: '🎸',
     glyphColor: '#44B78B',
     integration: Integration.django,
+    targetsBackend: true,
     beta: true,
     docsUrl: 'https://amplitude.com/docs/sdks/analytics/python',
     unsupportedVersionDocsUrl:
