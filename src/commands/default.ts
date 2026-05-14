@@ -11,6 +11,7 @@ import {
   gateCiSignupAcceptToS,
   gateAgentSignupArguments,
   isAuthTaskGateReady,
+  applyEnvSelectionDeferral,
 } from './helpers';
 import { WIZARD_VERSION } from './context';
 import { isNonInteractiveEnvironment } from '../utils/environment';
@@ -262,6 +263,18 @@ export const defaultCommand: CommandModule = {
         const session = await buildSessionFromOptions(options);
         session.agent = true;
         applyOrchestratorContext(session, options, true);
+
+        // Install the SIGINT handler IMMEDIATELY after we have a session
+        // to checkpoint. Agent / CI modes have no Ink keypress fallback;
+        // without this, a Ctrl+C from an orchestrator hard-killed the
+        // process — no checkpoint, no terminal `run_completed: cancelled`
+        // NDJSON envelope, and a parent agent reading the stream saw an
+        // abrupt EOF that was indistinguishable from a crash.
+        const { installAbortSignalHandler } = await import(
+          '../lib/graceful-exit.js'
+        );
+        installAbortSignalHandler(session);
+
         await selfHealIfNeeded(session);
         await maybeResumeFromCheckpoint(session, options);
 
@@ -295,6 +308,16 @@ export const defaultCommand: CommandModule = {
       void (async () => {
         const session = await buildSessionFromOptions(options, { ci: true });
         applyOrchestratorContext(session, options, false);
+
+        // Same rationale as the agent branch: a CI orchestrator's SIGINT
+        // (timeout, manual cancel) must route through wizardAbort so the
+        // run terminates cleanly with the correct exit code and the
+        // checkpoint is saved before exit.
+        const { installAbortSignalHandler } = await import(
+          '../lib/graceful-exit.js'
+        );
+        installAbortSignalHandler(session);
+
         await selfHealIfNeeded(session);
         await maybeResumeFromCheckpoint(session, options);
 
@@ -411,11 +434,26 @@ export const defaultCommand: CommandModule = {
             }
 
             // Resolve credentials using shared logic (token refresh,
-            // env auto-select, pendingOrgs population)
+            // env auto-select, pendingOrgs population). The discriminated
+            // result is logged at the bin layer so a tail of `log.txt`
+            // shows a concrete reason for "still on AuthScreen" instead
+            // of just `[credential-resolution] N environments found —
+            // deferring`. Pre-fix the void return obscured the post-defer
+            // state from anyone debugging the second-run-after-`git
+            // reset --hard` stall — see fix(self-heal) #N.
             const { resolveCredentials } = await import(
               '../lib/credential-resolution.js'
             );
-            await resolveCredentials(session);
+            const credentialResolution = await resolveCredentials(session);
+            logToFile(
+              `[bin] credential-resolution outcome: ${credentialResolution.outcome}`,
+              credentialResolution.outcome === 'needs_user_choice'
+                ? {
+                    kind: credentialResolution.kind,
+                    envsWithKey: credentialResolution.envsWithKey,
+                  }
+                : undefined,
+            );
 
             // If resolveCredentials silently picked an org/project from
             // disk (returning-user path), require an explicit confirmation
@@ -432,6 +470,38 @@ export const defaultCommand: CommandModule = {
               (session.selectedOrgId || session.selectedProjectId)
             ) {
               session.requiresAccountConfirmation = true;
+            }
+
+            // When the resolver explicitly told us it needs the user to
+            // pick an environment (typical second-run state after
+            // `git reset --hard` wipes `<installDir>/.amplitude/`),
+            // wipe leftover env / app / credentials pre-selection from a
+            // prior run so AuthScreen's `selectedEnv` lookup can't resolve
+            // a stale name against the freshly-fetched pendingOrgs and
+            // auto-call `setCredentials()` against the wrong env. #703
+            // made the resolver outcome observable; #709 added env/appId
+            // clearing; this commit adds `credentials` clearing to fix the
+            // rerun path where a stored API key or checkpoint rehydration
+            // left `session.credentials` non-null, which made
+            // `Auth.isComplete` (flows.ts) return true and the router
+            // advance past Auth to Setup with no env-picker surface.
+            //
+            // Note: we do NOT set `requiresAccountConfirmation` here —
+            // that flag drives the returning-user "confirm this
+            // account" UI, which is the wrong affordance for "you
+            // need to pick an env". With `credentials` now nulled the
+            // Auth flow gate evaluates false, which is what routes the
+            // user back to AuthScreen.
+            //
+            // Only the `'environment_selection'` arm clears credentials;
+            // see `applyEnvSelectionDeferral` for the discriminator-gated
+            // rationale. Skipped in --agent / --ci mode — those modes
+            // emit a structured rejection elsewhere and don't render an
+            // interactive picker.
+            if (applyEnvSelectionDeferral(session, credentialResolution)) {
+              logToFile(
+                '[bin] needs_user_choice/environment_selection: cleared stale env/appId/credentials so AuthScreen renders the env picker unambiguously',
+              );
             }
 
             // Resolve org/project display names so /whoami shows them.

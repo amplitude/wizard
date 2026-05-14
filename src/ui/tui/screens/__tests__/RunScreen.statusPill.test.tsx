@@ -1,29 +1,33 @@
 /**
- * RunScreen — bottom status pill resolves to the CURRENT in-progress
- * canonical task, never the first step's text.
+ * RunScreen — bottom status pill no longer echoes the active canonical
+ * task's `activeForm`.
  *
  * History:
  *   PR #663 anchored the pill to the canonical task `activeForm`
  *   (instead of the trailing free-form `pushStatus`), fixing the
  *   "agent says 'let me plan…' after Plan ✓" mismatch.
  *
- *   Regression: a user reported the pill reading "Detecting your
- *   project setup" while the task list correctly showed detect ✓,
- *   install ✓, plan in_progress, wire pending. The previous resolver
- *   used `store.tasks.find(t => t.status === InProgress)` which
- *   returns the FIRST match — so any state where two rows are
- *   in_progress at once silently mislabels the pill with the earliest
- *   step's text (detect). This file pins both the original contract
- *   AND the regression: the pill's text must always belong to the
- *   step the user is actively waiting on.
+ *   PR #685 hardened tier 6 to walk `CANONICAL_STEPS` in order and
+ *   short-circuit on the first in_progress row, fixing the "pill says
+ *   'Detecting your project setup' while plan is in_progress" bug.
+ *
+ *   PR #688 made the pill flush with the content area (sitting directly
+ *   under the Tasks list). Tier 6's contract suddenly produced visible
+ *   duplicates: ProgressList shows `› Detecting project setup` as the
+ *   in-progress row, and the pill below shows `◇ Detecting project
+ *   setup` — the same string twice.
  *
  * Fix:
- *   The resolver (now in `run-status-pill.ts`, surfaced through the
- *   `resolveRunScreenStatus` back-compat wrapper in `RunScreen.tsx`)
- *   walks `CANONICAL_STEPS` in order and short-circuits on the first
- *   in_progress row. The fallback when `activeForm` is unset is the
- *   SAME step's canonical label ("Plan and approve events to track"),
- *   never another step's `defaultActiveForm`.
+ *   `run-status-pill.ts` now suppresses tier 6 entirely and ALSO skips
+ *   tier 7 while a canonical task is in_progress (otherwise stale
+ *   pushStatus narration would leak in). Higher-priority tiers (file
+ *   writes, tool activity, event-plan-await, currentActivity,
+ *   postAgentSteps) keep firing because their messages carry signal
+ *   the Tasks list does NOT already display.
+ *
+ *   These tests are integration-shaped: they exercise the
+ *   `resolveRunScreenStatus` wrapper that `RunScreen.tsx` re-exports,
+ *   pinning the contract callers see.
  */
 
 import { describe, it, expect } from 'vitest';
@@ -57,10 +61,26 @@ function makeCanonicalTasks(opts: {
   });
 }
 
-describe('resolveRunScreenStatus — state/narration mismatch fix', () => {
-  it('returns the in-progress canonical task activeForm when one is active, ignoring stale narration', () => {
-    // Reproduces the user-reported screenshot: Plan ✓, Wire in_progress,
-    // but the agent's last streamed sentence is a stale "let me plan…".
+describe('resolveRunScreenStatus — duplicate-pill suppression contract', () => {
+  it('returns undefined when only signal is an in-progress canonical task (Tasks list already shows it)', () => {
+    // Bug from a real user screenshot: the Tasks list correctly showed
+    // detect ✓, install ✓, plan in_progress, wire pending — and the
+    // pill below the list ALSO showed plan's activeForm, the same string
+    // twice. With the suppression in place the pill is omitted.
+    const store = makeStoreForSnapshot();
+    store.setTasks(
+      makeCanonicalTasks({
+        inProgressIndex: 3, // wire
+      }),
+    );
+    expect(resolveRunScreenStatus(store)).toBeUndefined();
+  });
+
+  it('returns undefined even when stale narration would have echoed (no leak through tier 7)', () => {
+    // Tier 6 is suppressed, but tier 7 (`pushStatus` cold-start fallback)
+    // must ALSO not fire while a canonical task is running — otherwise
+    // stale streamed narration ("now let me plan…") would leak into the
+    // pill mid-run, the very bug PR #663 fixed.
     const store = makeStoreForSnapshot();
     store.setTasks(
       makeCanonicalTasks({
@@ -69,13 +89,9 @@ describe('resolveRunScreenStatus — state/narration mismatch fix', () => {
     );
     store.pushStatus('Detected Next.js 15 with the App Router');
     store.pushStatus(
-      // The stale narration the user reported. The Plan step has already
-      // flipped to ✓ via the journey classifier (PostToolUse on
-      // confirm_event_plan), but the streamed text delta is still here.
       "age install finished. Now let me plan the events based on what I've read",
     );
-
-    expect(resolveRunScreenStatus(store)).toBe('Wiring up event tracking');
+    expect(resolveRunScreenStatus(store)).toBeUndefined();
   });
 
   it('returns the trailing statusMessage when no canonical task is in_progress (cold-start)', () => {
@@ -95,10 +111,11 @@ describe('resolveRunScreenStatus — state/narration mismatch fix', () => {
     expect(resolveRunScreenStatus(store)).toBeUndefined();
   });
 
-  it('post-agent step activeForm wins over canonical task and trailing statusMessage', () => {
+  it('post-agent step activeForm wins over canonical task suppression', () => {
     // Existing contract pinned by the FinalizingPanel — the post-agent
-    // step is the source of truth once the in-loop agent has handed off.
-    // The fix did not loosen this; this test pins it.
+    // step is the source of truth once the in-loop agent has handed off,
+    // and it is NOT shown in the Tasks list (it's a separate panel), so
+    // it does NOT duplicate. Suppression must scope to tier 6 only.
     const store = makeStoreForSnapshot();
     store.setTasks(
       makeCanonicalTasks({
@@ -126,8 +143,9 @@ describe('resolveRunScreenStatus — state/narration mismatch fix', () => {
   it('falls back to trailing statusMessage when only completed canonical tasks exist', () => {
     // After every canonical step has flipped to ✓ but the post-agent
     // queue has not yet been seeded, no canonical task is in_progress
-    // and there is no post-agent step either. The trailing
-    // narration is the right fallback.
+    // and there is no post-agent step either. The trailing narration is
+    // the right fallback — no canonical row is currently rendered as
+    // in_progress in the Tasks list, so there is nothing to duplicate.
     const store = makeStoreForSnapshot();
     store.setTasks(
       CANONICAL_STEPS.map((step) => ({
@@ -141,29 +159,12 @@ describe('resolveRunScreenStatus — state/narration mismatch fix', () => {
     expect(resolveRunScreenStatus(store)).toBe('Wrapping up');
   });
 
-  // ─────────────────────────────────────────────────────────────────
-  // Regression contract — pill must resolve to the CURRENT in-progress
-  // step, not the FIRST step.
-  //
-  // Bug from a real user screenshot: the task list correctly showed
-  // detect ✓, install ✓, plan in_progress, wire pending — but the
-  // bottom pill read "◇ Detecting your project setup" (detect's
-  // defaultActiveForm). User feedback: "bottom line says Detecting
-  // project setup but clearly its past that".
-  //
-  // Root cause: `store.tasks.find(t => t.status === InProgress)`
-  // returns the FIRST match. If two rows are ever in_progress at once
-  // (or any future setter bypasses the cascade), the pill silently
-  // mislabels with detect's text. The fix walks CANONICAL_STEPS in
-  // order and falls back to the SAME step's canonical label, never to
-  // a different step's defaultActiveForm.
-  // ─────────────────────────────────────────────────────────────────
+  // Regression contract — tier 6 is suppressed, but the resolver must
+  // not over-suppress: any of the higher-priority tiers (1-5) carry
+  // signal the Tasks list does NOT show, so they must keep firing even
+  // when a canonical task is in_progress.
 
-  it('user screenshot: plan in_progress with custom activeForm — pill is plan, not detect', () => {
-    // Exactly the journey state from the bug screenshot:
-    //   detect: completed, install: completed, plan: in_progress, wire: pending
-    //   activeForms: { plan: 'Reading event plan…' }
-    // The pill must show "Reading event plan…", NOT "Detecting your project setup".
+  it('plan in_progress with a custom activeForm: pill is still suppressed (tier 6)', () => {
     const store = makeStoreForSnapshot();
     store.setTasks(
       makeCanonicalTasks({
@@ -171,17 +172,13 @@ describe('resolveRunScreenStatus — state/narration mismatch fix', () => {
         inProgressActiveForm: 'Reading event plan…',
       }),
     );
-    expect(resolveRunScreenStatus(store)).toBe('Reading event plan…');
-    expect(resolveRunScreenStatus(store)).not.toBe(
-      'Detecting your project setup',
-    );
+    expect(resolveRunScreenStatus(store)).toBeUndefined();
   });
 
-  it('canonical-name fallback: plan in_progress with no activeForm — pill is plan label, not detect', () => {
+  it('plan in_progress with no activeForm: pill is still suppressed (tier 6)', () => {
     // Same journey state but the agent never emitted a TodoWrite
-    // activeForm for plan. Defensive fallback: same step's canonical
-    // label ("Plan and approve events to track"), NEVER detect's
-    // defaultActiveForm ("Detecting your project setup").
+    // activeForm for plan. The Tasks list shows the canonical label as
+    // its in-progress row, so suppression still applies.
     const store = makeStoreForSnapshot();
     store.setTasks([
       {
@@ -198,7 +195,7 @@ describe('resolveRunScreenStatus — state/narration mismatch fix', () => {
       },
       {
         label: CANONICAL_STEPS[2].label,
-        activeForm: undefined, // ← agent never set one
+        activeForm: undefined,
         status: TaskStatus.InProgress,
         done: false,
       },
@@ -209,69 +206,13 @@ describe('resolveRunScreenStatus — state/narration mismatch fix', () => {
         done: false,
       },
     ]);
-    expect(resolveRunScreenStatus(store)).toBe(
-      'Plan and approve events to track',
-    );
-    expect(resolveRunScreenStatus(store)).not.toBe(
-      'Detecting your project setup',
-    );
+    expect(resolveRunScreenStatus(store)).toBeUndefined();
   });
 
-  it('pathological state: detect AND plan both in_progress — pill anchors to current step (plan), never detect', () => {
-    // Defensive contract: if anything (mid-batch render, future code
-    // path, regression) ever leaves two rows as in_progress at the
-    // same time, the resolver iterates in canonical order and returns
-    // the FIRST in_progress row's OWN text. The point of this test is
-    // that whatever row wins, the text it surfaces belongs to that
-    // matched row — never a different step's defaultActiveForm. In
-    // practice the journey-state cascade in renderJourneyTasks
-    // guarantees only one row is in_progress at a time; this test
-    // pins the resolver's behavior in case that invariant is ever
-    // violated.
-    const store = makeStoreForSnapshot();
-    store.setTasks([
-      {
-        label: CANONICAL_STEPS[0].label,
-        activeForm: CANONICAL_STEPS[0].defaultActiveForm,
-        status: TaskStatus.InProgress,
-        done: false,
-      },
-      {
-        label: CANONICAL_STEPS[1].label,
-        activeForm: CANONICAL_STEPS[1].defaultActiveForm,
-        status: TaskStatus.Completed,
-        done: true,
-      },
-      {
-        label: CANONICAL_STEPS[2].label,
-        activeForm: 'Planning and approving events to track',
-        status: TaskStatus.InProgress,
-        done: false,
-      },
-      {
-        label: CANONICAL_STEPS[3].label,
-        activeForm: CANONICAL_STEPS[3].defaultActiveForm,
-        status: TaskStatus.Pending,
-        done: false,
-      },
-    ]);
-    const pill = resolveRunScreenStatus(store);
-    expect(pill).toBeDefined();
-    // Whatever row wins, it must be from the canonical step list and
-    // not, say, a leak from the wrong index.
-    const validTexts = [
-      ...CANONICAL_STEPS.map((s) => s.defaultActiveForm),
-      ...CANONICAL_STEPS.map((s) => s.label),
-      'Planning and approving events to track',
-    ];
-    expect(validTexts).toContain(pill);
-  });
-
-  it('updates as journey state advances: Plan in_progress -> Wire in_progress', () => {
-    // Simulates the live progression. Initially Plan is in_progress and
-    // its activeForm is what the pill shows; then the classifier flips
-    // Plan to ✓ and Wire to in_progress, and the pill follows the
-    // canonical state — never the leftover narration.
+  it('updates as journey state advances: Plan in_progress -> Wire in_progress (both suppressed)', () => {
+    // Simulates the live progression. Tier 6 is suppressed throughout —
+    // the Tasks list in the rendered view above the pill is what the
+    // user is reading, not a duplicated pill.
     const store = makeStoreForSnapshot();
 
     // Phase 1: Plan in progress with custom activeForm from a TodoWrite.
@@ -282,27 +223,22 @@ describe('resolveRunScreenStatus — state/narration mismatch fix', () => {
       }),
     );
     store.pushStatus('Reading skill files');
-    expect(resolveRunScreenStatus(store)).toBe(
-      'Planning events for an e-commerce app',
-    );
+    expect(resolveRunScreenStatus(store)).toBeUndefined();
 
-    // Phase 2: streaming narration lands ("now let me plan…") but
-    // before the journey advances. Pill stays anchored to the canonical
-    // active task — narration cannot beat canonical state.
+    // Phase 2: streaming narration lands but before the journey advances.
+    // The pill is still suppressed — the canonical task's activeForm is
+    // still showing in the Tasks list above.
     store.pushStatus("Now let me plan the events based on what I've read");
-    expect(resolveRunScreenStatus(store)).toBe(
-      'Planning events for an e-commerce app',
-    );
+    expect(resolveRunScreenStatus(store)).toBeUndefined();
 
-    // Phase 3: classifier flips Plan to ✓ and Wire to in_progress
-    // (PostToolUse on confirm_event_plan + first Edit afterwards). The
-    // stale "now let me plan…" narration is still the last entry in
-    // statusMessages, but the pill now follows Wire.
+    // Phase 3: classifier flips Plan to ✓ and Wire to in_progress. The
+    // pill still doesn't fire — Wire's activeForm is now what the Tasks
+    // list shows.
     store.setTasks(
       makeCanonicalTasks({
         inProgressIndex: 3, // wire
       }),
     );
-    expect(resolveRunScreenStatus(store)).toBe('Wiring up event tracking');
+    expect(resolveRunScreenStatus(store)).toBeUndefined();
   });
 });

@@ -18,6 +18,7 @@ import {
 import type { WizardStore } from './store.js';
 import { RunPhase } from './session-constants.js';
 import { tryResolveZone } from '../../lib/zone-resolution.js';
+import { assertNever } from '../../utils/assert-never.js';
 
 // ── Screen + Flow enums ──────────────────────────────────────────────
 
@@ -198,17 +199,24 @@ export const FLOWS: Record<Flow, FlowEntry[]> = {
         s.signupEmail !== null &&
         s.signupAuth === null &&
         !s.signupAbandoned &&
-        // No required fields known yet, OR all known required fields are
-        // filled. SigningUp re-shows after collection screens write back.
+        // No required fields known yet (initial probe), OR every required
+        // field has been satisfied via its corresponding session state.
+        // The exhaustive switch + `assertNever` makes adding a future
+        // RequiredKey a compile-time error here until the new kind is
+        // explicitly mapped to its "satisfied" condition. The previous
+        // `: true` default branch silently passed unknown kinds, which
+        // would have masked a contract drift.
         (s.signupRequiredFields === null ||
-          s.signupRequiredFields.every((field) =>
-            field === 'full_name' ? s.signupFullName !== null : true,
-          )) &&
-        // ToS must be accepted before the second POST creates the account.
-        // On the initial probe (`signupRequiredFields === null`) ToS is not
-        // required yet — the server might redirect or error and we never
-        // touch ToS at all.
-        (s.signupRequiredFields === null || s.tosAccepted === true),
+          s.signupRequiredFields.every((field) => {
+            switch (field) {
+              case 'full_name':
+                return s.signupFullName !== null;
+              case 'terms_acceptance':
+                return s.tosAccepted === true;
+              default:
+                return assertNever(field);
+            }
+          })),
       isComplete: (s) =>
         !isCreateAccountOnboarding(s) ||
         s.signupAuth !== null ||
@@ -224,20 +232,25 @@ export const FLOWS: Record<Flow, FlowEntry[]> = {
       revert: () => false,
       isWall: signupCommittedWall,
     },
-    // 2c. Terms of Service — only renders AFTER the server confirmed
-    //     agentic signup is happening (signupRequiredFields was set).
-    //     Skipped entirely on the redirect / error / immediate-success
-    //     arms — exactly the "don't ask for ToS unless we're going to
-    //     create the account" behavior PR 234 motivated.
+    // 2c. Terms of Service — renders only when the server (or the parser's
+    //     spoof) actually requires it: `'terms_acceptance' in
+    //     signupRequiredFields`. This is the load-bearing migration
+    //     decision: when the BE flag is ON across env tiers and the spoof
+    //     is removed, the parser stops injecting `'terms_acceptance'` and
+    //     the screen naturally skips. If a future BE business decision
+    //     drops the requirement entirely, this predicate evaluates false
+    //     with no further wizard work.
     {
       screen: Screen.ToS,
       show: (s) =>
         isCreateAccountOnboarding(s) &&
         s.signupRequiredFields !== null &&
+        s.signupRequiredFields.includes('terms_acceptance') &&
         s.tosAccepted !== true,
       isComplete: (s) =>
         !isCreateAccountOnboarding(s) ||
         s.signupRequiredFields === null ||
+        !s.signupRequiredFields.includes('terms_acceptance') ||
         s.tosAccepted === true,
       // Returning false when the screen was *skipped* (server never asked,
       // or ToS was never accepted) is critical: `isComplete` returns true
@@ -248,13 +261,17 @@ export const FLOWS: Record<Flow, FlowEntry[]> = {
         if (!isCreateAccountOnboarding(store.session)) return false;
         if (store.session.signupRequiredFields === null) return false;
         if (store.session.tosAccepted === null) return false;
-        // Walk past on abandonment: clearing tosAccepted alone leaves
-        // signupAbandoned=true, which still gates SigningUp.show off.
-        // The user would re-accept ToS and land back on Auth without
-        // any retry — a dead-end. Letting back-nav continue to
-        // SignupEmail.revert clears the whole ceremony via
-        // _resetCeremonyKeys (which resets signupAbandoned), giving
-        // the user a clean restart.
+        // Walk past on abandonment BEFORE touching ToS state. `resetToS`
+        // emits a 'back navigation to tos' analytics event as a side
+        // effect of clearing tosAccepted + the lock-step legal-doc
+        // bundle/source — appropriate when the user explicitly
+        // back-navigated to ToS, but misleading during an abandonment
+        // cascade (no user action targeted ToS). Letting back-nav
+        // continue to SignupEmail.revert clears the whole ceremony via
+        // _resetCeremonyKeys (which re-nulls tosAccepted +
+        // legalDocumentBundle + legalDocumentSource alongside the rest
+        // of the ceremony, and resets signupAbandoned), giving the user
+        // a clean restart without emitting the misattributed event.
         if (store.session.signupAbandoned) return false;
         store.resetToS();
       },
@@ -325,7 +342,14 @@ export const FLOWS: Record<Flow, FlowEntry[]> = {
         // user explicitly confirms (or changes) the org/project that was
         // resolved silently from disk. Set in bin.ts when resolveCredentials
         // populates the session without going through the SUSI picker.
-        !s.requiresAccountConfirmation,
+        !s.requiresAccountConfirmation &&
+        // Env-picker race: when `resolveCredentials` returns
+        // `needs_user_choice / environment_selection`,
+        // `applyEnvSelectionDeferral` clears credentials AND sets this flag
+        // so the router collapses back to Auth even if it already advanced
+        // past Auth on a prior frame (rehydrated rerun state). Cleared by
+        // AuthScreen once `setCredentials` lands the chosen env.
+        !s.pendingEnvSelection,
       // Back from DataSetup — drop the picked org/project/env so the
       // Auth screen re-renders the picker. Credentials stay so we don't
       // force a fresh OAuth round-trip.
@@ -339,7 +363,12 @@ export const FLOWS: Record<Flow, FlowEntry[]> = {
     //     framework detection after `setCredentials()` fires.
     {
       screen: Screen.CreateProject,
-      show: (s) => s.runPhase !== RunPhase.Error && s.createProject.pending,
+      show: (s) =>
+        s.runPhase !== RunPhase.Error &&
+        s.createProject.pending &&
+        // Hidden while the env-picker deferral is active — Auth is the only
+        // legitimate screen until the user picks an env.
+        !s.pendingEnvSelection,
       isComplete: (s) => !s.createProject.pending,
       // CreateProject is always "complete" for users who never entered it
       // (`!pending` is true by default), so we mark it transparent for
@@ -349,8 +378,12 @@ export const FLOWS: Record<Flow, FlowEntry[]> = {
       revert: () => false,
     },
     // 4. Data check — is the project already ingesting events?
+    //    Hidden while `pendingEnvSelection` is active so the router collapses
+    //    back to Auth for the env picker (see Auth entry above for the full
+    //    bug story).
     {
       screen: Screen.DataSetup,
+      show: (s) => !s.pendingEnvSelection,
       isComplete: (s) => s.projectHasData !== null,
       // Reset the activation result so the check re-runs after a back-nav.
       revert: (store) => {
@@ -360,7 +393,7 @@ export const FLOWS: Record<Flow, FlowEntry[]> = {
     // 3a. Activation options (SDK installed but few events — partial activation)
     {
       screen: Screen.ActivationOptions,
-      show: (s) => s.activationLevel === 'partial',
+      show: (s) => s.activationLevel === 'partial' && !s.pendingEnvSelection,
       isComplete: (s) => s.activationOptionsComplete,
       revert: (store) => {
         store.resetActivationOptions();
@@ -369,7 +402,8 @@ export const FLOWS: Record<Flow, FlowEntry[]> = {
     // 3b. Framework setup questions — skipped for full users (already have data)
     {
       screen: Screen.Setup,
-      show: (s) => needsSetup(s) && s.activationLevel !== 'full',
+      show: (s) =>
+        needsSetup(s) && s.activationLevel !== 'full' && !s.pendingEnvSelection,
       isComplete: (s) => !needsSetup(s),
       // Pop the most recently-answered framework question. Returns false
       // when there's nothing user-answered to pop (e.g. every question was
@@ -387,14 +421,14 @@ export const FLOWS: Record<Flow, FlowEntry[]> = {
     //   init code rather than via a wizard prompt.)
     {
       screen: Screen.Run,
-      show: (s) => s.activationLevel !== 'full',
+      show: (s) => s.activationLevel !== 'full' && !s.pendingEnvSelection,
       isComplete: (s) =>
         s.runPhase === RunPhase.Completed || s.runPhase === RunPhase.Error,
     },
     // 4. MCP server setup — skipped on error; full users go straight here
     {
       screen: Screen.Mcp,
-      show: (s) => s.runPhase !== RunPhase.Error,
+      show: (s) => s.runPhase !== RunPhase.Error && !s.pendingEnvSelection,
       isComplete: (s) => s.mcpComplete,
       revert: (store) => {
         store.resetMcp();
@@ -411,7 +445,8 @@ export const FLOWS: Record<Flow, FlowEntry[]> = {
       screen: Screen.DataIngestionCheck,
       show: (s) =>
         s.runPhase !== RunPhase.Error &&
-        (s.activationLevel !== 'full' || s.localInstrumentationComplete),
+        (s.activationLevel !== 'full' || s.localInstrumentationComplete) &&
+        !s.pendingEnvSelection,
       isComplete: (s) => s.dataIngestionConfirmed,
       revert: (store) => {
         store.resetDataIngestion();
@@ -420,13 +455,17 @@ export const FLOWS: Record<Flow, FlowEntry[]> = {
     // 6. Slack integration setup (skipped on error)
     {
       screen: Screen.Slack,
-      show: (s) => s.runPhase !== RunPhase.Error,
+      show: (s) => s.runPhase !== RunPhase.Error && !s.pendingEnvSelection,
       isComplete: (s) => s.slackComplete,
       revert: (store) => {
         store.resetSlack();
       },
     },
-    { screen: Screen.Outro },
+    // Outro is the terminal screen of the Wizard flow. Hidden while
+    // pendingEnvSelection is active so the router doesn't fall through to
+    // it when every preceding entry is hidden — we want Auth to win
+    // unconditionally while the env picker is pending.
+    { screen: Screen.Outro, show: (s) => !s.pendingEnvSelection },
   ],
 
   [Flow.McpAdd]: [

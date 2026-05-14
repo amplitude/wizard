@@ -29,6 +29,17 @@ export const ExitCode = {
    */
   WRITE_REFUSED: 13,
   /**
+   * `wizard apply` refused to start because another `wizard apply` is
+   * already running against the same install directory — the
+   * per-project apply lock (`acquireApplyLock`) detected an in-flight
+   * holder. Distinct from INVALID_ARGS so an orchestrator can
+   * automatically back off + retry on lock contention without conflating
+   * "you passed wrong flags" with "wait your turn". The terminal
+   * `run_completed` envelope's `reason: 'lock_held'` discriminator
+   * pairs with this code.
+   */
+  LOCK_HELD: 14,
+  /**
    * Internal wizard bug — an uncaught exception, assertion violation, or
    * other unexpected error in the wizard's own code (NOT in the inner
    * Claude agent's behaviour). Distinct from `AGENT_FAILED=10` (the

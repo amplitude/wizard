@@ -93,6 +93,15 @@ interface WizardAbortOptions {
    * we want to point the user at docs to recover.
    */
   cancelOptions?: { docsUrl?: string };
+  /**
+   * Stable machine-readable reason code surfaced on the `run_completed`
+   * NDJSON envelope's `reason` field. Distinct from `message`, which is
+   * the human-readable display string the Outro renders — `reason` is
+   * intended for orchestrator branching (`'sigint'`, `'lock_held'`,
+   * `'auth_required'`, etc.). When set, takes precedence over the
+   * sanitized `message` form.
+   */
+  reason?: string;
 }
 
 const cleanupFns: Array<() => void> = [];
@@ -226,6 +235,15 @@ export async function wizardSuccessExit(exitCode = 0): Promise<never> {
   } catch {
     /* setup-complete emission must never block exit */
   }
+  // Mark the terminal `completed` run_phase BEFORE `run_completed` so
+  // an orchestrator's phase-state transitions
+  // (cold_start -> agent_running -> finalizing -> completed) close
+  // cleanly. AgentUI dedups; a no-op call here is safe.
+  try {
+    getUI().emitRunPhase?.('completed');
+  } catch {
+    /* terminal phase emission must not prevent exit */
+  }
   // Emit the terminal `run_completed` NDJSON event BEFORE shutting
   // analytics down. AgentUI is the only UI that implements this; for
   // InkUI / LoggingUI it's a no-op. The event has to land on stdout
@@ -264,8 +282,13 @@ export async function wizardSuccessExit(exitCode = 0): Promise<never> {
  * (TUI, CI logger), the run-start timestamp isn't tracked and we
  * report `0` — the value is only meaningful for orchestrator-facing
  * NDJSON, which only fires from AgentUI anyway.
+ *
+ * Exported so `performGracefulExit` (which lives next door in
+ * `graceful-exit.ts`) can stamp the same value on its
+ * `run_completed: cancelled` envelope instead of measuring the
+ * near-zero duration of the exit function itself.
  */
-function computeRunDurationMs(): number {
+export function computeRunDurationMs(): number {
   try {
     const ui = getUI() as { getRunStartedAtMs?: () => number | null };
     const startedAt = ui.getRunStartedAtMs?.() ?? null;
@@ -376,12 +399,29 @@ export function _resetWizardAbortInProgressForTests(): void {
 export async function wizardAbort(
   options?: WizardAbortOptions,
 ): Promise<never> {
+  // Re-entry guard. The SIGINT handler installed by
+  // `installAbortSignalHandler` calls into `wizardAbort` via
+  // `wizardAbortRunner`; if the agent-runner's error path has already
+  // initiated abort, a second call from SIGINT would double-execute
+  // cleanup, double-emit `run_completed`, and race `process.exit`.
+  // The async gap between entry and the terminal `process.exit`
+  // (the `await getUI().cancel(...)` + analytics-flush awaits) is
+  // the window where SIGINT delivery hits while the first abort is
+  // still draining. Block the second entry by parking it on an
+  // unresolved promise — the first call's `process.exit` will
+  // terminate the process before this promise ever needs to resolve.
+  if (_wizardAbortInProgress) {
+    return new Promise<never>(() => {
+      /* deliberately never resolve — first abort owns the exit */
+    });
+  }
   _wizardAbortInProgress = true;
   const {
     message = 'Wizard setup cancelled.',
     error,
     exitCode = 1,
     cancelOptions,
+    reason,
   } = options ?? {};
 
   // Suppress any future EPIPE-driven abort. We're already aborting —
@@ -447,6 +487,16 @@ export async function wizardAbort(
   //    Esc on the framework picker). Wrapped in try/catch so a
   //    misbehaving emitter can't block the exit.
   const outcome: 'error' | 'cancelled' = error ? 'error' : 'cancelled';
+  // Mark the terminal `error` run_phase BEFORE `run_completed` so an
+  // orchestrator's phase-state transitions (cold_start ->
+  // agent_running -> finalizing -> error) close cleanly. AgentUI
+  // dedups so a no-op call here is safe even when an earlier code
+  // path already emitted the same phase.
+  try {
+    getUI().emitRunPhase?.('error');
+  } catch {
+    /* terminal phase emission must not prevent exit */
+  }
   try {
     getUI().emitRunCompleted?.({
       outcome,
@@ -459,7 +509,16 @@ export async function wizardAbort(
       // RunCompletedData docstring promises sanitization. AgentUI's
       // emit() doesn't currently re-sanitize, so do it here to keep
       // the contract honest.
-      ...(message ? { reason: sanitizeReason(message) } : {}),
+      // Stable machine-readable `reason` takes precedence over the
+      // sanitized human-readable `message`. Callers that pass an
+      // explicit `reason` (SIGINT handlers, lock-collision paths) get
+      // their code straight through; everyone else falls back to a
+      // path-redacted message.
+      ...(reason
+        ? { reason }
+        : message
+        ? { reason: sanitizeReason(message) }
+        : {}),
     });
   } catch {
     /* terminal event emitter must not prevent exit */

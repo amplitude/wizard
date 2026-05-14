@@ -21,6 +21,9 @@ import { NoOrgsError } from './utils/zone-probe';
 import { getVersionCheckInfo } from './lib/version-check';
 import { initFeatureFlags } from './lib/feature-flags';
 import { autoEnableOptInFeatures } from './lib/feature-discovery';
+// Orchestration store — durable v2 state. Mirrored alongside the legacy
+// in-memory `WizardSession` for PR 1; PR 2 will widen the wiring.
+import { getOrchestrationStore } from './lib/orchestration/store';
 
 EventEmitter.defaultMaxListeners = 50;
 
@@ -114,6 +117,22 @@ export async function runWizard(
     ci: session.ci ?? false,
     'account creation flow': isCreateAccountOnboarding(session),
   });
+
+  // Mirror the session start into the durable orchestration store. This is
+  // the v2 foundation — see `src/lib/orchestration/`. Writes are best-effort
+  // (fs / permission failures must never block the wizard run); any thrown
+  // exception is logged to the per-project log file and swallowed.
+  try {
+    const orchestrationStore = getOrchestrationStore(session.installDir);
+    const goal = `set up Amplitude in ${integration}`;
+    orchestrationStore.createSession({ goal });
+  } catch (err) {
+    logToFile(
+      `[orchestration] session-start mirror failed: ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
+  }
 
   // Non-interactive modes (CI / agent) auto-enable every discovered
   // opt-in feature here so the agent run gets the same SR + G&S + LLM

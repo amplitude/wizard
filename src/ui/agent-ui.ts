@@ -302,6 +302,123 @@ function getNdjsonRedactor(): (s: string) => string {
   return _ndjsonRedactor;
 }
 
+/**
+ * Zod schema validating the wire-boundary envelope shape. Intentionally
+ * structural (not a per-event-type discriminated union) so we get
+ * defense-in-depth on the framing layer without locking the validation
+ * cost to O(N) discriminator branches. Per-event-type shapes are
+ * documented in `agent-events.ts`; the registry-vs-discriminator
+ * coherence check happens below in `validateEnvelopeOrLog`.
+ *
+ * Permissive shape: every event MUST have `v=1`, an ISO timestamp,
+ * the typed `type`, and a string `message`. `data` is unknown — we
+ * narrow further only when it carries an `event` discriminator.
+ */
+const agentEventSchema = z.object({
+  v: z.literal(1),
+  '@timestamp': z.string(),
+  type: z.enum([
+    'lifecycle',
+    'log',
+    'status',
+    'progress',
+    'session_state',
+    'prompt',
+    'needs_input',
+    'diagnostic',
+    'result',
+    'error',
+  ]),
+  message: z.string(),
+  session_id: z.string().optional(),
+  run_id: z.string().optional(),
+  level: z.enum(['info', 'warn', 'error', 'success', 'step']).optional(),
+  data_version: z.number().optional(),
+  data: z.unknown().optional(),
+});
+
+/**
+ * Validate the envelope just before it lands on stdout. Failures
+ * route to the on-disk log (`logToFile`) — NEVER to stderr (Ink owns
+ * stdout in TUI mode and stderr would interleave with NDJSON), NEVER
+ * throwing (a bad envelope must not crash the wizard mid-run).
+ *
+ * In addition to the structural shape, this also asserts:
+ *  - When `data.event` is set, the `data_version` matches the
+ *    registry entry — catches "I added a new event but forgot to
+ *    register its version" regressions.
+ *  - The `event` discriminator on `data` is a string (some failure
+ *    modes set it to numbers / booleans).
+ *
+ * Returns the validated event (or the original envelope when
+ * validation fails — we still EMIT, just with a log trail of the
+ * defect so the bug is fixable without losing data on the wire).
+ */
+function validateEnvelopeOrLog(event: NDJSONEvent): NDJSONEvent {
+  const parsed = agentEventSchema.safeParse(event);
+  if (!parsed.success) {
+    try {
+      const issues = parsed.error.issues
+        .map((i) => `${i.path.join('.')}: ${i.message}`)
+        .join('; ');
+      logToFileLazy(
+        `[agent-ui] NDJSON envelope failed schema validation — wire format invariant breached. issues=${issues}; event.type=${
+          event.type
+        }; event.message=${event.message.slice(0, 80)}`,
+      );
+    } catch {
+      // Logger may not be available; never throw from emit.
+    }
+    return event;
+  }
+
+  // Coherence check: registry value must match data_version when
+  // the event has a discriminator. A v1 schema bump that lands on
+  // disk without a corresponding registry update shows up as an
+  // assertion log here. Single source of truth: EVENT_DATA_VERSIONS.
+  if (
+    typeof event.data === 'object' &&
+    event.data !== null &&
+    typeof (event.data as { event?: unknown }).event === 'string'
+  ) {
+    const discriminator = (event.data as { event: string }).event;
+    const registry = EVENT_DATA_VERSIONS as Readonly<Record<string, number>>;
+    const expected = registry[discriminator];
+    if (expected !== undefined && event.data_version !== expected) {
+      try {
+        logToFileLazy(
+          `[agent-ui] data_version mismatch on '${discriminator}': expected ${expected} from EVENT_DATA_VERSIONS, got ${event.data_version}. Bump EVENT_DATA_VERSIONS or update the emitter.`,
+        );
+      } catch {
+        // never throw from emit
+      }
+    }
+  }
+
+  return event;
+}
+
+/**
+ * Lazy debug logger. Pulled lazily because eager imports of
+ * `../utils/debug` in this module pull in the full debug log machinery
+ * (file rotation, redaction, mtime checks) at module init — slow on a
+ * cold start. We only need the helper when an envelope is bad.
+ */
+let _logToFile: ((msg: string) => void) | null = null;
+function logToFileLazy(msg: string): void {
+  if (!_logToFile) {
+    try {
+      const mod = require('../utils/debug') as {
+        logToFile: (msg: string) => void;
+      };
+      _logToFile = mod.logToFile;
+    } catch {
+      _logToFile = () => undefined;
+    }
+  }
+  _logToFile(msg);
+}
+
 function emit(
   type: AgentEventType,
   message: string,
@@ -336,6 +453,11 @@ function emit(
     // omits anyway, but keeping the key absent is clearer in tests).
     ...(data_version !== undefined ? { data_version } : {}),
   };
+  // Zod-validate the envelope at the wire boundary. Failures land in
+  // the on-disk log (never throw, never stderr — Ink owns stdout) so
+  // schema regressions surface as a fixable defect on the next run
+  // rather than a silent data corruption on the wire.
+  validateEnvelopeOrLog(event);
   // Final wire-boundary scrub: redact env-value secrets (notably
   // WIZARD_OAUTH_TOKEN, supplied as a CI org secret) from anywhere in
   // the serialized line. Cheap on clean lines (a single `includes`
@@ -394,7 +516,9 @@ export class AgentUI implements WizardUI {
       | 'no_stored_credentials'
       | 'token_expired'
       | 'refresh_failed'
-      | 'env_selection_failed';
+      | 'env_selection_failed'
+      | 'amplitude_token_expired'
+      | 'gateway_token_expired';
     instruction: string;
     loginCommand: string[];
     resumeCommand?: string[];
@@ -433,6 +557,39 @@ export class AgentUI implements WizardUI {
       rank: number;
       label: string;
     }>;
+    /**
+     * `true` when the auth failure happened DURING an in-flight agent
+     * run (vs the pre-run credential resolution path). Distinct because
+     * mid-run failures often have partial side effects (files written,
+     * events instrumented) and the orchestrator should advertise
+     * `--resume` instead of suggesting a clean restart.
+     */
+    midRun?: boolean;
+    /**
+     * `true` when the wizard has decided to preserve any files written
+     * before the auth failure. Mirrors the OutroScreen's "Keep" choice
+     * in the TUI — an orchestrator should communicate the same intent
+     * to the human ("your changes were kept; re-run to resume").
+     */
+    preserveFiles?: boolean;
+    /**
+     * Coarse-grained partial-progress flags so the orchestrator can
+     * render an honest "X done, Y partial" status to the human without
+     * shelling out to inspect the filesystem.
+     */
+    partialProgress?: {
+      eventsInstrumented?: boolean;
+      dashboardComplete?: boolean;
+    };
+    /**
+     * Distinguishes the upstream that surfaced the failure: `amplitude`
+     * (Amplitude OAuth bearer) vs `llm-gateway` (the Amplitude-hosted
+     * LLM gateway's session token). Both manifest as a 401 but their
+     * remediation differs — re-running the wizard refreshes the
+     * gateway token automatically, while an Amplitude OAuth failure
+     * requires `amplitude-wizard login`.
+     */
+    authSubkind?: 'amplitude' | 'llm-gateway';
   }): void {
     emit('lifecycle', data.instruction, {
       level: 'error',
@@ -445,8 +602,77 @@ export class AgentUI implements WizardUI {
           ? { previousAttempt: data.previousAttempt }
           : {}),
         ...(data.choices ? { choices: data.choices } : {}),
+        ...(data.midRun ? { midRun: true } : {}),
+        ...(data.preserveFiles ? { preserveFiles: true } : {}),
+        ...(data.partialProgress
+          ? { partialProgress: data.partialProgress }
+          : {}),
+        ...(data.authSubkind ? { authSubkind: data.authSubkind } : {}),
       },
     });
+  }
+
+  /**
+   * Emit a structured `error` envelope with a machine-readable `code`
+   * discriminator. Used by the explicit AgentErrorType branches in
+   * `agent-runner.ts` (GATEWAY_DOWN, RATE_LIMIT, MCP_MISSING, etc.) to
+   * give the orchestrator a precise next-step hint without parsing the
+   * sanitized message string. Pairs with the subsequent `run_completed`
+   * envelope from `wizardAbort`. Wire shape mirrors `setRunError` plus
+   * the typed `code` + optional `mcpServer` discriminator.
+   */
+  emitRunError(data: {
+    message: string;
+    code:
+      | 'GATEWAY_DOWN'
+      | 'GATEWAY_INVALID_REQUEST'
+      | 'RATE_LIMIT'
+      | 'API_ERROR'
+      | 'MCP_MISSING'
+      | 'RESOURCE_MISSING';
+    mcpServer?: 'wizard-tools' | 'amplitude-wizard';
+    recoverable?: RecoverableHint;
+    suggestedAction?: SuggestedAction;
+  }): void {
+    emit('error', data.message, {
+      level: 'error',
+      data: {
+        event: 'run_error',
+        code: data.code,
+        ...(data.mcpServer ? { mcpServer: data.mcpServer } : {}),
+        recoverable: data.recoverable ?? 'fatal',
+        ...(data.suggestedAction
+          ? { suggestedAction: data.suggestedAction }
+          : {}),
+      },
+    });
+  }
+
+  /**
+   * Emit a `lifecycle: auth_retry_exhausted` event at the SDK
+   * retry-loop boundary. Pairs with the eventual AUTH_ERROR /
+   * `auth_required` follow-on — sees that exhaustion happened BEFORE
+   * the abort lands. See `AuthRetryExhaustedData` in
+   * `agent-events.ts`.
+   */
+  emitAuthRetryExhausted(data: {
+    attempts: number;
+    subkind?: 'amplitude' | 'llm-gateway';
+  }): void {
+    emit(
+      'lifecycle',
+      `auth_retry_exhausted: attempts=${data.attempts}${
+        data.subkind ? ` subkind=${data.subkind}` : ''
+      }`,
+      {
+        level: 'warn',
+        data: {
+          event: 'auth_retry_exhausted',
+          attempts: data.attempts,
+          ...(data.subkind ? { subkind: data.subkind } : {}),
+        },
+      },
+    );
   }
 
   /**
@@ -886,10 +1112,36 @@ export class AgentUI implements WizardUI {
    * `outcome` + `exitCode` are the contract.
    */
   private _runStartedAtMs: number | null = null;
+  // Run-phase deduplication. We emit `run_phase` at coarse boundaries
+  // (cold_start / agent_running / finalizing / completed / error)
+  // and the agent-runner is the lone caller — but agent_running fires
+  // from every tool call's preToolUse hook, so dedup at the wire
+  // boundary keeps a noisy hook chain from spamming the stream.
+  private _lastRunPhase: string | null = null;
 
   startRun(): void {
     this._runStartedAtMs = Date.now();
     emit('lifecycle', 'run_started', { data: { event: 'start_run' } });
+  }
+
+  /**
+   * Emit a `lifecycle: run_phase` event when the wizard transits
+   * between coarse phase boundaries. Idempotent — repeated calls
+   * with the same phase no-op. See `RunPhase` in `agent-events.ts`.
+   */
+  emitRunPhase(
+    phase:
+      | 'cold_start'
+      | 'agent_running'
+      | 'finalizing'
+      | 'completed'
+      | 'error',
+  ): void {
+    if (this._lastRunPhase === phase) return;
+    this._lastRunPhase = phase;
+    emit('lifecycle', `run_phase: ${phase}`, {
+      data: { event: 'run_phase', phase },
+    });
   }
 
   /**
@@ -1053,6 +1305,12 @@ export class AgentUI implements WizardUI {
     const hint = classifyRunError(error);
     emit('error', sanitized, {
       data: {
+        // `event: 'run_error'` discriminator brings this envelope in
+        // line with every other event family. Without it, an
+        // orchestrator filtering on `data.event` saw nothing here and
+        // had to special-case `type === 'error'`. data_version
+        // registry keys off this discriminator.
+        event: 'run_error',
         name: error.name,
         recoverable: hint.recoverable,
         ...(hint.suggestedAction

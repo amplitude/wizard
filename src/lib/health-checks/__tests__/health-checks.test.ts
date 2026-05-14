@@ -37,6 +37,7 @@ import {
   checkNpmOverallHealth,
   checkAmplitudeComponentHealth,
   checkAmplitudeOverallHealth,
+  checkAmplitudeStatusAndComponents,
   DEFAULT_WIZARD_READINESS_CONFIG,
   evaluateWizardReadiness,
   ServiceHealthStatus,
@@ -406,6 +407,26 @@ describe('health-checks', () => {
       const result = await checkCloudflareOverallHealth();
       expect(result.status).toBe(ServiceHealthStatus.Degraded);
     });
+
+    it('treats an unknown upstream indicator as healthy (fail-safe against schema drift)', async () => {
+      const body = {
+        page: { id: 'x', name: 'x', url: 'x' },
+        // 'super_critical' is not a documented Statuspage indicator value;
+        // we intentionally do NOT block the wizard on schema drift.
+        status: { indicator: 'super_critical', description: 'unknown' },
+      };
+      (global.fetch as Mock).mockImplementation(
+        overrideFetch({
+          [URLS.cloudflareStatus]: () =>
+            Promise.resolve(
+              new Response(JSON.stringify(body), { status: 200 }),
+            ),
+        }),
+      );
+      const result = await checkCloudflareOverallHealth();
+      expect(result.status).toBe(ServiceHealthStatus.Healthy);
+      expect(result.rawIndicator).toBe('super_critical');
+    });
   });
 
   // -----------------------------------------------------------------------
@@ -541,6 +562,38 @@ describe('health-checks', () => {
       expect(comp?.status).toBe(ServiceHealthStatus.Down);
     });
 
+    it('treats an unknown upstream component status as healthy (fail-safe against schema drift)', async () => {
+      const body = makeStatuspageSummary({
+        pageId: 'qf5jlnph3bcy',
+        pageName: 'Amplitude',
+        pageUrl: 'https://status.amplitude.com',
+        indicator: 'none',
+        description: 'All Systems Operational',
+        components: [
+          {
+            id: 'us-cloud',
+            // 'limited_availability' is not a documented Statuspage component
+            // status — must NOT silently flip healthy components to Degraded.
+            name: 'US Cloud',
+            status: 'limited_availability',
+            position: 1,
+            description: null,
+          },
+        ],
+      });
+      (global.fetch as Mock).mockImplementation(
+        overrideFetch({
+          [URLS.amplitudeSummary]: () =>
+            Promise.resolve(
+              new Response(JSON.stringify(body), { status: 200 }),
+            ),
+        }),
+      );
+      const result = await checkAmplitudeComponentHealth();
+      expect(result.status).toBe(ServiceHealthStatus.Healthy);
+      expect(result.degradedOrDownComponents).toBeUndefined();
+    });
+
     it('handles under_maintenance as degraded', async () => {
       const body = makeStatuspageSummary({
         pageId: 'qf5jlnph3bcy',
@@ -624,6 +677,74 @@ describe('health-checks', () => {
     it('reports healthy when Cloudflare components operational', async () => {
       const result = await checkCloudflareComponentHealth();
       expect(result.status).toBe(ServiceHealthStatus.Healthy);
+    });
+  });
+
+  // -----------------------------------------------------------------------
+  // Combined statuspage helper (single summary.json fetch, two results)
+  // -----------------------------------------------------------------------
+
+  describe('checkAmplitudeStatusAndComponents', () => {
+    it('returns both overall and components from a single summary.json fetch', async () => {
+      const fetchSpy = global.fetch as Mock;
+      fetchSpy.mockClear();
+      const { overall, components } = await checkAmplitudeStatusAndComponents();
+      expect(overall.status).toBe(ServiceHealthStatus.Healthy);
+      expect(overall.rawIndicator).toBe('none');
+      expect(components.status).toBe(ServiceHealthStatus.Healthy);
+      expect(components.degradedOrDownComponents).toBeUndefined();
+      // Crucially: only ONE network call, not two — no separate
+      // status.json hit when summary.json already carries the indicator.
+      const calledUrls = fetchSpy.mock.calls.map((c: unknown[]) =>
+        typeof c[0] === 'string' ? c[0] : (c[0] as URL).toString(),
+      );
+      expect(calledUrls).toEqual([URLS.amplitudeSummary]);
+    });
+
+    it('surfaces a degraded indicator AND degraded components from one response', async () => {
+      const body = makeStatuspageSummary({
+        pageId: 'qf5jlnph3bcy',
+        pageName: 'Amplitude',
+        pageUrl: 'https://status.amplitude.com',
+        indicator: 'minor',
+        description: 'Degraded System Performance',
+        components: [
+          {
+            id: 'us-cloud',
+            name: 'US Cloud',
+            status: 'degraded_performance',
+            position: 1,
+            description: null,
+          },
+        ],
+      });
+      (global.fetch as Mock).mockImplementation(
+        overrideFetch({
+          [URLS.amplitudeSummary]: () =>
+            Promise.resolve(
+              new Response(JSON.stringify(body), { status: 200 }),
+            ),
+        }),
+      );
+      const { overall, components } = await checkAmplitudeStatusAndComponents();
+      expect(overall.status).toBe(ServiceHealthStatus.Degraded);
+      expect(overall.rawIndicator).toBe('minor');
+      expect(components.status).toBe(ServiceHealthStatus.Degraded);
+      expect(components.degradedOrDownComponents).toHaveLength(1);
+    });
+
+    it('returns degraded error results on network failure', async () => {
+      (global.fetch as Mock).mockImplementation(
+        overrideFetch({
+          [URLS.amplitudeSummary]: () =>
+            Promise.reject(new Error('fetch failed')),
+        }),
+      );
+      const { overall, components } = await checkAmplitudeStatusAndComponents();
+      expect(overall.status).toBe(ServiceHealthStatus.Degraded);
+      expect(overall.error).toBe('fetch failed');
+      expect(components.status).toBe(ServiceHealthStatus.Degraded);
+      expect(components.error).toBe('fetch failed');
     });
   });
 
@@ -779,15 +900,46 @@ describe('health-checks', () => {
       }
     });
 
-    it('fires all 9 fetch calls in parallel (Anthropic health is a no-op)', async () => {
+    it('fires 6 statuspage/endpoint fetch calls in parallel (Anthropic health is a no-op; statuspage pairs collapsed to summary.json)', async () => {
       await checkAllExternalServices();
       const calledUrls = (global.fetch as Mock).mock.calls.map((c: unknown[]) =>
         typeof c[0] === 'string' ? c[0] : (c[0] as URL).toString(),
       );
-      // 9 fetches: Anthropic health is now a no-op (Vertex AI via proxy)
-      expect(calledUrls).toHaveLength(9);
+      // 6 fetches:
+      //   - Anthropic is a no-op (Vertex AI via proxy)
+      //   - Amplitude / npm / Cloudflare each issue ONE summary.json fetch
+      //     that supplies both overall indicator and components
+      //   - GitHub uses status.json (no component check)
+      //   - LLM Gateway + MCP are direct endpoints
+      expect(calledUrls).toHaveLength(6);
+      expect(calledUrls).toContain(URLS.amplitudeSummary);
+      expect(calledUrls).not.toContain(URLS.amplitudeStatus);
+      expect(calledUrls).toContain(URLS.npmSummary);
+      expect(calledUrls).not.toContain(URLS.npmStatus);
+      expect(calledUrls).toContain(URLS.cloudflareSummary);
+      expect(calledUrls).not.toContain(URLS.cloudflareStatus);
+      expect(calledUrls).toContain(URLS.githubStatus);
       expect(calledUrls).toContain(URLS.llmGatewayLiveness);
       expect(calledUrls).toContain(URLS.mcpLanding);
+    });
+
+    it('does not pass `keepalive: true` (that flag is service-worker semantics, not connection reuse — undici pools connections automatically)', async () => {
+      // Regression guard for https://github.com/nodejs/undici/issues/2169.
+      // The `keepalive` Fetch option controls whether a request can outlive
+      // its global context (page unload / worker termination), NOT HTTP
+      // connection keep-alive. Node 20+ fetch already reuses TLS sockets
+      // via undici's internal pool — passing the flag is misleading at
+      // best and a no-op at worst.
+      await checkAllExternalServices();
+      const calls = (global.fetch as Mock).mock.calls;
+      expect(calls.length).toBeGreaterThan(0);
+      for (const call of calls) {
+        const opts = call[1] as { keepalive?: boolean } | undefined;
+        // Each call should pass an options bag (signal lives there) but
+        // must NOT include the misleading keepalive flag.
+        expect(opts).toBeDefined();
+        expect(opts?.keepalive).toBeUndefined();
+      }
     });
   });
 
@@ -843,16 +995,25 @@ describe('health-checks', () => {
     });
 
     it('returns No when npm overall is down (downBlocksRun)', async () => {
-      const body = makeStatuspageStatus({
+      const body = makeStatuspageSummary({
         pageId: 'wyvgptkd90hm',
         pageName: 'npm',
         pageUrl: 'https://status.npmjs.org',
         indicator: 'critical',
         description: 'Major Service Outage',
+        components: [
+          {
+            id: 'mvm98gtxvb9b',
+            name: 'www.npmjs.com website',
+            status: 'operational',
+            position: 1,
+            description: null,
+          },
+        ],
       });
       (global.fetch as Mock).mockImplementation(
         overrideFetch({
-          [URLS.npmStatus]: () =>
+          [URLS.npmSummary]: () =>
             Promise.resolve(
               new Response(JSON.stringify(body), { status: 200 }),
             ),
@@ -866,16 +1027,25 @@ describe('health-checks', () => {
     });
 
     it('returns YesWithWarnings when a non-blocking service is degraded', async () => {
-      const body = makeStatuspageStatus({
+      const body = makeStatuspageSummary({
         pageId: 'yh6f0r4529hb',
         pageName: 'Cloudflare',
         pageUrl: 'https://www.cloudflarestatus.com',
         indicator: 'minor',
         description: 'Minor Service Outage',
+        components: [
+          {
+            id: '1km35smx8p41',
+            name: 'Cloudflare Sites and Services',
+            status: 'operational',
+            position: 1,
+            description: null,
+          },
+        ],
       });
       (global.fetch as Mock).mockImplementation(
         overrideFetch({
-          [URLS.cloudflareStatus]: () =>
+          [URLS.cloudflareSummary]: () =>
             Promise.resolve(
               new Response(JSON.stringify(body), { status: 200 }),
             ),

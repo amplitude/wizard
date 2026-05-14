@@ -7,13 +7,10 @@ import {
 } from './types';
 import {
   checkAnthropicHealth,
-  checkAmplitudeOverallHealth,
-  checkAmplitudeComponentHealth,
+  checkAmplitudeStatusAndComponents,
   checkGithubHealth,
-  checkNpmOverallHealth,
-  checkNpmComponentHealth,
-  checkCloudflareOverallHealth,
-  checkCloudflareComponentHealth,
+  checkNpmStatusAndComponents,
+  checkCloudflareStatusAndComponents,
 } from './statuspage';
 import { checkLlmGatewayHealth, checkMcpHealth } from './endpoints';
 
@@ -65,38 +62,29 @@ export const DEFAULT_WIZARD_READINESS_CONFIG: WizardReadinessConfig = {
 // ---------------------------------------------------------------------------
 
 export async function checkAllExternalServices(): Promise<AllServicesHealth> {
-  const [
-    anthropic,
-    amplitudeOverall,
-    amplitudeComponents,
-    github,
-    npmOverall,
-    npmComponents,
-    cloudflareOverall,
-    cloudflareComponents,
-    llmGateway,
-    mcp,
-  ] = await Promise.all([
-    checkAnthropicHealth(),
-    checkAmplitudeOverallHealth(),
-    checkAmplitudeComponentHealth(),
-    checkGithubHealth(),
-    checkNpmOverallHealth(),
-    checkNpmComponentHealth(),
-    checkCloudflareOverallHealth(),
-    checkCloudflareComponentHealth(),
-    checkLlmGatewayHealth(),
-    checkMcpHealth(),
-  ]);
+  // Collapses the three statuspage `*Overall` + `*Components` pairs into a
+  // single `summary.json` fetch each (Statuspage's summary endpoint returns
+  // both the page-level indicator and the component list in one response).
+  // Cuts the aggregate readiness check from 10 fetches to 7.
+  const [anthropic, amplitude, github, npm, cloudflare, llmGateway, mcp] =
+    await Promise.all([
+      checkAnthropicHealth(),
+      checkAmplitudeStatusAndComponents(),
+      checkGithubHealth(),
+      checkNpmStatusAndComponents(),
+      checkCloudflareStatusAndComponents(),
+      checkLlmGatewayHealth(),
+      checkMcpHealth(),
+    ]);
   return {
     anthropic,
-    amplitudeOverall,
-    amplitudeComponents,
+    amplitudeOverall: amplitude.overall,
+    amplitudeComponents: amplitude.components,
     github,
-    npmOverall,
-    npmComponents,
-    cloudflareOverall,
-    cloudflareComponents,
+    npmOverall: npm.overall,
+    npmComponents: npm.components,
+    cloudflareOverall: cloudflare.overall,
+    cloudflareComponents: cloudflare.components,
     llmGateway,
     mcp,
   };

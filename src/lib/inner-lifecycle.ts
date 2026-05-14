@@ -137,6 +137,15 @@ export function createInnerLifecycleHooks(config: InnerLifecycleConfig): {
     // the inner agent did, but redundant in the TUI (the agent's own
     // TodoWrite items already show user-facing progress).
     if (agentUI) agentUI.emitToolCall({ tool: toolName, summary });
+    // The first PreToolUse marks the `agent_running` coarse phase
+    // boundary — the inner Claude agent has actually started doing
+    // work (vs. still booting / handshaking MCP). The AgentUI
+    // emitter dedups, so it's safe to call from every tool call.
+    try {
+      getUI().emitRunPhase?.('agent_running');
+    } catch {
+      // best-effort — phase signal must not abort the agent loop
+    }
 
     // Live substep narration for InkUI: surface a single human-readable
     // line per tool call ("Reading package.json", "Running pnpm add …")

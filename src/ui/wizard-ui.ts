@@ -364,6 +364,106 @@ export interface WizardUI {
   }): void;
 
   /**
+   * Emit a structured `auth_required` event whenever the wizard
+   * decides the user's credentials are no longer usable — either at
+   * pre-run resolution (no stored creds, expired token, refresh
+   * failure) or mid-run when the LLM-gateway / Amplitude bearer
+   * expires while a long agent run was in flight.
+   *
+   * Optional because only AgentUI emits to NDJSON — InkUI / LoggingUI
+   * no-op, since their UI already shows the equivalent failure via
+   * `setOutroData`. Mid-run callers MUST pass `midRun: true` plus the
+   * `partialProgress` flags so the orchestrator can advertise
+   * `--resume` instead of suggesting a clean restart.
+   */
+  emitAuthRequired?(data: {
+    reason:
+      | 'no_stored_credentials'
+      | 'token_expired'
+      | 'refresh_failed'
+      | 'env_selection_failed'
+      | 'amplitude_token_expired'
+      | 'gateway_token_expired';
+    instruction: string;
+    loginCommand: string[];
+    resumeCommand?: string[];
+    midRun?: boolean;
+    preserveFiles?: boolean;
+    partialProgress?: {
+      eventsInstrumented?: boolean;
+      dashboardComplete?: boolean;
+    };
+    authSubkind?: 'amplitude' | 'llm-gateway';
+  }): void;
+
+  /**
+   * Emit a `lifecycle: auth_retry_exhausted` event when the wizard
+   * decides the SDK's internal auth-retry storm is unrecoverable —
+   * the boundary that fires immediately before
+   * `controller.abort('auth_failed')` in `agent-interface.ts`. Lets
+   * orchestrators distinguish "single 401, transient" from "we tried
+   * twice, giving up" without parsing the eventual `auth_required`
+   * envelope's text.
+   *
+   * Optional — only AgentUI emits to NDJSON. InkUI / LoggingUI no-op
+   * (the TUI surfaces the failure via the AUTH_ERROR outro; CI logs
+   * still see the underlying api_retry messages via the SDK).
+   */
+  emitAuthRetryExhausted?(data: {
+    attempts: number;
+    subkind?: 'amplitude' | 'llm-gateway';
+  }): void;
+
+  /**
+   * Emit a structured `error` envelope tagged with a machine-readable
+   * `code` discriminator (`GATEWAY_DOWN`, `RATE_LIMIT`, `MCP_MISSING`,
+   * etc.). Distinct from `setRunError`, which classifies arbitrary
+   * caught Errors via pattern match — `emitRunError` is for the
+   * runner's explicit AgentErrorType branches where we know the kind
+   * upfront and can hand the orchestrator a precise remediation hint
+   * without parsing the message string.
+   *
+   * Optional — only AgentUI emits. InkUI / LoggingUI no-op since the
+   * Outro / log path already covers their UX. The eventual
+   * `run_completed` envelope still lands via `wizardAbort` regardless.
+   */
+  emitRunError?(data: {
+    message: string;
+    code:
+      | 'GATEWAY_DOWN'
+      | 'GATEWAY_INVALID_REQUEST'
+      | 'RATE_LIMIT'
+      | 'API_ERROR'
+      | 'MCP_MISSING'
+      | 'RESOURCE_MISSING';
+    mcpServer?: 'wizard-tools' | 'amplitude-wizard';
+    recoverable?: 'retry' | 'reinvoke_with_flag' | 'human_required' | 'fatal';
+    suggestedAction?: { command?: string[]; docsUrl?: string };
+  }): void;
+
+  /**
+   * Coarse-grained run-phase boundary signal. Five fixed states a
+   * wizard run transits in order: `cold_start` -> `agent_running` ->
+   * `finalizing` -> `completed` | `error`. See `RunPhase` in
+   * `agent-events.ts` for the contract. Optional — only AgentUI
+   * emits to NDJSON; InkUI / LoggingUI no-op (their UI already
+   * implies phase via the journey stepper / log lines).
+   *
+   * Idempotent — callers may invoke with the same phase multiple
+   * times (a tool call rolling into `agent_running` is fine even if
+   * we already emitted it). The implementation deduplicates so
+   * orchestrators see one phase-transition event per actual change.
+   */
+  emitRunPhase?(
+    phase:
+      | 'cold_start'
+      | 'agent_running'
+      | 'finalizing'
+      | 'completed'
+      | 'error',
+  ): void;
+
+  /**
    * Emit a `setup_context` event carrying the resolved Amplitude scope
    * (region, org, project, app, env) at a known phase boundary.
    * Optional because only AgentUI emits to NDJSON — InkUI / LoggingUI

@@ -1,0 +1,20 @@
+{
+  "callSite": "gateway-probe",
+  "description": "Gateway transport probe (src/lib/agent/ai-sdk-gateway-probe.ts). Single short completion to validate streaming + gateway auth. Quality is binary: did the model echo the magic token? No tools, no system prompt, max 32 output tokens. Moved to Haiku in #590.",
+  "rubricVersion": "2026-05-07.1",
+  "system": null,
+  "maxOutputTokens": 32,
+  "prompts": [
+    {
+      "id": "probe-echo",
+      "userMessage": "Reply with exactly this token and nothing else: wizard_ai_sdk_probe_ok",
+      "structuralChecks": {
+        "minLength": 5,
+        "maxLength": 200,
+        "expectKeywords": ["wizard_ai_sdk_probe_ok"],
+        "forbiddenKeywords": ["I cannot", "I can't", "I'm unable", "as an AI"],
+        "expectJson": false
+      }
+    }
+  ]
+}

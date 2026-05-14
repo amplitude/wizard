@@ -84,9 +84,39 @@ Do NOT add a fifth — internal steps (env var writes, Content Security Policy e
 
   'After installing the SDK and adding init code, but BEFORE writing any track() calls, you MUST call confirm_event_plan. Naming, plan sizing, funnel/async/symmetry/identify, autocapture overlap, and `.amplitude/events.json` ownership — read `.claude/skills/wizard-prompt-supplement/references/confirm-event-plan-contract.md` before the call. Invariants: confirm_event_plan owns the initial write of `.amplitude/events.json` (canonical shape `[{name, description}]`); do not pre-write a conflicting shape, do not create the legacy root `.amplitude-events.json` / `.amplitude-dashboard.json`; if skipped, do not instrument.',
 
+  `Events fully covered by Amplitude autocapture MUST NOT be proposed in the event plan. The event plan is exclusively for events that require a hand-written \`track()\` call. If the user's interaction is one of the autocaptured types for the active SDK, do NOT include it in the events array you pass to \`confirm_event_plan\` — proposing an event the wizard will not implement is a bug. The user sees it in the plan, approves it, and then nothing gets written. BEFORE you assemble the \`events\` array, audit every candidate against the SDK's init config. If autocapture handles it end-to-end, drop it from the plan entirely — do NOT include it with a note, do NOT mention it in the description, do NOT let it ride along to "remind" the user. The plan is the contract for what \`track()\` calls will be written; if no \`track()\` call will be written, the event does not belong in the plan. Only propose events that capture business outcomes, state changes, async success/failure, or multi-step flow milestones that autocapture cannot infer from a click alone. Common autocaptured shapes that MUST NOT be proposed: "[X] Clicked", "Button Clicked", "Link Clicked", "Element Clicked", "Page Viewed", "Screen Viewed", "Route Changed", "Session Started", "Session Ended", "Form Submitted", "Form Started", "File Downloaded", "Rage Click", "Dead Click", "Error Occurred", and any single-button-click event like "Foo Pasted" / "Bar Exported" / "Baz Opened" that fires from a click handler with no business-side state change. Platform-specific autocapture catalogs: browser (@amplitude/unified / @amplitude/analytics-browser) defaults are documented at https://amplitude.com/docs/data/sdks/browser-2/autocapture and named on the browser-only commandment block; mobile SDKs (Swift / Android / React Native / Flutter) only autocapture what the init config explicitly opts in to — read the active SDK's init code before deciding.`,
+
+  `Every \`track()\` call you write MUST include 1-3 properties that capture the user-meaningful context of the action. A bare event name is not enough — the goal is for the event to answer a question in Amplitude (e.g., "what model was used for that AI generation?" "which room was joined?" "how long did the export take?"). Choose properties from information the surrounding code already has access to — local variables, function arguments, state — never invent or hand-roll property values.
+
+Property naming follows lowercase-with-spaces or snake_case based on the project's existing convention (detected via the \`discover-analytics-patterns\` skill). If no convention exists, use snake_case.
+
+Examples:
+  // GOOD — captures user-meaningful context the analyst needs
+  amplitude.track("ai diagram generated", {
+    prompt_length: prompt.length,
+    model: "claude-sonnet-4-6",
+    latency_ms: Date.now() - startedAt,
+  });
+  amplitude.track("collaboration session joined", { room_id: roomId });
+  amplitude.track("canvas exported", { format: "png", element_count: elements.length });
+
+  // BAD — bare event with no context; the chart can only count occurrences
+  amplitude.track("scene saved to backend");
+  amplitude.track("ai diagram generated");
+
+If you genuinely cannot capture any property at a callsite (e.g., a pure lifecycle event like \`app loaded\` where the only available context is \`frame_id\` and you've already captured it), prefer a single property over zero — and document the gap in the Setup Report's "Instrumented" table as "(no properties captured — context unavailable at callsite)".`,
+
   'Post-instrumentation `.amplitude/events.json` array shape — read `.claude/skills/wizard-prompt-supplement/references/post-instrumentation-events-and-dashboard.md`. This run does NOT create charts or dashboards: do NOT call `record_dashboard` / `create_chart` / `create_dashboard` / `query_dataset` / any Amplitude MCP chart/dashboard tool — those are deferred to the `amplitude-wizard dashboard` command, which runs after ingestion catches up.',
 
   'Setup report format and `<wizard-report>` tags — read `.claude/skills/wizard-prompt-supplement/references/setup-report-requirements.md`. You MUST write `amplitude-setup-report.md` at the project root before the run ends.',
+
+  `The Setup Report (\`amplitude-setup-report.md\`) MUST reconcile every event in the approved \`.amplitude/events.json\` plan. Each event lands in exactly one of three buckets:
+
+  - **Instrumented** — a \`track()\` call was wired. Show the file path. Include any properties captured.
+  - **Covered by autocapture** — no \`track()\` call needed because autocapture catches it. Name the specific autocapture surface (e.g., "element clicks via autocapture.elementInteractions" or "page views via autocapture.pageViews"). Generic "autocapture handles it" is insufficient — be specific so the user can verify.
+  - **Dropped** — intentionally not wired AND not autocaptured. Explain why (e.g., "this event would require backend instrumentation we cannot reach from the client").
+
+The sum of events across all three buckets MUST equal the count in the approved plan. A bullet count mismatch is a contract violation that hides work the user paid for from the agent (in tokens / time) and never received.`,
 
   'Prefer `report_status` (wizard-tools MCP) for progress updates and fatal errors. Use `kind="status"` for in-progress updates (appears in the spinner). Use `kind="error"` for fatal halts (codes: `MCP_MISSING`, `RESOURCE_MISSING`). Legacy `[STATUS]` / `[ERROR-MCP-MISSING]` / `[ERROR-RESOURCE-MISSING]` text markers from older bundled skills are still recognized for back-compat; new code should use `report_status`.',
 
@@ -117,6 +147,22 @@ The wizard runs explicit cleanup hooks AFTER your run (see \`cleanupIntegrationS
  */
 const BROWSER_ONLY_COMMANDMENTS: string[] = [
   `Browser SDK init defaults — CDN vs npm shapes differ; full autocapture tables, init()/initAll() examples, remoteConfig nesting, sessionReplay/engagement defaults, and per-SDK exclusions: read \`.claude/skills/wizard-prompt-supplement/references/browser-sdk-init-defaults.md\`. Defaults use the full autocapture set including frustrationInteractions; unified shape uses initAll(API_KEY, { analytics: { remoteConfig: { fetchRemoteConfig: true }, autocapture: { /* each key with same-line // comment */ } }, sessionReplay: { sampleRate: 1 }, engagement: {} }). Every generated option line needs a brief // comment so users can toggle behavior.`,
+
+  `Browser autocapture surface catalog — these are the autocaptured event sources for @amplitude/unified / @amplitude/analytics-browser when their defaults are on. Cross-reference against the SDK init config you wrote, then drop any candidate event covered by an enabled surface from the \`confirm_event_plan\` events array (see the universal "Events fully covered by Amplitude autocapture MUST NOT be proposed" rule).
+
+  - \`attribution\` — UTM / referrer attribution events
+  - \`pageViews\` — SPA route changes and initial page loads (covers "Page Viewed", "Screen Viewed", "Route Changed")
+  - \`sessions\` — session start / end (covers "Session Started", "Session Ended")
+  - \`formInteractions\` — form starts and submits (covers "Form Submitted", "Form Started", "Input Changed")
+  - \`fileDownloads\` — clicks on download links for common file types (covers "File Downloaded")
+  - \`elementInteractions\` — clicks and changes on instrumented elements (covers "[X] Clicked", "Button Clicked", "Link Clicked", "Element Clicked", and any single-click-fired "Foo Pasted" / "Bar Exported" / "Baz Opened" event with no business-side state change)
+  - \`frustrationInteractions\` — rage clicks and dead clicks (covers "Rage Click", "Dead Click")
+  - \`networkTracking\` — XHR / fetch request events (covers any "Request Sent" / "Response Received" generic network events)
+  - \`webVitals\` — LCP, INP, CLS on page hide (covers "Web Vitals" / per-metric events)
+  - \`errorMonitoring\` — uncaught JS errors (covers "Error Occurred")
+  - \`pageUrlEnrichment\` — adds path / search to event props (not a standalone event; no need to propose URL-tracking events)
+
+Doc: https://amplitude.com/docs/data/sdks/browser-2/autocapture`,
 
   `Initialize the SDK exactly once, in the framework's natural entry file. Every other file imports the SDK package directly with a namespace import — do NOT build a project-local re-export wrapper.
 
