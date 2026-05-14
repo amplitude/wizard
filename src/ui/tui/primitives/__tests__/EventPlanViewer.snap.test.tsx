@@ -13,7 +13,7 @@ describe('EventPlanViewer snapshots', () => {
     expect(frame).toMatchSnapshot();
   });
 
-  it('renders visible events and skips blank names', () => {
+  it('renders visible events and skips blank names (pending approval)', () => {
     const store = makeStoreForSnapshot();
     const { frame } = renderSnapshot(
       <EventPlanViewer
@@ -23,6 +23,27 @@ describe('EventPlanViewer snapshots', () => {
             description: 'Fires after successful project provisioning.',
           },
           { name: '   ', description: 'Should be hidden.' },
+          {
+            name: 'SDK Initialized',
+            description: '',
+          },
+        ]}
+      />,
+      store,
+    );
+    expect(frame).toMatchSnapshot();
+  });
+
+  it('renders the post-approval "Approved · wiring N events…" header', () => {
+    const store = makeStoreForSnapshot();
+    const { frame } = renderSnapshot(
+      <EventPlanViewer
+        approved
+        events={[
+          {
+            name: 'Project Created',
+            description: 'Fires after successful project provisioning.',
+          },
           {
             name: 'SDK Initialized',
             description: '',

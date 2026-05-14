@@ -159,6 +159,7 @@ export const EVENT_DATA_VERSIONS = {
   tool_call: 1,
   file_change_planned: 1,
   file_change_applied: 1,
+  file_changed: 1,
   // Event plan
   event_plan_proposed: 1,
   event_plan_confirmed: 1,
@@ -1002,6 +1003,27 @@ export interface FileChangeAppliedData {
   bytes?: number;
 }
 
+/**
+ * `file_changed` — emitted at PostToolUse with diff metadata so outer
+ * agents can render per-file change previews without re-reading anything
+ * themselves. Pairs with `file_change_applied` (same path) and adds the
+ * additions/deletions/hunks the wizard's session-scoped ledger computed.
+ */
+export interface FileChangedData {
+  event: 'file_changed';
+  path: string;
+  operation: 'create' | 'modify' | 'delete';
+  additions: number;
+  deletions: number;
+  /** Lightweight hunk metadata (line ranges) for ambient diff rendering. */
+  hunks: Array<{
+    oldStart: number;
+    oldLines: number;
+    newStart: number;
+    newLines: number;
+  }>;
+}
+
 /** `event_plan_proposed` — emitted when the inner agent calls `confirm_event_plan`. */
 export interface EventPlanProposedData {
   event: 'event_plan_proposed';
@@ -1590,6 +1612,7 @@ export type InnerAgentLifecycleData =
   | FileChangePlannedData
   | FileChangeAppliedData
   | FileChangeFailedData
+  | FileChangedData
   | EventPlanProposedData
   | EventPlanConfirmedData
   | VerificationStartedData

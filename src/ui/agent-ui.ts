@@ -19,6 +19,7 @@ import type {
   ToolCallData,
   FileChangePlannedData,
   FileChangeAppliedData,
+  FileChangedData,
   EventPlanProposedData,
   EventPlanConfirmedData,
   VerificationStartedData,
@@ -1073,6 +1074,19 @@ export class AgentUI implements WizardUI {
     } else if (data.operation === 'modify') {
       registerSetupComplete({ files: { written: [], modified: [data.path] } });
     }
+  }
+
+  /**
+   * `file_changed` — per-write diff metadata. Emitted from PostToolUse
+   * after `file_change_applied`, carries additions/deletions/hunk ranges
+   * so ambient agents can render diffs without re-reading the file.
+   */
+  emitFileChanged(data: Omit<FileChangedData, 'event'>): void {
+    emit(
+      'progress',
+      `file_changed: ${data.operation} ${data.path} (+${data.additions}/-${data.deletions})`,
+      { data: { event: 'file_changed', ...data } },
+    );
   }
 
   // WizardUI-shaped aliases (see wizard-ui.ts). Inner-lifecycle calls these

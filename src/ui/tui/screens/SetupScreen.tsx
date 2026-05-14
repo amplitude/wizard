@@ -122,10 +122,14 @@ export const SetupScreen = ({ store }: SetupScreenProps) => {
   }, [answerOrderLength]);
 
   if (resolving) {
+    // Voice tweak (PR A2 #7): "Detecting project configuration…" was
+    // accurate but read as machine output. "Reading your project…"
+    // names the same action in the wizard's voice — same scope, no
+    // UX change.
     return (
       <Box flexDirection="column" flexGrow={1}>
         <Text color={Colors.active}>
-          Detecting project configuration{Icons.ellipsis}
+          Reading your project{Icons.ellipsis}
         </Text>
       </Box>
     );

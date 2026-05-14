@@ -27,7 +27,15 @@ async function fetchEndpointHealth(
   try {
     const controller = new AbortController();
     const tid = setTimeout(() => controller.abort(), timeoutMs);
-    const res = await fetch(url, { signal: controller.signal });
+    // Node 20+'s built-in fetch (powered by undici) maintains an internal
+    // connection pool keyed by origin and reuses TLS sockets across
+    // requests automatically — no flag required. We deliberately do NOT
+    // pass `keepalive: true`: that's the WHATWG service-worker "outlive
+    // the page" semantic, not a connection-reuse hint
+    // (https://github.com/nodejs/undici/issues/2169).
+    const res = await fetch(url, {
+      signal: controller.signal,
+    });
     clearTimeout(tid);
 
     if (res.status === expectedStatus) {

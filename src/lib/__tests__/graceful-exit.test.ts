@@ -159,6 +159,36 @@ describe('performGracefulExit', () => {
     // Restore the original UI so subsequent tests see a clean slate.
     setUI(previousUI);
   });
+
+  it('stamps run duration on the cancelled envelope from AgentUI getRunStartedAtMs (Bugbot #9)', async () => {
+    // Regression: previously `performGracefulExit` measured `Date.now() -
+    // startedAt` where `startedAt` was captured at function entry —
+    // ~0ms of synchronous work, not the wizard run duration. The fix
+    // reads from `computeRunDurationMs()` which pulls from AgentUI's
+    // run-start timestamp, matching what `wizardAbort` stamps.
+    const { setUI, getUI: realGetUI } = await import('../../ui/index.js');
+    const previousUI = realGetUI();
+    const emitRunCompleted = vi.fn();
+    // Simulate AgentUI by exposing `getRunStartedAtMs` returning a value
+    // 12345 ms in the past.
+    const runStartedAt = Date.now() - 12_345;
+    setUI({
+      ...previousUI,
+      emitRunCompleted,
+      getRunStartedAtMs: () => runStartedAt,
+    } as typeof previousUI);
+
+    const ctx = makeCtx();
+    performGracefulExit(ctx);
+
+    expect(emitRunCompleted).toHaveBeenCalledTimes(1);
+    const arg = emitRunCompleted.mock.calls[0][0] as { durationMs: number };
+    // Should be ≥12 345 (the run duration), not ~0 (the exit-fn duration).
+    expect(arg.durationMs).toBeGreaterThanOrEqual(12_345);
+    expect(arg.durationMs).toBeLessThan(12_345 + 1_000);
+
+    setUI(previousUI);
+  });
 });
 
 describe('installAbortSignalHandler', () => {
@@ -225,5 +255,28 @@ describe('installAbortSignalHandler', () => {
     installAbortSignalHandler(session);
     installAbortSignalHandler(session);
     expect(listeners.length).toBe(1);
+  });
+
+  it('second SIGINT exits 130 without re-running saveCheckpoint / abortWizard / flush', async () => {
+    // In production `process.exit(130)` terminates the worker so falling
+    // through doesn't matter. In tests where `process.exit` is mocked
+    // (above) execution would otherwise fall through to the abort body
+    // and double-execute saveCheckpoint / abortWizard / analytics.flush.
+    // The `return` guard prevents that.
+    const { installAbortSignalHandler } = await import('../graceful-exit.js');
+    const session = { installDir: '/tmp/test' } as unknown as WizardSession;
+    installAbortSignalHandler(session);
+
+    // First SIGINT: full abort sequence.
+    listeners[0]('SIGINT');
+    expect(mockSaveCheckpoint).toHaveBeenCalledTimes(1);
+    expect(mockFlush).toHaveBeenCalledTimes(1);
+
+    // Second SIGINT: must exit immediately without re-entering the body.
+    // (process.exit is mocked to no-op so we can observe the fall-through.)
+    listeners[0]('SIGINT');
+    expect(process.exit).toHaveBeenCalledWith(130);
+    expect(mockSaveCheckpoint).toHaveBeenCalledTimes(1); // no re-entry
+    expect(mockFlush).toHaveBeenCalledTimes(1); // no re-entry
   });
 });

@@ -5,6 +5,8 @@ import {
   AMPLITUDE_ZONE_SETTINGS,
   OUTBOUND_URLS,
   OAUTH_PORT,
+  PRIVACY_POLICY_URL,
+  TERMS_OF_SERVICE_URL,
   type AmplitudeZone,
 } from '../lib/constants.js';
 import { createLogger } from '../lib/observability/logger.js';
@@ -13,6 +15,59 @@ const log = createLogger('direct-signup');
 
 const REQUEST_TIMEOUT_MS = 10_000;
 const MAX_EXPIRES_IN_SECONDS = 86_400 * 365;
+
+/**
+ * The fields the wizard knows how to satisfy when listed in
+ * `needs_information.required`. Drives the schema's refine AND consumers
+ * that exhaustively switch on a kind (e.g. `flows.ts` `requiredSatisfied`).
+ * Adding a new kind here is the single source-of-truth change that
+ * propagates through the parser, the flow predicate, and any other
+ * consumer via `tsc` errors at unhandled call sites.
+ */
+export const KNOWN_REQUIRED_KEYS = ['full_name', 'terms_acceptance'] as const;
+export type RequiredKey = (typeof KNOWN_REQUIRED_KEYS)[number];
+
+/**
+ * Legal document kinds the wizard knows how to render. Same source-of-truth
+ * pattern as KNOWN_REQUIRED_KEYS — the schema's enum and the screen's
+ * iteration both derive from this const.
+ */
+export const KNOWN_DOC_KINDS = ['terms_of_service', 'privacy_policy'] as const;
+export type DocKind = (typeof KNOWN_DOC_KINDS)[number];
+
+/**
+ * Map of legal-doc kind → URL. Shared across the wire boundary
+ * (`needs_information` parser, signup-or-auth wrapper, session) and the
+ * follow-up POST body builder. Adding a new `DocKind` propagates here
+ * automatically via tsc.
+ */
+export type LegalDocumentBundle = Record<DocKind, string>;
+
+/**
+ * Where a `LegalDocumentBundle`'s URLs originated:
+ * `'server'` — BE-supplied via `needs_information.terms_acceptance.documents`.
+ * `'local'` — synthesized from local constants by the parser's spoof block.
+ */
+export type LegalDocumentSource = 'server' | 'local';
+
+// === SPOOF — DELETE WHEN REMOVING LOCAL FALLBACK ===
+// Local URLs the parser substitutes when the BE flag is OFF. Keyed by
+// DocKind so adding a new kind propagates here via tsc.
+//
+// Exported because non-TUI callers (CI / agent / classic modes via
+// `src/commands/helpers.ts`) need the same bundle to construct a
+// with_required_fields signup body — those modes never traverse the parser's
+// needs_information round-trip, so they synthesize the bundle directly.
+//
+// **Mock-fragility warning:** adding a new entry here also requires
+// adding the corresponding `lib/constants` export to any vitest mock
+// factory that includes this module. Without that, vitest's strict
+// mocker throws at module-load time and cascades unrelated tests into
+// timeout — happened once already at commit 9c47575f → 3896fa8b.
+export const LOCAL_DOC_URLS: LegalDocumentBundle = {
+  terms_of_service: TERMS_OF_SERVICE_URL,
+  privacy_policy: PRIVACY_POLICY_URL,
+};
 
 // Discriminated union response schemas from the provisioning endpoint.
 // `dashboard_url` — optional magic-link URL (amplitude/javascript PR #108967).
@@ -64,39 +119,61 @@ const RedirectSchema = z.object({
 // test (`accepts properties values with or without optional metadata`) that
 // pins both shapes; keep it green if you change this.
 //
-// **Supported `required` shape:** the wizard's TUI ceremony has exactly one
-// collection screen (`SignupFullNameScreen`), so the only `required` value
-// it can act on is exactly `['full_name']`. The `.refine()` enforces this at
-// the parse layer — anything else (additional fields, missing fields, empty
-// array, substituted field) fails the parse and we route through the
-// type-aware handler below to `kind: 'error'` with `code:
-// 'unsupported_required_shape'`. That code maps to a distinct
-// `needs_information_unsupported` telemetry status in the wrapper so the
-// drift is visible in the funnel before users notice. To extend support,
-// update both this refine and `SUPPORTED_REQUIRED` together.
-const SUPPORTED_REQUIRED: ReadonlyArray<string> = ['full_name'];
+// **Supported `required` shape:** any non-empty subset of
+// `KNOWN_REQUIRED_KEYS`. Anything else (unknown kinds, empty array) fails
+// the parse and we route through the type-aware handler below to
+// `kind: 'error'` with `code: 'unsupported_required_shape'`. That code maps
+// to a distinct `needs_information_unsupported` telemetry status in the
+// wrapper so the drift is visible in the funnel before users notice.
 const NeedsInformationSchema = z.object({
   type: z.literal('needs_information'),
   needs_information: z.object({
     schema: z.object({
       type: z.literal('object'),
       properties: z.record(z.string(), z.unknown()),
-      required: z
-        .array(z.string())
-        .refine(
-          (arr) =>
-            arr.length === SUPPORTED_REQUIRED.length &&
-            SUPPORTED_REQUIRED.every((field) => arr.includes(field)),
-          { message: 'unsupported_required_shape' },
-        ),
+      required: z.array(z.enum(KNOWN_REQUIRED_KEYS)).nonempty(),
     }),
   }),
 });
+
+// Validates AND emits the keyed shape for `terms_acceptance.documents` in
+// one pass via `.transform()`. Output is `{ terms_of_service, privacy_policy }`
+// directly — no `.find()` ceremony at the call site.
+const DocumentEntrySchema = z.object({
+  kind: z.enum(KNOWN_DOC_KINDS),
+  url: z.string().url(),
+});
+
+const TermsAcceptanceDocsSchema = z
+  .array(DocumentEntrySchema)
+  // Length derives from KNOWN_DOC_KINDS so adding a new kind doesn't
+  // leave a stale magic number behind. Today: 2. Tomorrow: whatever
+  // KNOWN_DOC_KINDS becomes.
+  .length(KNOWN_DOC_KINDS.length)
+  .transform((docs, ctx) => {
+    const map: Partial<Record<DocKind, string>> = {};
+    for (const d of docs) map[d.kind] = d.url;
+    if (!map.terms_of_service || !map.privacy_policy) {
+      // ctx = zod RefinementCtx; addIssue + z.NEVER short-circuits the
+      // transform and surfaces the failure at the parent safeParse.
+      ctx.addIssue({ code: 'custom', message: 'unsupported_required_shape' });
+      return z.NEVER;
+    }
+    return {
+      terms_of_service: map.terms_of_service,
+      privacy_policy: map.privacy_policy,
+    };
+  });
 
 const ErrorSchema = z.object({
   type: z.literal('error'),
   error: z.object({ code: z.string(), message: z.string() }),
 });
+
+// Narrow `response.data` (typed as `any` by axios) to "an object with a
+// `type` field" without an `as` cast — zod handles the unknown → typed
+// value safely. Used by the unsupported-shape fall-through.
+const ResponseTypeSchema = z.object({ type: z.string() }).passthrough();
 
 const TokenSchema = z.object({
   access_token: z.string(),
@@ -132,27 +209,92 @@ function isCallerAbort(error: unknown, signal?: AbortSignal): boolean {
   return false;
 }
 
-export interface DirectSignupInput {
-  email: string;
-  /**
-   * Optional. Omit on the probe POST so the server can decide whether the
-   * account is new (→ `needs_information`) or already exists (→ redirect).
-   * Required on the follow-up POST when the wizard has collected the field
-   * the server asked for.
-   */
-  fullName?: string;
-  zone: AmplitudeZone;
-  /**
-   * Aborts both the provisioning POST and the token-exchange POST when
-   * fired. Threaded from the screen's `useAsyncEffect` so unmounting
-   * (Esc back, /exit, navigation) cancels in-flight network work
-   * before it can settle and trigger downstream side effects (token
-   * persistence). Without this, a cancelled ceremony can still leak
-   * `replaceStoredUser` writes that make the next launch think the
-   * user is signed in.
-   */
-  signal?: AbortSignal;
-}
+/**
+ * Shared shape of the signup request payload, parameterized by email
+ * nullability. Both `DirectSignupInput` (`email: string`) and
+ * `signup-or-auth.ts`'s `SignupOrAuthInput` (`email: string | null`)
+ * instantiate this — keeping them structurally identical except for
+ * email lets `performSignupOrAuth` pass through to `performDirectSignup`
+ * with a one-line spread after its email-non-null guard, without any
+ * risk of the two shapes silently diverging.
+ *
+ * - `kind: 'email_only'` — the wizard hasn't heard from the BE yet during
+ *   this ceremony. Body carries only `email` (plus envelope fields).
+ *   The BE decides what's needed and responds `needs_information`,
+ *   `requires_redirect` (existing user), or `oauth` (success).
+ *
+ * - `kind: 'with_required_fields'` — the wizard received `needs_information`
+ *   on a prior call and the user has satisfied the fields the BE
+ *   requested in that response. Each of `fullName` and
+ *   `legalDocumentBundle` is independently optional: present iff the BE
+ *   asked for the corresponding `RequiredKey` AND the user collected it.
+ *   The body builder in `performDirectSignup` emits each request slot
+ *   only when its source field is defined, so the POST body mirrors the
+ *   BE-supplied `required` array exactly.
+ *
+ * Why the kind discriminator is binary even though the fields aren't:
+ * the wizard's flow gate (`requiredSatisfied` in `flows.ts`) prevents
+ * `SigningUp` from re-firing until every BE-required field is collected.
+ * So `'with_required_fields'` always means "this is the follow-up POST
+ * after `needs_information`" — never a partial-progress retry. What the
+ * BE asked for determines which optional fields are populated; the kind
+ * itself just tells callers (and the body builder) whether they're on
+ * the probe path or the follow-up path.
+ */
+export type SignupShape<Email extends string | null> =
+  | {
+      kind: 'email_only';
+      email: Email;
+      zone: AmplitudeZone;
+      /**
+       * Aborts both the provisioning POST and the token-exchange POST
+       * when fired. Threaded from the screen's `useAsyncEffect` so
+       * unmounting (Esc back, /exit, navigation) cancels in-flight
+       * network work before it can settle and trigger downstream side
+       * effects (token persistence). Without this, a cancelled ceremony
+       * can still leak `replaceStoredUser` writes that make the next
+       * launch think the user is signed in.
+       */
+      signal?: AbortSignal;
+    }
+  | {
+      kind: 'with_required_fields';
+      email: Email;
+      /**
+       * Present when the caller has supplied a full name. Two paths:
+       * TUI flow — `SignupFullName` screen collected it after the BE
+       * asked for `'full_name'` in `needs_information.required`;
+       * non-TUI flow — the operator passed `--full-name`, populating
+       * `session.signupFullName` upfront and `helpers.ts` forwards it
+       * regardless of any BE round-trip. The body builder in
+       * `performDirectSignup` omits the `full_name` slot when this is
+       * undefined.
+       */
+      fullName?: string;
+      /**
+       * Present when the caller has terms-acceptance state to send.
+       * Same two-path pattern as `fullName`: TUI collects via the ToS
+       * screen after the BE asks for `'terms_acceptance'`; non-TUI uses
+       * `LOCAL_DOC_URLS` upfront. The body builder omits the
+       * `terms_acceptance` slot when this is undefined. Co-varies with
+       * `legalDocumentSource` — either both fields are present together
+       * or both are absent.
+       */
+      legalDocumentBundle?: LegalDocumentBundle;
+      /**
+       * Where `legalDocumentBundle`'s URLs originated. Only meaningful when
+       * `legalDocumentBundle` is set. The body builder doesn't read this —
+       * the request body only needs the URLs. The field exists so the
+       * wrapper's telemetry layer can tag the `'legal document source'`
+       * event on follow-up arms without re-deriving the source or
+       * re-threading it through session reads.
+       */
+      legalDocumentSource?: LegalDocumentSource;
+      zone: AmplitudeZone;
+      signal?: AbortSignal;
+    };
+
+export type DirectSignupInput = SignupShape<string>;
 
 export type DirectSignupResult =
   | {
@@ -168,7 +310,18 @@ export type DirectSignupResult =
       dashboardUrl: string | null;
     }
   | { kind: 'requires_redirect' }
-  | { kind: 'needs_information'; requiredFields: string[] }
+  | {
+      kind: 'needs_information';
+      requiredFields: RequiredKey[];
+      /**
+       * Legal-doc URLs. Nullable so the BE can drop the requirement
+       * later — at that point the ToS-show predicate evaluates false and
+       * the screen is naturally skipped.
+       */
+      legalDocumentBundle: LegalDocumentBundle | null;
+      /** Source feeds the `'legal document source'` telemetry tag. */
+      legalDocumentSource: LegalDocumentSource;
+    }
   | { kind: 'error'; message: string; code?: string };
 
 /**
@@ -188,22 +341,41 @@ export async function performDirectSignup(
   // auth code. We send it for server-side correlation; there's no echo to
   // verify against (unlike browser OAuth `state`).
   const state = crypto.randomBytes(16).toString('hex');
-  log.debug('[direct-signup] POST', { url, zone: input.zone });
+  log.debug('[direct-signup] POST', {
+    url,
+    zone: input.zone,
+    kind: input.kind,
+  });
 
-  // Build the request body conditionally — omit `full_name` entirely when
-  // unset, instead of sending it as an empty string. The server treats
-  // `!body.full_name` as "no name provided" and responds `needs_information`;
-  // sending `""` would either be rejected by the server's zod (`min(1)`)
-  // or — worse, depending on coercion — be accepted as a valid name.
-  const requestBody: Record<string, unknown> = {
+  const baseBody = {
     email: input.email,
     scopes: ['openid', 'offline'],
     state,
     client_id: oAuthClientId,
     redirect_uri: `http://localhost:${OAUTH_PORT}/callback`,
   };
-  if (input.fullName !== undefined && input.fullName.length > 0) {
-    requestBody.full_name = input.fullName;
+
+  // Each `with_required_fields` slot is emitted only when its source
+  // field is supplied — the BE's `required` array can be any non-empty
+  // subset of `KNOWN_REQUIRED_KEYS`, so per-field emission stays
+  // uniform regardless of how many keys exist.
+  const requestBody: Record<string, unknown> = { ...baseBody };
+  if (input.kind === 'with_required_fields') {
+    if (input.fullName !== undefined) {
+      requestBody.full_name = input.fullName;
+    }
+    if (input.legalDocumentBundle !== undefined) {
+      requestBody.terms_acceptance = {
+        terms_of_service: {
+          url: input.legalDocumentBundle.terms_of_service,
+          accepted: true,
+        },
+        privacy_policy: {
+          url: input.legalDocumentBundle.privacy_policy,
+          accepted: true,
+        },
+      };
+    }
   }
 
   let response;
@@ -237,28 +409,76 @@ export async function performDirectSignup(
 
   const parsedNeeds = NeedsInformationSchema.safeParse(response.data);
   if (parsedNeeds.success) {
+    const requiredFromBE = parsedNeeds.data.needs_information.schema.required;
+    const requiredHasTerms = requiredFromBE.includes('terms_acceptance');
+
+    // Pull `documents` out of `properties.terms_acceptance` defensively —
+    // the wire contract keeps property values opaque (z.unknown), so we
+    // walk the shape with `in`-narrowing rather than tightening the schema.
+    const propsRaw = parsedNeeds.data.needs_information.schema.properties;
+    const termsPropertyRaw = propsRaw['terms_acceptance'];
+    const documentsRaw =
+      typeof termsPropertyRaw === 'object' &&
+      termsPropertyRaw !== null &&
+      'documents' in termsPropertyRaw
+        ? termsPropertyRaw.documents
+        : undefined;
+    const termsParse = TermsAcceptanceDocsSchema.safeParse(documentsRaw);
+
+    // Invariant violation: BE listed terms_acceptance as required but
+    // documents are missing or malformed. Treat as unsupported.
+    if (requiredHasTerms && !termsParse.success) {
+      log.warn(
+        '[direct-signup] needs_information with required terms_acceptance but invalid documents',
+      );
+      return {
+        kind: 'error',
+        code: 'unsupported_required_shape',
+        message:
+          'Server returned terms_acceptance in required without valid documents — falling back to browser auth.',
+      };
+    }
+
+    let legalDocumentBundle: LegalDocumentBundle | null;
+    let legalDocumentSource: LegalDocumentSource;
+    let normalizedRequired: RequiredKey[] = [...requiredFromBE];
+
+    if (requiredHasTerms && termsParse.success) {
+      legalDocumentBundle = termsParse.data;
+      legalDocumentSource = 'server';
+    } else {
+      // === SPOOF — DELETE WHEN REMOVING LOCAL FALLBACK ===
+      // BE flag OFF: synthesize URLs and inject 'terms_acceptance' so
+      // downstream sees the same shape as the BE-supplied case. When the
+      // flag is ON across env tiers, the entire `else` branch is what the
+      // cleanup PR deletes — no downstream changes required.
+      legalDocumentBundle = LOCAL_DOC_URLS;
+      legalDocumentSource = 'local';
+      normalizedRequired = [...requiredFromBE, 'terms_acceptance'];
+      // === END SPOOF ===
+    }
+
     return {
       kind: 'needs_information',
-      requiredFields: parsedNeeds.data.needs_information.schema.required,
+      requiredFields: normalizedRequired,
+      legalDocumentBundle,
+      legalDocumentSource,
     };
   }
-  // The schema's `.refine()` rejected the `required` shape (e.g. the
-  // server added a new field the wizard doesn't have a screen for, or
-  // returned an empty `required` array). Detect this here — by peeking
-  // at the response's `type` field — so we can return a distinct error
-  // code instead of falling through to the generic "Unexpected response"
-  // path. The wrapper maps `code: 'unsupported_required_shape'` to
-  // `needs_information_unsupported` telemetry so the wire-contract drift
-  // is visible in the funnel.
-  const responseType =
-    typeof response.data === 'object' &&
-    response.data !== null &&
-    'type' in response.data
-      ? (response.data as { type: unknown }).type
-      : undefined;
+  // The schema rejected the `required` shape (unknown kind, empty array, or
+  // some other contract drift). Detect this here — by peeking at the
+  // response's `type` field — so we can return a distinct error code instead
+  // of falling through to the generic "Unexpected response" path. The
+  // wrapper maps `code: 'unsupported_required_shape'` to
+  // `needs_information_unsupported` telemetry so the wire-contract drift is
+  // visible in the funnel.
+  const typedResponse = ResponseTypeSchema.safeParse(response.data);
+  const responseType = typedResponse.success
+    ? typedResponse.data.type
+    : undefined;
   if (responseType === 'needs_information') {
     log.warn('[direct-signup] needs_information with unsupported shape', {
-      supported: SUPPORTED_REQUIRED,
+      knownKeys: KNOWN_REQUIRED_KEYS,
     });
     return {
       kind: 'error',

@@ -15,6 +15,7 @@ import { Icons, Colors } from '../styles.js';
 import { PromptLabel } from './PromptLabel.js';
 import { useScreenInput } from '../hooks/useScreenInput.js';
 import { useStdoutDimensions } from '../hooks/useStdoutDimensions.js';
+import { logToFile } from '../../../utils/debug.js';
 
 /**
  * First-frame fallback chrome size, used before `measureElement` has run.
@@ -22,6 +23,16 @@ import { useStdoutDimensions } from '../hooks/useStdoutDimensions.js';
  * height plus a small allowance for scroll indicators and bottom padding.
  */
 const PICKER_CHROME_ROWS_FALLBACK = 16;
+
+/**
+ * Selection-confirmation flash duration (ms). When the user commits a
+ * choice (Enter or a digit key) the selected row briefly flashes with
+ * an accent background before the screen transitions away. This is the
+ * "the input was received" feedback users expect from native menu UIs
+ * and matches the wait time most operating-system menu pickers use.
+ * Exported so tests can reference the same constant.
+ */
+export const PICKER_FLASH_MS = 250;
 
 /** Minimum number of visible options on extremely short terminals. */
 const MIN_VISIBLE_ROWS = 5;
@@ -130,23 +141,48 @@ function numKey(index: number): string | null {
 const PickerItem = <T,>({
   opt,
   isFocused,
+  isFlashing,
   index,
 }: {
   opt: PickerOption<T>;
   isFocused: boolean;
+  /**
+   * True for the brief window between the user committing a choice and
+   * `onSelect` being invoked. Renders the row with an accent
+   * background so the keystroke registers visibly — same affordance
+   * native menu UIs use to acknowledge a click.
+   */
+  isFlashing?: boolean;
   index: number;
 }) => {
   const label = opt.hint ? `${opt.label} (${opt.hint})` : opt.label;
   const key = numKey(index);
+  // Foreground rule: flashing rows render in white text against the
+  // accent background so the row stays legible. Focused rows keep the
+  // existing accent foreground on the default background; non-focused
+  // rows stay muted. Picking these tiers separately avoids the
+  // "accent-on-accent" invisible-text bug.
+  const textColor = isFlashing
+    ? Colors.heading
+    : isFocused
+    ? Colors.accent
+    : Colors.muted;
+  const bgColor = isFlashing ? Colors.accent : undefined;
   return (
     <Box gap={1}>
-      <Text color={isFocused ? Colors.accent : Colors.muted}>
-        {isFocused ? Icons.triangleSmallRight : ' '}
+      <Text color={textColor} backgroundColor={bgColor}>
+        {isFocused || isFlashing ? Icons.triangleSmallRight : ' '}
       </Text>
       {key !== null && (
-        <Text color={isFocused ? Colors.accent : Colors.muted}>[{key}]</Text>
+        <Text color={textColor} backgroundColor={bgColor}>
+          [{key}]
+        </Text>
       )}
-      <Text color={isFocused ? Colors.accent : Colors.muted} bold={isFocused}>
+      <Text
+        color={textColor}
+        backgroundColor={bgColor}
+        bold={isFocused || isFlashing}
+      >
         {label}
       </Text>
     </Box>
@@ -171,6 +207,58 @@ const SinglePickerMenu = <T,>({
   onSelect: (value: T | T[]) => void;
 }) => {
   const [focused, setFocused] = useState(0);
+  // Selection-confirmation flash. Holds the index the user just
+  // committed (Enter / digit shortcut) so the row renders with an
+  // accent background for PICKER_FLASH_MS before we hand control to
+  // `onSelect`. Clearing the state via a return-cleanup on the effect
+  // covers the "user unmounts the picker before the timer fires" case
+  // (e.g. dispatcher navigates away). `setTimeout` IDs are stable so
+  // we cancel-on-unmount; without that, a stale timer could call
+  // `onSelect` after the parent has already moved on.
+  const [flashingIndex, setFlashingIndex] = useState<number | null>(null);
+  // Track if we're already flashing so a double-press (digit then
+  // Enter) doesn't queue two onSelect calls — the timer captured the
+  // intent on the first key.
+  const flashTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    return () => {
+      if (flashTimerRef.current !== null) {
+        clearTimeout(flashTimerRef.current);
+        flashTimerRef.current = null;
+      }
+    };
+  }, []);
+  const commitSelection = (idx: number, value: T): void => {
+    if (flashTimerRef.current !== null) return;
+    setFlashingIndex(idx);
+    flashTimerRef.current = setTimeout(() => {
+      flashTimerRef.current = null;
+      // Always release the flash + input lock, even if `onSelect`
+      // throws or the parent's navigation is asynchronous. Without
+      // this guard, a thrown handler would leave `flashingIndex`
+      // set — the input handler reads that as "still flashing" and
+      // swallows every subsequent keystroke, deadlocking the picker
+      // with no recovery path. Catch + re-throw asynchronously: the
+      // error still surfaces (via Node's unhandled-rejection handler
+      // and our existing error boundary) but the picker stays alive.
+      try {
+        onSelect(value);
+      } catch (err) {
+        // The picker's contract is "I won't deadlock". The parent's
+        // contract is "your onSelect is safe to call". If the parent
+        // breaks its contract, log to the wizard's debug file but
+        // keep the picker responsive — silently swallowing here is
+        // the lesser of two evils vs. the user being unable to type.
+        logToFile(
+          `PickerMenu onSelect threw — input released to avoid deadlock: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+      } finally {
+        setFlashingIndex(null);
+      }
+    }, PICKER_FLASH_MS);
+  };
   const [, termRows] = useStdoutDimensions();
   const scrollRef = useRef(0);
   const headerRef = useRef<DOMElement>(null);
@@ -211,6 +299,12 @@ const SinglePickerMenu = <T,>({
   const scrollOffset = scrollRef.current;
 
   useScreenInput((input, key) => {
+    // Swallow all input while the flash window is open — the choice
+    // is locked in, and we don't want a follow-up keypress to register
+    // a second selection or scroll the list while the user sees the
+    // confirmation flash.
+    if (flashingIndex !== null) return;
+
     const col = Math.floor(focused / rowsPerCol);
     const row = focused % rowsPerCol;
 
@@ -219,7 +313,8 @@ const SinglePickerMenu = <T,>({
       const idx = digit === 0 ? 9 : digit - 1;
       const opt = options[idx];
       if (opt) {
-        onSelect(opt.value);
+        setFocused(idx);
+        commitSelection(idx, opt.value);
         return;
       }
     }
@@ -252,7 +347,7 @@ const SinglePickerMenu = <T,>({
     if (key.return) {
       const selected = options[focused];
       if (selected) {
-        onSelect(selected.value);
+        commitSelection(focused, selected.value);
       }
     }
   });
@@ -281,6 +376,7 @@ const SinglePickerMenu = <T,>({
             opt={opt}
             index={scrollOffset + i}
             isFocused={scrollOffset + i === focused}
+            isFlashing={scrollOffset + i === flashingIndex}
           />
         ))}
         {hasBelow && (
@@ -308,14 +404,18 @@ const SinglePickerMenu = <T,>({
       <Box flexDirection="row" gap={4}>
         {columnArrays.map((colOpts, colIdx) => (
           <Box key={colIdx} flexDirection="column">
-            {colOpts.map((opt, rowIdx) => (
-              <PickerItem
-                key={colIdx * rowsPerCol + rowIdx}
-                opt={opt}
-                index={colIdx * rowsPerCol + rowIdx}
-                isFocused={colIdx * rowsPerCol + rowIdx === focused}
-              />
-            ))}
+            {colOpts.map((opt, rowIdx) => {
+              const idx = colIdx * rowsPerCol + rowIdx;
+              return (
+                <PickerItem
+                  key={idx}
+                  opt={opt}
+                  index={idx}
+                  isFocused={idx === focused}
+                  isFlashing={idx === flashingIndex}
+                />
+              );
+            })}
           </Box>
         ))}
       </Box>

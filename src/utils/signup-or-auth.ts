@@ -1,5 +1,12 @@
 import type { AmplitudeAuthResult } from './oauth.js';
-import { performDirectSignup } from './direct-signup.js';
+import {
+  performDirectSignup,
+  type DirectSignupInput,
+  type RequiredKey,
+  type LegalDocumentBundle,
+  type LegalDocumentSource,
+  type SignupShape,
+} from './direct-signup.js';
 import { replaceStoredUser, type StoredUser } from './ampli-settings.js';
 import { fetchAmplitudeUser, type AmplitudeUserInfo } from '../lib/api.js';
 import { createLogger } from '../lib/observability/logger.js';
@@ -97,12 +104,14 @@ export type SignupAttemptStatus =
   | 'needs_information'
   /**
    * Server returned `needs_information` with a `required` shape the wizard
-   * doesn't know how to collect (anything other than exactly `['full_name']`
-   * — including unknown new fields, an empty array, or a mix with unknown
-   * fields). Treated as a terminal abandon → user falls back to OAuth.
-   * Distinct from `signup_error` so the wire-contract drift is visible in
-   * the funnel — if this status starts firing, the server has added a
-   * required field the wizard doesn't yet handle.
+   * doesn't know how to collect — i.e. anything outside a non-empty subset
+   * of `KNOWN_REQUIRED_KEYS` (unknown new fields, an empty array, or a mix
+   * that includes an unknown field). Also fires when `'terms_acceptance'`
+   * is in `required` but the BE's `documents` payload is malformed.
+   * Treated as a terminal abandon → user falls back to OAuth. Distinct
+   * from `signup_error` so the wire-contract drift is visible in the
+   * funnel: if this status starts firing, the server has added a required
+   * field (or doc kind) the wizard doesn't yet handle.
    */
   | 'needs_information_unsupported'
   | 'signup_error'
@@ -123,6 +132,15 @@ export type AgenticSignupAttemptedProperties = {
   zone: AmplitudeZone;
   'has env with api key'?: boolean;
   'user fetch retry count'?: number;
+  /**
+   * Where the legal-document URLs that informed this attempt's
+   * `terms_acceptance` slot came from. `'unused'` covers attempts whose
+   * body carried no `terms_acceptance` (probe POST, existing-user
+   * redirect, error before terms collection). Set on every status arm so
+   * dashboards can slice adoption by URL source and tie it to the
+   * eventual outcome.
+   */
+  'legal document source'?: LegalDocumentSource | 'unused';
 };
 
 export const trackSignupAttempt = (
@@ -131,25 +149,24 @@ export const trackSignupAttempt = (
   analytics.wizardCapture(AGENTIC_SIGNUP_ATTEMPTED_EVENT, properties);
 };
 
-export interface SignupOrAuthInput {
-  email: string | null;
-  /**
-   * Optional. Omit on the probe POST so the server can decide whether the
-   * account is new (→ `needs_information`) or already exists (→ redirect).
-   * Pass it on the follow-up POST after the wizard collected it.
-   */
-  fullName?: string | null;
-  zone: AmplitudeZone;
-  /**
-   * Threaded from the screen's `useAsyncEffect`. Aborts the in-flight
-   * provisioning + token-exchange POSTs and gates the post-success
-   * persistence (`replaceStoredUser`) so a cancelled ceremony doesn't
-   * leak tokens to disk. Without this, `/exit` mid-POST would still
-   * persist tokens and the next launch would think the user is signed
-   * in.
-   */
-  signal?: AbortSignal;
-}
+/**
+ * Wrapper input — same shape as `DirectSignupInput`, only `email` may be
+ * `null`. Both types instantiate `SignupShape<Email>` so the relationship
+ * is structural: a future field added to one auto-applies to the other,
+ * and the `{ ...input, email: input.email }` pass-through in
+ * `performSignupOrAuth` stays sound by construction. The wrapper
+ * short-circuits to a `'missing email'` error before reaching
+ * `performDirectSignup`, so the underlying call always sees a non-null
+ * email.
+ *
+ * The screen at the call site (`SigningUpScreen.tsx`) decides which kind
+ * to build based on `session.signupRequiredFields !== null` (BE-driven:
+ * has the BE returned `needs_information` at least once during this
+ * ceremony?). Data-completeness is enforced separately by the flow gate
+ * (`requiredSatisfied` in `flows.ts`) — by the time SigningUp re-fires,
+ * every required field is collected.
+ */
+export type SignupOrAuthInput = SignupShape<string | null>;
 
 /**
  * Discriminated-union result of {@link performSignupOrAuth}.
@@ -176,7 +193,22 @@ export type PerformSignupOrAuthResult =
        */
       dashboardUrl: string | null;
     })
-  | { kind: 'needs_information'; requiredFields: string[] }
+  | {
+      kind: 'needs_information';
+      requiredFields: RequiredKey[];
+      /**
+       * Legal-doc URLs the parser produced. Caller writes this into
+       * `session.legalDocumentBundle` so the ToS screen and the follow-up
+       * POST body both pull from one place.
+       */
+      legalDocumentBundle: LegalDocumentBundle | null;
+      /**
+       * Caller writes this into `session.legalDocumentSource` so
+       * subsequent telemetry arms can read the source without
+       * re-threading it through the wrapper.
+       */
+      legalDocumentSource: LegalDocumentSource;
+    }
   | { kind: 'redirect' }
   | { kind: 'error'; message: string };
 
@@ -209,25 +241,38 @@ export async function performSignupOrAuth(
     log.debug('missing email; skipping direct signup');
     return { kind: 'error', message: 'missing email' };
   }
-  const fullName = input.fullName ?? null;
+  // SignupOrAuthInput differs from DirectSignupInput only in email's
+  // nullability. After the guard above, narrow via spread + explicit
+  // email — performDirectSignup builds the body via its own switch.
+  const directSignupInput: DirectSignupInput = { ...input, email: input.email };
 
-  log.debug('attempting direct signup', { hasFullName: fullName !== null });
+  // Source tag for the `'legal document source'` telemetry property,
+  // derived from what the body WILL carry: an input that has no
+  // `legalDocumentSource` won't emit a `terms_acceptance` slot, so the
+  // attempt's source is `'unused'`. The `needs_information` arm
+  // overrides this with `result.legalDocumentSource` since that reports
+  // what BE produced, not what the caller sent.
+  const inputSource: LegalDocumentSource | 'unused' =
+    input.kind === 'with_required_fields' && input.legalDocumentSource
+      ? input.legalDocumentSource
+      : 'unused';
+
+  log.debug('attempting direct signup', { kind: input.kind });
   // performDirectSignup is contracted to catch its own network/parse errors
   // and return { kind: 'error' }. The try/catch here is belt-and-suspenders
   // enforcement against an unexpected throw — emit `wrapper_exception`
   // telemetry so a thrown error is distinguishable from a clean error arm.
   let result: Awaited<ReturnType<typeof performDirectSignup>>;
   try {
-    result = await performDirectSignup({
-      email: input.email,
-      ...(fullName !== null ? { fullName } : {}),
-      zone: input.zone,
-      signal: input.signal,
-    });
+    result = await performDirectSignup(directSignupInput);
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     log.warn('direct signup threw unexpectedly', { message });
-    trackSignupAttempt({ status: 'wrapper_exception', zone: input.zone });
+    trackSignupAttempt({
+      status: 'wrapper_exception',
+      zone: input.zone,
+      'legal document source': inputSource,
+    });
     return { kind: 'error', message };
   }
 
@@ -241,16 +286,32 @@ export async function performSignupOrAuth(
   switch (result.kind) {
     case 'requires_redirect':
       log.debug('direct signup → redirect');
-      trackSignupAttempt({ status: 'requires_redirect', zone: input.zone });
+      trackSignupAttempt({
+        status: 'requires_redirect',
+        zone: input.zone,
+        // Existing-user redirect path. For initial-kind probes, body
+        // carried no terms_acceptance → 'unused'. For with_required_fields calls
+        // that get redirected (e.g. an existing-user email surfaces
+        // late), body did carry terms_acceptance from the input's
+        // source — pass that through.
+        'legal document source': inputSource,
+      });
       return { kind: 'redirect' };
     case 'needs_information':
       log.debug('direct signup → needs_information', {
         requiredFields: result.requiredFields,
+        legalDocumentSource: result.legalDocumentSource,
       });
-      trackSignupAttempt({ status: 'needs_information', zone: input.zone });
+      trackSignupAttempt({
+        status: 'needs_information',
+        zone: input.zone,
+        'legal document source': result.legalDocumentSource,
+      });
       return {
         kind: 'needs_information',
         requiredFields: result.requiredFields,
+        legalDocumentBundle: result.legalDocumentBundle,
+        legalDocumentSource: result.legalDocumentSource,
       };
     case 'error': {
       log.debug('direct signup → error', {
@@ -274,7 +335,14 @@ export async function performSignupOrAuth(
         result.code === 'unsupported_required_shape'
           ? 'needs_information_unsupported'
           : 'signup_error';
-      trackSignupAttempt({ status, zone: input.zone });
+      trackSignupAttempt({
+        status,
+        zone: input.zone,
+        // Source comes from the input — `initial` calls had no
+        // terms_acceptance in the body ('unused'), `with_required_fields` calls
+        // had it from whichever source the parser recorded.
+        'legal document source': inputSource,
+      });
       return { kind: 'error', message: result.message };
     }
     case 'success':
@@ -318,10 +386,14 @@ export async function performSignupOrAuth(
         zone: input.zone,
       },
     );
-    // `fullName` is required by the server when this success arm fires, so
-    // it's non-null here despite being optional in the input — the server
-    // would have returned `needs_information` otherwise.
-    const parts = (fullName ?? '').trim().split(/\s+/);
+    // Display-name placeholder for the pending-sentinel `StoredUser`
+    // when the post-signup fetch fails. Empty when the caller didn't
+    // supply `fullName` — the next successful user fetch overwrites it.
+    const fullNameForFallback =
+      input.kind === 'with_required_fields' && input.fullName
+        ? input.fullName
+        : '';
+    const parts = fullNameForFallback.trim().split(/\s+/);
     user = {
       id: 'pending',
       firstName: parts[0] ?? '',
@@ -358,12 +430,20 @@ export async function performSignupOrAuth(
       zone: input.zone,
       'has env with api key': fetchResult.hasEnvWithApiKey,
       'user fetch retry count': fetchResult.retryCount,
+      // Source tag accurately reflects what the attempt's body carried:
+      // initial calls have no terms_acceptance ('unused'), with_required_fields
+      // calls have it from whichever URL source the parser recorded
+      // (passed in via input.legalDocumentSource). This is what unlocks
+      // adoption dashboards once the BE flag flips ON — they can slice
+      // success outcomes by URL provenance.
+      'legal document source': inputSource,
     });
   } else {
     trackSignupAttempt({
       status: 'user_fetch_failed',
       zone: input.zone,
       'user fetch retry count': fetchResult.retryCount,
+      'legal document source': inputSource,
     });
   }
 

@@ -57,25 +57,24 @@ export const WIZARD_VERSION: string = (() => {
 })();
 
 /**
- * How the user invoked this CLI — echoed back in help/error messages so we
- * don't tell `npx @amplitude/wizard` users to run `amplitude-wizard login`
- * (which only works when globally installed).
+ * Canonical user-facing CLI invocation — echoed back in help/error
+ * messages, resume commands, status output, and the orchestration
+ * `nextAction.command` arrays.
  *
- * npx stages packages under a cache path containing `/_npx/`. Everything
- * else is treated as a direct bin invocation.
+ * Always `npx @amplitude/wizard`, regardless of how the current
+ * wizard process was started (npx, direct bin, `pnpm try`, or a global
+ * install). Rationale:
+ *
+ *   - `npx @amplitude/wizard` works in every environment — even when
+ *     the user has a global install, npx defers to it.
+ *   - The bare `amplitude-wizard` only works when globally installed.
+ *     Telling a user "run amplitude-wizard --install-dir X" from a
+ *     persisted JSON artifact strands every npx user.
+ *   - Detection-based variants (the previous behavior — sniff `argv[1]`
+ *     for `/_npx/` or `npm_command=exec`) silently fall through to
+ *     `amplitude-wizard` when the wizard is launched via `pnpm try`,
+ *     `node dist/bin.js`, or any wrapper that obscures npm's env vars.
+ *     The persisted `resumeCommand` from such a run is then wrong for
+ *     the user reading it. A constant is universally correct.
  */
-export const CLI_INVOCATION: string = (() => {
-  const scriptPath = process.argv[1] ?? '';
-  if (scriptPath.includes('/_npx/') || scriptPath.includes('\\_npx\\')) {
-    return 'npx @amplitude/wizard';
-  }
-  // npm >= 7 implements `npx` as `npm exec`, which always sets
-  // npm_command=exec — even when npx resolves to an already-installed copy
-  // (e.g. running `npx @amplitude/wizard` from inside this repo, or from
-  // a project that depends on it). argv[1] doesn't contain /_npx/ in that
-  // case, so this catches it.
-  if (process.env.npm_command === 'exec') {
-    return 'npx @amplitude/wizard';
-  }
-  return 'amplitude-wizard';
-})();
+export const CLI_INVOCATION: string = 'npx @amplitude/wizard';

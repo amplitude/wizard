@@ -16,7 +16,11 @@
 
 import { saveCheckpoint } from './session-checkpoint.js';
 import { analytics } from '../utils/analytics.js';
-import { abortWizard } from '../utils/wizard-abort.js';
+import {
+  abortWizard,
+  computeRunDurationMs,
+  wizardAbort,
+} from '../utils/wizard-abort.js';
 import { getUI } from '../ui/index.js';
 import type { WizardSession } from './wizard-session';
 
@@ -66,7 +70,6 @@ export function _isGracefulExitInProgressForTests(): boolean {
 export function performGracefulExit(ctx: GracefulExitContext): void {
   if (_exitInProgress) return;
   _exitInProgress = true;
-  const startedAt = Date.now();
 
   try {
     ctx.setCommandFeedback(
@@ -106,10 +109,15 @@ export function performGracefulExit(ctx: GracefulExitContext): void {
   // `emitRunCompleted`; InkUI / LoggingUI no-op. Wrapped in try/catch
   // so a misbehaving emitter can't block the exit.
   try {
+    // `computeRunDurationMs()` reads from AgentUI's `getRunStartedAtMs()`
+    // so the duration is the wall-clock length of the wizard run, not
+    // the ~0ms it takes for this synchronous exit function to execute.
+    // Matches what `wizardAbort` stamps on its own `run_completed`
+    // envelope so the two SIGINT paths agree.
     getUI().emitRunCompleted?.({
       outcome: 'cancelled',
       exitCode: 130,
-      durationMs: Date.now() - startedAt,
+      durationMs: computeRunDurationMs(),
       reason: 'sigint',
     });
   } catch {
@@ -177,6 +185,12 @@ export function installAbortSignalHandler(session: WizardSession): void {
   process.on('SIGINT', () => {
     if (_abortInProgress) {
       process.exit(130);
+      // Defensive `return` for tests that mock `process.exit` so it
+      // returns instead of terminating. Without it, execution falls
+      // through and re-runs the entire abort sequence (saveCheckpoint,
+      // abortWizard, analytics flush, wizardAbortRunner). In production
+      // process.exit never returns so this is a no-op.
+      return;
     }
     _abortInProgress = true;
 
@@ -226,11 +240,12 @@ export function installAbortSignalHandler(session: WizardSession): void {
  * handler can pass a stable, machine-readable reason string ("sigint")
  * without bleeding into the human-readable message argument.
  *
- * Lazy import avoids the wizardAbort -> graceful-exit edge in the
- * dependency graph; both modules already import from `wizard-abort`,
- * but loading wizardAbort eagerly at module init pulled in the entire
- * analytics + UI graph for callers that just want the graceful-exit
- * helpers.
+ * `wizardAbort` is statically imported at the top of this file —
+ * `abortWizard` (used by `performGracefulExit` and the SIGINT handler
+ * above) lives in the same module, so the `wizard-abort.js` module
+ * graph is already eagerly loaded here. The previous dynamic
+ * `await import(...)` was a misleading no-op: the module came from the
+ * import cache instantly and bought no lazy-loading benefit.
  */
 async function wizardAbortRunner(opts: {
   message: string;
@@ -244,7 +259,6 @@ async function wizardAbortRunner(opts: {
   // this to catch unintended terminations). In production the throw
   // path never fires; the rejection only ever shows up in tests.
   try {
-    const { wizardAbort } = await import('../utils/wizard-abort.js');
     await wizardAbort({
       message: opts.message,
       exitCode: opts.exitCode,

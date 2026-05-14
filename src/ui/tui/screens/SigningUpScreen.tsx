@@ -35,6 +35,11 @@ import { resolveZone } from '../../../lib/zone-resolution.js';
 import { DEFAULT_AMPLITUDE_ZONE } from '../../../lib/constants.js';
 import { createLogger } from '../../../lib/observability/logger.js';
 import { assertNever } from '../../../utils/assert-never.js';
+import type { SignupOrAuthInput } from '../../../utils/signup-or-auth.js';
+import type {
+  LegalDocumentBundle,
+  LegalDocumentSource,
+} from '../../../utils/direct-signup.js';
 
 const log = createLogger('signing-up-screen');
 
@@ -47,22 +52,79 @@ export const SigningUpScreen = ({ store }: SigningUpScreenProps) => {
 
   const { session } = store;
   const email = session.signupEmail;
-  // Only include `fullName` in the POST when ToS is accepted too — the
-  // server creates the account on the success arm, and shipping the user
-  // through provisioning before they confirm ToS is the regression we're
-  // explicitly fixing. Without ToS, send email-only and let the server
-  // route us to needs_information so the ToS screen renders next.
-  const fullName =
-    session.tosAccepted === true ? (session.signupFullName ?? null) : null;
+  const signupFullName = session.signupFullName;
 
   useAsyncEffect(
     async (signal) => {
       if (email === null) return; // SignupEmailScreen still pending
-      log.debug('posting signup', { hasFullName: fullName !== null });
 
       const zone = resolveZone(session, DEFAULT_AMPLITUDE_ZONE, {
         readDisk: false,
       });
+
+      // `signupRequiredFields !== null` means the BE returned
+      // `needs_information` at least once this ceremony, so this is a
+      // follow-up call. The flow's `requiredSatisfied` predicate keeps
+      // us out of SigningUp until each required-key has its session
+      // value populated; the per-field null checks below narrow
+      // `string | null` to `string` for the wrapper input.
+      const requiredFields = session.signupRequiredFields;
+
+      let input: SignupOrAuthInput;
+      if (requiredFields !== null) {
+        // Per-RequiredKey exhaustive switch: validates session readiness AND
+        // collects the input slot for each requested key. `assertNever`
+        // makes adding a new `RequiredKey` (e.g. `phone_number`) a compile
+        // error here until the contributor maps it to a session field and
+        // an input slot — otherwise the new key would silently be treated
+        // as "not collected" and abandon every ceremony.
+        let inputFullName: string | undefined;
+        let inputLegalDocumentBundle: LegalDocumentBundle | undefined;
+        let inputLegalDocumentSource: LegalDocumentSource | undefined;
+        for (const key of requiredFields) {
+          switch (key) {
+            case 'full_name':
+              if (session.signupFullName === null) {
+                log.error(
+                  'signup: re-fired in follow-up mode without full_name; abandoning',
+                );
+                store.setSignupAbandoned(true);
+                return;
+              }
+              inputFullName = session.signupFullName;
+              break;
+            case 'terms_acceptance':
+              if (
+                session.legalDocumentBundle === null ||
+                session.legalDocumentSource === null
+              ) {
+                log.error(
+                  'signup: re-fired in follow-up mode without terms_acceptance state; abandoning',
+                );
+                store.setSignupAbandoned(true);
+                return;
+              }
+              inputLegalDocumentBundle = session.legalDocumentBundle;
+              inputLegalDocumentSource = session.legalDocumentSource;
+              break;
+            default:
+              assertNever(key);
+          }
+        }
+        input = {
+          kind: 'with_required_fields',
+          email,
+          fullName: inputFullName,
+          legalDocumentBundle: inputLegalDocumentBundle,
+          legalDocumentSource: inputLegalDocumentSource,
+          zone,
+          signal,
+        };
+      } else {
+        input = { kind: 'email_only', email, zone, signal };
+      }
+
+      log.debug('posting signup', { kind: input.kind });
       // `store.runSignupAttempt` is the sole TUI surface for the
       // agentic-signup POST: it wraps `performSignupOrAuth` in a
       // try/finally that toggles `signupInFlight` for the duration
@@ -76,12 +138,7 @@ export const SigningUpScreen = ({ store }: SigningUpScreenProps) => {
       // the user backed out before the success arm settled —
       // otherwise an abandoned ceremony can still leak tokens to
       // disk and make the next launch think the user is signed in.
-      const result = await store.runSignupAttempt({
-        email,
-        fullName,
-        zone,
-        signal,
-      });
+      const result = await store.runSignupAttempt(input);
 
       if (signal.aborted) return;
 
@@ -117,19 +174,31 @@ export const SigningUpScreen = ({ store }: SigningUpScreenProps) => {
           // Defensive guard against a stuck-spinner deadlock: if the
           // server is asking for a field we already populated, the
           // ceremony can't make progress — `useAsyncEffect`'s deps
-          // (`[email, fullName]`) won't change on the next
+          // (`[email, signupFullName]`) won't change on the next
           // `setSignupRequiredFields` write, the screen won't re-mount,
           // and no further effect will fire. Without this guard the
           // user wedges on the spinner forever with no escape besides
           // Ctrl+C.
           //
           // Today this can only fire as a server bug (we just sent
-          // `full_name` and the server is still asking for it), but
-          // the cost of the guard is one branch and the failure mode
-          // it prevents has zero in-band recovery.
-          const alreadySatisfied = result.requiredFields.every((field) =>
-            field === 'full_name' ? fullName !== null : false,
-          );
+          // a complete body and the server is still asking for these
+          // fields), but the cost of the guard is one switch and the
+          // failure mode it prevents has zero in-band recovery.
+          //
+          // Per-key arms read raw session fields, mirroring
+          // `flows.ts:requiredSatisfied`. Reading a `tosAccepted`-gated
+          // derivation would have miscoded full_name-only flows as
+          // unsatisfied even after the user supplied a name.
+          const alreadySatisfied = result.requiredFields.every((field) => {
+            switch (field) {
+              case 'full_name':
+                return session.signupFullName !== null;
+              case 'terms_acceptance':
+                return session.tosAccepted === true;
+              default:
+                return assertNever(field);
+            }
+          });
           if (alreadySatisfied) {
             log.warn(
               'signup: server re-requested already-provided fields; abandoning',
@@ -139,6 +208,14 @@ export const SigningUpScreen = ({ store }: SigningUpScreenProps) => {
             return;
           }
           store.setSignupRequiredFields(result.requiredFields);
+          // Persist the legal-doc URLs the parser produced for this
+          // probe response. The ToSScreen reads from session.legalDocumentBundle
+          // (no fallback at the screen — parser already normalized via the
+          // spoof block when BE flag is OFF) and the follow-up POST body
+          // pulls from the same field. Source is recorded so subsequent
+          // telemetry arms can tag attempts without re-threading it.
+          store.setLegalDocumentBundle(result.legalDocumentBundle);
+          store.setLegalDocumentSource(result.legalDocumentSource);
           return;
         }
         case 'redirect':
@@ -154,14 +231,27 @@ export const SigningUpScreen = ({ store }: SigningUpScreenProps) => {
           assertNever(result);
       }
     },
-    [email, fullName],
+    // Deps read raw session fields rather than `tosAccepted`-gated
+    // derivations — full_name-only flows never set `tosAccepted`, so a
+    // derived `fullName` would stay null even after the user supplied
+    // a name and the effect would miss re-firings keyed on it. (Same
+    // staleness pattern bugbot caught in the deadlock guard above.)
+    [email, signupFullName],
   );
 
   // Render mimics the previous input screen so the screen swap feels
   // continuous: same heading, the submitted value as a static line, and
   // a spinner.
+  //
+  // "Creating…" runs on every follow-up POST regardless of which fields
+  // the user collected — `signupRequiredFields !== null` is the load-
+  // bearing condition (BE has acknowledged the email and asked for at
+  // least one field; we're committing the account). Conditioning on
+  // `fullName !== null` was correct when full_name was always required
+  // but rendered "Checking…" on terms-only follow-ups, which became
+  // user-visible after BA-149 enabled that combination.
   const headerLabel =
-    session.signupRequiredFields !== null && fullName !== null
+    session.signupRequiredFields !== null
       ? 'Creating your account…'
       : 'Checking your account…';
 
@@ -177,7 +267,7 @@ export const SigningUpScreen = ({ store }: SigningUpScreenProps) => {
       {email && (
         <Box flexDirection="column" marginBottom={1}>
           <Text>{email}</Text>
-          {fullName && <Text>{fullName}</Text>}
+          {signupFullName && <Text>{signupFullName}</Text>}
         </Box>
       )}
 

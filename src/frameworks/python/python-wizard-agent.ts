@@ -42,6 +42,7 @@ export const PYTHON_AGENT_CONFIG: FrameworkConfig<PythonContext> = {
     glyph: '🐍',
     glyphColor: '#FFD43B',
     integration: Integration.python,
+    targetsBackend: true,
     beta: true,
     docsUrl: 'https://amplitude.com/docs/sdks/analytics/python',
     gatherContext: async (options: WizardOptions) => {
