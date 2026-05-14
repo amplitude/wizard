@@ -134,6 +134,70 @@ function needsSetup(session: WizardSession): boolean {
   );
 }
 
+/**
+ * Structural detector for "the env picker still needs to render before the
+ * router can advance past Auth". Pure function of session state — no flag
+ * to clobber.
+ *
+ * Returns true when EVERY one of the following holds:
+ *   1. `pendingOrgs` is populated (so `resolveCredentials` ran and the
+ *      org/project list is available — distinguishes the SUSI/checkpoint
+ *      path from the manual-API-key path, where `pendingOrgs` is null).
+ *   2. The session has a resolved org and project ID — i.e. we know which
+ *      project the user is going against, just not which env within it.
+ *   3. That resolved project has ≥ 2 environments with usable API keys.
+ *   4. The user hasn't picked an env yet (`selectedEnvName === null`).
+ *
+ * When ALL of those hold, `Auth.isComplete` must return false so the router
+ * keeps the user on AuthScreen until they pick an env (or hit Esc / manually
+ * enter an API key — both of those paths set `selectedEnvName` or replace
+ * `pendingOrgs` in ways that flip this back to false).
+ *
+ * This is intentionally REDUNDANT with the `pendingEnvSelection` flag in
+ * the predicate. The flag is the primary gate; this is defense in depth
+ * for the recurring class of bug where the flag gets cleared by an
+ * unrelated path before the env is actually picked. Both gates point at
+ * the same "env still needs picking" state, but one is mutable state and
+ * the other is derived structure — so any single bug that clobbers the
+ * flag is now also caught by the structural check (and vice versa).
+ */
+function needsEnvPickStillRequired(session: WizardSession): boolean {
+  // Guard 1: pendingOrgs must be populated. The manual-API-key path
+  // (apiKeyNotice resolver outcome) doesn't populate pendingOrgs, so this
+  // check leaves that path's `Auth.isComplete` semantics unchanged.
+  const pendingOrgs = session.pendingOrgs;
+  if (pendingOrgs === null) return false;
+
+  // Guard 2: a project must be resolved on the session. Without it we
+  // can't look up the env count, and that's fine — the existing
+  // `selectedProjectId/Name !== null` gate above already keeps Auth from
+  // completing in this state.
+  const orgId = session.selectedOrgId;
+  const projectId = session.selectedProjectId;
+  if (orgId === null || projectId === null) return false;
+
+  // Guard 3 + 4: the resolved project has ≥ 2 envs with API keys AND the
+  // user hasn't picked one yet. Either condition false means the env
+  // picker isn't a required step.
+  if (session.selectedEnvName !== null) return false;
+
+  // Find the project in pendingOrgs. If it's not there (stale checkpoint
+  // selectedProjectId, user switched accounts, etc.), let other gates
+  // handle it — the AuthScreen's stale-org useEffect at line 134-151 will
+  // clear selectedOrgId, which flips guard 2 to false on the next render.
+  const org = pendingOrgs.find((o) => o.id === orgId);
+  if (!org) return false;
+  const project = org.projects.find((p) => p.id === projectId);
+  if (!project) return false;
+
+  const selectableEnvs = (project.environments ?? []).filter(
+    (e) => e.app?.apiKey,
+  );
+  if (selectableEnvs.length < 2) return false;
+
+  return true;
+}
+
 /** All flow pipelines. Add new screens by appending entries. */
 export const FLOWS: Record<Flow, FlowEntry[]> = {
   [Flow.Wizard]: [
@@ -349,7 +413,43 @@ export const FLOWS: Record<Flow, FlowEntry[]> = {
         // so the router collapses back to Auth even if it already advanced
         // past Auth on a prior frame (rehydrated rerun state). Cleared by
         // AuthScreen once `setCredentials` lands the chosen env.
-        !s.pendingEnvSelection,
+        !s.pendingEnvSelection &&
+        // **Defense in depth** against the recurring "stuck on Setup with
+        // no env-picker" bug (PRs #747 / #760 / #762 each thought they'd
+        // fixed it; the bug kept reproducing). The `pendingEnvSelection`
+        // flag above is the primary gate, but it has been getting
+        // clobbered through paths that aren't fully understood. A SECOND
+        // gate — derived directly from observable structural evidence on
+        // the session — closes the bug regardless of which path clobbers
+        // the flag.
+        //
+        // Specifically: when `resolveCredentials` returned
+        // `needs_user_choice / environment_selection`, it ALSO populated
+        // `session.pendingOrgs` with the (org, project, environments)
+        // tuple, and `applyEnvSelectionDeferral` cleared
+        // `session.selectedEnvName`. So the structural signature of the
+        // "env still needs picking" state is:
+        //   - `pendingOrgs` is non-null (the resolver populated it)
+        //   - the resolved project has ≥ 2 environments with API keys
+        //   - the user hasn't picked one yet (`selectedEnvName === null`)
+        //
+        // When that signature holds, Auth.isComplete MUST be false even
+        // if `pendingEnvSelection` somehow flipped to false — otherwise
+        // the router walks past Auth into the Setup-bucket screens with
+        // no picker shown, which is exactly the bug users keep reporting.
+        //
+        // Carve-outs intentionally NOT added here:
+        //   - Manual API key entry (`AuthScreen.handleApiKeySubmit`) sets
+        //     `credentials.projectApiKey` to a user-supplied key WITHOUT
+        //     populating `selectedEnvName`. That path is gated upstream by
+        //     `setCredentials` being called BEFORE this predicate evaluates
+        //     true, so by the time we'd block on `selectedEnvName === null`,
+        //     `pendingEnvSelection` has already been cleared AND
+        //     `credentials !== null` — but `pendingOrgs` for a manual-key
+        //     path is null (the resolver landed at `'api_key_notice'`,
+        //     not `'needs_user_choice'`). The `pendingOrgs !== null` guard
+        //     below keeps the manual-key path passing through unchanged.
+        !needsEnvPickStillRequired(s),
       // Back from DataSetup — drop the picked org/project/env so the
       // Auth screen re-renders the picker. Credentials stay so we don't
       // force a fresh OAuth round-trip.
