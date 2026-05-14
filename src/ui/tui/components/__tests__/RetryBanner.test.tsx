@@ -21,6 +21,7 @@ import {
   RetryStatusChip,
   RetryBanner,
   getRetryStatusText,
+  backoffSecondsFromState,
   RETRY_GRACE_MS,
 } from '../RetryBanner.js';
 import type { RetryState } from '../../../../lib/wizard-session.js';
@@ -89,6 +90,97 @@ describe('getRetryStatusText (pure helper)', () => {
     );
   });
 
+  // ── Sustained-storm backoff countdown ────────────────────────────────
+  //
+  // Once a retry storm crosses the sustained threshold (attempt ≥ 5), the
+  // chip MAY append a concrete "next in Ns" tail when the retry state
+  // carries a useful `nextRetryAtMs`. This answers the implicit "is it
+  // actually still working?" question users ask once they've been
+  // staring at the chip long enough to want a number. We deliberately
+  // do NOT show the X/Y attempt fraction — calm copy is still calm.
+
+  it('appends "next in Ns" backoff when sustained AND a future nextRetryAtMs is known', () => {
+    const now = 10_000;
+    const retry = baseRetry({
+      errorStatus: 429,
+      attempt: 5,
+      startedAt: 0,
+      nextRetryAtMs: now + 4_000,
+    });
+    expect(getRetryStatusText(retry, now)).toBe(
+      'slowing down to match Amplitude rate limits (still trying — next in 4s)',
+    );
+  });
+
+  it('still uses the plain "still trying" tail when nextRetryAtMs is unset', () => {
+    const retry = baseRetry({
+      errorStatus: 429,
+      attempt: 5,
+      startedAt: 0,
+      nextRetryAtMs: 0,
+    });
+    expect(getRetryStatusText(retry, RETRY_GRACE_MS + 1)).toBe(
+      'slowing down to match Amplitude rate limits (still trying)',
+    );
+  });
+
+  it('still uses the plain "still trying" tail when nextRetryAtMs is in the past', () => {
+    const now = 10_000;
+    const retry = baseRetry({
+      errorStatus: 429,
+      attempt: 6,
+      startedAt: 0,
+      nextRetryAtMs: now - 500,
+    });
+    expect(getRetryStatusText(retry, now)).toBe(
+      'slowing down to match Amplitude rate limits (still trying)',
+    );
+  });
+
+  it('does NOT append the backoff tail below the sustained threshold', () => {
+    const now = 10_000;
+    const retry = baseRetry({
+      errorStatus: 429,
+      attempt: 4,
+      startedAt: 0,
+      nextRetryAtMs: now + 4_000,
+    });
+    expect(getRetryStatusText(retry, now)).toBe(
+      'slowing down to match Amplitude rate limits',
+    );
+  });
+});
+
+describe('backoffSecondsFromState (pure helper)', () => {
+  it('returns null when nextRetryAtMs is unset', () => {
+    expect(
+      backoffSecondsFromState(baseRetry({ nextRetryAtMs: 0 }), 0),
+    ).toBeNull();
+  });
+
+  it('returns null when nextRetryAtMs is in the past', () => {
+    expect(
+      backoffSecondsFromState(baseRetry({ nextRetryAtMs: 5_000 }), 6_000),
+    ).toBeNull();
+  });
+
+  it('rounds DOWN so the user never waits longer than advertised', () => {
+    // 3.9s remaining — show 3, not 4.
+    expect(
+      backoffSecondsFromState(baseRetry({ nextRetryAtMs: 3_900 }), 0),
+    ).toBe(3);
+  });
+
+  it('clamps to a minimum of 1s while there is still time on the clock', () => {
+    // Sub-second tail — we don't want a misleading "0s" countdown right
+    // before the retry fires.
+    expect(backoffSecondsFromState(baseRetry({ nextRetryAtMs: 500 }), 0)).toBe(
+      1,
+    );
+  });
+});
+
+describe('getRetryStatusText (calm invariants)', () => {
   it('never surfaces a raw HTTP code', () => {
     for (const status of [400, 401, 429, 500, 503, 504]) {
       const text = getRetryStatusText(
@@ -101,6 +193,10 @@ describe('getRetryStatusText (pure helper)', () => {
     }
   });
 
+  // Existing invariant: calm copy must never show an X/Y attempt fraction.
+  // The sustained-storm path may add a "next in Ns" suffix when a useful
+  // nextRetryAtMs is known, but the attempt-count fraction stays hidden —
+  // users don't read counters, they read context.
   it('never surfaces an attempt counter fraction', () => {
     const text = getRetryStatusText(
       baseRetry({ attempt: 6, maxRetries: 10, startedAt: 0 }),

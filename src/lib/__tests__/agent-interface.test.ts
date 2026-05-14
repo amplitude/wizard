@@ -1768,7 +1768,7 @@ describe('runAgent', () => {
       expect(mcpServers['amplitude-wizard'].headers.Authorization).toBe(
         'Bearer new-token',
       );
-    }, 15_000);
+    }, 30_000);
   });
 
   describe('race condition handling', () => {

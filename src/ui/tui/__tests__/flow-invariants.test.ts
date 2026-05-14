@@ -1184,3 +1184,162 @@ describe('WizardStore session ref stability (env-picker race regression)', () =>
     expect(store.currentScreen).toBe(Screen.Auth);
   });
 });
+
+// ── Overlay stack invalidation under hard-reset (audit #5) ──────────
+//
+// Property: for any interleaving of overlay push/pop with the three
+// hard-reset handlers (`setRegionForced`, `resetForFreshStart`,
+// `cancelWizard`), the post-reset state must satisfy
+//
+//   1. `router.overlays.length === 0`
+//   2. `router.resolve(session)` returns a screen value that is part of
+//      the active flow (i.e. not an orphaned `Overlay.*` value)
+//
+// This pins the regression caught by audit #5: before the fix, an
+// overlay pushed by /mcp or /slack would keep rendering against a
+// session whose credentials had just been wiped, silently driving
+// `installer.detectClients()` against the wrong zone.
+//
+// The test models the three resets as the union of "wipe a bunch of
+// session keys" + `router.clearOverlays()` — the exact contract the
+// store handlers now implement. We mutate the session and call
+// `clearOverlays()` here rather than constructing a full `WizardStore`
+// (which would require fs + analytics + api-key-store mocks not present
+// in this test file) — the store-level integration is pinned separately
+// in `store.test.ts`.
+describe('overlay stack invalidation on hard reset (audit #5)', () => {
+  type ResetKind = 'setRegionForced' | 'resetForFreshStart' | 'cancelWizard';
+
+  /**
+   * Apply the same session-key mutations the matching store handler
+   * does, plus the `router.clearOverlays()` call that's now wired in.
+   * Each branch deliberately mirrors only the slice of state the
+   * router cares about for re-resolution — the full handler in
+   * `store.ts` touches more fields (mcpComplete / slackOutcome / etc.)
+   * but none of them change which screen `resolve()` picks.
+   */
+  function applyReset(
+    kind: ResetKind,
+    session: WizardSession,
+    router: WizardRouter,
+  ) {
+    router.clearOverlays();
+    if (kind === 'setRegionForced') {
+      session.regionForced = true;
+      session.credentials = null;
+      session.selectedOrgId = null;
+      session.selectedOrgName = null;
+      session.selectedProjectId = null;
+      session.selectedProjectName = null;
+      session.selectedEnvName = null;
+      session.outroData = null;
+      session.runPhase = RunPhase.Idle;
+    } else if (kind === 'resetForFreshStart') {
+      session.introConcluded = false;
+      session.region = null;
+      session.selectedOrgId = null;
+      session.selectedOrgName = null;
+      session.selectedProjectId = null;
+      session.selectedProjectName = null;
+      session.selectedEnvName = null;
+    } else {
+      session.outroData = { kind: OutroKind.Cancel, message: 'cancel' };
+    }
+  }
+
+  it('after any reset, overlays are empty and resolve() never returns an Overlay value', () => {
+    const overlayArb = fc.constantFrom(
+      Overlay.Outage,
+      Overlay.Mcp,
+      Overlay.Slack,
+      Overlay.Snake,
+      Overlay.Login,
+      Overlay.Logout,
+    );
+
+    // An action stream: either push an overlay, pop one, or no-op.
+    const actionArb = fc.oneof(
+      overlayArb.map((o) => ({ kind: 'push' as const, overlay: o })),
+      fc.constant({ kind: 'pop' as const }),
+    );
+
+    const resetArb = fc.constantFrom(
+      'setRegionForced' as const,
+      'resetForFreshStart' as const,
+      'cancelWizard' as const,
+    );
+
+    // Random session-state preludes so the reset has something
+    // non-trivial to wipe. None of these prevent the property: the
+    // reset's job is to land on a sensible screen regardless of where
+    // the user was before.
+    const preludeArb = fc.record({
+      introConcluded: fc.boolean(),
+      regionSet: fc.boolean(),
+      credsSet: fc.boolean(),
+      mcpDone: fc.boolean(),
+      phase: fc.constantFrom(
+        RunPhase.Idle,
+        RunPhase.Running,
+        RunPhase.Completed,
+        RunPhase.Error,
+      ),
+    });
+
+    fc.assert(
+      fc.property(
+        fc.array(actionArb, { minLength: 0, maxLength: 8 }),
+        resetArb,
+        preludeArb,
+        (actions, reset, prelude) => {
+          const session = buildSession({});
+          const router = new WizardRouter(Flow.Wizard);
+
+          // Apply prelude — landing somewhere plausible mid-flow.
+          session.introConcluded = prelude.introConcluded;
+          session.region = prelude.regionSet ? 'us' : null;
+          if (prelude.credsSet) applyAuthComplete(session);
+          session.mcpComplete = prelude.mcpDone;
+          session.runPhase = prelude.phase;
+
+          // Interleave overlay actions to seed the stack.
+          for (const action of actions) {
+            if (action.kind === 'push') {
+              router.pushOverlay(action.overlay);
+            } else {
+              router.popOverlay();
+            }
+          }
+
+          // Trigger the reset.
+          applyReset(reset, session, router);
+
+          // Invariant 1: overlays gone.
+          expect(
+            router.hasOverlay,
+            `hasOverlay after ${reset} with actions ${JSON.stringify(actions)}`,
+          ).toBe(false);
+
+          // Invariant 2: resolved screen is a real Screen value, not
+          // an orphaned Overlay value. (resolve() returns `ScreenName`
+          // — either a Screen or an Overlay — so we check membership
+          // explicitly rather than relying on the type.)
+          const resolved = router.resolve(session);
+          expect(
+            ALL_OVERLAYS.has(resolved as Overlay),
+            `resolve() returned overlay ${resolved} after ${reset} with actions ${JSON.stringify(
+              actions,
+            )}`,
+          ).toBe(false);
+          expect(
+            ALL_SCREENS.has(resolved as Screen),
+            `resolve() returned non-Screen ${resolved} after ${reset} with actions ${JSON.stringify(
+              actions,
+            )}`,
+          ).toBe(true);
+        },
+      ),
+      { numRuns: 500 },
+    );
+  });
+});
