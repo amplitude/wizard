@@ -37,6 +37,7 @@ import {
   TOOL_RESPONSE_CONTENT_HEAD_MAX_BYTES,
   TOOL_RESPONSE_ERROR_MESSAGE_MAX_BYTES,
   TOOL_RESPONSE_SUMMARY_MAX_CHARS,
+  appIdResponseSchema,
   buildColdStartBreakdown,
   buildProgressEstimate,
   classifyRunError,
@@ -2526,10 +2527,15 @@ export class AgentUI implements WizardUI {
           // unambiguous selector.
           hierarchy: ['org', 'project', 'app', 'environment'],
           choices,
-          // Agents should reply on stdin with one JSON line matching this shape:
-          responseSchema: {
-            appId: 'string (required, from choices[].appId)',
-          },
+          // Agents should reply on stdin with one JSON line matching this
+          // JSON Schema 2020-12 fragment. Switched from `Record<string, string>`
+          // English descriptions in v3 so non-Claude orchestrators
+          // (Codex, GPT-5, Mistral) can run a real validator. Shared
+          // factory keeps structural parts in sync across all three
+          // env-selection emit sites.
+          responseSchema: appIdResponseSchema(
+            'Numeric Amplitude app ID — must match one of choices[].appId.',
+          ),
           // Or re-invoke with a single CLI flag:
           resumeFlags: choices.map((c) => ({
             label: c.label,
@@ -2597,9 +2603,15 @@ export class AgentUI implements WizardUI {
           value: String(c.appId),
           flags: ['--app-id', String(c.appId)],
         })),
-      responseSchema: {
-        appId: 'string (required, from choices[].value)',
-      },
+      // JSON Schema 2020-12 fragment — replaces the v2 English-in-JSON
+      // shape so non-Claude orchestrators can run `ajv` / `jsonschema`
+      // directly. Shared factory; `pattern: '^\\d+$'` (not `enum`)
+      // because `allowManualEntry: true` lets orchestrators
+      // legitimately submit an above-cap app-id that didn't make the
+      // choices list.
+      responseSchema: appIdResponseSchema(
+        'Numeric Amplitude app ID — must match one of choices[].value, or any valid app ID when allowManualEntry is true.',
+      ),
       // Pagination is signalled even when all choices fit so outer agents
       // can surface the total. When the wizard caps the payload at
       // MAX_ENV_SELECTION_CHOICES (currently 50), `total` carries the

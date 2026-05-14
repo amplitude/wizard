@@ -1,6 +1,11 @@
 import type { CommandModule } from 'yargs';
 import chalk from 'chalk';
 import { getUI, ExitCode } from './helpers';
+import {
+  EVENT_DATA_VERSIONS,
+  appIdResponseSchema,
+  nextDecisionId,
+} from '../lib/agent-events.js';
 
 export const projectsCommand: CommandModule = {
   command: 'projects <command>',
@@ -61,6 +66,14 @@ export const projectsCommand: CommandModule = {
                     v: 1,
                     '@timestamp': new Date().toISOString(),
                     type: 'needs_input',
+                    // Manual envelope construction bypasses the
+                    // `emit()` helper's auto-stamp. Pull from the
+                    // registry so future bumps (v4, v5…) stay in
+                    // sync without touching this file. Orchestrators
+                    // branch on `data_version >= 3` for the JSON
+                    // Schema 2020-12 `responseSchema` shape; pre-v3
+                    // shipped English-in-JSON.
+                    data_version: EVENT_DATA_VERSIONS.needs_input,
                     message: result.warning
                       ? result.warning
                       : `${result.total} project${
@@ -71,6 +84,12 @@ export const projectsCommand: CommandModule = {
                     ...(result.warning && { level: 'warn' }),
                     data: {
                       event: 'needs_input',
+                      // `decisionId` is required since data_version 2 —
+                      // orchestrators correlate this envelope with its
+                      // `decision_auto` / `user_input_received` partner
+                      // via the matching id. Manual envelope construction
+                      // bypasses `emitNeedsInput` so we mint our own.
+                      decisionId: nextDecisionId(),
                       code: 'project_selection',
                       ui: {
                         component: 'searchable_select',
@@ -103,9 +122,14 @@ export const projectsCommand: CommandModule = {
                       recommendedReason: result.choices[0]
                         ? `Highest-ranked environment in the first matching workspace (${result.choices[0].description}).`
                         : undefined,
-                      responseSchema: {
-                        appId: 'string (required, from choices[].value)',
-                      },
+                      // JSON Schema 2020-12 fragment — replaces the v2
+                      // English-in-JSON shape so non-Claude orchestrators
+                      // can run `ajv` / `jsonschema` directly. Shared
+                      // factory keeps structural parts in sync with the
+                      // two `agent-ui.ts` env-selection emit sites.
+                      responseSchema: appIdResponseSchema(
+                        'Numeric Amplitude app ID — must match one of choices[].value, or any valid app ID when allowManualEntry is true.',
+                      ),
                       pagination: {
                         total: result.total,
                         returned: result.returned,
