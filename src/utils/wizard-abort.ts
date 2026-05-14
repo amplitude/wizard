@@ -249,7 +249,6 @@ export async function wizardSuccessExit(exitCode = 0): Promise<never> {
     /* terminal rollup emission must not prevent exit */
   }
 
-
   // Mark the terminal `completed` run_phase BEFORE `run_completed` so
   // an orchestrator's phase-state transitions
   // (cold_start -> agent_running -> finalizing -> completed) close
@@ -514,7 +513,6 @@ export async function wizardAbort(
   } catch {
     /* terminal rollup emission must not prevent exit */
   }
-
 
   // Mark the terminal `error` run_phase BEFORE `run_completed` so an
   // orchestrator's phase-state transitions (cold_start ->
