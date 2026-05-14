@@ -167,6 +167,16 @@ describe('COMMANDS registry', () => {
     expect(cmds).toContain('/diagnostics');
   });
 
+  it('exposes /help — CLAUDE.md documents it as canonical', () => {
+    // Pre-fix the registry was missing `/help` even though the docs
+    // listed it; users typed `/help` and got no completion match or
+    // dispatch. The empty-result path is the worst kind of broken.
+    const cmds = COMMANDS.map((c) => c.cmd);
+    expect(cmds).toContain('/help');
+    const help = COMMANDS.find((c) => c.cmd === '/help');
+    expect(help?.requiresIdle).toBeFalsy();
+  });
+
   it('marks credential / region / org-mutating commands as requiresIdle', () => {
     // These commands swap the agent's auth, region, or project context
     // out from under it — they MUST be blocked while a run is active so
