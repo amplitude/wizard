@@ -37,6 +37,28 @@
 export const AGENT_EVENT_WIRE_VERSION = 1 as const;
 
 /**
+ * Coarse-grained "wizard protocol" version. Distinct from
+ * `AGENT_EVENT_WIRE_VERSION` (envelope-only): this bumps when the broader
+ * handshake changes — new exit codes / re-numbered exit codes, removed
+ * CLI flags an orchestrator depended on, or NDJSON framing changes
+ * outside the envelope keys themselves. Today both `--print-protocol`
+ * and `wizard manifest` advertise this value so an orchestrator probing
+ * the binary out-of-band reads the same number it would see on the
+ * NDJSON wire at runtime.
+ *
+ * Bumping rules:
+ *   - Renaming or removing an exit code → bump.
+ *   - Removing a CLI flag listed in the manifest → bump.
+ *   - Removing or renaming a registered event in `EVENT_DATA_VERSIONS`
+ *     without a deprecation window → bump.
+ *   - Adding new events / new optional fields / new exit codes → no bump.
+ *
+ * Single source of truth. `print-protocol.ts` and `agent-manifest.ts`
+ * both import this — no re-declared constants.
+ */
+export const WIZARD_PROTOCOL_VERSION = 2 as const;
+
+/**
  * Per-event-type data-shape version. The key insight from orchestrator
  * feedback: pinning to envelope `v: 1` doesn't protect orchestrators
  * from breaking changes inside `data`. Adding/renaming a field on
@@ -152,6 +174,25 @@ export const EVENT_DATA_VERSIONS = {
   project_create_start: 1,
   project_create_success: 1,
   project_create_error: 1,
+  /**
+   * `signup_input_required` — emitted from `AgentUI.emitSignupInputsRequired`
+   * when `--agent --auth-onboarding create-account` is invoked but one or
+   * more required inputs are missing (region, email, full-name, accept-tos).
+   * Carries `missing[]` (each entry pairs a CLI flag with a description and
+   * optional URL/pattern) and a `resumeCommand` argv the orchestrator can
+   * re-invoke after gathering the inputs. Always paired with exit code
+   * `INPUT_REQUIRED` (12).
+   *
+   * Triple-overlap audit (A1) caught this discriminator missing from the
+   * registry — the event shipped on the wire as `lifecycle`+`event:
+   * 'signup_input_required'` but the `data_version` stamp was silently
+   * dropped because `lookupDataVersion` had no entry to match. v1 = the
+   * first registered version. The existing "every emit method stamps
+   * data_version" invariant test missed this gap because it only
+   * exercised a curated subset of `AgentUI` methods; the test now calls
+   * `emitSignupInputsRequired` explicitly.
+   */
+  signup_input_required: 1,
   // Tool / file changes
   /**
    * v2 — added `id` (mirrors the SDK's `tool_use_id`), a stable

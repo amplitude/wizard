@@ -1162,6 +1162,12 @@ describe('EVENT_DATA_VERSIONS registry covers every emitted discriminator', () =
   // whose `data.event` discriminator must be in the registry. This
   // test exercises the public methods that carry a discriminator and
   // asserts every resulting event is stamped with `data_version`.
+  //
+  // B16: `emitSignupInputsRequired` was added to the exercise list
+  // because the prior version of this test silently skipped it —
+  // which is how `signup_input_required` slipped onto the wire
+  // without a registry entry (audit A1 caught it). New emit methods
+  // MUST be added here so the registry-invariant test exercises them.
   it('every documented emit method stamps data_version', async () => {
     const ui = new AgentUI();
     ui.emitAuthRequired({
@@ -1181,6 +1187,15 @@ describe('EVENT_DATA_VERSIONS registry covers every emitted discriminator', () =
       name: 'n',
       code: 'X',
       message: 'm',
+    });
+    ui.emitSignupInputsRequired({
+      missing: [
+        {
+          flag: '--accept-tos',
+          description: 'Accept the Amplitude terms of service',
+        },
+      ],
+      resumeCommand: ['npx', '@amplitude/wizard', '--auth-onboarding'],
     });
     ui.emitNestedAgent({
       signal: 'claude_code_cli',
@@ -1227,6 +1242,72 @@ describe('EVENT_DATA_VERSIONS registry covers every emitted discriminator', () =
         `Event ${eventName} should have data_version stamped — registry key may be missing or misnamed`,
       ).toBe(expected);
     }
+  });
+
+  // Tightening of the invariant: enumerate every event-name string that
+  // appears as a `data.event` discriminator in `src/ui/agent-ui.ts` and
+  // assert each has a registry entry — independent of whether this test
+  // file remembers to call the matching emit method. This is the
+  // backstop that would have caught `signup_input_required` even if
+  // someone forgot to add `emitSignupInputsRequired` above. Audits A1,
+  // A2, A4 all cited "missing registry entry" as the gap class.
+  //
+  // Known-unregistered allowlist: the audit wave that surfaced this gap
+  // only explicitly flagged `signup_input_required`. The static-scan
+  // backstop catches a small handful of other emissions that lack a
+  // registry entry (`journey_transition`, `outro_data`,
+  // `post_agent_seeded`, `post_agent_step`); registering each of those
+  // requires the same documented-contract analysis (`data_version`
+  // semantics, breaking-change rules) that B16 isn't scoped for. They
+  // are listed here EXPLICITLY so a future PR sees the gap and a NEW
+  // emitter without a registry entry fails this test immediately. Do
+  // NOT grow this allowlist without a comment explaining the deferral.
+  it('every data.event discriminator in agent-ui.ts source is in the registry (with documented deferrals)', async () => {
+    const fs = await import('node:fs');
+    const path = await import('node:path');
+    const url = await import('node:url');
+    const here = path.dirname(url.fileURLToPath(import.meta.url));
+    const source = fs.readFileSync(
+      path.resolve(here, '..', 'agent-ui.ts'),
+      'utf8',
+    );
+    // Match `event: 'foo_bar'` lines inside a `data:` block. Skip
+    // arbitrary `event` properties on unrelated objects by requiring
+    // the snake_case + single-quote pattern.
+    const matches = source.matchAll(/\bevent:\s*'([a-z][a-z0-9_]*)'/g);
+    const discriminators = new Set<string>();
+    for (const m of matches) discriminators.add(m[1]);
+    // Sanity: the regex actually found a meaningful number of names.
+    expect(discriminators.size).toBeGreaterThanOrEqual(20);
+
+    // Allowlist of known-unregistered discriminators (see comment
+    // above). New unregistered emissions MUST NOT be added to this list
+    // — register them in `EVENT_DATA_VERSIONS` instead.
+    const KNOWN_UNREGISTERED = new Set<string>([
+      'journey_transition',
+      'outro_data',
+      'post_agent_seeded',
+      'post_agent_step',
+    ]);
+
+    const { EVENT_DATA_VERSIONS } = await import('../../lib/agent-events.js');
+    const registry = EVENT_DATA_VERSIONS as Readonly<Record<string, number>>;
+    const missing: string[] = [];
+    for (const name of discriminators) {
+      if (!(name in registry) && !KNOWN_UNREGISTERED.has(name)) {
+        missing.push(name);
+      }
+    }
+    expect(
+      missing,
+      `Discriminators emitted by agent-ui.ts but missing from EVENT_DATA_VERSIONS: ${missing.join(
+        ', ',
+      )}. Add an entry to the registry (and a docstring explaining the contract), or — if the deferral is intentional — add it to KNOWN_UNREGISTERED with a comment.`,
+    ).toEqual([]);
+    // Pin signup_input_required explicitly so an accidental removal
+    // from the registry fails LOUDLY on this file (in addition to the
+    // matching manifest test).
+    expect(registry.signup_input_required).toBe(1);
   });
 });
 

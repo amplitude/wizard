@@ -6,8 +6,25 @@
  * without parsing human help text.
  *
  * Kept hand-maintained (rather than auto-generated from yargs internals)
- * so it stays a stable contract that changes only intentionally.
+ * so it stays a stable contract that changes only intentionally. Two
+ * blocks ARE generated, however, so they can't drift from the runtime:
+ *
+ *   - `exitCodes`     — generated from the `ExitCode` enum +
+ *                       `ExitCodeDescription` map in `exit-codes.ts`.
+ *   - `ndjsonProtocol` — generated from `AGENT_EVENT_WIRE_VERSION`,
+ *                       `WIZARD_PROTOCOL_VERSION`, and
+ *                       `EVENT_DATA_VERSIONS` in `agent-events.ts`.
+ *
+ * Adding a new exit code or registering a new event in the wire format
+ * automatically surfaces in `wizard manifest` — no manual edit here.
  */
+
+import {
+  AGENT_EVENT_WIRE_VERSION,
+  EVENT_DATA_VERSIONS,
+  WIZARD_PROTOCOL_VERSION,
+} from './agent-events.js';
+import { ExitCode, ExitCodeDescription } from './exit-codes.js';
 
 export interface CommandFlag {
   name: string;
@@ -22,6 +39,41 @@ export interface CommandEntry {
   flags?: CommandFlag[];
   subcommands?: CommandEntry[];
   outputs?: 'human' | 'json' | 'ndjson' | 'both';
+}
+
+/**
+ * Wire-format + protocol-version block surfaced on the manifest. Mirrors
+ * what `--print-protocol` advertises out-of-band so an orchestrator that
+ * probes `wizard manifest` once at cold-start gets the same numbers it
+ * would observe on the NDJSON stream during a live run.
+ *
+ * All three fields are imported from `agent-events.ts` — single source of
+ * truth, no re-declared constants. Adding a new registered event in
+ * `EVENT_DATA_VERSIONS` automatically appears in `eventDataVersions`
+ * here; bumping `WIZARD_PROTOCOL_VERSION` automatically bumps
+ * `protocolVersion` here.
+ */
+export interface NdjsonProtocolBlock {
+  /**
+   * Envelope-level wire-format version (`v` on every NDJSON line).
+   * Mirrors `AGENT_EVENT_WIRE_VERSION`. Bumped only on breaking changes
+   * to the top-level envelope keys.
+   */
+  wireVersion: number;
+  /**
+   * Coarse-grained "wizard protocol" version covering CLI flags, exit
+   * codes, and NDJSON framing outside the envelope itself. Mirrors
+   * `WIZARD_PROTOCOL_VERSION`. Same value `--print-protocol` returns
+   * as `wizardProtocolVersion`.
+   */
+  protocolVersion: number;
+  /**
+   * Per-event-type data-shape versions, keyed off the `data.event`
+   * discriminator. Mirror of `EVENT_DATA_VERSIONS`. Orchestrators
+   * branch on `(type, data.event, data_version)` and can read this
+   * map at cold-start to learn which version they're about to see.
+   */
+  eventDataVersions: Record<string, number>;
 }
 
 export interface AgentManifest {
@@ -62,7 +114,23 @@ export interface AgentManifest {
   env: Array<{ name: string; describe: string }>;
   exitCodes: Array<{ code: number; name: string; describe: string }>;
   commands: CommandEntry[];
+  /**
+   * @deprecated Use `ndjsonProtocol.wireVersion` instead. Retained for one
+   * release as an alias so existing orchestrators that branched on
+   * `manifest.ndjsonSchemaVersion === 1` don't break. Always equals
+   * `ndjsonProtocol.wireVersion`; will be removed in the next manifest
+   * `schemaVersion` bump.
+   */
   ndjsonSchemaVersion: 1;
+  /**
+   * NDJSON wire-format + protocol-version block, generated from
+   * `AGENT_EVENT_WIRE_VERSION` / `WIZARD_PROTOCOL_VERSION` /
+   * `EVENT_DATA_VERSIONS` in `agent-events.ts`. Mirrors the payload
+   * `--print-protocol` returns, so an orchestrator that probes
+   * `wizard manifest` once at cold-start has every protocol number it
+   * needs without spawning a second probe.
+   */
+  ndjsonProtocol: NdjsonProtocolBlock;
 }
 
 export function getAgentManifest(): AgentManifest {
@@ -224,31 +292,23 @@ export function getAgentManifest(): AgentManifest {
           "Override the inner agent's per-run turn cap (default 200, sanity-bounded at 10000). Useful for unusually long-running setups.",
       },
     ],
-    exitCodes: [
-      { code: 0, name: 'SUCCESS', describe: 'Completed successfully' },
-      { code: 1, name: 'GENERAL_ERROR', describe: 'Unclassified error' },
-      { code: 2, name: 'INVALID_ARGS', describe: 'Invalid flags or arguments' },
-      {
-        code: 3,
-        name: 'AUTH_REQUIRED',
-        describe: 'Not logged in; run `amplitude-wizard login` first',
-      },
-      {
-        code: 4,
-        name: 'NETWORK_ERROR',
-        describe: 'Could not reach Amplitude or a required service',
-      },
-      {
-        code: 10,
-        name: 'AGENT_FAILED',
-        describe: 'The AI-powered setup agent failed mid-run',
-      },
-      {
-        code: 130,
-        name: 'USER_CANCELLED',
-        describe: 'User cancelled (Ctrl-C or prompt rejection)',
-      },
-    ],
+    // exitCodes is generated from the `ExitCode` enum + `ExitCodeDescription`
+    // map so adding a new code in `exit-codes.ts` surfaces here automatically.
+    // Sorted by numeric value so the manifest is stable across reorderings
+    // of the source enum (which is read in declaration order today, but
+    // shouldn't be a contract). The manifest test asserts every `ExitCode`
+    // enum value appears here — drift fails CI.
+    exitCodes: (
+      Object.entries(ExitCode) as Array<
+        [keyof typeof ExitCode, (typeof ExitCode)[keyof typeof ExitCode]]
+      >
+    )
+      .map(([name, code]) => ({
+        code,
+        name,
+        describe: ExitCodeDescription[name],
+      }))
+      .sort((a, b) => a.code - b.code),
     commands: [
       {
         command: '(default)',
@@ -372,5 +432,17 @@ export function getAgentManifest(): AgentManifest {
       },
     ],
     ndjsonSchemaVersion: 1,
+    // Imported from `agent-events.ts` — no re-declared constants. The
+    // `EVENT_DATA_VERSIONS` registry is cloned into a plain Record so the
+    // JSON serializer emits a stable POJO (the source is an `as const`
+    // tuple). Mirrors what `--print-protocol` surfaces out-of-band; the
+    // manifest test asserts both blocks stay in sync with the source.
+    ndjsonProtocol: {
+      wireVersion: AGENT_EVENT_WIRE_VERSION,
+      protocolVersion: WIZARD_PROTOCOL_VERSION,
+      eventDataVersions: Object.fromEntries(
+        Object.entries(EVENT_DATA_VERSIONS),
+      ),
+    },
   };
 }
