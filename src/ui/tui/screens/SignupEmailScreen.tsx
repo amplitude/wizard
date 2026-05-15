@@ -23,6 +23,7 @@ import { useScreenHints } from '../hooks/useScreenHints.js';
 import { Colors, Icons } from '../styles.js';
 import type { KeyHint } from '../components/KeyHintBar.js';
 import { EMAIL_REGEX } from '../../../lib/constants.js';
+import { AuthOnboardingPath } from '../../../lib/wizard-session.js';
 import { analytics } from '../../../utils/analytics.js';
 
 interface SignupEmailScreenProps {
@@ -40,6 +41,7 @@ export const SignupEmailScreen = ({ store }: SignupEmailScreenProps) => {
   const hints = useMemo<readonly KeyHint[]>(
     () => [
       { key: 'Enter', label: 'Continue' },
+      { key: 'Tab', label: 'Sign in' },
       { key: 'Esc', label: routerCanGoBack ? 'Back' : 'Welcome' },
     ],
     [routerCanGoBack],
@@ -48,15 +50,28 @@ export const SignupEmailScreen = ({ store }: SignupEmailScreenProps) => {
 
   // TextInput from @inkjs/ui swallows Esc — wire it explicitly so users
   // can step back to the Intro picker (or rewind to Welcome if no
-  // earlier screen has anything to revert).
+  // earlier screen has anything to revert). Tab is the inline escape
+  // for users who already have an account: flipping authOnboardingPath
+  // makes isCreateAccountOnboarding(s) return false, which short-circuits
+  // every downstream create-account-only flow entry and routes them to
+  // AuthScreen for browser OAuth. We don't use setSignupAbandoned here
+  // because that flag's contract is "ceremony probed and aborted" — on
+  // this screen no probe has fired yet.
   useScreenInput((_input, key) => {
-    if (!key.escape) return;
-    analytics.wizardCapture('signup email screen back');
-    if (store.canGoBack()) {
-      store.goBack();
+    if (key.escape) {
+      analytics.wizardCapture('signup email screen back');
+      if (store.canGoBack()) {
+        store.goBack();
+        return;
+      }
+      store.backToWelcome();
       return;
     }
-    store.backToWelcome();
+    if (key.tab) {
+      analytics.wizardCapture('signup email sign in chosen');
+      store.setAuthOnboardingPath(AuthOnboardingPath.SignIn);
+      return;
+    }
   });
 
   const handleSubmit = (value: string) => {
@@ -103,6 +118,10 @@ export const SignupEmailScreen = ({ store }: SignupEmailScreenProps) => {
       <Box marginTop={1} flexDirection="column">
         <Text color={Colors.muted}>
           {Icons.dot} We&apos;ll use this to create your Amplitude account
+        </Text>
+        <Text color={Colors.muted}>
+          {Icons.dot} Already have an account? Press [Tab] to sign in via
+          browser
         </Text>
       </Box>
     </Box>
