@@ -22,6 +22,13 @@ function argv(extra: Record<string, unknown> = {}): Arguments {
   } as unknown as Arguments;
 }
 
+/**
+ * Empty env shared across most tests so the host shell's `CI`,
+ * `DO_NOT_TRACK`, etc. don't leak into assertions. Tests that exercise
+ * the env-var capture pass a populated object explicitly.
+ */
+const EMPTY_ENV: NodeJS.ProcessEnv = {};
+
 describe('emailDomainFromArg', () => {
   it('returns lowercase domain for a valid email', () => {
     expect(emailDomainFromArg('user@example.com')).toBe('example.com');
@@ -65,12 +72,12 @@ describe('emailDomainFromArg', () => {
 
 describe('wizardLaunchedProperties — defaults', () => {
   it('reports subcommand=default when no positional is present', () => {
-    const props = wizardLaunchedProperties(argv(), false);
+    const props = wizardLaunchedProperties(argv(), false, EMPTY_ENV);
     expect(props.subcommand).toBe('default');
   });
 
   it('reports all boolean flags false when argv is empty', () => {
-    const props = wizardLaunchedProperties(argv(), false);
+    const props = wizardLaunchedProperties(argv(), false, EMPTY_ENV);
     expect(props.debug).toBe(false);
     expect(props.verbose).toBe(false);
     expect(props.ci).toBe(false);
@@ -88,41 +95,55 @@ describe('wizardLaunchedProperties — defaults', () => {
   });
 
   it('reports `no defaults` as false when --default is unset or true', () => {
-    expect(wizardLaunchedProperties(argv(), false)['no defaults']).toBe(false);
     expect(
-      wizardLaunchedProperties(argv({ default: true }), false)['no defaults'],
+      wizardLaunchedProperties(argv(), false, EMPTY_ENV)['no defaults'],
+    ).toBe(false);
+    expect(
+      wizardLaunchedProperties(argv({ default: true }), false, EMPTY_ENV)[
+        'no defaults'
+      ],
     ).toBe(false);
   });
 
   it('reports `no defaults` as true ONLY when --no-default was passed', () => {
     expect(
-      wizardLaunchedProperties(argv({ default: false }), false)['no defaults'],
+      wizardLaunchedProperties(argv({ default: false }), false, EMPTY_ENV)[
+        'no defaults'
+      ],
     ).toBe(true);
   });
 
   it('reports nested agent from the parameter, not from argv', () => {
-    expect(wizardLaunchedProperties(argv(), false)['nested agent']).toBe(false);
-    expect(wizardLaunchedProperties(argv(), true)['nested agent']).toBe(true);
+    expect(
+      wizardLaunchedProperties(argv(), false, EMPTY_ENV)['nested agent'],
+    ).toBe(false);
+    expect(
+      wizardLaunchedProperties(argv(), true, EMPTY_ENV)['nested agent'],
+    ).toBe(true);
   });
 });
 
 describe('wizardLaunchedProperties — subcommand detection', () => {
   it('reports the first string positional as the subcommand', () => {
     expect(
-      wizardLaunchedProperties(argv({ _: ['login'] }), false).subcommand,
+      wizardLaunchedProperties(argv({ _: ['login'] }), false, EMPTY_ENV)
+        .subcommand,
     ).toBe('login');
   });
 
   it('falls back to default for numeric positionals', () => {
-    expect(wizardLaunchedProperties(argv({ _: [42] }), false).subcommand).toBe(
-      'default',
-    );
+    expect(
+      wizardLaunchedProperties(argv({ _: [42] }), false, EMPTY_ENV).subcommand,
+    ).toBe('default');
   });
 
   it('uses only the first positional', () => {
     expect(
-      wizardLaunchedProperties(argv({ _: ['mcp', 'install'] }), false)
-        .subcommand,
+      wizardLaunchedProperties(
+        argv({ _: ['mcp', 'install'] }),
+        false,
+        EMPTY_ENV,
+      ).subcommand,
     ).toBe('mcp');
   });
 });
@@ -132,6 +153,7 @@ describe('wizardLaunchedProperties — boolean pass-through', () => {
     const props = wizardLaunchedProperties(
       argv({ ci: true, agent: true, debug: true }),
       false,
+      EMPTY_ENV,
     );
     expect(props.ci).toBe(true);
     expect(props.agent).toBe(true);
@@ -142,6 +164,7 @@ describe('wizardLaunchedProperties — boolean pass-through', () => {
     const props = wizardLaunchedProperties(
       argv({ ci: 'true', agent: 1, debug: 'yes' }),
       false,
+      EMPTY_ENV,
     );
     expect(props.ci).toBe(false);
     expect(props.agent).toBe(false);
@@ -155,21 +178,24 @@ describe('wizardLaunchedProperties — enumerated strings', () => {
       wizardLaunchedProperties(
         argv({ 'auth-onboarding': 'create-account' }),
         false,
+        EMPTY_ENV,
       )['auth onboarding'],
     ).toBe('create-account');
   });
 
   it('reports null for empty strings', () => {
     expect(
-      wizardLaunchedProperties(argv({ 'auth-onboarding': '' }), false)[
-        'auth onboarding'
-      ],
+      wizardLaunchedProperties(
+        argv({ 'auth-onboarding': '' }),
+        false,
+        EMPTY_ENV,
+      )['auth onboarding'],
     ).toBeNull();
   });
 
   it('reports null when unset', () => {
     expect(
-      wizardLaunchedProperties(argv(), false)['auth onboarding'],
+      wizardLaunchedProperties(argv(), false, EMPTY_ENV)['auth onboarding'],
     ).toBeNull();
   });
 });
@@ -179,6 +205,7 @@ describe('wizardLaunchedProperties — sensitive-field redaction', () => {
     const props = wizardLaunchedProperties(
       argv({ 'api-key': 'secret-amplitude-key-xxx' }),
       false,
+      EMPTY_ENV,
     );
     expect(props['api key provided']).toBe(true);
     expect(JSON.stringify(props)).not.toContain('secret-amplitude-key-xxx');
@@ -188,6 +215,7 @@ describe('wizardLaunchedProperties — sensitive-field redaction', () => {
     const props = wizardLaunchedProperties(
       argv({ token: 'eyJhbGciOi.SECRET.signature' }),
       false,
+      EMPTY_ENV,
     );
     expect(props['token provided']).toBe(true);
     expect(JSON.stringify(props)).not.toContain('eyJhbGciOi.SECRET');
@@ -197,6 +225,7 @@ describe('wizardLaunchedProperties — sensitive-field redaction', () => {
     const props = wizardLaunchedProperties(
       argv({ 'full-name': 'Jane Doe' }),
       false,
+      EMPTY_ENV,
     );
     expect(props['full name provided']).toBe(true);
     expect(JSON.stringify(props)).not.toContain('Jane Doe');
@@ -206,6 +235,7 @@ describe('wizardLaunchedProperties — sensitive-field redaction', () => {
     const props = wizardLaunchedProperties(
       argv({ email: 'private.local-part@amplitude.com' }),
       false,
+      EMPTY_ENV,
     );
     expect(props['email provided']).toBe(true);
     expect(props['email domain']).toBe('amplitude.com');
@@ -222,6 +252,7 @@ describe('wizardLaunchedProperties — sensitive-field redaction', () => {
         'plan-id': 'plan-abc-123',
       }),
       false,
+      EMPTY_ENV,
     );
     expect(props['install dir provided']).toBe(true);
     expect(props['cache dir provided']).toBe(true);
@@ -244,6 +275,7 @@ describe('wizardLaunchedProperties — sensitive-field redaction', () => {
         env: 'production',
       }),
       false,
+      EMPTY_ENV,
     );
     expect(props['app id provided']).toBe(true);
     expect(props['app name provided']).toBe(true);
@@ -263,13 +295,18 @@ describe('wizardLaunchedProperties — email edge cases', () => {
     const props = wizardLaunchedProperties(
       argv({ email: 'not-an-email' }),
       false,
+      EMPTY_ENV,
     );
     expect(props['email provided']).toBe(true);
     expect(props['email domain']).toBeNull();
   });
 
   it('treats empty-string email as absent', () => {
-    const props = wizardLaunchedProperties(argv({ email: '' }), false);
+    const props = wizardLaunchedProperties(
+      argv({ email: '' }),
+      false,
+      EMPTY_ENV,
+    );
     expect(props['email provided']).toBe(false);
     expect(props['email domain']).toBeNull();
   });
@@ -286,6 +323,7 @@ describe('wizardLaunchedProperties — internal env-var passthroughs', () => {
         'log-file': '/tmp/wizard.log',
       }),
       false,
+      EMPTY_ENV,
     );
     expect(props['event plan decision provided']).toBe(true);
     expect(props['event plan feedback provided']).toBe(true);
@@ -297,11 +335,152 @@ describe('wizardLaunchedProperties — internal env-var passthroughs', () => {
   });
 
   it('reports presence false when env-var shadows are unset', () => {
-    const props = wizardLaunchedProperties(argv(), false);
+    const props = wizardLaunchedProperties(argv(), false, EMPTY_ENV);
     expect(props['event plan decision provided']).toBe(false);
     expect(props['event plan feedback provided']).toBe(false);
     expect(props['benchmark file provided']).toBe(false);
     expect(props['benchmark config provided']).toBe(false);
     expect(props['log file provided']).toBe(false);
+  });
+});
+
+describe('wizardLaunchedProperties — undocumented env-var capture', () => {
+  it('reports every env-var property as false / null when env is empty', () => {
+    const props = wizardLaunchedProperties(argv(), false, EMPTY_ENV);
+    expect(props['allow nested env']).toBe(false);
+    expect(props['no telemetry env']).toBe(false);
+    expect(props['do not track env']).toBe(false);
+    expect(props['gateway sanitize off env']).toBe(false);
+    expect(props['no update check env']).toBe(false);
+    expect(props['no theme env']).toBe(false);
+    expect(props['data api url override env']).toBe(false);
+    expect(props['ingestion host override env']).toBe(false);
+    expect(props['signup url override env']).toBe(false);
+    expect(props['amplitude server url override env']).toBe(false);
+    expect(props['amplitude api key env']).toBe(false);
+    expect(props['mcp tool filter env']).toBeNull();
+    expect(props['builtin tool filter env']).toBeNull();
+    expect(props['max turns env']).toBeNull();
+  });
+
+  it('captures DO_NOT_TRACK=1 even though the SDK opt-out logic is unrelated', () => {
+    const props = wizardLaunchedProperties(argv(), false, {
+      DO_NOT_TRACK: '1',
+    });
+    expect(props['do not track env']).toBe(true);
+  });
+
+  it('only matches DO_NOT_TRACK=1 (not other truthy strings)', () => {
+    // Mirrors sentry.ts's exact `=== '1'` check — if a future contributor
+    // loosens this, the funnel would diverge from the actual opt-out
+    // behavior. Lock the contract here.
+    expect(
+      wizardLaunchedProperties(argv(), false, { DO_NOT_TRACK: 'true' })[
+        'do not track env'
+      ],
+    ).toBe(false);
+    expect(
+      wizardLaunchedProperties(argv(), false, { DO_NOT_TRACK: '0' })[
+        'do not track env'
+      ],
+    ).toBe(false);
+  });
+
+  it('captures AMPLITUDE_WIZARD_NO_TELEMETRY=1', () => {
+    const props = wizardLaunchedProperties(argv(), false, {
+      AMPLITUDE_WIZARD_NO_TELEMETRY: '1',
+    });
+    expect(props['no telemetry env']).toBe(true);
+  });
+
+  it('captures AMPLITUDE_WIZARD_ALLOW_NESTED as presence (any value)', () => {
+    expect(
+      wizardLaunchedProperties(argv(), false, {
+        AMPLITUDE_WIZARD_ALLOW_NESTED: '1',
+      })['allow nested env'],
+    ).toBe(true);
+    // Any non-empty value counts as set — matches the bypass semantics.
+    expect(
+      wizardLaunchedProperties(argv(), false, {
+        AMPLITUDE_WIZARD_ALLOW_NESTED: 'yes',
+      })['allow nested env'],
+    ).toBe(true);
+    // Empty string is not presence.
+    expect(
+      wizardLaunchedProperties(argv(), false, {
+        AMPLITUDE_WIZARD_ALLOW_NESTED: '',
+      })['allow nested env'],
+    ).toBe(false);
+  });
+
+  it('matches AMPLITUDE_WIZARD_GATEWAY_SANITIZE_FETCH=0 (off semantics)', () => {
+    // The consumer in register-gateway-fetch-sanitize.ts uses `=== '0'` to
+    // mean "disable". Funnel must report the same to stay accurate.
+    expect(
+      wizardLaunchedProperties(argv(), false, {
+        AMPLITUDE_WIZARD_GATEWAY_SANITIZE_FETCH: '0',
+      })['gateway sanitize off env'],
+    ).toBe(true);
+    expect(
+      wizardLaunchedProperties(argv(), false, {
+        AMPLITUDE_WIZARD_GATEWAY_SANITIZE_FETCH: '1',
+      })['gateway sanitize off env'],
+    ).toBe(false);
+  });
+
+  it('captures URL / endpoint overrides as presence only, not values', () => {
+    const props = wizardLaunchedProperties(argv(), false, {
+      AMPLITUDE_WIZARD_DATA_API_URL: 'https://internal.example.com/api',
+      AMPLITUDE_WIZARD_INGESTION_HOST: 'https://ingest.example.com',
+      AMPLITUDE_WIZARD_SIGNUP_URL: 'https://signup.example.com',
+      AMPLITUDE_SERVER_URL: 'https://analytics.example.com',
+      AMPLITUDE_API_KEY: 'akey-secret-value',
+    });
+    expect(props['data api url override env']).toBe(true);
+    expect(props['ingestion host override env']).toBe(true);
+    expect(props['signup url override env']).toBe(true);
+    expect(props['amplitude server url override env']).toBe(true);
+    expect(props['amplitude api key env']).toBe(true);
+    const serialized = JSON.stringify(props);
+    expect(serialized).not.toContain('internal.example.com');
+    expect(serialized).not.toContain('signup.example.com');
+    expect(serialized).not.toContain('akey-secret-value');
+  });
+
+  it('passes agent-knob env-var values through (low cardinality)', () => {
+    const props = wizardLaunchedProperties(argv(), false, {
+      AMPLITUDE_WIZARD_MCP_TOOL_FILTER: 'minimal',
+      AMPLITUDE_WIZARD_BUILTIN_TOOL_FILTER: 'full',
+      AMPLITUDE_WIZARD_MAX_TURNS: '100',
+    });
+    expect(props['mcp tool filter env']).toBe('minimal');
+    expect(props['builtin tool filter env']).toBe('full');
+    expect(props['max turns env']).toBe('100');
+  });
+
+  it('captures NO_UPDATE_CHECK and NO_THEME with strict =1 match', () => {
+    expect(
+      wizardLaunchedProperties(argv(), false, {
+        AMPLITUDE_WIZARD_NO_UPDATE_CHECK: '1',
+        AMPLITUDE_WIZARD_NO_THEME: '1',
+      })['no update check env'],
+    ).toBe(true);
+    expect(
+      wizardLaunchedProperties(argv(), false, {
+        AMPLITUDE_WIZARD_NO_UPDATE_CHECK: '1',
+        AMPLITUDE_WIZARD_NO_THEME: '1',
+      })['no theme env'],
+    ).toBe(true);
+  });
+
+  it('reflects CI env var via `ci env detected` (passes through `env` param)', () => {
+    expect(
+      wizardLaunchedProperties(argv(), false, { CI: 'true' })[
+        'ci env detected'
+      ],
+    ).toBe(true);
+    expect(wizardLaunchedProperties(argv(), false, {})['ci env detected']).toBe(
+      false,
+    );
   });
 });
