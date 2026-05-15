@@ -23,6 +23,7 @@ import { CtrlCHandler } from './components/CtrlCHandler.js';
 import { HeaderBar } from './components/HeaderBar.js';
 import { JourneyStepper } from './components/JourneyStepper.js';
 import { ActivityLine } from './components/ActivityLine.js';
+import { OutageBanner } from './components/OutageBanner.js';
 import { useStdoutDimensions } from './hooks/useStdoutDimensions.js';
 import { useWizardStore } from './hooks/useWizardStore.js';
 import { DissolveTransition } from './primitives/index.js';
@@ -135,6 +136,11 @@ export const App = ({ store }: AppProps) => {
             alignItems="center"
           >
             <Box flexDirection="column" width={width}>
+              {/* OutageBanner — pinned above the stepper when WIZARD_NEW_UX
+                  is enabled. Renders nothing on healthy status so the
+                  vertical chrome budget is unchanged in the common case. */}
+              {process.env.WIZARD_NEW_UX === '1' && <OutageBanner />}
+
               {/* Journey stepper */}
               <JourneyStepper store={store} width={width} />
 
