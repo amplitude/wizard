@@ -466,3 +466,170 @@ describe('wizardLaunchedProperties — undocumented env-var capture', () => {
     );
   });
 });
+
+describe('wizardLaunchedProperties — LLM gateway / model env vars', () => {
+  it('reports presence of Anthropic / Claude credentials, never the value', () => {
+    const props = wizardLaunchedProperties(argv(), false, {
+      ANTHROPIC_API_KEY: 'sk-ant-secret',
+      ANTHROPIC_AUTH_TOKEN: 'bearer-secret',
+      CLAUDE_CODE_OAUTH_TOKEN: 'claude-oauth-secret',
+      ANTHROPIC_BASE_URL: 'https://internal-gateway.example.com',
+      WIZARD_LLM_PROXY_URL: 'https://litellm.example.com',
+    });
+    expect(props['anthropic api key env']).toBe(true);
+    expect(props['anthropic auth token env']).toBe(true);
+    expect(props['claude code oauth token env']).toBe(true);
+    expect(props['anthropic base url override env']).toBe(true);
+    expect(props['wizard llm proxy url override env']).toBe(true);
+    const serialized = JSON.stringify(props);
+    expect(serialized).not.toContain('sk-ant-secret');
+    expect(serialized).not.toContain('bearer-secret');
+    expect(serialized).not.toContain('claude-oauth-secret');
+    expect(serialized).not.toContain('internal-gateway.example.com');
+    expect(serialized).not.toContain('litellm.example.com');
+  });
+
+  it('passes model overrides through (low cardinality, chart-useful)', () => {
+    const props = wizardLaunchedProperties(argv(), false, {
+      WIZARD_CLAUDE_MODEL: 'claude-3-5-sonnet-20241022',
+      WIZARD_HAIKU_MODEL: 'claude-3-haiku-20240307',
+    });
+    expect(props['wizard claude model env']).toBe('claude-3-5-sonnet-20241022');
+    expect(props['wizard haiku model env']).toBe('claude-3-haiku-20240307');
+  });
+
+  it('reports CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS as presence (consumer uses !truthy)', () => {
+    // agent-interface.ts:1510 checks `!process.env.CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS`,
+    // so any truthy string disables. Presence semantics match.
+    expect(
+      wizardLaunchedProperties(argv(), false, {
+        CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS: '1',
+      })['claude code disable beta env'],
+    ).toBe(true);
+    expect(
+      wizardLaunchedProperties(argv(), false, {
+        CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS: 'true',
+      })['claude code disable beta env'],
+    ).toBe(true);
+  });
+});
+
+describe('wizardLaunchedProperties — region / experiments / endpoints', () => {
+  it('passes WIZARD_ZONE through (low cardinality: us / eu)', () => {
+    expect(
+      wizardLaunchedProperties(argv(), false, { WIZARD_ZONE: 'eu' })[
+        'wizard zone env'
+      ],
+    ).toBe('eu');
+  });
+
+  it('matches DEMO_MODE_WIZARD=1 (strict, mirroring constants.ts)', () => {
+    expect(
+      wizardLaunchedProperties(argv(), false, { DEMO_MODE_WIZARD: '1' })[
+        'demo mode env'
+      ],
+    ).toBe(true);
+    expect(
+      wizardLaunchedProperties(argv(), false, { DEMO_MODE_WIZARD: 'true' })[
+        'demo mode env'
+      ],
+    ).toBe(false);
+  });
+
+  it('reports presence for service-endpoint overrides without leaking URLs', () => {
+    const props = wizardLaunchedProperties(argv(), false, {
+      MCP_URL: 'http://localhost:8787',
+      SKILLS_URL: 'https://skills-internal.example.com',
+      OAUTH_CLIENT_ID: 'custom-client-uuid',
+      OAUTH_HOST: 'https://auth-internal.example.com',
+      AMPLITUDE_EXPERIMENT_DEPLOYMENT_KEY: 'depl-secret',
+      SENTRY_DSN: 'https://abc@sentry-internal.example.com/123',
+    });
+    expect(props['mcp url override env']).toBe(true);
+    expect(props['skills url override env']).toBe(true);
+    expect(props['oauth client id override env']).toBe(true);
+    expect(props['oauth host override env']).toBe(true);
+    expect(props['amplitude experiment deployment key env']).toBe(true);
+    expect(props['sentry dsn override env']).toBe(true);
+    const serialized = JSON.stringify(props);
+    expect(serialized).not.toContain('localhost:8787');
+    expect(serialized).not.toContain('skills-internal');
+    expect(serialized).not.toContain('custom-client-uuid');
+    expect(serialized).not.toContain('depl-secret');
+    expect(serialized).not.toContain('sentry-internal');
+  });
+
+  it('reports presence for OAuth-related secrets without the value', () => {
+    const props = wizardLaunchedProperties(argv(), false, {
+      WIZARD_OAUTH_TOKEN: 'oauth-secret-value',
+      WIZARD_EXPIRES_AT: '2030-01-01T00:00:00Z',
+    });
+    expect(props['wizard oauth token env']).toBe(true);
+    expect(props['wizard expires at env']).toBe(true);
+    expect(JSON.stringify(props)).not.toContain('oauth-secret-value');
+  });
+
+  it('matches SENTRY_DEBUG=1 strictly', () => {
+    expect(
+      wizardLaunchedProperties(argv(), false, { SENTRY_DEBUG: '1' })[
+        'sentry debug env'
+      ],
+    ).toBe(true);
+    expect(
+      wizardLaunchedProperties(argv(), false, { SENTRY_DEBUG: 'true' })[
+        'sentry debug env'
+      ],
+    ).toBe(false);
+  });
+
+  it('passes DATA_INGESTION_TIMEOUT_MS through as string', () => {
+    expect(
+      wizardLaunchedProperties(argv(), false, {
+        DATA_INGESTION_TIMEOUT_MS: '60000',
+      })['data ingestion timeout env'],
+    ).toBe('60000');
+  });
+
+  it('reports NO_UPDATE_NOTIFIER as presence (upstream package convention)', () => {
+    expect(
+      wizardLaunchedProperties(argv(), false, { NO_UPDATE_NOTIFIER: '1' })[
+        'no update notifier env'
+      ],
+    ).toBe(true);
+    expect(
+      wizardLaunchedProperties(argv(), false, { NO_UPDATE_NOTIFIER: 'yes' })[
+        'no update notifier env'
+      ],
+    ).toBe(true);
+    expect(
+      wizardLaunchedProperties(argv(), false, EMPTY_ENV)[
+        'no update notifier env'
+      ],
+    ).toBe(false);
+  });
+
+  it('reports every new env property as false / null when env is empty', () => {
+    const props = wizardLaunchedProperties(argv(), false, EMPTY_ENV);
+    expect(props['anthropic base url override env']).toBe(false);
+    expect(props['anthropic api key env']).toBe(false);
+    expect(props['anthropic auth token env']).toBe(false);
+    expect(props['claude code oauth token env']).toBe(false);
+    expect(props['claude code disable beta env']).toBe(false);
+    expect(props['wizard llm proxy url override env']).toBe(false);
+    expect(props['wizard claude model env']).toBeNull();
+    expect(props['wizard haiku model env']).toBeNull();
+    expect(props['wizard zone env']).toBeNull();
+    expect(props['demo mode env']).toBe(false);
+    expect(props['amplitude experiment deployment key env']).toBe(false);
+    expect(props['mcp url override env']).toBe(false);
+    expect(props['skills url override env']).toBe(false);
+    expect(props['oauth client id override env']).toBe(false);
+    expect(props['oauth host override env']).toBe(false);
+    expect(props['wizard oauth token env']).toBe(false);
+    expect(props['wizard expires at env']).toBe(false);
+    expect(props['sentry dsn override env']).toBe(false);
+    expect(props['sentry debug env']).toBe(false);
+    expect(props['data ingestion timeout env']).toBeNull();
+    expect(props['no update notifier env']).toBe(false);
+  });
+});

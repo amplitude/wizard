@@ -169,5 +169,55 @@ export function wizardLaunchedProperties(
     'mcp tool filter env': envValue('AMPLITUDE_WIZARD_MCP_TOOL_FILTER'),
     'builtin tool filter env': envValue('AMPLITUDE_WIZARD_BUILTIN_TOOL_FILTER'),
     'max turns env': envValue('AMPLITUDE_WIZARD_MAX_TURNS'),
+
+    // ─── LLM gateway / Claude / model overrides ──────────────────────
+    // Endpoint or credential overrides change which LLM the agent
+    // actually talks to — material for diagnosing model-routing issues.
+    'anthropic base url override env': envSet('ANTHROPIC_BASE_URL'),
+    'anthropic api key env': envSet('ANTHROPIC_API_KEY'),
+    'anthropic auth token env': envSet('ANTHROPIC_AUTH_TOKEN'),
+    'claude code oauth token env': envSet('CLAUDE_CODE_OAUTH_TOKEN'),
+    'claude code disable beta env': envSet(
+      'CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS',
+    ),
+    'wizard llm proxy url override env': envSet('WIZARD_LLM_PROXY_URL'),
+    // Model values pass through — low cardinality (claude-3-5-sonnet,
+    // claude-3-haiku, etc.) and chart-useful for "what % run on which
+    // model".
+    'wizard claude model env': envValue('WIZARD_CLAUDE_MODEL'),
+    'wizard haiku model env': envValue('WIZARD_HAIKU_MODEL'),
+
+    // ─── Region / zone ───────────────────────────────────────────────
+    // `us` / `eu` — load-bearing for cross-region routing diagnostics.
+    'wizard zone env': envValue('WIZARD_ZONE'),
+
+    // ─── Demo / experiments ──────────────────────────────────────────
+    'demo mode env': envEquals('DEMO_MODE_WIZARD', '1'),
+    'amplitude experiment deployment key env': envSet(
+      'AMPLITUDE_EXPERIMENT_DEPLOYMENT_KEY',
+    ),
+
+    // ─── Service endpoint overrides ──────────────────────────────────
+    'mcp url override env': envSet('MCP_URL'),
+    'skills url override env': envSet('SKILLS_URL'),
+
+    // ─── OAuth ───────────────────────────────────────────────────────
+    'oauth client id override env': envSet('OAUTH_CLIENT_ID'),
+    'oauth host override env': envSet('OAUTH_HOST'),
+    'wizard oauth token env': envSet('WIZARD_OAUTH_TOKEN'),
+    'wizard expires at env': envSet('WIZARD_EXPIRES_AT'),
+
+    // ─── Sentry ──────────────────────────────────────────────────────
+    'sentry dsn override env': envSet('SENTRY_DSN'),
+    'sentry debug env': envEquals('SENTRY_DEBUG', '1'),
+
+    // ─── Tuning ──────────────────────────────────────────────────────
+    // Numeric override (milliseconds) — passes through as string. Low
+    // cardinality in practice (one or two values per CI tier).
+    'data ingestion timeout env': envValue('DATA_INGESTION_TIMEOUT_MS'),
+
+    // Companion to `no update check env` — the upstream `update-notifier`
+    // package's own opt-out env var (any non-empty value disables).
+    'no update notifier env': envSet('NO_UPDATE_NOTIFIER'),
   };
 }
