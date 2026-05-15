@@ -175,6 +175,31 @@ function needsSetup(session: WizardSession): boolean {
  * structural gate covers the no-pre-selection path too. Once the user
  * picks an org/project via AuthScreen, guard 2 takes over with the
  * specific selection.
+ *
+ * **Stale-IDs fix (PRs #747/#760/#762/#775/#778/#780 follow-up — the
+ *   one that finally pins the live repro):** PR #780 only fired the
+ * `pendingOrgs[0].projects[0]` fallback when BOTH `selectedOrgId` AND
+ * `selectedProjectId` are null. In the real restart-after-reset
+ * sequence, `AuthScreen`'s auto-resolve effect for single-org/
+ * single-project writes `selectedOrgId/ProjectId` from the FIRST
+ * `pendingOrgs` snapshot (returned by `resolveCredentials`). The
+ * `authTask` then runs OAuth, `fetchAmplitudeUser` fetches a SECOND
+ * time, and `setOAuthComplete` REPLACES `pendingOrgs` with the fresh
+ * snapshot. If the two snapshots' IDs don't match (re-fetch race, a
+ * different ordering, account changes between calls, even just a stale
+ * `selectedProjectId` from an earlier session that survived in
+ * memory) — the existing `pendingOrgs.find(o => o.id === selectedOrgId)`
+ * call returns `undefined` and the structural gate short-circuits to
+ * `false`. If anything then clobbers `pendingEnvSelection` (the
+ * recurring failure mode 6 prior PRs chased), `Auth.isComplete`
+ * returns true and the router walks past Auth into the Setup-bucket
+ * screens — exactly the user-reported `✓ Auth ─ ● Setup ←` hang with
+ * no env picker on screen. The fix: when stale IDs don't resolve a
+ * project in `pendingOrgs`, fall through to the same first-org/
+ * first-project heuristic instead of bailing out. The structural gate
+ * is now load-bearing across all three states: (a) no IDs picked
+ * (#780), (b) IDs picked and valid, (c) IDs picked but stale relative
+ * to the fresh `pendingOrgs` (this PR).
  */
 function needsEnvPickStillRequired(session: WizardSession): boolean {
   // Guard 1: pendingOrgs must be populated. The manual-API-key path
@@ -188,32 +213,32 @@ function needsEnvPickStillRequired(session: WizardSession): boolean {
   // the structural gate stop blocking.
   if (session.selectedEnvName !== null) return false;
 
-  // Resolve the project this run is targeting. Two valid sources:
-  //   (a) `selectedOrgId/ProjectId` — the user (or AuthScreen's
-  //       auto-resolve effect for single-org+single-project) has picked.
-  //       Use that exact (org, project) tuple.
-  //   (b) Neither is set yet — typical post-#778 restart-after-reset:
-  //       fall back to `pendingOrgs[0].projects[0]`, the same tuple
-  //       `resolveCredentials` walked when it landed at
-  //       `needs_user_choice/environment_selection`. Without this
-  //       fallback, the structural gate gives up the moment the user
-  //       reaches Auth without a pre-selected project — and the env
-  //       picker hang reproduces if `pendingEnvSelection` gets clobbered.
+  // Resolve the project this run is targeting. Three valid sources,
+  // tried in order of specificity:
+  //   (a) `selectedOrgId/ProjectId` resolve to a project IN
+  //       `pendingOrgs` — the user has a real selection, use it.
+  //   (b) `selectedOrgId/ProjectId` are set but DON'T resolve in
+  //       `pendingOrgs` (stale IDs from an earlier snapshot — typical
+  //       after `setOAuthComplete` replaced the orgs list with a
+  //       fresh fetch). Fall through to (c) — stale IDs must not let
+  //       the structural gate short-circuit, otherwise the env-picker
+  //       hang reproduces.
+  //   (c) Use `pendingOrgs[0].projects[0]` — the same tuple
+  //       `resolveCredentials` walked when it issued the deferral.
   const orgId = session.selectedOrgId;
   const projectId = session.selectedProjectId;
   let project: (typeof pendingOrgs)[number]['projects'][number] | undefined;
   if (orgId !== null && projectId !== null) {
-    // (a) Specific selection. Stale ID → bail; the existing stale-org
-    //     useEffect in AuthScreen handles that case.
+    // Try (a): exact specific selection.
     const org = pendingOrgs.find((o) => o.id === orgId);
-    if (!org) return false;
-    project = org.projects.find((p) => p.id === projectId);
-    if (!project) return false;
-  } else {
-    // (b) No selection yet. Use the same first-org/first-project
-    //     heuristic `resolveCredentials` did so the gate detects the
-    //     exact (org, project, envsWithKey) tuple the deferral was
-    //     triggered against.
+    project = org?.projects.find((p) => p.id === projectId);
+    // Fall through to (c) below if not found — that's path (b).
+  }
+  if (!project) {
+    // (c) No selection yet OR stale IDs. Use the first-org/
+    //     first-project heuristic `resolveCredentials` did so the gate
+    //     detects the exact (org, project, envsWithKey) tuple the
+    //     deferral was triggered against.
     project = pendingOrgs[0]?.projects?.[0];
     if (!project) return false;
   }
