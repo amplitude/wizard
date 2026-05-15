@@ -10,6 +10,7 @@ import {
   type AmplitudeZone,
 } from '../lib/constants.js';
 import { createLogger } from '../lib/observability/logger.js';
+import { analytics } from './analytics.js';
 
 const log = createLogger('direct-signup');
 
@@ -353,6 +354,12 @@ export async function performDirectSignup(
     state,
     client_id: oAuthClientId,
     redirect_uri: `http://localhost:${OAUTH_PORT}/callback`,
+    // Persistent CLI install UUID — forwarded so the server can bind this
+    // device's prior anonymous wizard events to the user's email on
+    // Amplitude's backend (BA-174). Sourced from the analytics singleton
+    // rather than threaded through SignupShape because it's a wizard-process
+    // fact, not session or wire-shape state.
+    device_id: analytics.getAnonymousId(),
   };
 
   // Each `with_required_fields` slot is emitted only when its source

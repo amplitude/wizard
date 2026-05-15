@@ -12,6 +12,15 @@ import { http, HttpResponse } from 'msw';
 import axios from 'axios';
 import { performDirectSignup } from '../direct-signup';
 
+// Mock the analytics singleton — direct-signup pulls `getAnonymousId()` to
+// forward the wizard's persistent install UUID as `device_id` in the request
+// body. Mocking sidesteps the real singleton's disk read of
+// ~/.amp-wizard/install-id and gives the body-shape tests a deterministic
+// value to assert against.
+vi.mock('../analytics', () => ({
+  analytics: { getAnonymousId: () => 'test-device-id-uuid' },
+}));
+
 const PROVISIONING_URL = 'https://app.amplitude.com/t/agentic/signup/v1';
 const EU_PROVISIONING_URL = 'https://app.eu.amplitude.com/t/agentic/signup/v1';
 const TOKEN_URL = 'https://auth.amplitude.com/oauth2/token';
@@ -524,6 +533,22 @@ describe('performDirectSignup', () => {
       }
     },
   );
+
+  it('always includes device_id from the analytics singleton in the request body', async () => {
+    let observedBody: Record<string, unknown> | null = null;
+    server.use(
+      http.post(PROVISIONING_URL, async ({ request }) => {
+        observedBody = (await request.json()) as Record<string, unknown>;
+        return HttpResponse.json({ type: 'oauth', oauth: { code: 'c' } });
+      }),
+      http.post(TOKEN_URL, () => HttpResponse.json(VALID_TOKEN_RESPONSE)),
+    );
+
+    await performDirectSignup(INITIAL_INPUT);
+
+    expect(observedBody).not.toBeNull();
+    expect(observedBody!.device_id).toBe('test-device-id-uuid');
+  });
 
   it('omits full_name from the request body when fullName is not supplied', async () => {
     let observedBody: Record<string, unknown> | null = null;
