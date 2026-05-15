@@ -1,0 +1,46 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`RunTimeline (WIZARD_NEW_UX=1) > renders at 40 cols (no extras row, narrow ledger) 1`] = `
+"⠋ Reading project structure
+
+✓ Detect framework
+❯ Wiring up SDK
+○ Confirm event plan
+○ Save events
+○ Build starter dashboard
+
+✎ src/amplitude.ts 512B
+✎ app/layout.tsx 128B
+
+elapsed 47s"
+`;
+
+exports[`RunTimeline (WIZARD_NEW_UX=1) > renders at 60 cols (extras row threshold) 1`] = `
+"⠋ Reading project structure
+
+✓ Detect framework
+❯ Wiring up SDK
+○ Confirm event plan
+○ Save events
+○ Build starter dashboard
+
+✎ src/amplitude.ts 512B
+✎ app/layout.tsx 128B
+
+elapsed 47s"
+`;
+
+exports[`RunTimeline (WIZARD_NEW_UX=1) > renders at 80 cols 1`] = `
+"⠋ Reading project structure
+
+✓ Detect framework
+❯ Wiring up SDK
+○ Confirm event plan
+○ Save events
+○ Build starter dashboard
+
+✎ src/amplitude.ts 512B
+✎ app/layout.tsx 128B
+
+elapsed 47s"
+`;

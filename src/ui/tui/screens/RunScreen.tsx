@@ -16,7 +16,9 @@ import { Box, Text } from 'ink';
 import { useState, useEffect, useRef, type ReactNode } from 'react';
 import { useWizardStore } from '../hooks/useWizardStore.js';
 import { useScreenHints } from '../hooks/useScreenHints.js';
+import { useScreenInput } from '../hooks/useScreenInput.js';
 import { useTimedCoaching } from '../hooks/useTimedCoaching.js';
+import { RunTimeline } from '../components/RunTimeline.js';
 import type { KeyHint } from '../components/KeyHintBar.js';
 import type { WizardStore } from '../store.js';
 import {
@@ -638,6 +640,18 @@ export const RunScreen = ({ store }: RunScreenProps) => {
   useWizardStore(store);
   useScreenHints(RUN_HINTS);
 
+  // ── Timeline UX fork (PR 4) ──────────────────────────────────────
+  // When `WIZARD_NEW_UX=1` we render the new vertical RunTimeline
+  // composer instead of the tabbed layout. The legacy path below is
+  // untouched so the env-unset behavior is byte-for-byte identical.
+  // `[l]` toggles a Logs overlay so users keep an escape hatch onto
+  // the live log file without bringing back the full tab strip.
+  // Snake / Events tabs are deferred under the new UX path (covered
+  // by other PRs in the Timeline series).
+  if (process.env.WIZARD_NEW_UX === '1') {
+    return <RunScreenTimeline store={store} />;
+  }
+
   // The bottom status pill ("what is the wizard doing right now") used
   // to live in TabContainer's chrome row, but it's content semantics,
   // not navigation — and a previous attempt to "rise" the chrome to
@@ -722,4 +736,45 @@ export const RunScreen = ({ store }: RunScreenProps) => {
       onTabConsumed={() => store.clearRequestedTab()}
     />
   );
+};
+
+/**
+ * Timeline-UX path for RunScreen, gated on `WIZARD_NEW_UX=1`.
+ *
+ * Replaces the tab strip with a single vertical `RunTimeline` view and
+ * exposes a `[l]` keypress that toggles a logs overlay so the user
+ * keeps access to the live log file. Esc / `l` close the overlay.
+ */
+const RunScreenTimeline = ({ store }: RunScreenProps) => {
+  const [showLogs, setShowLogs] = useState(false);
+  const [, rows] = useStdoutDimensions();
+
+  useScreenInput((input, key) => {
+    if (showLogs && (key.escape || input === 'l' || input === 'L')) {
+      setShowLogs(false);
+      return;
+    }
+    if (!showLogs && (input === 'l' || input === 'L')) {
+      setShowLogs(true);
+    }
+  });
+
+  if (showLogs) {
+    const logHeight = Math.max(8, Math.min(rows - 6, 20));
+    return (
+      <Box flexDirection="column" overflow="hidden">
+        <Box>
+          <Text color={Colors.muted}>logs — press [l] or Esc to close</Text>
+        </Box>
+        <Box overflow="hidden" height={logHeight}>
+          <LogViewer
+            filePath={getLogFile(store.session.installDir)}
+            sessionStartMs={getSessionStartMs()}
+          />
+        </Box>
+      </Box>
+    );
+  }
+
+  return <RunTimeline store={store} />;
 };
