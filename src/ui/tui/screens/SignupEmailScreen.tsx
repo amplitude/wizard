@@ -23,7 +23,6 @@ import { useScreenHints } from '../hooks/useScreenHints.js';
 import { Colors, Icons } from '../styles.js';
 import type { KeyHint } from '../components/KeyHintBar.js';
 import { EMAIL_REGEX } from '../../../lib/constants.js';
-import { AuthOnboardingPath } from '../../../lib/wizard-session.js';
 import { analytics } from '../../../utils/analytics.js';
 
 interface SignupEmailScreenProps {
@@ -49,11 +48,11 @@ export const SignupEmailScreen = ({ store }: SignupEmailScreenProps) => {
   useScreenHints(hints);
 
   // @inkjs/ui's TextInput handles its own keypress events — wire Esc
-  // (back-nav) and Tab (sign-in escape) on the screen. Tab flips
-  // authOnboardingPath; create-account-only flow entries short-circuit
-  // and the router routes to AuthScreen for browser OAuth. Not
-  // setSignupAbandoned — that flag's contract is "ceremony probed and
-  // aborted", and on this screen no probe has fired yet.
+  // (back-nav) and Tab (sign-in escape) on the screen. Tab routes
+  // through store.switchToLogin(), which flips authOnboardingPath +
+  // resets ceremony state + fires 'signup switched to login'. The
+  // router then short-circuits the create-account-only flow entries
+  // and resolves AuthScreen for browser OAuth.
   useScreenInput((_input, key) => {
     if (key.escape) {
       analytics.wizardCapture('signup email screen back');
@@ -65,8 +64,7 @@ export const SignupEmailScreen = ({ store }: SignupEmailScreenProps) => {
       return;
     }
     if (key.tab) {
-      analytics.wizardCapture('signup email sign in chosen');
-      store.setAuthOnboardingPath(AuthOnboardingPath.SignIn);
+      store.switchToLogin();
       return;
     }
   });
@@ -117,7 +115,7 @@ export const SignupEmailScreen = ({ store }: SignupEmailScreenProps) => {
           {Icons.dot} We&apos;ll use this to create your Amplitude account
         </Text>
         <Text color={Colors.muted}>
-          {Icons.dot} Already have an account? Press [Tab] to sign in via
+          {Icons.dot} Already have an account? Press Tab to sign in via
           browser
         </Text>
       </Box>

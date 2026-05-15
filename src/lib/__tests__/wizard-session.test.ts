@@ -122,7 +122,8 @@ describe('buildSession executionMode gating', () => {
       executionMode: 'interactive',
     });
     // Falls through to the SignIn default; the Intro picker overwrites
-    // this when the user selects "Continue — create a new account".
+    // this when an unauthenticated user picks `Continue` (which sets
+    // CreateAccount).
     expect(s.authOnboardingPath).toBe('sign_in');
   });
 

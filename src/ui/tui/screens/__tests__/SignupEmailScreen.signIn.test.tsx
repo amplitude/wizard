@@ -12,21 +12,20 @@ describe('SignupEmailScreen — sign-in escape', () => {
     const { lastFrame } = render(<SignupEmailScreen store={store} />);
     const frame = lastFrame() ?? '';
     expect(frame).toContain(
-      'Already have an account? Press [Tab] to sign in via browser',
+      'Already have an account? Press Tab to sign in via browser',
     );
   });
 
   it('flips authOnboardingPath to SignIn when Tab is pressed', () => {
     const store = makeStoreForSnapshot({});
-    const setPathSpy = vi.spyOn(store, 'setAuthOnboardingPath');
     const { stdin } = render(<SignupEmailScreen store={store} />);
 
     stdin.write('\t');
 
-    expect(setPathSpy).toHaveBeenCalledWith(AuthOnboardingPath.SignIn);
+    expect(store.session.authOnboardingPath).toBe(AuthOnboardingPath.SignIn);
   });
 
-  it('captures the signup-sign-in analytics event when Tab is pressed', () => {
+  it('captures the signup-switched-to-login event when Tab is pressed', () => {
     const store = makeStoreForSnapshot({});
     const captureSpy = vi.spyOn(analytics, 'wizardCapture');
     const { stdin } = render(<SignupEmailScreen store={store} />);
@@ -34,9 +33,10 @@ describe('SignupEmailScreen — sign-in escape', () => {
     stdin.write('\t');
 
     const captured = captureSpy.mock.calls.find(
-      (args) => args[0] === 'signup email sign in chosen',
+      (args) => args[0] === 'signup switched to login',
     );
     expect(captured).toBeDefined();
+    expect(captured?.[1]).toMatchObject({ reason: 'existing user' });
   });
 
   it('does not leak a tab character into the email input buffer', () => {
