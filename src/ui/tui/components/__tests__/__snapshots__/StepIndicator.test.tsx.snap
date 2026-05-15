@@ -1,0 +1,28 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`StepIndicator — ASCII fallback profile > renders ASCII glyphs at 40 cols 1`] = `
+"* welcome * auth > o project o setup
+o verify o done"
+`;
+
+exports[`StepIndicator — ASCII fallback profile > renders ASCII glyphs at 60 cols 1`] = `"* welcome * auth > o project o setup o verify o done"`;
+
+exports[`StepIndicator — ASCII fallback profile > renders ASCII glyphs at 80 cols 1`] = `"* welcome * auth > o project o setup o verify o done"`;
+
+exports[`StepIndicator — UTF-8 + no-color profile > renders unicode glyphs sans color at 40 cols 1`] = `
+"✓ welcome ✓ auth ❯ ● project ○ setup
+○ verify ○ done"
+`;
+
+exports[`StepIndicator — UTF-8 + no-color profile > renders unicode glyphs sans color at 60 cols 1`] = `"✓ welcome ✓ auth ❯ ● project ○ setup ○ verify ○ done"`;
+
+exports[`StepIndicator — UTF-8 + no-color profile > renders unicode glyphs sans color at 80 cols 1`] = `"✓ welcome ✓ auth ❯ ● project ○ setup ○ verify ○ done"`;
+
+exports[`StepIndicator — UTF-8 profile > renders unicode glyphs at 40 cols 1`] = `
+"✓ welcome ✓ auth ❯ ● project ○ setup
+○ verify ○ done"
+`;
+
+exports[`StepIndicator — UTF-8 profile > renders unicode glyphs at 60 cols 1`] = `"✓ welcome ✓ auth ❯ ● project ○ setup ○ verify ○ done"`;
+
+exports[`StepIndicator — UTF-8 profile > renders unicode glyphs at 80 cols 1`] = `"✓ welcome ✓ auth ❯ ● project ○ setup ○ verify ○ done"`;
