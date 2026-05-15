@@ -44,6 +44,7 @@ import { BrailleSpinner } from './BrailleSpinner.js';
 import { RunTimelineTodos } from './RunTimelineTodos.js';
 import { RunTimelineLedger } from './RunTimelineLedger.js';
 import { Colors } from '../styles.js';
+import { supportsUnicode } from '../lib/terminalCapabilities.js';
 import type { WizardStore, TaskItem, FileWriteEntry } from '../store.js';
 
 const MAX_TODOS = 5;
@@ -51,18 +52,6 @@ const LEDGER_WIDE_MAX = 5;
 const LEDGER_NARROW_MAX = 3;
 const NARROW_THRESHOLD = 100;
 const EXTRAS_MIN_COLS = 60;
-
-/**
- * Inline capability check until PR 1's `terminalCapabilities` lands on
- * `feat/timeline-ux`. UTF-8 in any locale env var → glyphs on, unless
- * the operator has explicitly forced ASCII.
- */
-function detectUnicode(): boolean {
-  if (process.env.WIZARD_FORCE_ASCII === '1') return false;
-  const haystack =
-    `${process.env.LANG ?? ''} ${process.env.LC_ALL ?? ''} ${process.env.LC_CTYPE ?? ''}`.toUpperCase();
-  return haystack.includes('UTF-8') || haystack.includes('UTF8');
-}
 
 interface RunTimelineProps {
   store: WizardStore;
@@ -90,7 +79,7 @@ export const RunTimeline = ({ store }: RunTimelineProps) => {
   const [cols] = useStdoutDimensions();
   const narrow = cols < NARROW_THRESHOLD;
   const ledgerMax = narrow ? LEDGER_NARROW_MAX : LEDGER_WIDE_MAX;
-  const unicode = detectUnicode();
+  const unicode = supportsUnicode();
 
   const status = useAtomSelector(store, selectLatestStatus);
   const tasks = useAtomSelector(store, selectTopTasks, shallowArrayEqual);

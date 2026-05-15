@@ -935,20 +935,53 @@ export const RunScreen = ({ store }: RunScreenProps) => {
  * Replaces the tab strip with a single vertical `RunTimeline` view and
  * exposes a `[l]` keypress that toggles a logs overlay so the user
  * keeps access to the live log file. Esc / `l` close the overlay.
+ *
+ * Preview merge note (combined branch): PR 6's Tab-to-ask integration
+ * originally lived in the legacy `RunScreen` body. Once PR 4's Timeline
+ * fork added an early-return for `WIZARD_NEW_UX=1`, that legacy code
+ * became unreachable in new-UX. The Tab-to-ask handler and AskBar are
+ * inlined here so the new-UX path keeps the killer feature.
  */
 const RunScreenTimeline = ({ store }: RunScreenProps) => {
   const [showLogs, setShowLogs] = useState(false);
   const [, rows] = useStdoutDimensions();
+  // Trailing wizard-side ack lines for already-submitted asks. Kept in
+  // component state (not the store) because they're pure render hints.
+  const [askAcks, setAskAcks] = useState<readonly string[]>([]);
 
   useScreenInput((input, key) => {
+    // Logs overlay toggle takes precedence when the overlay is open.
     if (showLogs && (key.escape || input === 'l' || input === 'L')) {
       setShowLogs(false);
       return;
     }
-    if (!showLogs && (input === 'l' || input === 'L')) {
+    // Tab opens AskBar. Skip when AskBar is already mounted — TextInput
+    // owns input then and flipping `paused` would no-op.
+    if (key.tab && !store.paused && !showLogs) {
+      store.setPaused(true);
+      agentInterrupt.interrupt();
+      return;
+    }
+    if (!showLogs && (input === 'l' || input === 'L') && !store.paused) {
       setShowLogs(true);
     }
   });
+
+  const handleAskSubmit = (rawQuery: string) => {
+    const query = rawQuery.trim();
+    if (!query) return;
+    // Synchronous ack — same render tick. See ASK_ACK_LINE above.
+    setAskAcks((prev) => [...prev, ASK_ACK_LINE]);
+    store.pushAskHistory(query);
+    agentInterrupt.inject(query);
+    store.setPaused(false);
+  };
+
+  const handleAskCancel = () => {
+    // Esc resumes; ack history is preserved (it belongs to the timeline).
+    store.setPaused(false);
+    agentInterrupt.resume();
+  };
 
   if (showLogs) {
     const logHeight = Math.max(8, Math.min(rows - 6, 20));
@@ -967,5 +1000,36 @@ const RunScreenTimeline = ({ store }: RunScreenProps) => {
     );
   }
 
-  return <RunTimeline store={store} />;
+  return (
+    <Box flexDirection="column" flexGrow={1} overflow="hidden">
+      <Box flexGrow={1} flexDirection="column">
+        <RunTimeline store={store} />
+      </Box>
+      {/* "paused" pill — surfaces alongside AskBar so the user can
+          confirm at a glance the wizard heard them. Mirrors the legacy
+          path's header pill (see ProgressTab above). */}
+      {store.paused && (
+        <Box flexShrink={0} paddingX={1}>
+          <Text color={Colors.accent} bold>
+            {Icons.dot} paused
+          </Text>
+        </Box>
+      )}
+      {askAcks.length > 0 && (
+        <Box flexDirection="column" flexShrink={0} paddingX={1}>
+          {askAcks.map((line, i) => (
+            <Text key={`ack-${i}`} color={Colors.secondary}>
+              {line}
+            </Text>
+          ))}
+        </Box>
+      )}
+      <AskBar
+        open={store.paused}
+        history={store.askHistory}
+        onSubmit={handleAskSubmit}
+        onCancel={handleAskCancel}
+      />
+    </Box>
+  );
 };
