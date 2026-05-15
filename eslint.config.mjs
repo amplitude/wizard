@@ -73,27 +73,44 @@ export default tseslint.config(
     },
   },
 
-  // Drafted in PR 2, activates in PR 10.
-  // Forbids hand-written status strings in screens; use voice.* from
-  // src/ui/tui/lib/voice.ts instead. The rule block below is intentionally
-  // commented out so it does not fail any existing files yet — PR 10 will
-  // uncomment it once every screen has migrated to WizardVoice.
+  // Timeline UX voice guardrail (PR 10).
   //
-  // ENABLED IN PR 10:
-  // {
-  //   files: ['src/ui/tui/screens/**'],
-  //   rules: {
-  //     'no-restricted-syntax': [
-  //       'error',
-  //       {
-  //         selector:
-  //           'Literal[value=/\\b(TASK|STEP|PHASE|INITIALIZING|EXECUTING)\\b/]',
-  //         message:
-  //           "Use voice.* from src/ui/tui/lib/voice.ts instead of hand-written status strings (TASK / STEP / PHASE / INITIALIZING / EXECUTING).",
-  //       },
-  //     ],
-  //   },
-  // },
+  // The new design system replaces all-caps status-shout copy ("TASK",
+  // "STEP", "PHASE", "INITIALIZING", "EXECUTING") with the lowercase /
+  // sentence-case `voice.*` vocabulary documented in
+  // `docs/design/timeline-ux.md`. This block is scoped to wizard screens
+  // so we don't accidentally flag SQL column names or unrelated constants
+  // elsewhere in the codebase.
+  //
+  // Excludes `__tests__/` because snapshot fixtures intentionally include
+  // legacy strings for regression coverage.
+  {
+    files: ['src/ui/tui/screens/**/*.{ts,tsx}'],
+    ignores: ['src/ui/tui/screens/**/__tests__/**'],
+    rules: {
+      'no-restricted-syntax': [
+        'error',
+        {
+          selector:
+            "Literal[value=/\\b(TASK|STEP|PHASE|INITIALIZING|EXECUTING)\\b/]",
+          message:
+            'Status-shout copy is forbidden in wizard screens. Use the voice.* vocabulary from docs/design/timeline-ux.md (e.g. voice.step, voice.phase) instead.',
+        },
+        {
+          selector:
+            "TemplateElement[value.cooked=/\\b(TASK|STEP|PHASE|INITIALIZING|EXECUTING)\\b/]",
+          message:
+            'Status-shout copy is forbidden in wizard screens. Use the voice.* vocabulary from docs/design/timeline-ux.md (e.g. voice.step, voice.phase) instead.',
+        },
+        {
+          selector:
+            "JSXText[value=/\\b(TASK|STEP|PHASE|INITIALIZING|EXECUTING)\\b/]",
+          message:
+            'Status-shout copy is forbidden in wizard screens. Use the voice.* vocabulary from docs/design/timeline-ux.md (e.g. voice.step, voice.phase) instead.',
+        },
+      ],
+    },
+  },
 
   // Test files — disable type-checked rules, add test globals
   {
