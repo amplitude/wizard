@@ -164,6 +164,11 @@ import {
   resumeCommand,
   orchestrationCommand,
 } from './src/commands';
+import { wizardLaunchedProperties } from './src/utils/wizard-launched-event';
+
+// Populated in the bootstrap block below; read by the `wizard launched` middleware
+// so the middleware doesn't re-run env-var detection just to set one property.
+let nestedAgent: ReturnType<typeof detectNestedAgent> = null;
 
 // ── Observability bootstrap ─────────────────────────────────────────
 // Initialize structured logging early so all code paths can use it.
@@ -263,8 +268,9 @@ import {
   // snapshot them. This block is diagnostic-only: it surfaces the signal so
   // outer agent orchestrators can log it, and gives humans debugging auth
   // weirdness a breadcrumb.
-  const nested = detectNestedAgent();
-  if (nested) {
+  nestedAgent = detectNestedAgent();
+  if (nestedAgent) {
+    const nested = nestedAgent;
     const detail =
       `Detected nested agent invocation via ${nested.envVar}=${nested.envValue}. ` +
       `Inherited outer-agent env vars were sanitized; the setup agent will run normally.`;
@@ -285,9 +291,6 @@ import {
         })
         .catch(() => {});
     } else {
-      // Surface a soft breadcrumb for interactive + CI users too, not just
-      // --debug. If sanitization ever regresses, this is the only signal a
-      // non-agent caller will see.
       getUI().log.info(detail);
     }
   }
@@ -708,6 +711,17 @@ void yargs(hideBin(process.argv))
       );
     }
     return true;
+  })
+  // Runs after .check() so invalid args don't pollute the funnel.
+  .middleware((argv) => {
+    try {
+      analytics.wizardCapture(
+        'wizard launched',
+        wizardLaunchedProperties(argv, nestedAgent !== null),
+      );
+    } catch {
+      // Telemetry must never block the run.
+    }
   })
   // Reject unknown flags and subcommands. Catches typos like `--app-ids` or
   // `--instal-dir` that would otherwise silently fall through. Middleware for
