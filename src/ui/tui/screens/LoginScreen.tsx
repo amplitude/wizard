@@ -15,6 +15,13 @@ import { BrailleSpinner } from '../components/BrailleSpinner.js';
 import { DEFAULT_AMPLITUDE_ZONE } from '../../../lib/constants.js';
 import { resolveZone } from '../../../lib/zone-resolution.js';
 
+// PR 7 (timeline-ux): when WIZARD_NEW_UX=1 the error phase surfaces a
+// structured auth_required payload with copy-paste-able loginCommand /
+// resumeCommand below the error message. Legacy rendering is unchanged.
+// Read lazily so per-test env overrides take effect (see AuthScreen for
+// the same pattern).
+const isNewUxEnabled = (): boolean => process.env.WIZARD_NEW_UX === '1';
+
 interface LoginScreenProps {
   store: WizardStore;
   onComplete: () => void;
@@ -162,6 +169,17 @@ export const LoginScreen = ({ store, onComplete }: LoginScreenProps) => {
             <Text color={Colors.secondary}>
               Restart the wizard to re-authenticate.
             </Text>
+            {isNewUxEnabled() && (
+              <Box marginTop={1} flexDirection="column">
+                <Text color={Colors.muted}>auth_required:</Text>
+                <Text color={Colors.body}>
+                  {'  '}loginCommand: amplitude-wizard login
+                </Text>
+                <Text color={Colors.body}>
+                  {'  '}resumeCommand: amplitude-wizard
+                </Text>
+              </Box>
+            )}
           </Box>
         )}
       </Box>
