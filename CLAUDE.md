@@ -259,3 +259,25 @@ GitHub Actions workflows in `.github/workflows/`:
 - [`docs/external-services.md`](./docs/external-services.md) — third-party services the wizard talks to
 - [`docs/ux-improvements.md`](./docs/ux-improvements.md) — UX backlog and recently-shipped polish
 - [`docs/releasing.md`](./docs/releasing.md) — release process and versioning
+
+## Design system (read before touching src/ui/tui/)
+
+This wizard ships under `npx @amplitude/wizard`. Its TUI is the first 10 minutes a developer ever spends with Amplitude — treat that as a contract.
+
+**Canonical references**:
+- `docs/design/timeline-ux.md` — design principles, palette, voice, IA
+- `docs/design/timeline-ux-plan.md` — PR sequencing
+
+**Hard rules**:
+1. **Voice**: lowercase, first-person, present tense. Always call `voice.*` from `src/ui/tui/lib/voice.ts`; never hand-write a status string in a screen.
+2. **Layout**: every screen uses `<ScreenShell>` with `step`, `title`, `hotkeys`. No per-screen chrome.
+3. **Color**: 5 tokens only. Red is fatal errors only. Color never carries information alone.
+4. **Glyphs**: safe set only. Always degrade via `useTerminalCapabilities()`.
+5. **Calm**: no walls of logs. Use receipts ledger. Drill-down behind `[d]`, `[e]`, `[l]`, `[/]`.
+6. **Receipts**: every multi-step screen ends with time, cost, files +/−, packages, events, extras.
+7. **Extras first-class**: MCP, Slack, Session Replay appear on Welcome (returning user), Plan, Run, Verify, Done.
+8. **Tab interruption**: Tab pauses the agent ≤500ms. Don't break this.
+9. **Cross-platform**: test every screen with `WIZARD_FORCE_ASCII=1` and `WIZARD_FORCE_NO_COLOR=1`.
+10. **State**: nanostores via `@nanostores/react`. Subscribe narrowly.
+11. **Inputs**: `@inkjs/ui` only.
+12. **Tests**: `ink-testing-library` snapshots at 80, 60, 40 cols for every new component. No `console.log` in `src/ui/tui/`.
