@@ -32,6 +32,13 @@ import { PickerMenu } from '../primitives/index.js';
 import { PathInput } from '../components/PathInput.js';
 import { Colors, Icons } from '../styles.js';
 import { BrailleSpinner } from '../components/BrailleSpinner.js';
+import {
+  ExtrasPanel,
+  detectMcpClients,
+  summarizeMcpDetection,
+  filterExtrasByFramework,
+  type ExtraItem,
+} from '../components/ExtrasPanel.js';
 import { AmplitudeTextLogo } from '../components/AmplitudeTextLogo.js';
 import { useStdoutDimensions } from '../hooks/useStdoutDimensions.js';
 import { useScreenHints } from '../hooks/useScreenHints.js';
@@ -63,6 +70,35 @@ const COMPACT_ROWS = 24;
  *   (the main label already reads "none detected" in that case)
  * - ' (detected)' when auto-detection found a real framework
  */
+/**
+ * PR 8 — build the ExtrasPanel items for a returning user's intro.
+ * MCP detail is informed by detectMcpClients (read-only fs probes);
+ * Slack/SR start as "available" so the user can see they're still on
+ * offer. The actual installs happen later in the flow.
+ */
+function buildReturningUserExtras(mcpComplete: boolean): ExtraItem[] {
+  const detected = detectMcpClients();
+  const detail = summarizeMcpDetection(detected) ?? 'No AI tools detected yet';
+  return [
+    {
+      kind: 'mcp',
+      label: 'Amplitude MCP for AI tools',
+      state: mcpComplete ? 'done' : 'available',
+      detail,
+    },
+    {
+      kind: 'slack',
+      label: 'Slack integration',
+      state: 'available',
+    },
+    {
+      kind: 'session-replay',
+      label: 'Session Replay',
+      state: 'available',
+    },
+  ];
+}
+
 export function getFrameworkLabelSuffix({
   manuallySelected,
   autoFallback,
@@ -270,14 +306,30 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
         marginBottom={compact ? 0 : 1}
       >
         {welcomeBack ? (
-          <WelcomeBackPanel
-            email={welcomeBack.email}
-            projectName={session.selectedProjectName}
-            region={session.region}
-            eventCount={welcomeBack.eventCount}
-            lastRunAt={welcomeBack.lastRunAt}
-            compact={compact}
-          />
+          <>
+            <WelcomeBackPanel
+              email={welcomeBack.email}
+              projectName={session.selectedProjectName}
+              region={session.region}
+              eventCount={welcomeBack.eventCount}
+              lastRunAt={welcomeBack.lastRunAt}
+              compact={compact}
+            />
+            {/* PR 8 — surface MCP / Slack / Session Replay status to
+                returning users so they can see what's still on the
+                table at a glance. Gated on WIZARD_NEW_UX so legacy
+                runs render byte-identical output. */}
+            {process.env.WIZARD_NEW_UX === '1' && !compact && (
+              <Box marginTop={1} flexDirection="column">
+                <ExtrasPanel
+                  items={filterExtrasByFramework(
+                    buildReturningUserExtras(session.mcpComplete),
+                    session.integration,
+                  )}
+                />
+              </Box>
+            )}
+          </>
         ) : (
           <>
             <Text bold color={Colors.heading}>

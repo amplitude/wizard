@@ -33,9 +33,15 @@
  */
 
 import { Box, Text, useInput } from 'ink';
+import type React from 'react';
 import { useEffect, useRef, useState } from 'react';
 
 import { BrailleSpinner } from '../components/BrailleSpinner.js';
+import {
+  ExtrasPanel,
+  filterExtrasByFramework,
+  type ExtraItem,
+} from '../components/ExtrasPanel.js';
 import { useScreenInput } from '../hooks/useScreenInput.js';
 import { useWizardStore } from '../hooks/useWizardStore.js';
 import type { WizardStore } from '../store.js';
@@ -467,6 +473,15 @@ export const EventPlanFullScreen = ({
         )}
       </Box>
 
+      {/* PR 8 — "also queued" footer surfacing extras that haven't
+          fired yet. One muted line, gated on WIZARD_NEW_UX=1 so
+          legacy approval flows render byte-identical output. The
+          panel's items only include those that still need user
+          action (mcpComplete + slackComplete = false), so once
+          everything's resolved the line disappears entirely. */}
+      {process.env.WIZARD_NEW_UX === '1' &&
+        renderQueuedExtrasFooter(store) /* may return null */}
+
       {/* Action hint — pinned to bottom, always visible. Three modes:
           - banner-only (no prompt to act on, user just needs to ack
             the abandon/timeout banner)
@@ -496,3 +511,45 @@ export const EventPlanFullScreen = ({
     </Box>
   );
 };
+
+/**
+ * PR 8 — render a one-line "also queued: …" footer for the event-plan
+ * approval screen so the user knows MCP / Slack / Session Replay are
+ * still waiting in the wings. Returns null when nothing is queued
+ * (all extras are already complete or framework-gated out).
+ *
+ * Hoisted to a module-level helper rather than inlined so its
+ * branching stays out of the main render body's long JSX tree.
+ */
+function renderQueuedExtrasFooter(store: WizardStore): React.ReactElement | null {
+  const session = store.session;
+  const items: ExtraItem[] = [];
+  if (!session.mcpComplete) {
+    items.push({
+      kind: 'mcp',
+      label: 'Amplitude MCP for AI tools',
+      state: 'queued',
+    });
+  }
+  if (!session.slackComplete) {
+    items.push({
+      kind: 'slack',
+      label: 'Slack integration',
+      state: 'queued',
+    });
+  }
+  items.push({
+    kind: 'session-replay',
+    label: 'Session Replay',
+    state: 'queued',
+  });
+
+  const filtered = filterExtrasByFramework(items, session.integration);
+  if (filtered.length === 0) return null;
+
+  return (
+    <Box flexShrink={0} marginTop={1} flexDirection="column">
+      <ExtrasPanel items={filtered} title="Also queued" />
+    </Box>
+  );
+}

@@ -24,6 +24,7 @@
  */
 
 import { Box, Text } from 'ink';
+import type React from 'react';
 import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { WizardStore } from '../store.js';
 import { useWizardStore } from '../hooks/useWizardStore.js';
@@ -51,6 +52,11 @@ import { detectBoundPort } from '../../../utils/port-detection.js';
 import { makeLink } from '../utils/terminal-rendering.js';
 import type { KeyHint } from '../components/KeyHintBar.js';
 import { Sparkline, SPARKLINE_DEFAULT_WIDTH } from '../components/Sparkline.js';
+import {
+  ExtrasPanel,
+  filterExtrasByFramework,
+  type ExtraItem,
+} from '../components/ExtrasPanel.js';
 
 const POLL_INTERVAL_MS = 30_000;
 const MAX_EVENTS_SHOWN = 8;
@@ -1061,6 +1067,13 @@ export const DataIngestionCheckScreen = ({
         </Box>
       )}
 
+      {/* PR 8 — "while you wait" extras. Surfaced during the polling
+          phase so users have a productive sidebar action instead of
+          staring at the spinner. Gated on WIZARD_NEW_UX=1 so legacy
+          flows render byte-identical output. */}
+      {process.env.WIZARD_NEW_UX === '1' && !apiUnavailable && !celebrating &&
+        renderWaitingExtras(session) /* may return null */}
+
       {/* Progressive coaching tips after extended wait.
           Wording rules: hedged ("look for", "check for", "usually") rather
           than definitive claims. We don't know the cause; we suggest where
@@ -1199,3 +1212,47 @@ export const DataIngestionCheckScreen = ({
     </Box>
   );
 };
+
+/**
+ * PR 8 — render the "while you wait" ExtrasPanel during ingestion
+ * polling. Surfaces not-yet-done extras so users have a productive
+ * task while they wait for the first event to land. Returns null
+ * when nothing is offerable (all complete or framework-gated out).
+ */
+function renderWaitingExtras(
+  session: {
+    mcpComplete: boolean;
+    slackComplete: boolean;
+    integration: Integration | null;
+    selectedOrgName: string | null;
+  },
+): React.ReactElement | null {
+  const items: ExtraItem[] = [];
+  if (!session.mcpComplete) {
+    items.push({
+      kind: 'mcp',
+      label: 'Install Amplitude MCP',
+      state: 'available',
+    });
+  }
+  if (!session.slackComplete) {
+    items.push({
+      kind: 'slack',
+      label: 'Connect Slack',
+      state: 'available',
+      detail: session.selectedOrgName ?? undefined,
+    });
+  }
+  items.push({
+    kind: 'session-replay',
+    label: 'Enable Session Replay',
+    state: 'available',
+  });
+  const filtered = filterExtrasByFramework(items, session.integration);
+  if (filtered.length === 0) return null;
+  return (
+    <Box marginTop={1} flexDirection="column">
+      <ExtrasPanel items={filtered} title="While you wait" />
+    </Box>
+  );
+}

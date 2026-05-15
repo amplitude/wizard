@@ -240,11 +240,33 @@ export const SlackScreen = ({
     handleConnect();
   };
 
+  // PR 8 — overlay box pattern when WIZARD_NEW_UX=1, matching MCP.
+  // Surfaces the org name as a muted subhead under the title when the
+  // org context is known. Legacy UX renders the inner content
+  // directly (no wrapper, no subhead).
+  const useOverlayBox = process.env.WIZARD_NEW_UX === '1';
+  const orgName = store.session.selectedOrgName;
+
   return (
-    <Box flexDirection="column" flexGrow={1}>
+    <Box
+      flexDirection="column"
+      flexGrow={1}
+      {...(useOverlayBox
+        ? {
+            borderStyle: 'round' as const,
+            borderColor: Colors.border,
+            paddingX: 2,
+            paddingY: 1,
+            overflow: 'hidden' as const,
+          }
+        : {})}
+    >
       <Text bold color={Colors.accent}>
         Slack Integration
       </Text>
+      {useOverlayBox && orgName && (
+        <Text color={Colors.muted}>Workspace: {orgName}</Text>
+      )}
 
       <Box marginTop={1} flexDirection="column">
         <Text color={Colors.secondary}>

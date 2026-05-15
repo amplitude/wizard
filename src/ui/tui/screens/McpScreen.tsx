@@ -239,8 +239,13 @@ export const McpScreen = ({
     );
   };
 
-  return (
-    <Box flexDirection="column" flexGrow={1}>
+  // PR 8 — overlay box pattern when WIZARD_NEW_UX=1. Wraps the
+  // existing content in a rounded-corner Box so the MCP "extra"
+  // visually reads as a popover step, not a full-bleed screen.
+  // Legacy UX renders the inner content directly (no wrapper).
+  const useOverlayBox = process.env.WIZARD_NEW_UX === '1';
+  const content = (
+    <>
       {dataSetupComplete && (
         <Box marginBottom={1}>
           <Text color={Colors.success} bold>
@@ -413,6 +418,28 @@ export const McpScreen = ({
           </Box>
         </>
       )}
+    </>
+  );
+
+  if (useOverlayBox) {
+    return (
+      <Box
+        flexDirection="column"
+        flexGrow={1}
+        borderStyle="round"
+        borderColor={Colors.border}
+        paddingX={2}
+        paddingY={1}
+        overflow="hidden"
+      >
+        {content}
+      </Box>
+    );
+  }
+
+  return (
+    <Box flexDirection="column" flexGrow={1}>
+      {content}
     </Box>
   );
 };
