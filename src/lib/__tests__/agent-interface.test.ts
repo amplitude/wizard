@@ -35,6 +35,7 @@ import {
   EVENT_PLAN_FEEDBACK_REINJECTION_PROMPT,
   updateAmplitudeMcpBearer,
 } from '../agent-interface';
+import { setAgentDriver } from '../agent-driver';
 import {
   recordEventPlanDecision,
   resetEventPlanFeedbackState,
@@ -1667,11 +1668,13 @@ describe('runAgent', () => {
       vi.useRealTimers();
       vi.unmock('../agent-runner.js');
       vi.unmock('../agent-runner');
+      // Always clear the injected driver so the next test (potentially in
+      // the same worker) falls back to the top-level `vi.mock(
+      // '@anthropic-ai/claude-agent-sdk', ...)` SDK mock.
+      setAgentDriver(null);
     });
 
     it('refreshes the MCP Authorization header when the token rotates between attempts', async () => {
-      vi.useFakeTimers();
-
       // Mock agent-runner so the pre-attempt refresh hook returns a
       // rotated token. The dynamic `await import('./agent-runner.js')`
       // inside agent-interface resolves to this mock module. With the
@@ -1681,6 +1684,26 @@ describe('runAgent', () => {
       vi.doMock('../agent-runner.js', () => ({
         refreshTokenIfStale: vi.fn(async () => 'new-token'),
       }));
+
+      // Pre-warm the dynamic-import resolver for `'./agent-runner.js'`
+      // BEFORE `vi.useFakeTimers()` takes effect. On Node 20 + vitest 4
+      // with fake timers active, the first `await import('./agent-runner.js')`
+      // inside `agent-interface.runAgent` was not resolving until the
+      // 70_000ms timer advance completed — which burnt the entire 30s
+      // real-time deadline on `vi.advanceTimersByTimeAsync`. Resolving
+      // the mocked module up front populates vitest's module cache so
+      // the in-run dynamic import is a cache hit (one microtask). Node 22
+      // / 24 happened to drain the same chain quickly; Node 20's loader
+      // pipeline is slower.
+      await import('../agent-runner.js');
+
+      vi.useFakeTimers();
+
+      // Bypass the lazy `await import('@anthropic-ai/claude-agent-sdk')` in
+      // `getAgentDriver()`. Same Node-20 loader-pipeline cost as above —
+      // injecting a driver directly skips the dynamic import and forwards
+      // every `query()` call to the existing top-level mock.
+      setAgentDriver((args) => mockQuery(args) as AsyncIterable<unknown>);
 
       const initialBearer = 'old-token';
       process.env.ANTHROPIC_AUTH_TOKEN = initialBearer;
@@ -1701,11 +1724,22 @@ describe('runAgent', () => {
       let queryCallCount = 0;
 
       mockQuery.mockImplementation(
-        (params: { options: Record<string, unknown> }) => {
+        (params: { options: Record<string, unknown> } | unknown) => {
+          // The injected driver passes a single `AgentDriverArgs` object
+          // shaped as `{ prompt, options }`. The legacy SDK mock passed a
+          // positional `{ options }` arg — both shapes funnel through here.
+          const resolvedParams = (
+            params as { options: Record<string, unknown> }
+          )?.options
+            ? (params as { options: Record<string, unknown> })
+            : (params as {
+                prompt: unknown;
+                options: Record<string, unknown>;
+              }) ?? { options: {} as Record<string, unknown> };
           queryCallCount++;
           // Capture the Authorization header the SDK would have used for
           // the Amplitude MCP server on this attempt.
-          const servers = params.options.mcpServers as
+          const servers = resolvedParams.options.mcpServers as
             | Record<string, { headers?: Record<string, string> }>
             | undefined;
           observedAuthHeaders.push(
@@ -1714,7 +1748,7 @@ describe('runAgent', () => {
 
           if (queryCallCount === 1) {
             // Stall the first attempt so the retry preamble runs.
-            const signal = params.options.abortSignal as AbortSignal;
+            const signal = resolvedParams.options.abortSignal as AbortSignal;
             // eslint-disable-next-line require-yield
             return (async function* () {
               await new Promise<never>((_, reject) => {
@@ -1745,12 +1779,13 @@ describe('runAgent', () => {
         { successMessage: 'Done', errorMessage: 'Failed' },
       );
 
-      // 60s cold-start stall + jittered backoff (2-30s) = up to ~90s.
-      // With the mid-run bearer-refresh fix, the per-attempt refresh
-      // also fires on attempt 0 — that adds an extra microtask cycle
-      // for the dynamic import before the query starts, so we need a
-      // few more advance cycles to drain everything.
-      await vi.advanceTimersByTimeAsync(120_000);
+      // 60s cold-start stall + first-retry jittered backoff (2-4s using
+      // `min(30s, 2s + Math.random()*2s)`) = 62-64s worst case. With the
+      // SDK driver injected via `setAgentDriver` above and the
+      // `agent-runner.js` pre-warm above, the dynamic-import bottleneck
+      // is out of the hot path, so 70s of fake-timer advance comfortably
+      // covers the stall + first-retry backoff without burning real time.
+      await vi.advanceTimersByTimeAsync(70_000);
 
       const result = await runPromise;
 
