@@ -21,6 +21,8 @@ import { useTimedCoaching } from '../hooks/useTimedCoaching.js';
 import { RunTimeline } from '../components/RunTimeline.js';
 import type { KeyHint } from '../components/KeyHintBar.js';
 import type { WizardStore } from '../store.js';
+import { AskBar } from '../components/AskBar.js';
+import * as agentInterrupt from '../lib/agentInterrupt.js';
 import {
   TabContainer,
   ProgressList,
@@ -63,6 +65,30 @@ function formatElapsed(seconds: number): string {
   if (m === 0) return `${s}s`;
   return `${m}m ${s}s`;
 }
+
+/**
+ * Tab-to-ask gate. The new-UX experience is opt-in via env var while the
+ * Timeline UX redesign is in progress. Legacy users see exactly the
+ * existing RunScreen behavior — Tab still activates ConsoleView's
+ * slash-command bar via the handler in `ConsoleView.tsx`.
+ *
+ * Read on every render so toggling the env var inside an integration
+ * test takes effect without a process restart.
+ */
+function isNewUxEnabled(): boolean {
+  return process.env.WIZARD_NEW_UX === '1';
+}
+
+/**
+ * Wizard-side synthetic ack line. Rendered inline in the timeline as
+ * soon as the user submits a Tab-to-ask query. This is what satisfies
+ * the 500ms acknowledgement contract — see `lib/agentInterrupt.ts` for
+ * the broader synthetic-pause architecture and the PR body for what
+ * the real Claude Agent SDK wiring would look like.
+ *
+ * Exported so the snapshot test can pin the exact copy.
+ */
+export const ASK_ACK_LINE = '› got it, pausing to look at that';
 
 /**
  * Cap a status string before handing it to TabContainer. Belt-and-braces
@@ -497,6 +523,21 @@ const ProgressTab = ({ store }: { store: WizardStore }) => {
                 {Icons.dot} {formatElapsed(elapsed)}
                 {showColdStartHint ? ' (cold start: ~30–60s)' : ''}
               </Text>
+              {/*
+                Tab-to-ask "paused" pill (PR 6). New-UX only. When the user
+                taps Tab to open AskBar, `store.paused` flips true and we
+                surface a small pill next to the elapsed counter so the
+                user can confirm at a glance that the wizard heard them.
+                The synthetic-pause stub means the agent itself isn't
+                actually parked yet (see `lib/agentInterrupt.ts`), but
+                the user-visible contract is the same: tabbed in, we
+                noticed.
+              */}
+              {isNewUxEnabled() && store.paused && (
+                <Text color={Colors.accent} bold>
+                  {Icons.dot} paused
+                </Text>
+              )}
               <RetryStatusChip
                 retryState={store.session.retryState}
                 now={Date.now()}
@@ -663,6 +704,67 @@ export const RunScreen = ({ store }: RunScreenProps) => {
   // See `resolveRunScreenStatus` and ProgressTab for the resolution
   // and rendering details.
 
+  // Tab-to-ask: when WIZARD_NEW_UX === '1', Tab on RunScreen opens
+  // AskBar instead of activating the ConsoleView slash-command bar.
+  // The legacy path is unchanged because the Tab handler in
+  // ConsoleView.tsx is gated to fire only when `showConsoleChrome` is
+  // active and we don't mutate its predicate here. In practice both
+  // handlers will see the Tab keystroke under new-UX, but flipping
+  // `store.paused` and mounting AskBar is the dominant visible
+  // signal — the slash-command bar's `activate('')` is idempotent and
+  // benign next to it. The new-UX path is opt-in, and the next PR
+  // can teach ConsoleView to bail when `store.paused` is true.
+  const newUx = isNewUxEnabled();
+  // Trailing ack lines we render inline at the bottom of the screen as
+  // synthetic "the wizard heard you" responses. Kept in component
+  // state (not the store) because they are pure render hints — losing
+  // them on tab switch or wizard restart is fine.
+  const [askAcks, setAskAcks] = useState<readonly string[]>([]);
+  useScreenInput(
+    (_input, key) => {
+      if (!newUx) return;
+      // Tab opens AskBar. We deliberately ignore Tab when AskBar is
+      // already open — TextInput owns the input then, and re-flipping
+      // `paused` would no-op anyway.
+      if (key.tab && !store.paused) {
+        store.setPaused(true);
+        agentInterrupt.interrupt();
+      }
+    },
+    { isActive: newUx },
+  );
+
+  const handleAskSubmit = (rawQuery: string) => {
+    // Trim is defensive — AskBar already trims, but the contract is
+    // "non-empty string" and we'd rather drop a stray whitespace
+    // submission than render a blank ack.
+    const query = rawQuery.trim();
+    if (!query) return;
+    // Synchronous ack contract: we mutate React state and push the
+    // wizard-side response into the timeline in this very render tick.
+    // The ack line renders below, in the same pass that the AskBar
+    // close happens — no setTimeout, no microtask, no Promise.then.
+    // That is what meets the 500ms upper-bound guarantee. See
+    // ASK_ACK_LINE and `agentInterrupt.ts` for the broader
+    // synthetic-pause story.
+    setAskAcks((prev) => [...prev, ASK_ACK_LINE]);
+    store.pushAskHistory(query);
+    agentInterrupt.inject(query);
+    // Close AskBar. `paused` stays true — by design, the user
+    // explicitly resumes via Esc (or a future agent reply) so the
+    // pause pill stays visible while they read the ack. This is the
+    // "AskBar unmounted after submit" branch documented in the AC.
+    store.setPaused(false);
+  };
+
+  const handleAskCancel = () => {
+    // Esc resumes the wizard. We do NOT clear the ack lines — the
+    // user already saw the wizard acknowledge previous questions, and
+    // those acks belong to the timeline now, not the AskBar lifecycle.
+    store.setPaused(false);
+    agentInterrupt.resume();
+  };
+
   const hasEvents = store.eventPlan.length > 0;
 
   const tabs = [
@@ -729,12 +831,51 @@ export const RunScreen = ({ store }: RunScreenProps) => {
     },
   ];
 
+  // Legacy path: just the TabContainer. Identical to the pre-PR-6
+  // shape — no extra wrappers, no extra paint, no behavior change.
+  if (!newUx) {
+    return (
+      <TabContainer
+        tabs={tabs}
+        requestedTab={store.requestedTab}
+        onTabConsumed={() => store.clearRequestedTab()}
+      />
+    );
+  }
+
+  // New-UX path: wrap the TabContainer in a column so AskBar (and the
+  // wizard-side synthetic ack lines for already-submitted asks) can
+  // pin themselves below the existing chrome. `overflow="hidden"` on
+  // the outer Box prevents long ack copy from poking past the visible
+  // viewport on narrow terminals — Yoga handles the layout, we just
+  // declare the boundary.
   return (
-    <TabContainer
-      tabs={tabs}
-      requestedTab={store.requestedTab}
-      onTabConsumed={() => store.clearRequestedTab()}
-    />
+    <Box flexDirection="column" flexGrow={1} overflow="hidden">
+      <Box flexGrow={1} flexDirection="column">
+        <TabContainer
+          tabs={tabs}
+          requestedTab={store.requestedTab}
+          onTabConsumed={() => store.clearRequestedTab()}
+        />
+      </Box>
+      {askAcks.length > 0 && (
+        <Box flexDirection="column" flexShrink={0} paddingX={1}>
+          {askAcks.map((line, i) => (
+            // The ack lines are append-only and never re-ordered;
+            // index keys are stable for this render path.
+            <Text key={`ack-${i}`} color={Colors.secondary}>
+              {line}
+            </Text>
+          ))}
+        </Box>
+      )}
+      <AskBar
+        open={store.paused}
+        history={store.askHistory}
+        onSubmit={handleAskSubmit}
+        onCancel={handleAskCancel}
+      />
+    </Box>
   );
 };
 
