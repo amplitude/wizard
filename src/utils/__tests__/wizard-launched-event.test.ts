@@ -78,8 +78,6 @@ describe('wizardLaunchedProperties — defaults', () => {
 
   it('reports all boolean flags false when argv is empty', () => {
     const props = wizardLaunchedProperties(argv(), false, EMPTY_ENV);
-    expect(props.debug).toBe(false);
-    expect(props.verbose).toBe(false);
     expect(props.ci).toBe(false);
     expect(props.agent).toBe(false);
     expect(props.yes).toBe(false);
@@ -92,6 +90,20 @@ describe('wizardLaunchedProperties — defaults', () => {
     expect(props.signup).toBe(false);
     expect(props['local mcp']).toBe(false);
     expect(props.dev).toBe(false);
+  });
+
+  it('does NOT expose pure-logging flags as properties', () => {
+    // `--debug` / `--verbose` only affect log verbosity, not what the
+    // wizard does. They belong on Sentry tags (follow-up PR), not on
+    // this event. Lock the omission so a future contributor doesn't
+    // re-add them by mistake.
+    const props = wizardLaunchedProperties(
+      argv({ debug: true, verbose: true }),
+      false,
+      EMPTY_ENV,
+    );
+    expect(props).not.toHaveProperty('debug');
+    expect(props).not.toHaveProperty('verbose');
   });
 
   it('reports `no defaults` as false when --default is unset or true', () => {
@@ -151,24 +163,24 @@ describe('wizardLaunchedProperties — subcommand detection', () => {
 describe('wizardLaunchedProperties — boolean pass-through', () => {
   it('passes true booleans through', () => {
     const props = wizardLaunchedProperties(
-      argv({ ci: true, agent: true, debug: true }),
+      argv({ ci: true, agent: true, force: true }),
       false,
       EMPTY_ENV,
     );
     expect(props.ci).toBe(true);
     expect(props.agent).toBe(true);
-    expect(props.debug).toBe(true);
+    expect(props.force).toBe(true);
   });
 
   it('coerces non-true booleans to false (no truthy coercion)', () => {
     const props = wizardLaunchedProperties(
-      argv({ ci: 'true', agent: 1, debug: 'yes' }),
+      argv({ ci: 'true', agent: 1, force: 'yes' }),
       false,
       EMPTY_ENV,
     );
     expect(props.ci).toBe(false);
     expect(props.agent).toBe(false);
-    expect(props.debug).toBe(false);
+    expect(props.force).toBe(false);
   });
 });
 
@@ -247,7 +259,6 @@ describe('wizardLaunchedProperties — sensitive-field redaction', () => {
       argv({
         'install-dir': '/Users/jane/projects/secret',
         'cache-dir': '/Users/jane/.cache',
-        log: '/Users/jane/wizard.log',
         context: '/Users/jane/.config/orchestrator.json',
         'plan-id': 'plan-abc-123',
       }),
@@ -256,7 +267,6 @@ describe('wizardLaunchedProperties — sensitive-field redaction', () => {
     );
     expect(props['install dir provided']).toBe(true);
     expect(props['cache dir provided']).toBe(true);
-    expect(props['log path provided']).toBe(true);
     expect(props['context path provided']).toBe(true);
     expect(props['plan id provided']).toBe(true);
     const serialized = JSON.stringify(props);
@@ -312,324 +322,21 @@ describe('wizardLaunchedProperties — email edge cases', () => {
   });
 });
 
-describe('wizardLaunchedProperties — internal env-var passthroughs', () => {
-  it('reports presence for benchmark + event-plan env-var shadows', () => {
-    const props = wizardLaunchedProperties(
-      argv({
-        'event-plan-decision': 'accept',
-        'event-plan-feedback': 'looks good',
-        'benchmark-file': '/tmp/bench.json',
-        'benchmark-config': '/tmp/cfg.json',
-        'log-file': '/tmp/wizard.log',
-      }),
-      false,
-      EMPTY_ENV,
-    );
-    expect(props['event plan decision provided']).toBe(true);
-    expect(props['event plan feedback provided']).toBe(true);
-    expect(props['benchmark file provided']).toBe(true);
-    expect(props['benchmark config provided']).toBe(true);
-    expect(props['log file provided']).toBe(true);
-    expect(JSON.stringify(props)).not.toContain('looks good');
-    expect(JSON.stringify(props)).not.toContain('/tmp');
-  });
-
-  it('reports presence false when env-var shadows are unset', () => {
-    const props = wizardLaunchedProperties(argv(), false, EMPTY_ENV);
-    expect(props['event plan decision provided']).toBe(false);
-    expect(props['event plan feedback provided']).toBe(false);
-    expect(props['benchmark file provided']).toBe(false);
-    expect(props['benchmark config provided']).toBe(false);
-    expect(props['log file provided']).toBe(false);
-  });
-});
-
-describe('wizardLaunchedProperties — undocumented env-var capture', () => {
-  it('reports every env-var property as false / null when env is empty', () => {
-    const props = wizardLaunchedProperties(argv(), false, EMPTY_ENV);
-    expect(props['allow nested env']).toBe(false);
-    expect(props['gateway sanitize off env']).toBe(false);
-    expect(props['no update check env']).toBe(false);
-    expect(props['no theme env']).toBe(false);
-    expect(props['data api url override env']).toBe(false);
-    expect(props['ingestion host override env']).toBe(false);
-    expect(props['signup url override env']).toBe(false);
-    expect(props['amplitude server url override env']).toBe(false);
-    expect(props['amplitude api key env']).toBe(false);
-    expect(props['mcp tool filter env']).toBeNull();
-    expect(props['builtin tool filter env']).toBeNull();
-    expect(props['max turns env']).toBeNull();
-  });
-
-  it('does NOT expose the telemetry opt-out env vars as properties', () => {
-    // Existing wizard analytics events ignore DO_NOT_TRACK /
-    // AMPLITUDE_WIZARD_NO_TELEMETRY (sentry honors them, the analytics SDK
-    // does not). Surfacing them as properties would be a new signal no
-    // other event tracks — out of scope for this PR. Lock the omission so
-    // a future contributor doesn't re-introduce them by mistake.
-    const props = wizardLaunchedProperties(argv(), false, {
-      DO_NOT_TRACK: '1',
-      AMPLITUDE_WIZARD_NO_TELEMETRY: '1',
-    });
-    expect(props).not.toHaveProperty('do not track env');
-    expect(props).not.toHaveProperty('no telemetry env');
-  });
-
-  it('captures AMPLITUDE_WIZARD_ALLOW_NESTED as presence (any value)', () => {
-    expect(
-      wizardLaunchedProperties(argv(), false, {
-        AMPLITUDE_WIZARD_ALLOW_NESTED: '1',
-      })['allow nested env'],
-    ).toBe(true);
-    // Any non-empty value counts as set — matches the bypass semantics.
-    expect(
-      wizardLaunchedProperties(argv(), false, {
-        AMPLITUDE_WIZARD_ALLOW_NESTED: 'yes',
-      })['allow nested env'],
-    ).toBe(true);
-    // Empty string is not presence.
-    expect(
-      wizardLaunchedProperties(argv(), false, {
-        AMPLITUDE_WIZARD_ALLOW_NESTED: '',
-      })['allow nested env'],
-    ).toBe(false);
-  });
-
-  it('matches AMPLITUDE_WIZARD_GATEWAY_SANITIZE_FETCH=0 (off semantics)', () => {
-    // The consumer in register-gateway-fetch-sanitize.ts uses `=== '0'` to
-    // mean "disable". Funnel must report the same to stay accurate.
-    expect(
-      wizardLaunchedProperties(argv(), false, {
-        AMPLITUDE_WIZARD_GATEWAY_SANITIZE_FETCH: '0',
-      })['gateway sanitize off env'],
-    ).toBe(true);
-    expect(
-      wizardLaunchedProperties(argv(), false, {
-        AMPLITUDE_WIZARD_GATEWAY_SANITIZE_FETCH: '1',
-      })['gateway sanitize off env'],
-    ).toBe(false);
-  });
-
-  it('captures URL / endpoint overrides as presence only, not values', () => {
-    const props = wizardLaunchedProperties(argv(), false, {
-      AMPLITUDE_WIZARD_DATA_API_URL: 'https://internal.example.com/api',
-      AMPLITUDE_WIZARD_INGESTION_HOST: 'https://ingest.example.com',
-      AMPLITUDE_WIZARD_SIGNUP_URL: 'https://signup.example.com',
-      AMPLITUDE_SERVER_URL: 'https://analytics.example.com',
-      AMPLITUDE_API_KEY: 'akey-secret-value',
-    });
-    expect(props['data api url override env']).toBe(true);
-    expect(props['ingestion host override env']).toBe(true);
-    expect(props['signup url override env']).toBe(true);
-    expect(props['amplitude server url override env']).toBe(true);
-    expect(props['amplitude api key env']).toBe(true);
-    const serialized = JSON.stringify(props);
-    expect(serialized).not.toContain('internal.example.com');
-    expect(serialized).not.toContain('signup.example.com');
-    expect(serialized).not.toContain('akey-secret-value');
-  });
-
-  it('passes agent-knob env-var values through (low cardinality)', () => {
-    const props = wizardLaunchedProperties(argv(), false, {
-      AMPLITUDE_WIZARD_MCP_TOOL_FILTER: 'minimal',
-      AMPLITUDE_WIZARD_BUILTIN_TOOL_FILTER: 'full',
-      AMPLITUDE_WIZARD_MAX_TURNS: '100',
-    });
-    expect(props['mcp tool filter env']).toBe('minimal');
-    expect(props['builtin tool filter env']).toBe('full');
-    expect(props['max turns env']).toBe('100');
-  });
-
-  it('captures NO_UPDATE_CHECK and NO_THEME with strict =1 match', () => {
-    expect(
-      wizardLaunchedProperties(argv(), false, {
-        AMPLITUDE_WIZARD_NO_UPDATE_CHECK: '1',
-        AMPLITUDE_WIZARD_NO_THEME: '1',
-      })['no update check env'],
-    ).toBe(true);
-    expect(
-      wizardLaunchedProperties(argv(), false, {
-        AMPLITUDE_WIZARD_NO_UPDATE_CHECK: '1',
-        AMPLITUDE_WIZARD_NO_THEME: '1',
-      })['no theme env'],
-    ).toBe(true);
-  });
-
-  it('reflects CI env var via `ci env detected` (passes through `env` param)', () => {
+describe('wizardLaunchedProperties — env-driven properties', () => {
+  it('reflects CI env var via `ci env detected`', () => {
     expect(
       wizardLaunchedProperties(argv(), false, { CI: 'true' })[
         'ci env detected'
       ],
     ).toBe(true);
+  });
+
+  it('reports `ci env detected` false when CI is unset or empty', () => {
     expect(wizardLaunchedProperties(argv(), false, {})['ci env detected']).toBe(
       false,
     );
-  });
-});
-
-describe('wizardLaunchedProperties — LLM gateway / model env vars', () => {
-  it('reports presence of Anthropic / Claude credentials, never the value', () => {
-    const props = wizardLaunchedProperties(argv(), false, {
-      ANTHROPIC_API_KEY: 'sk-ant-secret',
-      ANTHROPIC_AUTH_TOKEN: 'bearer-secret',
-      CLAUDE_CODE_OAUTH_TOKEN: 'claude-oauth-secret',
-      ANTHROPIC_BASE_URL: 'https://internal-gateway.example.com',
-      WIZARD_LLM_PROXY_URL: 'https://litellm.example.com',
-    });
-    expect(props['anthropic api key env']).toBe(true);
-    expect(props['anthropic auth token env']).toBe(true);
-    expect(props['claude code oauth token env']).toBe(true);
-    expect(props['anthropic base url override env']).toBe(true);
-    expect(props['wizard llm proxy url override env']).toBe(true);
-    const serialized = JSON.stringify(props);
-    expect(serialized).not.toContain('sk-ant-secret');
-    expect(serialized).not.toContain('bearer-secret');
-    expect(serialized).not.toContain('claude-oauth-secret');
-    expect(serialized).not.toContain('internal-gateway.example.com');
-    expect(serialized).not.toContain('litellm.example.com');
-  });
-
-  it('passes model overrides through (low cardinality, chart-useful)', () => {
-    const props = wizardLaunchedProperties(argv(), false, {
-      WIZARD_CLAUDE_MODEL: 'claude-3-5-sonnet-20241022',
-      WIZARD_HAIKU_MODEL: 'claude-3-haiku-20240307',
-    });
-    expect(props['wizard claude model env']).toBe('claude-3-5-sonnet-20241022');
-    expect(props['wizard haiku model env']).toBe('claude-3-haiku-20240307');
-  });
-
-  it('reports CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS as presence (consumer uses !truthy)', () => {
-    // agent-interface.ts:1510 checks `!process.env.CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS`,
-    // so any truthy string disables. Presence semantics match.
     expect(
-      wizardLaunchedProperties(argv(), false, {
-        CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS: '1',
-      })['claude code disable beta env'],
-    ).toBe(true);
-    expect(
-      wizardLaunchedProperties(argv(), false, {
-        CLAUDE_CODE_DISABLE_EXPERIMENTAL_BETAS: 'true',
-      })['claude code disable beta env'],
-    ).toBe(true);
-  });
-});
-
-describe('wizardLaunchedProperties — region / experiments / endpoints', () => {
-  it('passes WIZARD_ZONE through (low cardinality: us / eu)', () => {
-    expect(
-      wizardLaunchedProperties(argv(), false, { WIZARD_ZONE: 'eu' })[
-        'wizard zone env'
-      ],
-    ).toBe('eu');
-  });
-
-  it('matches DEMO_MODE_WIZARD=1 (strict, mirroring constants.ts)', () => {
-    expect(
-      wizardLaunchedProperties(argv(), false, { DEMO_MODE_WIZARD: '1' })[
-        'demo mode env'
-      ],
-    ).toBe(true);
-    expect(
-      wizardLaunchedProperties(argv(), false, { DEMO_MODE_WIZARD: 'true' })[
-        'demo mode env'
-      ],
+      wizardLaunchedProperties(argv(), false, { CI: '' })['ci env detected'],
     ).toBe(false);
-  });
-
-  it('reports presence for service-endpoint overrides without leaking URLs', () => {
-    const props = wizardLaunchedProperties(argv(), false, {
-      MCP_URL: 'http://localhost:8787',
-      SKILLS_URL: 'https://skills-internal.example.com',
-      OAUTH_CLIENT_ID: 'custom-client-uuid',
-      OAUTH_HOST: 'https://auth-internal.example.com',
-      AMPLITUDE_EXPERIMENT_DEPLOYMENT_KEY: 'depl-secret',
-      SENTRY_DSN: 'https://abc@sentry-internal.example.com/123',
-    });
-    expect(props['mcp url override env']).toBe(true);
-    expect(props['skills url override env']).toBe(true);
-    expect(props['oauth client id override env']).toBe(true);
-    expect(props['oauth host override env']).toBe(true);
-    expect(props['amplitude experiment deployment key env']).toBe(true);
-    expect(props['sentry dsn override env']).toBe(true);
-    const serialized = JSON.stringify(props);
-    expect(serialized).not.toContain('localhost:8787');
-    expect(serialized).not.toContain('skills-internal');
-    expect(serialized).not.toContain('custom-client-uuid');
-    expect(serialized).not.toContain('depl-secret');
-    expect(serialized).not.toContain('sentry-internal');
-  });
-
-  it('reports presence for OAuth-related secrets without the value', () => {
-    const props = wizardLaunchedProperties(argv(), false, {
-      WIZARD_OAUTH_TOKEN: 'oauth-secret-value',
-      WIZARD_EXPIRES_AT: '2030-01-01T00:00:00Z',
-    });
-    expect(props['wizard oauth token env']).toBe(true);
-    expect(props['wizard expires at env']).toBe(true);
-    expect(JSON.stringify(props)).not.toContain('oauth-secret-value');
-  });
-
-  it('matches SENTRY_DEBUG=1 strictly', () => {
-    expect(
-      wizardLaunchedProperties(argv(), false, { SENTRY_DEBUG: '1' })[
-        'sentry debug env'
-      ],
-    ).toBe(true);
-    expect(
-      wizardLaunchedProperties(argv(), false, { SENTRY_DEBUG: 'true' })[
-        'sentry debug env'
-      ],
-    ).toBe(false);
-  });
-
-  it('passes DATA_INGESTION_TIMEOUT_MS through as string', () => {
-    expect(
-      wizardLaunchedProperties(argv(), false, {
-        DATA_INGESTION_TIMEOUT_MS: '60000',
-      })['data ingestion timeout env'],
-    ).toBe('60000');
-  });
-
-  it('reports NO_UPDATE_NOTIFIER as presence (upstream package convention)', () => {
-    expect(
-      wizardLaunchedProperties(argv(), false, { NO_UPDATE_NOTIFIER: '1' })[
-        'no update notifier env'
-      ],
-    ).toBe(true);
-    expect(
-      wizardLaunchedProperties(argv(), false, { NO_UPDATE_NOTIFIER: 'yes' })[
-        'no update notifier env'
-      ],
-    ).toBe(true);
-    expect(
-      wizardLaunchedProperties(argv(), false, EMPTY_ENV)[
-        'no update notifier env'
-      ],
-    ).toBe(false);
-  });
-
-  it('reports every new env property as false / null when env is empty', () => {
-    const props = wizardLaunchedProperties(argv(), false, EMPTY_ENV);
-    expect(props['anthropic base url override env']).toBe(false);
-    expect(props['anthropic api key env']).toBe(false);
-    expect(props['anthropic auth token env']).toBe(false);
-    expect(props['claude code oauth token env']).toBe(false);
-    expect(props['claude code disable beta env']).toBe(false);
-    expect(props['wizard llm proxy url override env']).toBe(false);
-    expect(props['wizard claude model env']).toBeNull();
-    expect(props['wizard haiku model env']).toBeNull();
-    expect(props['wizard zone env']).toBeNull();
-    expect(props['demo mode env']).toBe(false);
-    expect(props['amplitude experiment deployment key env']).toBe(false);
-    expect(props['mcp url override env']).toBe(false);
-    expect(props['skills url override env']).toBe(false);
-    expect(props['oauth client id override env']).toBe(false);
-    expect(props['oauth host override env']).toBe(false);
-    expect(props['wizard oauth token env']).toBe(false);
-    expect(props['wizard expires at env']).toBe(false);
-    expect(props['sentry dsn override env']).toBe(false);
-    expect(props['sentry debug env']).toBe(false);
-    expect(props['data ingestion timeout env']).toBeNull();
-    expect(props['no update notifier env']).toBe(false);
   });
 });
