@@ -1,7 +1,5 @@
-# Post-instrumentation events manifest and dashboard
+# Post-instrumentation events manifest
 
-After all event and identity instrumentation is complete, write **`.amplitude-events.json`** at the project root.
+After all event and identity instrumentation is complete, the wizard owns `.amplitude/events.json` — `confirm_event_plan` wrote the canonical `[{name, description}]` shape on approval. You MAY append a `file` key per entry (the path where you wired the `track()` call) so the setup report and event-plan viewer can link source. Use the key `name` (matching the event_type you passed to `track()`) — not `event`, `event_type`, or `eventName`. Do NOT wrap the array in an object (e.g. `{ "events": [...] }`); the wizard's parsers expect a top-level array. Do NOT rewrite the legacy root `.amplitude-events.json`.
 
-**Shape:** a top-level JSON array — `[ { "name": "<exact event name>", "description": "<short description>", "file": "<path where instrumented>" } ]`. Use the key `name` (matching the event_type you passed to `track()`) — not `event`, `event_type`, or `eventName`. Do NOT wrap the array in an object (e.g. `{ "events": [...] }`); the wizard's parsers expect a top-level array.
-
-After writing this file you proceed to dashboard creation as STEP 5 (see the per-run instructions). Create 4–6 charts and a dashboard via the Amplitude MCP, then call the wizard-tools **`record_dashboard`** tool with the dashboard URL — that tool persists the result so the wizard outro links to it and the post-agent fallback step short-circuits. **Do NOT skip `record_dashboard`:** a dashboard the wizard never sees is a dashboard the user never sees.
+**No dashboard work in this run.** Chart + dashboard creation is owned by the deferred `amplitude-wizard dashboard` command, which runs after event ingestion catches up. Do NOT call `record_dashboard`, `create_chart`, `create_dashboard`, `query_dataset`, `save_chart_edits`, or any Amplitude MCP chart/dashboard tool. If your taxonomy work surfaces a clear chart strategy, you MAY call wizard-tools `record_dashboard_plan` once at the very end of the run to hand the plan off — but do not block instrumentation on it.

@@ -41,6 +41,12 @@ const UNIVERSAL_COMMANDMENTS: string[] = [
 
   'For monorepos with package-manager workspaces, use the workspace-aware install syntax: `yarn workspace <name> add <pkg>`, `yarn --cwd <dir> add <pkg>`, `pnpm --filter <name> add <pkg>`, or `npm -w <ws> install <pkg>`. Avoid `cd <dir> && <cmd>` — the `&&` is denied by the bash allowlist.',
 
+  // Motivated by monorepo failure mode: agents wander into sibling packages,
+  // grep across every workspace, and propose cross-package edits the user
+  // never asked for. Pre-flight JIT mode tells the agent the project is big;
+  // this rule tells it what to DO about that.
+  'Monorepo scope: by default, operate ONLY within the install directory (`cwd` in the pre-flight block) and its subtree. Do NOT grep / read / edit files in sibling workspaces unless they\'re directly imported by the install-dir code you\'re instrumenting OR the user explicitly asks. If the install dir is itself a workspace root and the user\'s intent is ambiguous between "this package" vs "all packages," call `wizard_feedback` (severity="warn") naming the candidate workspaces and stop instead of fanning out. Cross-package edits without confirmation are how 1-event runs turn into 30-file blast-radius PRs.',
+
   `Discovery parallelism — fan out independent probes in ONE assistant message instead of serializing them turn-by-turn. The Claude Agent SDK runs every tool call in a single message in parallel, so a 3-tool batch costs ~one round-trip; the same 3 calls split across 3 messages costs ~3 round-trips and ~10–20s of avoidable wall time on cold-start.
 
 Combine in the SAME message when none depend on each other (typical for the very first project sniff):
@@ -58,6 +64,14 @@ Write tools (Edit / Write) — DO parallelize when each call targets a DIFFERENT
   'NEVER use `sleep`, busy-wait loops, or polling Bash commands to wait for MCP servers, gateways, or services to "recover". If an MCP tool errors, retry AT MOST ONCE; then report and proceed. Long Bash sleeps idle the streaming connection and produce cascading "API Error: 400 terminated" failures — sleeps over a few seconds will be denied.',
 
   'Retry budget for ANY tool failure or denial (error, PreToolUse hook deny, permission rejection): retry AT MOST ONCE with a different approach. After two consecutive failures/denials for the same goal, STOP. Two cycles is the budget; spending 5+ turns hammering on a denied command is a bug. When exhausted: write the limitation into the setup report ("Could not verify <X> at runtime; the bash allowlist denies <command>. Manually verify after install.") and move to the next checklist item. A "Bash command not allowed" deny means the command WILL NEVER BE ALLOWED on this run, no matter how you reword it.',
+
+  // Motivated by ~5pt completion→activation drop: agents finish nominally
+  // but have looped on the same broken approach. This caps strategic retry.
+  'Strategy retry cap: if you have tried 3 different approaches to the SAME goal (e.g. three ways to wire env vars into client code, three ways to verify the build, three event-plan revisions for the same feedback) and none have worked, STOP. Document what you tried and the apparent root cause in the setup report under a "Known limitations" section, then move to the next checklist item. Looping past three approaches burns budget and almost always ships broken work — escalating to the user via the report is the correct outcome.',
+
+  // Motivated by Bash Policy denies at ~80/day peak. These commands are
+  // hard-blocked by safety-scanner.ts; pre-empting saves a retry cycle.
+  'NEVER attempt these destructive bash commands — they are pre-blocked by the safety scanner and no rephrasing changes the outcome: `rm -rf` (any form), `git reset --hard`, `git push --force` / `--force-with-lease`, `git checkout .` / broad `git restore`, `git clean -f`, `curl ... | sh` / `wget ... | bash` (any pipe-to-shell), `npm install -g` / `pnpm add -g` / `yarn global add`, `npm publish` / `pnpm publish` / `yarn publish`, `sudo` (anything). The wizard never needs these. If a workflow seems to require one, the workflow itself is wrong — note it in the setup report and proceed without.',
 
   'When a wizard tool returns a structured error payload (`{"success": false, "error": ..., "guidance": ..., "suggestedTool": ..., "suggestedArgs": ..., "context": ...}`), READ the `guidance` field and follow it. If `suggestedTool` / `suggestedArgs` are present, call THAT tool with THOSE args next — do NOT retry the failing tool with the same args. The same shape comes back for PreToolUse denials (Bash policy, denied paths, denied event-plan / dashboard writes). Treating structured errors as recovery instructions is the difference between a 1-turn fix and a 5-turn loop that trips the consecutive-deny circuit breaker.',
 
