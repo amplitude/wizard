@@ -615,18 +615,20 @@ describe('scale + safety guardrails commandments', () => {
 
   it('pre-empts destructive bash commands by name', () => {
     // The agent should learn about these from the prompt, not by tripping
-    // safety-scanner.ts and burning a retry cycle. Each pattern matches a
-    // rule in `src/lib/safety-scanner.ts`.
-    const blockedShapes = [
+    // safety-scanner.ts and burning a retry cycle. Each pattern in
+    // `scannerShapes` matches a rule in `src/lib/safety-scanner.ts`;
+    // `allowlistShapes` are blocked by the bash allowlist, not the scanner.
+    const scannerShapes = [
       'rm -rf',
       'git reset --hard',
       'git push --force',
+      'git checkout .',
+      'git restore',
+      'git clean -f',
       'curl ... | sh',
-      'install -g',
-      'publish',
-      'sudo',
     ];
-    for (const shape of blockedShapes) {
+    const allowlistShapes = ['install -g', 'publish', 'sudo'];
+    for (const shape of [...scannerShapes, ...allowlistShapes]) {
       expect(
         text,
         `commandments should pre-empt "${shape}" so the agent never burns a retry discovering it's blocked.`,
