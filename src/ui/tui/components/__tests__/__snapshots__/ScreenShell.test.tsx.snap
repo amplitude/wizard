@@ -1,0 +1,151 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`ScreenShell — ASCII fallback profile > renders header / body / footer at 40 cols 1`] = `
+"  * welcome * auth * project
+  > o setup o verify o done
+
+  Setup
+
+  ------------------------------------
+  ------------------------
+
+  Body line 1
+  Body line 2
+
+  ------------------------------------
+  ------------------------
+
+  [Enter] continue  [Esc] back"
+`;
+
+exports[`ScreenShell — ASCII fallback profile > renders header / body / footer at 60 cols 1`] = `
+"  * welcome * auth * project > o setup o verify o done
+
+  Setup
+
+  --------------------------------------------------------
+  ----
+
+  Body line 1
+  Body line 2
+
+  --------------------------------------------------------
+  ----
+
+  [Enter] continue  [Esc] back"
+`;
+
+exports[`ScreenShell — ASCII fallback profile > renders header / body / footer at 80 cols 1`] = `
+"  * welcome * auth * project > o setup o verify o done
+
+  Setup
+
+  ------------------------------------------------------------
+
+  Body line 1
+  Body line 2
+
+  ------------------------------------------------------------
+
+  [Enter] continue  [Esc] back"
+`;
+
+exports[`ScreenShell — UTF-8 + no-color profile > renders header / body / footer at 40 cols 1`] = `
+"  ✓ welcome ✓ auth ✓ project
+  ❯ ● setup ○ verify ○ done
+
+  Setup
+
+  ────────────────────────────────────
+  ────────────────────────
+
+  Body line 1
+  Body line 2
+
+  ────────────────────────────────────
+  ────────────────────────
+
+  [Enter] continue  [Esc] back"
+`;
+
+exports[`ScreenShell — UTF-8 + no-color profile > renders header / body / footer at 60 cols 1`] = `
+"  ✓ welcome ✓ auth ✓ project ❯ ● setup ○ verify ○ done
+
+  Setup
+
+  ────────────────────────────────────────────────────────
+  ────
+
+  Body line 1
+  Body line 2
+
+  ────────────────────────────────────────────────────────
+  ────
+
+  [Enter] continue  [Esc] back"
+`;
+
+exports[`ScreenShell — UTF-8 + no-color profile > renders header / body / footer at 80 cols 1`] = `
+"  ✓ welcome ✓ auth ✓ project ❯ ● setup ○ verify ○ done
+
+  Setup
+
+  ────────────────────────────────────────────────────────────
+
+  Body line 1
+  Body line 2
+
+  ────────────────────────────────────────────────────────────
+
+  [Enter] continue  [Esc] back"
+`;
+
+exports[`ScreenShell — UTF-8 profile > renders header / body / footer at 40 cols 1`] = `
+"  ✓ welcome ✓ auth ✓ project
+  ❯ ● setup ○ verify ○ done
+
+  Setup
+
+  ────────────────────────────────────
+  ────────────────────────
+
+  Body line 1
+  Body line 2
+
+  ────────────────────────────────────
+  ────────────────────────
+
+  [Enter] continue  [Esc] back"
+`;
+
+exports[`ScreenShell — UTF-8 profile > renders header / body / footer at 60 cols 1`] = `
+"  ✓ welcome ✓ auth ✓ project ❯ ● setup ○ verify ○ done
+
+  Setup
+
+  ────────────────────────────────────────────────────────
+  ────
+
+  Body line 1
+  Body line 2
+
+  ────────────────────────────────────────────────────────
+  ────
+
+  [Enter] continue  [Esc] back"
+`;
+
+exports[`ScreenShell — UTF-8 profile > renders header / body / footer at 80 cols 1`] = `
+"  ✓ welcome ✓ auth ✓ project ❯ ● setup ○ verify ○ done
+
+  Setup
+
+  ────────────────────────────────────────────────────────────
+
+  Body line 1
+  Body line 2
+
+  ────────────────────────────────────────────────────────────
+
+  [Enter] continue  [Esc] back"
+`;
