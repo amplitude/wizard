@@ -81,6 +81,17 @@ export const COMMANDS: CommandDef[] = [
     desc: 'Show wizard, agent-mode protocol, Node, and platform versions',
   },
   { cmd: '/snake', desc: 'Play Snake' },
+  // PR 3 — palette stubs. Wired in later timeline-ux PRs; for now the
+  // SlashPalette dispatcher surfaces a `not yet wired` notice when
+  // these are picked, so the catalog stays discoverable.
+  {
+    cmd: '/events',
+    desc: 'Browse and edit the captured event plan (not yet wired)',
+  },
+  {
+    cmd: '/resume',
+    desc: 'Resume the previous wizard run from checkpoint (not yet wired)',
+  },
   { cmd: '/exit', desc: 'Exit the wizard' },
 ];
 
