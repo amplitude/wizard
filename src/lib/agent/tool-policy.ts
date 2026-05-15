@@ -160,6 +160,108 @@ const SAFE_SCRIPTS = [
 const DANGEROUS_OPERATORS = /[;`$()]/;
 
 /**
+ * Read-only POSIX inspection commands that surface ~37% of "not in allowlist"
+ * denies in production (Amplitude `wizard cli: bash deny circuit breaker
+ * tripped` events, May 2026). Agents reach for these reflexively to confirm
+ * a directory exists or print the current path; without an allow-path the
+ * agent is forced to chain alternate shell incantations that trip the
+ * `command not in allowlist` deny, then escalate into a circuit-breaker
+ * trip after 5 consecutive denies.
+ *
+ * Each entry is a POSIX command that reads filesystem metadata and writes
+ * nothing. We only allow the EXACT command shape declared here — any flag,
+ * redirection, pipe, or shell metacharacter must still fall through to the
+ * generic deny rules. The wider safety net (DANGEROUS_OPERATORS, pipe
+ * deny, multiple-pipe deny, command-substitution deny) stays in place
+ * before this allowlist is consulted.
+ *
+ * DELIBERATELY NOT INCLUDED:
+ *   - `find` — `-exec`/`-execdir` is arbitrary code execution.
+ *   - `cd` — stateful shell builtin; encourages `cd && <cmd>` patterns
+ *     that would let chained commands bypass the per-token allowlist.
+ *   - `cat` / `head -n <file>` / etc. — `Read` covers this and the
+ *     `.env` file deny path lives at the Read tool, not Bash.
+ *   - `grep` — `Grep` tool covers this and respects the `.env` deny.
+ */
+const READONLY_INSPECTION_COMMANDS: ReadonlySet<string> = new Set([
+  'pwd',
+  'ls',
+]);
+
+/**
+ * Maximum length of a path argument we'll allow through the read-only
+ * inspection allowlist. A 4 KB ceiling is well above any realistic
+ * filesystem path (POSIX PATH_MAX is 4096) while keeping the
+ * denial-of-service surface tiny.
+ */
+const MAX_INSPECTION_PATH_LENGTH = 4096;
+
+/**
+ * Check if a command is a strictly bounded, read-only inspection command
+ * that we want to allow without forcing the agent through the Read/Glob
+ * tools. Only matches:
+ *
+ *   pwd
+ *   ls
+ *   ls <single-path-arg>
+ *
+ * The path arg may be:
+ *   - bare: `ls /Users/foo/proj`
+ *   - double-quoted: `ls "/Users/foo/My Project"`
+ *   - single-quoted: `ls '/Users/foo/My Project'`
+ *
+ * Any flag (token starting with `-`), any second positional, any shell
+ * metacharacter (caught earlier), or any quote-with-embedded-quote is
+ * rejected. The caller MUST run this check AFTER the DANGEROUS_OPERATORS
+ * and pipe/background-operator denies so quote injection cannot smuggle a
+ * second command past us.
+ */
+export function isReadOnlyInspectionCommand(command: string): boolean {
+  const trimmed = command.trim();
+
+  // Reject anything containing shell metacharacters even if a future
+  // refactor reorders the check. Defense in depth — the caller already
+  // denies on these, but a stray reorder shouldn't open a hole.
+  if (/[;`$()|&<>\n\r]/.test(trimmed)) return false;
+
+  // Zero-arg form: command stands alone (e.g. `pwd`, `ls`).
+  if (READONLY_INSPECTION_COMMANDS.has(trimmed)) return true;
+
+  // One-arg form: only `ls <path>` is supported. `pwd` takes no path arg.
+  if (!trimmed.startsWith('ls ')) return false;
+
+  const rest = trimmed.slice(3).trim();
+  // Reject flag-shaped tokens. Even safe-looking flags like `-A` could in
+  // theory accept additional positional args we don't validate — keep the
+  // surface zero by rejecting all `-`/`--` tokens.
+  if (rest.startsWith('-')) return false;
+  if (rest.length === 0) return false;
+  if (rest.length > MAX_INSPECTION_PATH_LENGTH) return false;
+
+  // Quoted path: must be fully quoted with no embedded matching quote.
+  if (rest.startsWith('"')) {
+    if (!rest.endsWith('"')) return false;
+    const inner = rest.slice(1, -1);
+    if (inner.includes('"')) return false;
+    // Inside double quotes, $/` expand. They're already rejected above,
+    // but reject explicitly here for clarity.
+    if (/[`$]/.test(inner)) return false;
+    return inner.length > 0;
+  }
+  if (rest.startsWith("'")) {
+    if (!rest.endsWith("'")) return false;
+    const inner = rest.slice(1, -1);
+    if (inner.includes("'")) return false;
+    return inner.length > 0;
+  }
+
+  // Bare path: must be a single whitespace-free token. Multi-word paths
+  // must be quoted (the production denial samples show agents already
+  // quote multi-word user paths correctly).
+  return !/\s/.test(rest);
+}
+
+/**
  * Check if command is a Amplitude skill installation from MCP.
  * We control the MCP server, so we only need to verify:
  * 1. It installs to .claude/skills/
@@ -729,6 +831,22 @@ export function wizardCanUseTool(
     return { behavior: 'allow', updatedInput: input };
   }
 
+  // Allow strictly bounded read-only inspection commands (`pwd`, `ls`,
+  // `ls <single-path>`). Production telemetry (Amplitude `wizard cli:
+  // bash deny circuit breaker tripped`, May 2026) showed agents reach
+  // for `ls "/Users/foo/proj/"` to confirm a directory exists; without
+  // this allow path the deny cascade burns turns and trips the 5-deny
+  // circuit breaker that halts the run. Placed AFTER the dangerous-
+  // operator / pipe / multi-pipe denies above so quote injection,
+  // command substitution, and chaining are already rejected before we
+  // get here. `isReadOnlyInspectionCommand` also re-rejects the same
+  // metacharacters as defense in depth.
+  if (isReadOnlyInspectionCommand(normalized)) {
+    logToFile(`Allowing read-only inspection command: ${command}`);
+    debug(`Allowing read-only inspection command: ${command}`);
+    return { behavior: 'allow', updatedInput: input };
+  }
+
   logToFile(`Denying bash command: ${command}`);
   debug(`Denying bash command: ${command}`);
   captureWizardError(
@@ -740,8 +858,8 @@ export function wizardCanUseTool(
   return {
     behavior: 'deny',
     message: toWizardToolDenyMessage({
-      error: `Bash command denied by wizard policy: only package-manager subcommands (install / add / build / test / typecheck / lint / format / etc.) and Amplitude skill installs are permitted.`,
-      guidance: `DO NOT retry the same goal with a different shell command — \`node -e\`, \`node --eval\`, \`printenv\`, \`echo $VAR\`, \`cat .env\`, \`bash -c '...'\`, etc. will all be denied. To verify env vars use mcp__wizard-tools__check_env_keys; to inspect a file use Read; to inspect a directory use Glob; to search code use Grep. If you cannot accomplish the goal with the allowed tools, document the limitation in the setup report and proceed.`,
+      error: `Bash command denied by wizard policy: only package-manager subcommands (install / add / build / test / typecheck / lint / format / etc.), \`pwd\`, \`ls\` / \`ls <path>\` (no flags), and Amplitude skill installs are permitted.`,
+      guidance: `DO NOT retry the same goal with a different shell command — \`node -e\`, \`node --eval\`, \`printenv\`, \`echo $VAR\`, \`cat .env\`, \`bash -c '...'\`, \`find ... -exec\`, etc. will all be denied. To verify env vars use mcp__wizard-tools__check_env_keys; to inspect a file use Read; to inspect a directory use Glob (or \`ls <path>\` with no flags); to search code use Grep. If you cannot accomplish the goal with the allowed tools, document the limitation in the setup report and proceed.`,
       suggestedTool: 'Read',
       context: `denied command: ${command}`,
     }),
