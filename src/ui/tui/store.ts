@@ -80,6 +80,15 @@ export type {
   DiscoveryFact,
 };
 
+/**
+ * Tab-to-ask history cap. Exported so AskBar's tests can assert the
+ * trim boundary without grepping the implementation, and so the
+ * `pushAskHistory` slicing is centrally tuneable. Keep small — this
+ * is a recall buffer for the user's most recent free-form questions,
+ * not a transcript log.
+ */
+export const ASK_HISTORY_CAP = 5;
+
 export interface TaskItem {
   label: string;
   activeForm?: string;
@@ -271,6 +280,23 @@ export class WizardStore {
   /** Tab id to switch to imperatively (e.g. from a slash command). */
   private $requestedTab = atom<string | null>(null);
 
+  /**
+   * Tab-to-ask state (Timeline UX PR 6, killer feature).
+   *
+   * `$paused` flips on when the user taps Tab from RunScreen with
+   * `WIZARD_NEW_UX === '1'` and opens AskBar. It is the visible "we
+   * paused to listen" pill next to the elapsed counter, and the gate
+   * the eventual Claude Agent SDK pause hook will key off. AskBar reads
+   * + writes it. The agent runner ignoring it is intentional in this
+   * PR — see `agentInterrupt.ts` for the synthetic-pause stub.
+   *
+   * `$askHistory` keeps the last 5 user questions, most-recent-first,
+   * so AskBar's ↑/↓ recalls them. Consecutive duplicates are deduped
+   * at write time.
+   */
+  private $paused = atom<boolean>(false);
+  private $askHistory = atom<string[]>([]);
+
   /** Last screen seen — used to detect screen transitions for analytics. */
   private _lastScreen: ScreenName | null = null;
 
@@ -341,6 +367,21 @@ export class WizardStore {
 
   get requestedTab(): string | null {
     return this.$requestedTab.get();
+  }
+
+  /** Tab-to-ask: true while AskBar is open (PR 6 killer feature). */
+  get paused(): boolean {
+    return this.$paused.get();
+  }
+
+  /**
+   * Tab-to-ask: last 5 user questions, most-recent-first. AskBar's
+   * ↑/↓ recall walks this list. Consecutive duplicates are deduped
+   * at write time so re-submitting the same query doesn't fill the
+   * buffer.
+   */
+  get askHistory(): readonly string[] {
+    return this.$askHistory.get();
   }
 
   get statusMessages(): string[] {
@@ -1452,6 +1493,38 @@ export class WizardStore {
 
   clearRequestedTab(): void {
     this.$requestedTab.set(null);
+  }
+
+  /**
+   * Tab-to-ask: flip the paused flag (PR 6).
+   *
+   * Public so AskBar + slash commands can drive it directly. The
+   * actual agent-side pause hook is deferred — see `agentInterrupt.ts`
+   * for the synthetic-pause stub that this flag and the timeline ack
+   * line cooperate with.
+   */
+  setPaused(value: boolean): void {
+    if (this.$paused.get() === value) return;
+    this.$paused.set(value);
+    this.$version.set(this.$version.get() + 1);
+  }
+
+  /**
+   * Tab-to-ask: push a user question onto the recall buffer (PR 6).
+   *
+   * Trims, ignores empty input, dedupes consecutive duplicates against
+   * the most recent entry, caps the buffer at the last 5 questions
+   * (most-recent-first). Returns the new buffer for caller convenience.
+   */
+  pushAskHistory(query: string): readonly string[] {
+    const trimmed = query.trim();
+    if (!trimmed) return this.$askHistory.get();
+    const current = this.$askHistory.get();
+    if (current[0] === trimmed) return current;
+    const next = [trimmed, ...current].slice(0, ASK_HISTORY_CAP);
+    this.$askHistory.set(next);
+    this.$version.set(this.$version.get() + 1);
+    return next;
   }
 
   /**
