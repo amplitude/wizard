@@ -34,7 +34,6 @@ export enum Screen {
   SignupFullName = 'signup-full-name',
   ToS = 'tos',
   DataSetup = 'data-setup',
-  Options = 'options',
   ActivationOptions = 'activation-options',
   Run = 'run',
   Mcp = 'mcp',
