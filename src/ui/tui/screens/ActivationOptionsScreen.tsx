@@ -3,6 +3,17 @@
  *
  * Shown when the user has the SDK installed but hasn't fully activated yet
  * (1-49 events). Offers next-step options without forcing a full re-run.
+ *
+ * PR 9 (WIZARD_NEW_UX): the acceptance contract for this PR includes a
+ * "reuse project context without re-auth when token valid" flip. The
+ * wizard's session today does not carry a top-level `tokenExpiresAt`
+ * field — token validity is checked at the `tryRefreshToken` / OAuth
+ * boundary in `src/utils/token-refresh.ts`, not on `WizardSession`.
+ * Adding a session-level predicate is out of scope for this PR
+ * (`src/lib/wizard-session.ts` is read-only per AC #5); the route
+ * through this screen doesn't currently re-prompt for auth anyway
+ * (auth runs upstream via the AuthScreen → activation gate). Tracking
+ * as deferred until the session schema is expanded.
  */
 
 import { Box, Text } from 'ink';

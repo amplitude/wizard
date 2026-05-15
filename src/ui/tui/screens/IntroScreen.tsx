@@ -211,6 +211,142 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
   if (showResume) {
     const orgLabel =
       session.selectedOrgName ?? session.selectedProjectName ?? null;
+    const newUx = process.env.WIZARD_NEW_UX === '1';
+
+    // New-UX returning-user welcome: bordered checkpoint summary block
+    // + 4 hotkey options (r/s/m/c). Falls back to the legacy 3-option
+    // picker when the gate is off so existing screenshots/snapshots
+    // remain unchanged.
+    if (newUx) {
+      const previous = readPreviousRunSummary(session.installDir);
+      const eventCount = previous.eventCount;
+      const lastRunRelative = previous.lastRunAt
+        ? humanizeAge(previous.lastRunAt)
+        : null;
+      // The checkpoint doesn't carry the last-completed step verbatim,
+      // so we synthesize a stable label from the highest-completed
+      // signal recorded in the checkpoint payload. Order matches the
+      // wizard flow: framework detection → region → org/project →
+      // intro concluded.
+      const lastStep =
+        session.selectedProjectName || session.selectedProjectId
+          ? 'Project selected'
+          : session.selectedOrgName || session.selectedOrgId
+            ? 'Organization selected'
+            : session.region
+              ? 'Region selected'
+              : session.detectionComplete
+                ? 'Framework detected'
+                : 'Intro';
+
+      return (
+        <Box
+          flexDirection="column"
+          flexGrow={1}
+          alignItems="center"
+          justifyContent="flex-start"
+          paddingTop={2}
+          overflow="hidden"
+        >
+          {showLogo && <AmplitudeTextLogo />}
+          <Box flexDirection="column" alignItems="center" marginBottom={1}>
+            <Text bold color={Colors.heading}>
+              Welcome back to Amplitude Wizard
+            </Text>
+            <Text color={Colors.muted}>
+              A previous session was interrupted.
+            </Text>
+          </Box>
+
+          {/* Bordered checkpoint summary. Single-column rows so a wide
+              org name doesn't push the events line off-screen on 80-col
+              terminals. */}
+          <Box
+            flexDirection="column"
+            borderStyle="round"
+            borderColor={Colors.border}
+            paddingX={2}
+            paddingY={0}
+            marginBottom={1}
+          >
+            {lastRunRelative && (
+              <Text>
+                <Text color={Colors.muted}>Last run </Text>
+                <Text color={Colors.body}>{lastRunRelative}</Text>
+              </Text>
+            )}
+            <Text>
+              <Text color={Colors.muted}>Last step </Text>
+              <Text color={Colors.body}>{lastStep}</Text>
+            </Text>
+            {frameworkLabel && (
+              <Text>
+                <Text color={Colors.muted}>Framework </Text>
+                <Text color={Colors.secondary}>{frameworkLabel}</Text>
+              </Text>
+            )}
+            {orgLabel && (
+              <Text>
+                <Text color={Colors.muted}>Organization </Text>
+                <Text color={Colors.secondary}>{orgLabel}</Text>
+              </Text>
+            )}
+            <Text>
+              <Text color={Colors.muted}>Events wired </Text>
+              <Text color={Colors.body}>{eventCount}</Text>
+            </Text>
+          </Box>
+
+          <Box marginTop={1}>
+            <PickerMenu
+              options={[
+                {
+                  label: '[r] Resume where you left off',
+                  value: 'resume',
+                  hint: 'recommended',
+                },
+                {
+                  label: '[s] Start fresh',
+                  value: 'fresh',
+                  hint: 'clear checkpoint',
+                },
+                {
+                  label: '[m] Install MCP',
+                  value: 'mcp',
+                  hint: 'editor integration',
+                },
+                {
+                  label: '[c] Connect Slack',
+                  value: 'slack',
+                  hint: 'team notifications',
+                },
+              ]}
+              onSelect={(value) => {
+                const choice = Array.isArray(value) ? value[0] : value;
+                analytics.wizardCapture('checkpoint resume action', {
+                  action: choice,
+                  integration: session.integration,
+                  'detected framework': session.detectedFrameworkLabel,
+                  'new ux': true,
+                });
+
+                if (choice === 'resume') {
+                  store.concludeIntro();
+                } else if (choice === 'fresh') {
+                  clearCheckpoint(store.session.installDir, 'manual');
+                  store.resetForFreshStart();
+                  setShowResume(false);
+                } else if (choice === 'mcp') {
+                  store.showMcpOverlay();
+                } else if (choice === 'slack') {
+                  store.showSlackOverlay();
+                }
+              }}
+            />
+          </Box>
+        </Box>
+      );
+    }
 
     return (
       <Box

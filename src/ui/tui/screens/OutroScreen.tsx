@@ -964,6 +964,30 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
               <Text color={Colors.body}>{outroData.message}</Text>
             </Box>
           )}
+          {/* Structured login/resume hints — under WIZARD_NEW_UX, the
+              error variant ALWAYS surfaces the two recovery commands
+              the orchestrator-facing NDJSON would emit. Mirrors the
+              `loginCommand` / `resumeCommand` payload on
+              `emitAuthRequired` so a TUI user has the same actionable
+              copy as a CI/agent-mode operator reading the JSON stream.
+              Login command renders only when the error class implies
+              an auth issue (`promptLogin`); resume command renders on
+              every error (any failure can be retried from checkpoint).
+              The legacy view (gate off) keeps its existing layout. */}
+          {process.env.WIZARD_NEW_UX === '1' && (
+            <Box marginTop={1} flexDirection="column">
+              {outroData.promptLogin && (
+                <Text color={Colors.secondary}>
+                  {Icons.arrowRight} Sign in:{' '}
+                  <Text bold>npx @amplitude/wizard login</Text>
+                </Text>
+              )}
+              <Text color={Colors.secondary}>
+                {Icons.arrowRight} Resume:{' '}
+                <Text bold>npx @amplitude/wizard</Text>
+              </Text>
+            </Box>
+          )}
           {/* Last-activity anchor — when the run actually started AND any
               task transitioned past pending, surface a one-line
               "Started at HH:MM:SS · Step: <label>" so the user has a

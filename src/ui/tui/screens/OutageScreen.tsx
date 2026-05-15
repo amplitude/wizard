@@ -19,6 +19,7 @@ import { ConfirmationInput, TerminalLink } from '../primitives/index.js';
 import { Colors, Icons } from '../styles.js';
 import { wizardAbort } from '../../../utils/wizard-abort.js';
 import { BrailleSpinner } from '../components/BrailleSpinner.js';
+import { OutageBanner } from '../components/OutageBanner.js';
 import { checkAmplitudeOverallHealth } from '../../../lib/health-checks/index.js';
 import { ServiceHealthStatus } from '../../../lib/health-checks/types.js';
 import { logToFile } from '../../../utils/debug.js';
@@ -91,7 +92,18 @@ export const OutageScreen = ({ store }: OutageScreenProps) => {
   const giveUp = attempts >= MAX_POLL_ATTEMPTS;
 
   return (
-    <Box flexDirection="column" flexGrow={1}>
+    <Box flexDirection="column" flexGrow={1} overflow="hidden">
+      {/* Outage strip — re-renders the same status the parent App.tsx
+          mounts under WIZARD_NEW_UX, but embedded in the overlay too so
+          a user who pinned this screen still gets the canonical
+          glyph + label even with the legacy chrome. Renders nothing on
+          healthy so the existing copy below remains the primary signal
+          when the rollup hasn't yet confirmed degradation. */}
+      {process.env.WIZARD_NEW_UX === '1' && (
+        <Box marginBottom={1}>
+          <OutageBanner />
+        </Box>
+      )}
       <Box flexDirection="column" marginBottom={1}>
         <Text color={Colors.warning} bold>
           {Icons.diamond} The setup agent is temporarily unavailable.
