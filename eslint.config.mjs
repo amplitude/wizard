@@ -73,6 +73,28 @@ export default tseslint.config(
     },
   },
 
+  // Drafted in PR 2, activates in PR 10.
+  // Forbids hand-written status strings in screens; use voice.* from
+  // src/ui/tui/lib/voice.ts instead. The rule block below is intentionally
+  // commented out so it does not fail any existing files yet — PR 10 will
+  // uncomment it once every screen has migrated to WizardVoice.
+  //
+  // ENABLED IN PR 10:
+  // {
+  //   files: ['src/ui/tui/screens/**'],
+  //   rules: {
+  //     'no-restricted-syntax': [
+  //       'error',
+  //       {
+  //         selector:
+  //           'Literal[value=/\\b(TASK|STEP|PHASE|INITIALIZING|EXECUTING)\\b/]',
+  //         message:
+  //           "Use voice.* from src/ui/tui/lib/voice.ts instead of hand-written status strings (TASK / STEP / PHASE / INITIALIZING / EXECUTING).",
+  //       },
+  //     ],
+  //   },
+  // },
+
   // Test files — disable type-checked rules, add test globals
   {
     files: [
