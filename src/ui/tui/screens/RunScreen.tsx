@@ -32,6 +32,11 @@ import { Colors, Icons, SPINNER_FRAMES, SPINNER_INTERVAL } from '../styles.js';
 import { RetryStatusChip } from '../components/RetryBanner.js';
 import { FileWritesPanel } from '../components/FileWritesPanel.js';
 import { FinalizingPanel } from '../components/FinalizingPanel.js';
+import {
+  ExtrasPanel,
+  filterExtrasByFramework,
+  type ExtraItem,
+} from '../components/ExtrasPanel.js';
 import { ActiveTaskSubsteps } from '../components/ActiveTaskSubsteps.js';
 import { DiscoveryFeed } from '../components/DiscoveryFeed.js';
 import { TypewriterFilename } from '../components/TypewriterFilename.js';
@@ -141,6 +146,43 @@ export function resolveRunScreenStatus(store: WizardStore): string | undefined {
 }
 
 /** Compact inline display of planned event names. */
+/**
+ * PR 8 — inline ExtrasPanel rendered above the event plan in
+ * ProgressTab. Reflects the live MCP / Slack states from the session
+ * plus Session Replay (gated by framework via filterExtrasByFramework).
+ *
+ * Returns null when the panel would be empty (e.g. native framework
+ * with nothing else queued) so it doesn't reserve a blank row.
+ */
+const RunScreenExtras = ({ store }: { store: WizardStore }) => {
+  const session = store.session;
+  const items: ExtraItem[] = [
+    {
+      kind: 'mcp',
+      label: 'Amplitude MCP',
+      state: session.mcpComplete ? 'done' : 'queued',
+    },
+    {
+      kind: 'slack',
+      label: 'Slack',
+      state: session.slackComplete ? 'done' : 'queued',
+      detail: session.selectedOrgName ?? undefined,
+    },
+    {
+      kind: 'session-replay',
+      label: 'Session Replay',
+      state: 'queued',
+    },
+  ];
+  const filtered = filterExtrasByFramework(items, session.integration);
+  if (filtered.length === 0) return null;
+  return (
+    <Box flexDirection="column" marginTop={1}>
+      <ExtrasPanel items={filtered} />
+    </Box>
+  );
+};
+
 const InlineEventPlan = ({ store }: { store: WizardStore }) => {
   const events = store.eventPlan.filter((e) => e.name);
   if (events.length === 0) return null;
@@ -583,6 +625,14 @@ const ProgressTab = ({ store }: { store: WizardStore }) => {
             the MCP/Verify screens. Empty until agent-runner seeds the
             queue, so it's a no-op during the agent run itself. */}
         <FinalizingPanel steps={store.session.postAgentSteps} />
+
+        {/* PR 8 — ExtrasPanel surfacing MCP / Slack / Session Replay
+            inline so the user sees the work that's still ahead while
+            the agent finishes. Gated on WIZARD_NEW_UX so legacy runs
+            render byte-identical output. */}
+        {process.env.WIZARD_NEW_UX === '1' && (
+          <RunScreenExtras store={store} />
+        )}
 
         {/* Inline event plan */}
         <InlineEventPlan store={store} />

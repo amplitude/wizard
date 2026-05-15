@@ -10,13 +10,21 @@
  */
 
 import { Box, Text } from 'ink';
+import type React from 'react';
 import { useEffect, useMemo, useState } from 'react';
 import * as fs from 'fs';
 import type { WizardStore } from '../store.js';
 import { useWizardStore } from '../hooks/useWizardStore.js';
 import { OutroKind } from '../session-constants.js';
+import { McpOutcome, SlackOutcome } from '../store.js';
 import { Colors, Icons } from '../styles.js';
 import { GradientText } from '../components/GradientText.js';
+import {
+  ExtrasPanel,
+  filterExtrasByFramework,
+  type ExtraItem,
+  type ExtraState,
+} from '../components/ExtrasPanel.js';
 import {
   ChangedFilesView,
   PickerMenu,
@@ -933,6 +941,15 @@ export const OutroScreen = ({ store }: OutroScreenProps) => {
               </Text>
             </Box>
           )}
+
+          {/* PR 8 — final receipt for MCP / Slack / Session Replay.
+              Reads the per-extra outcome from the session and renders
+              done / skipped so the user has a single panel they can
+              point at when answering "did the wizard do X?". Gated on
+              WIZARD_NEW_UX=1 so legacy outros render byte-identical
+              output. */}
+          {process.env.WIZARD_NEW_UX === '1' &&
+            renderOutroExtras(store) /* may return null */}
         </Box>
       )}
 
@@ -1282,4 +1299,58 @@ function readDashboardUrlFromDisk(installDir: string): string | null {
     // Read or JSON.parse failed — treat as no URL.
   }
   return null;
+}
+
+/**
+ * PR 8 — render the final ExtrasPanel for the outro success receipt.
+ * Reads MCP / Slack outcomes from the session and maps them to the
+ * panel's `done` / `skipped` states. Session Replay state is derived
+ * from `sessionReplayOptIn` for now (no per-feature outcome field
+ * yet); a follow-up PR can promote it to an explicit outcome enum.
+ */
+function renderOutroExtras(store: WizardStore): React.ReactElement | null {
+  const session = store.session;
+  const mcpState: ExtraState =
+    session.mcpOutcome === McpOutcome.Installed
+      ? 'done'
+      : session.mcpOutcome === McpOutcome.Skipped ||
+          session.mcpOutcome === McpOutcome.NoClients ||
+          session.mcpOutcome === McpOutcome.Failed
+        ? 'skipped'
+        : 'skipped';
+
+  const slackState: ExtraState =
+    session.slackOutcome === SlackOutcome.Configured ? 'done' : 'skipped';
+
+  const srState: ExtraState = session.sessionReplayOptIn ? 'done' : 'skipped';
+
+  const items: ExtraItem[] = [
+    {
+      kind: 'mcp',
+      label: 'Amplitude MCP for AI tools',
+      state: mcpState,
+      detail:
+        session.mcpInstalledClients.length > 0
+          ? session.mcpInstalledClients.join(' + ')
+          : undefined,
+    },
+    {
+      kind: 'slack',
+      label: 'Slack integration',
+      state: slackState,
+      detail: session.selectedOrgName ?? undefined,
+    },
+    {
+      kind: 'session-replay',
+      label: 'Session Replay',
+      state: srState,
+    },
+  ];
+  const filtered = filterExtrasByFramework(items, session.integration);
+  if (filtered.length === 0) return null;
+  return (
+    <Box marginTop={1} flexDirection="column">
+      <ExtrasPanel items={filtered} title="Extras" />
+    </Box>
+  );
 }
