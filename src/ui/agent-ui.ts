@@ -1706,6 +1706,52 @@ export class AgentUI implements WizardUI {
     });
   }
 
+  // Track the agent's last reported task list so updateAgentTask can
+  // patch a single row and emit a structured progress event.
+  private _agentTasks: Array<{
+    id: string;
+    title: string;
+    status: 'pending' | 'in_progress' | 'done';
+  }> = [];
+
+  setAgentTasks(
+    tasks: Array<{
+      id: string;
+      title: string;
+      status: 'pending' | 'in_progress' | 'done';
+    }>,
+  ): void {
+    this._agentTasks = tasks.map((t) => ({ ...t }));
+    emit('progress', `agent_plan: ${tasks.length} tasks`, {
+      data: { event: 'agent_plan_declared', tasks },
+    });
+  }
+
+  updateAgentTask(
+    id: string,
+    patch: {
+      status: 'pending' | 'in_progress' | 'done';
+      title?: string;
+    },
+  ): boolean {
+    const idx = this._agentTasks.findIndex((t) => t.id === id);
+    if (idx === -1) return false;
+    this._agentTasks[idx] = {
+      ...this._agentTasks[idx],
+      status: patch.status,
+      ...(patch.title !== undefined ? { title: patch.title } : {}),
+    };
+    emit('progress', `agent_task: ${id} -> ${patch.status}`, {
+      data: {
+        event: 'agent_task_updated',
+        id,
+        status: patch.status,
+        title: this._agentTasks[idx].title,
+      },
+    });
+    return true;
+  }
+
   markDataIngestionConfirmed(): void {
     // No-op in --agent mode — there's no flow router to advance, and the
     // ingestion-confirmed signal is already on the wire via the

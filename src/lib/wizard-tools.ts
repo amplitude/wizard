@@ -81,6 +81,23 @@ let activeUserPromptCount = 0;
 const promptReleaseListeners = new Set<() => void>();
 
 /**
+ * One-shot guard so the `agent plan declared` Amplitude event fires
+ * once per wizard run — at the first `set_agent_tasks` call. Mid-run
+ * plan revisions (the agent discovers another file to wire and calls
+ * `set_agent_tasks` again with a bigger list) shouldn't count as new
+ * declarations for the telemetry channel.
+ *
+ * Reset via `__resetFirstAgentPlanForTests` so unit tests for the tool
+ * can assert the gate.
+ */
+let firstAgentPlanFired = false;
+
+/** Test-only: reset the `agent plan declared` one-shot guard. */
+export function __resetFirstAgentPlanForTests(): void {
+  firstAgentPlanFired = false;
+}
+
+/**
  * True while at least one blocking wizard-tools user prompt
  * (`confirm` / `choose` / `confirm_event_plan`) is awaiting a decision.
  */
@@ -2424,6 +2441,199 @@ Returns: "ok: <planId>" on successful persistence, an error string otherwise. Id
     },
   );
 
+  // -- set_agent_tasks ------------------------------------------------------
+  //
+  // The agent declares its own task list at the start of a run and updates
+  // it as work progresses. Distinct from the wizard's canonical 4-step
+  // skeleton (`Detect / Install / Plan / Wire`), this surfaces the agent's
+  // actual plan ("Add @amplitude/analytics-browser import to src/index.tsx")
+  // so the user sees what the agent is thinking, not just that it's still
+  // spinning. Rendered in the RunScreen below the canonical task list.
+  //
+  // Granularity: 5-12 tasks per run. Each task should take 30 seconds to
+  // 2 minutes of agent work — coarser than tool calls, finer than the
+  // wizard's 4-step skeleton.
+  const setAgentTasks = tool(
+    'set_agent_tasks',
+    `Declare the agent's task list for this run, replacing any prior list wholesale. Call this ONCE at the start of every run after inspecting the codebase enough to plan, and again whenever the plan changes mid-run (e.g. you discover another file that needs wiring).
+
+Tasks must be specific and observable — name the file or the concrete action ("Add @amplitude/analytics-browser import to src/index.tsx", NOT "Install SDK"). Aim for 5-12 tasks per run; each should take roughly 30 seconds to 2 minutes of agent work.
+
+Distinct from \`TodoWrite\`: that drives the canonical 4-step wizard skeleton. This tool drives a SEPARATE list rendered below the skeleton so the user sees your actual plan.
+
+Returns: "ok: N tasks" on success.`,
+    {
+      tasks: z
+        .array(
+          z.object({
+            id: z
+              .string()
+              .min(1)
+              .max(120)
+              .describe(
+                'Stable handle for this row, used by `update_agent_task`. Pick anything unique within this list (e.g. "init-sdk", "wire-signup-track"). Must be non-empty.',
+              ),
+            title: z
+              .string()
+              .min(1)
+              .max(160)
+              .describe(
+                'Short, specific, observable description of the work. Name files or concrete actions ("Add Amplitude import to src/main.tsx"), not categories ("Install SDK").',
+              ),
+            status: z
+              .enum(['pending', 'in_progress', 'done'])
+              .describe(
+                'Initial status — `pending` for not-yet-started rows, `in_progress` for the one you are about to start, `done` if you already completed it.',
+              ),
+          }),
+        )
+        .min(1)
+        .max(20)
+        .describe(
+          'The full task list. 5-12 entries is the sweet spot. Replaces any prior list.',
+        ),
+      reason: reasonField,
+    },
+    (args: {
+      tasks: Array<{
+        id: string;
+        title: string;
+        status: 'pending' | 'in_progress' | 'done';
+      }>;
+      reason: string;
+    }) => {
+      // Reject duplicate ids — the agent owns the namespace but a dupe
+      // makes `update_agent_task` ambiguous.
+      const ids = new Set<string>();
+      for (const t of args.tasks) {
+        if (ids.has(t.id)) {
+          return toWizardToolErrorContent({
+            error: `duplicate task id: ${t.id}`,
+            guidance: `Every task id must be unique within the list. Rename one of the duplicates and retry.`,
+            suggestedTool: 'mcp__wizard-tools__set_agent_tasks',
+            context: `tasks: ${args.tasks.length}`,
+          });
+        }
+        ids.add(t.id);
+      }
+
+      logToFile(`set_agent_tasks: ${args.tasks.length} tasks`);
+
+      try {
+        getUI().setAgentTasks(args.tasks);
+      } catch (err) {
+        logToFile(
+          `set_agent_tasks: ui.setAgentTasks failed: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+      }
+
+      // Telemetry: capture the first plan declaration per run so we can
+      // measure how often the agent actually plans vs falls back to
+      // ad-hoc tool calls. Lazy-import to avoid a static dependency
+      // cycle on the analytics client.
+      void (async () => {
+        try {
+          if (firstAgentPlanFired) return;
+          firstAgentPlanFired = true;
+          const { analytics } = await import('../utils/analytics.js');
+          analytics.wizardCapture('agent plan declared', {
+            'task count': args.tasks.length,
+          });
+        } catch (err) {
+          logToFile(
+            `set_agent_tasks: analytics emit failed: ${
+              err instanceof Error ? err.message : String(err)
+            }`,
+          );
+        }
+      })();
+
+      return {
+        content: [
+          { type: 'text' as const, text: `ok: ${args.tasks.length} tasks` },
+        ],
+      };
+    },
+  );
+
+  // -- update_agent_task ----------------------------------------------------
+  //
+  // Patch a single agent task by id. Called as the agent transitions a row
+  // through `pending → in_progress → done`. Returns an error response if
+  // the id was never declared via `set_agent_tasks` — the agent must seed
+  // the list before patching it.
+  const updateAgentTask = tool(
+    'update_agent_task',
+    `Update a single agent task's status by id. Call this with status="in_progress" BEFORE starting work on a task, and with status="done" AFTER completing it. The id must match an entry from your most recent \`set_agent_tasks\` call.
+
+If the plan changes mid-run (you discover another file to wire, or a step you planned is no longer needed), call \`set_agent_tasks\` again with a fresh full list instead of trying to patch.
+
+Returns: "ok" on success, an error response if the id is unknown.`,
+    {
+      id: z
+        .string()
+        .min(1)
+        .max(120)
+        .describe(
+          'The id of the task to update — must match an entry from the most recent `set_agent_tasks` call.',
+        ),
+      status: z
+        .enum(['pending', 'in_progress', 'done'])
+        .describe(
+          'New status for the task. Transition `pending → in_progress` when you start work, `in_progress → done` when you finish.',
+        ),
+      title: z
+        .string()
+        .min(1)
+        .max(160)
+        .optional()
+        .describe(
+          'Optional updated title. Use when you want to refine the description as you learn more (e.g. a placeholder "wire signup" becomes "wire signup -> SignupForm.tsx onSubmit").',
+        ),
+      reason: reasonField,
+    },
+    (args: {
+      id: string;
+      status: 'pending' | 'in_progress' | 'done';
+      title?: string;
+      reason: string;
+    }) => {
+      logToFile(
+        `update_agent_task: id="${args.id}" status=${args.status}${
+          args.title ? ` title="${args.title}"` : ''
+        }`,
+      );
+
+      let ok = false;
+      try {
+        ok = getUI().updateAgentTask(args.id, {
+          status: args.status,
+          ...(args.title !== undefined ? { title: args.title } : {}),
+        });
+      } catch (err) {
+        logToFile(
+          `update_agent_task: ui.updateAgentTask failed: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+      }
+
+      if (!ok) {
+        return toWizardToolErrorContent({
+          error: `unknown task id: ${args.id}`,
+          guidance:
+            'No agent task with that id has been declared. Call `set_agent_tasks` first with the full task list, then call `update_agent_task` to transition rows.',
+          suggestedTool: 'mcp__wizard-tools__set_agent_tasks',
+          context: `id: ${args.id}; status: ${args.status}`,
+        });
+      }
+
+      return { content: [{ type: 'text' as const, text: 'ok' }] };
+    },
+  );
+
   // -- Assemble server ------------------------------------------------------
 
   const rawServer = createSdkMcpServer({
@@ -2448,6 +2658,8 @@ Returns: "ok: <planId>" on successful persistence, an error string otherwise. Id
       // in and retires `record_dashboard`.
       recordDashboardPlan,
       wizardFeedback,
+      setAgentTasks,
+      updateAgentTask,
     ],
   });
 
@@ -2475,6 +2687,8 @@ export const WIZARD_TOOL_NAMES = [
   // but no prompt copy references it yet. PR 4 wires it in.
   `${SERVER_NAME}:record_dashboard_plan`,
   `${SERVER_NAME}:wizard_feedback`,
+  `${SERVER_NAME}:set_agent_tasks`,
+  `${SERVER_NAME}:update_agent_task`,
 ];
 
 /**
