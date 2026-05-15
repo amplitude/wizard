@@ -135,16 +135,18 @@ export function wizardLaunchedProperties(
     'benchmark config provided': present('benchmark-config'),
     'log file provided': present('log-file'),
 
-    // Undocumented env vars that meaningfully alter behavior. Captured here
-    // (not as session properties) so the launch fingerprint shows them
-    // even when the consumer reads them later. `wizard launched` fires
-    // before `Analytics.applyOptOut()` is consulted; the SDK's runtime
-    // opt-out logic only respects the `wizard-agent-analytics` flag, not
-    // these env vars — so the event lands even when DO_NOT_TRACK=1 is set,
-    // which is intentional: we want the opt-out signal visible at launch.
+    // Undocumented env vars that meaningfully alter wizard behavior — read
+    // directly via `process.env` by their consumers, so without explicit
+    // capture they're invisible to the funnel.
+    //
+    // We deliberately do NOT capture the telemetry opt-out signals
+    // (`DO_NOT_TRACK`, `AMPLITUDE_WIZARD_NO_TELEMETRY`). They're checked
+    // only by `src/lib/observability/sentry.ts`, not by the analytics SDK,
+    // so every event ingests regardless — that's the existing behavior of
+    // every other `wizard cli: *` event and we're matching it here.
+    // Capturing the opt-out value as a property would surface a signal no
+    // other event tracks, which is the inconsistency we want to avoid.
     'allow nested env': envSet('AMPLITUDE_WIZARD_ALLOW_NESTED'),
-    'no telemetry env': envEquals('AMPLITUDE_WIZARD_NO_TELEMETRY', '1'),
-    'do not track env': envEquals('DO_NOT_TRACK', '1'),
     'gateway sanitize off env': envEquals(
       'AMPLITUDE_WIZARD_GATEWAY_SANITIZE_FETCH',
       '0',

@@ -348,8 +348,6 @@ describe('wizardLaunchedProperties — undocumented env-var capture', () => {
   it('reports every env-var property as false / null when env is empty', () => {
     const props = wizardLaunchedProperties(argv(), false, EMPTY_ENV);
     expect(props['allow nested env']).toBe(false);
-    expect(props['no telemetry env']).toBe(false);
-    expect(props['do not track env']).toBe(false);
     expect(props['gateway sanitize off env']).toBe(false);
     expect(props['no update check env']).toBe(false);
     expect(props['no theme env']).toBe(false);
@@ -363,34 +361,18 @@ describe('wizardLaunchedProperties — undocumented env-var capture', () => {
     expect(props['max turns env']).toBeNull();
   });
 
-  it('captures DO_NOT_TRACK=1 even though the SDK opt-out logic is unrelated', () => {
+  it('does NOT expose the telemetry opt-out env vars as properties', () => {
+    // Existing wizard analytics events ignore DO_NOT_TRACK /
+    // AMPLITUDE_WIZARD_NO_TELEMETRY (sentry honors them, the analytics SDK
+    // does not). Surfacing them as properties would be a new signal no
+    // other event tracks — out of scope for this PR. Lock the omission so
+    // a future contributor doesn't re-introduce them by mistake.
     const props = wizardLaunchedProperties(argv(), false, {
       DO_NOT_TRACK: '1',
-    });
-    expect(props['do not track env']).toBe(true);
-  });
-
-  it('only matches DO_NOT_TRACK=1 (not other truthy strings)', () => {
-    // Mirrors sentry.ts's exact `=== '1'` check — if a future contributor
-    // loosens this, the funnel would diverge from the actual opt-out
-    // behavior. Lock the contract here.
-    expect(
-      wizardLaunchedProperties(argv(), false, { DO_NOT_TRACK: 'true' })[
-        'do not track env'
-      ],
-    ).toBe(false);
-    expect(
-      wizardLaunchedProperties(argv(), false, { DO_NOT_TRACK: '0' })[
-        'do not track env'
-      ],
-    ).toBe(false);
-  });
-
-  it('captures AMPLITUDE_WIZARD_NO_TELEMETRY=1', () => {
-    const props = wizardLaunchedProperties(argv(), false, {
       AMPLITUDE_WIZARD_NO_TELEMETRY: '1',
     });
-    expect(props['no telemetry env']).toBe(true);
+    expect(props).not.toHaveProperty('do not track env');
+    expect(props).not.toHaveProperty('no telemetry env');
   });
 
   it('captures AMPLITUDE_WIZARD_ALLOW_NESTED as presence (any value)', () => {
