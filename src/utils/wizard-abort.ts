@@ -235,6 +235,20 @@ export async function wizardSuccessExit(exitCode = 0): Promise<never> {
   } catch {
     /* setup-complete emission must never block exit */
   }
+  // PR B6: emit the cumulative `tool_call_summary` rollup at terminal
+  // exit. The phase-finalize emission already covered the inner-agent
+  // tool calls; this re-emission captures any tool calls the
+  // post-agent steps made (today these go through `executeStepQueue`
+  // and don't currently call the AgentUI tool-call emitter, so in
+  // practice the payload usually matches the finalize emission —
+  // which is why AgentUI dedups on signature). Wrapped so the rollup
+  // can never block the exit path.
+  try {
+    getUI().emitToolCallSummary?.();
+  } catch {
+    /* terminal rollup emission must not prevent exit */
+  }
+
   // Mark the terminal `completed` run_phase BEFORE `run_completed` so
   // an orchestrator's phase-state transitions
   // (cold_start -> agent_running -> finalizing -> completed) close
@@ -487,6 +501,19 @@ export async function wizardAbort(
   //    Esc on the framework picker). Wrapped in try/catch so a
   //    misbehaving emitter can't block the exit.
   const outcome: 'error' | 'cancelled' = error ? 'error' : 'cancelled';
+  // PR B6: emit the cumulative `tool_call_summary` rollup on the
+  // error / cancel path too — an orchestrator that's about to render
+  // an "agent failed" panel still benefits from seeing what the
+  // inner agent attempted before the abort fired. AgentUI dedups
+  // on payload signature so a duplicate from a runner that already
+  // reached the finalize boundary is a no-op. Wrapped so the rollup
+  // can never block the abort path.
+  try {
+    getUI().emitToolCallSummary?.();
+  } catch {
+    /* terminal rollup emission must not prevent exit */
+  }
+
   // Mark the terminal `error` run_phase BEFORE `run_completed` so an
   // orchestrator's phase-state transitions (cold_start ->
   // agent_running -> finalizing -> error) close cleanly. AgentUI

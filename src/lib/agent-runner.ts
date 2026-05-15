@@ -1080,44 +1080,74 @@ async function runAgentWizardBody(
     logToFile('cold-start: setCurrentActivity (skills) failed', err);
   }
 
+  // PR B5: per-phase cold-start timing breakdown. Each of the five phases
+  // below is wrapped in a `try/finally` so the breakdown event always
+  // ships, even when the phase throws — orchestrators see a timing
+  // breadcrumb for the failing phase rather than a silent gap on the
+  // wire. The emitter is a no-op on InkUI / LoggingUI (TUI shows the
+  // labeled activity line; CI logs the per-phase step messages).
+  const emitColdStartPhase = (
+    phase:
+      | 'skill_staging'
+      | 'package_manager_detection'
+      | 'framework_detection',
+    startedAt: number,
+  ): void => {
+    try {
+      getUI().emitColdStartBreakdown?.({
+        phase,
+        startedAt,
+        finishedAt: Date.now(),
+      });
+    } catch (err) {
+      logToFile(`[agent-runner] emitColdStartBreakdown(${phase}) threw`, err);
+    }
+  };
+
   // Pre-stage all bundled skills the agent will need into the user's
   // .claude/skills/ directory. The taxonomy / instrumentation / dashboard
   // skills are constants; the integration skill is resolved per framework
   // (with a sensible default fallback). When staging succeeds the prompt pins
   // that id; otherwise a deterministic on-disk resolver picks at most one
   // `integration-*` match so the model never chooses among several Glob hits.
-  const { preStageSkills, bundledSkillExists } = await import(
-    './wizard-tools.js'
-  );
-  const { listIntegrationSkillIdsOnDisk, resolveIntegrationSkillId } =
-    await import('./integration-skill-resolve.js');
-  const integrationSkillId = config.metadata.getIntegrationSkillId
-    ? config.metadata.getIntegrationSkillId(frameworkContext)
-    : (() => {
-        const fallback = `integration-${config.metadata.integration}`;
-        return bundledSkillExists(fallback) ? fallback : null;
-      })();
-  const { integrationStaged } = preStageSkills(
-    session.installDir,
-    integrationSkillId,
-  );
+  const skillStagingStartedAt = Date.now();
+  let integrationSkillIdForPrompt: string | null;
+  try {
+    const { preStageSkills, bundledSkillExists } = await import(
+      './wizard-tools.js'
+    );
+    const { listIntegrationSkillIdsOnDisk, resolveIntegrationSkillId } =
+      await import('./integration-skill-resolve.js');
+    const integrationSkillId = config.metadata.getIntegrationSkillId
+      ? config.metadata.getIntegrationSkillId(frameworkContext)
+      : (() => {
+          const fallback = `integration-${config.metadata.integration}`;
+          return bundledSkillExists(fallback) ? fallback : null;
+        })();
+    const { integrationStaged } = preStageSkills(
+      session.installDir,
+      integrationSkillId,
+    );
 
-  let integrationSkillIdForPrompt: string | null =
-    integrationStaged && integrationSkillId ? integrationSkillId : null;
-  if (!integrationSkillIdForPrompt) {
-    const diskIds = listIntegrationSkillIdsOnDisk(session.installDir);
-    const resolved = resolveIntegrationSkillId({
-      integration: config.metadata.integration,
-      primaryBundledId: integrationSkillId,
-      frameworkContext,
-      candidateSkillIds: diskIds,
-    });
-    if (resolved?.source === 'lexicographic_tiebreak') {
-      logToFile(
-        `[runAgentWizard] integration skill lexicographic tie-break: picked "${resolved.skillId}" (scoped pool had multiple matches; consider tightening framework hints).`,
-      );
+    integrationSkillIdForPrompt =
+      integrationStaged && integrationSkillId ? integrationSkillId : null;
+    if (!integrationSkillIdForPrompt) {
+      const diskIds = listIntegrationSkillIdsOnDisk(session.installDir);
+      const resolved = resolveIntegrationSkillId({
+        integration: config.metadata.integration,
+        primaryBundledId: integrationSkillId,
+        frameworkContext,
+        candidateSkillIds: diskIds,
+      });
+      if (resolved?.source === 'lexicographic_tiebreak') {
+        logToFile(
+          `[runAgentWizard] integration skill lexicographic tie-break: picked "${resolved.skillId}" (scoped pool had multiple matches; consider tightening framework hints).`,
+        );
+      }
+      integrationSkillIdForPrompt = resolved?.skillId ?? null;
     }
-    integrationSkillIdForPrompt = resolved?.skillId ?? null;
+  } finally {
+    emitColdStartPhase('skill_staging', skillStagingStartedAt);
   }
 
   // Cold-start phase 2: project read. The next 1-5s is package-manager
@@ -1226,39 +1256,59 @@ async function runAgentWizardBody(
   //     mid-run verification) — it does not call it during init.
   //   - `wizardFlags` / `wizardMetadata` are computed above; `getAgent` reads
   //     them as plain values.
-  const { packageManagerInfo, agent } = await runColdStartParallel(
-    () => config.detection.detectPackageManager(session.installDir),
-    () =>
-      getAgent(
-        {
-          workingDirectory: session.installDir,
-          amplitudeMcpUrl: mcpUrl,
-          amplitudeApiKey: projectApiKey,
-          amplitudeBearerToken: accessToken,
-          amplitudeApiHost: host,
-          additionalMcpServers: config.metadata.additionalMcpServers,
-          detectPackageManager: config.detection.detectPackageManager,
-          wizardFlags,
-          wizardMetadata,
-          skipAmplitudeMcp,
-          skillsBaseUrl,
-          agentSessionId: session.agentSessionId,
-          targetsBrowser: config.metadata.targetsBrowser,
-          mode: session.mode,
-          // Forward orchestrator-supplied context (from `--context-file`
-          // / `AMPLITUDE_WIZARD_CONTEXT`) so it lands in the cached
-          // system-prompt block alongside the commandments. Undefined when
-          // no context was provided — keeps the cached preset stable for
-          // every "no context" run.
-          orchestratorContext: session.orchestratorContext ?? undefined,
-        },
-        sessionToOptions(session),
-      ),
-    (err) =>
-      preflightLog.warn('detectPackageManager failed', {
-        'error message': err instanceof Error ? err.message : String(err),
-      }),
-  );
+  // PR #726/#730: wrap the parallel cold-start call in a single phase
+  // boundary so orchestrators see a `package_manager_detection`
+  // cold_start_breakdown entry even though it now races against agent
+  // init rather than running serially. Timing here covers BOTH legs of
+  // the parallel block; the separate `framework_detection` boundary
+  // below covers `buildPreflightContext`.
+  const parallelColdStartStartedAt = Date.now();
+  type DetectPmReturn = Awaited<
+    ReturnType<typeof config.detection.detectPackageManager>
+  >;
+  type GetAgentReturn = Awaited<ReturnType<typeof getAgent>>;
+  let parallelResult: {
+    packageManagerInfo: DetectPmReturn | null;
+    agent: GetAgentReturn;
+  };
+  try {
+    parallelResult = await runColdStartParallel<DetectPmReturn, GetAgentReturn>(
+      () => config.detection.detectPackageManager(session.installDir),
+      () =>
+        getAgent(
+          {
+            workingDirectory: session.installDir,
+            amplitudeMcpUrl: mcpUrl,
+            amplitudeApiKey: projectApiKey,
+            amplitudeBearerToken: accessToken,
+            amplitudeApiHost: host,
+            additionalMcpServers: config.metadata.additionalMcpServers,
+            detectPackageManager: config.detection.detectPackageManager,
+            wizardFlags,
+            wizardMetadata,
+            skipAmplitudeMcp,
+            skillsBaseUrl,
+            agentSessionId: session.agentSessionId,
+            targetsBrowser: config.metadata.targetsBrowser,
+            mode: session.mode,
+            // Forward orchestrator-supplied context (from `--context-file`
+            // / `AMPLITUDE_WIZARD_CONTEXT`) so it lands in the cached
+            // system-prompt block alongside the commandments. Undefined when
+            // no context was provided — keeps the cached preset stable for
+            // every "no context" run.
+            orchestratorContext: session.orchestratorContext ?? undefined,
+          },
+          sessionToOptions(session),
+        ),
+      (err) =>
+        preflightLog.warn('detectPackageManager failed', {
+          'error message': err instanceof Error ? err.message : String(err),
+        }),
+    );
+  } finally {
+    emitColdStartPhase('package_manager_detection', parallelColdStartStartedAt);
+  }
+  const { packageManagerInfo, agent } = parallelResult;
 
   if (packageManagerInfo?.primary) {
     publishDiscoveryFact('package-manager', {
@@ -1277,25 +1327,33 @@ async function runAgentWizardBody(
   // preflight builder also runs the project-size gate; logging happens
   // here so the diagnostic line reflects the authoritative jit/full
   // decision the gate emitted.
-  const preflightCtx = await buildPreflightContext({
-    installDir: session.installDir,
-    integration: session.integration,
-    detectedFrameworkLabel: session.detectedFrameworkLabel,
-    frameworkVersion: frameworkVersion ?? null,
-    typescript: typeScriptDetected,
-    packageManagerInfo,
-    userEmail: session.userEmail,
-    selectedOrgId: session.selectedOrgId,
-    selectedOrgName: session.selectedOrgName,
-    selectedProjectId: session.selectedProjectId,
-    selectedProjectName: session.selectedProjectName,
-    selectedEnvName: session.selectedEnvName,
-    cloudRegion,
-    projectBound: fsSync.existsSync(
-      path.join(session.installDir, '.amplitude', 'project-binding.json'),
-    ),
-    frameworkContext,
-  });
+  // PR #726/#730: emit the `framework_detection` cold_start_breakdown
+  // around buildPreflightContext so orchestrators get per-phase timing.
+  const frameworkDetectionStartedAt = Date.now();
+  let preflightCtx: Awaited<ReturnType<typeof buildPreflightContext>>;
+  try {
+    preflightCtx = await buildPreflightContext({
+      installDir: session.installDir,
+      integration: session.integration,
+      detectedFrameworkLabel: session.detectedFrameworkLabel,
+      frameworkVersion: frameworkVersion ?? null,
+      typescript: typeScriptDetected,
+      packageManagerInfo,
+      userEmail: session.userEmail,
+      selectedOrgId: session.selectedOrgId,
+      selectedOrgName: session.selectedOrgName,
+      selectedProjectId: session.selectedProjectId,
+      selectedProjectName: session.selectedProjectName,
+      selectedEnvName: session.selectedEnvName,
+      cloudRegion,
+      projectBound: fsSync.existsSync(
+        path.join(session.installDir, '.amplitude', 'project-binding.json'),
+      ),
+      frameworkContext,
+    });
+  } finally {
+    emitColdStartPhase('framework_detection', frameworkDetectionStartedAt);
+  }
   preflightLog.info('project size detected', {
     'file count': preflightCtx.projectSize.fileCount,
     'event count': preflightCtx.projectSize.eventCount,
@@ -1856,6 +1914,21 @@ async function runAgentWizardBody(
   // creation moved to the deferred `amplitude-wizard dashboard` command.
   // The final-success message and (optionally) a `dashboard-plan.json`
   // hand-off replace the inline dashboard step.
+  // PR B6: emit the `tool_call_summary` rollup BEFORE the
+  // `run_phase: finalizing` envelope so an orchestrator can render
+  // the inner-agent tool usage summary before the post-agent steps
+  // section appears in their UI. The terminal-exit emission in
+  // `wizardSuccessExit` / `wizardAbort` re-emits a cumulative rollup
+  // (covering any post-agent step tool calls), with dedup on the
+  // payload signature so we don't ship identical envelopes back-to-
+  // back. Wrapped so the rollup can never block the phase transition
+  // or the post-agent step queue from running.
+  try {
+    getUI().emitToolCallSummary?.();
+  } catch (err) {
+    logToFile('[agent-runner] emitToolCallSummary(finalize) threw', err);
+  }
+
   // Mark the coarse `finalizing` phase boundary — the inner agent
   // has stopped and the wizard is running its post-agent steps
   // (commit events, env upload, MCP install, etc.). Pairs with the

@@ -25,6 +25,40 @@ import { analytics, captureWizardError } from '../../../utils/analytics.js';
 import { wizardSuccessExit } from '../../../utils/wizard-abort.js';
 import { resolveZone } from '../../../lib/zone-resolution.js';
 import { DEFAULT_AMPLITUDE_ZONE } from '../../../lib/constants.js';
+import { getUI } from '../../index.js';
+
+/**
+ * PR B7: thin helper for the McpScreen state-transition lifecycle
+ * events. Every emit goes through this so the try/catch wrap and the
+ * `Date.now()` timestamp are uniform across the screen's six entry
+ * points (no_clients, skipped, picker shown, install ok, install
+ * failed, detect failed). The TUI UI implementation is itself a
+ * no-op for this event — `emitMcpStatus` only fires for AgentUI when
+ * the same wizard is launched in `--agent` mode (rare for a
+ * human-driven McpScreen, but the screen is also reachable via the
+ * `/mcp` slash command from an automation harness, and the event is
+ * cheap regardless).
+ */
+const emitEditorInstallStatus = (
+  state:
+    | 'install_skipped'
+    | 'needs_user_choice'
+    | 'installed'
+    | 'failed'
+    | 'not_applicable',
+  detail?: string,
+) => {
+  try {
+    getUI().emitMcpStatus?.({
+      server: 'editor_install',
+      state,
+      transition_ts: Date.now(),
+      ...(detail ? { detail } : {}),
+    });
+  } catch {
+    /* mcp_status emission must never block the screen */
+  }
+};
 
 export type McpMode = 'install' | 'remove';
 
@@ -114,6 +148,12 @@ export const McpScreen = ({
         if (unmountedRef.current) return;
         if (detected.length === 0) {
           analytics.wizardCapture('MCP No Clients Detected', { mode });
+          // PR B7: terminal `not_applicable` — no editor on this
+          // machine supports MCP, so the install flow is a no-op.
+          emitEditorInstallStatus(
+            'not_applicable',
+            'no supported MCP editor clients detected on this machine',
+          );
           setPhase(Phase.None);
           timerRef.current = setTimeout(
             () =>
@@ -137,6 +177,11 @@ export const McpScreen = ({
           'McpScreen',
           { mode },
         );
+        // PR B7: detection-side failure — surface as `failed` so the
+        // orchestrator can distinguish "detection threw" from "no
+        // clients detected" (both reach the Failed/NoClients
+        // outcomes but mean different things on the wire).
+        emitEditorInstallStatus('failed', 'editor client detection failed');
         setPhase(Phase.None);
         timerRef.current = setTimeout(
           () => markDone(store, McpOutcome.Failed, [], standalone, onComplete),
@@ -158,12 +203,30 @@ export const McpScreen = ({
       analytics.wizardCapture('MCP Client Picker Shown', {
         available_clients: clients.map((c) => c.name),
       });
+      // PR B7: `needs_user_choice` — multiple editors detected; the
+      // wizard is about to ask the user which one(s) to install
+      // into. Distinct from `needs_install` (single editor, install
+      // pending confirmation) so the orchestrator can render
+      // "wizard is waiting on your editor pick" verbatim.
+      emitEditorInstallStatus(
+        'needs_user_choice',
+        `multiple editor clients detected (${clients
+          .map((c) => c.name)
+          .join(', ')}); awaiting user pick`,
+      );
       setPhase(Phase.Pick);
     }
   };
 
   const handleSkip = () => {
     analytics.wizardCapture('MCP Skipped', { mode });
+    // PR B7: terminal `install_skipped` — user (or the auto-skip
+    // path on the confirm prompt) declined the editor MCP install.
+    // Distinct from `not_applicable` (no editor detected at all).
+    emitEditorInstallStatus(
+      'install_skipped',
+      `user declined editor MCP install (mode=${mode})`,
+    );
     markDone(store, McpOutcome.Skipped, [], standalone, onComplete);
   };
 
@@ -214,6 +277,25 @@ export const McpScreen = ({
     setPhase(Phase.Done);
     const outcome =
       result.length > 0 ? McpOutcome.Installed : McpOutcome.Failed;
+    // PR B7: terminal install lifecycle. `installed` when at least
+    // one client took the config; `failed` when zero clients
+    // succeeded (every attempt threw or returned success=false).
+    // Partial successes ship `installed` with a `detail` enumerating
+    // the failed names — the orchestrator branches on
+    // `(state, detail)` for the "X of Y installed" UX.
+    if (result.length > 0) {
+      emitEditorInstallStatus(
+        'installed',
+        failed.length > 0
+          ? `installed: ${result.join(', ')}; failed: ${failed.join(', ')}`
+          : `installed: ${result.join(', ')}`,
+      );
+    } else {
+      emitEditorInstallStatus(
+        'failed',
+        `all editor installs failed (attempted: ${names.join(', ')})`,
+      );
+    }
     timerRef.current = setTimeout(
       () => markDone(store, outcome, result, standalone, onComplete),
       2000,

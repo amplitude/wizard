@@ -245,6 +245,36 @@ export async function loadCheckpoint(
     /* restore must not be blocked by a UI emit */
   }
 
+  // v2 protocol: `run_resumed` is the orchestrator-facing companion to
+  // `checkpoint_loaded`. The loaded event carries the file's age (a
+  // policy-only signal); `run_resumed` carries the structured summary
+  // a parent agent uses to render "continuing from where we left off".
+  // Pre-redact the summary so user names / paths from the checkpoint
+  // don't slip through the cosmetic free-form field.
+  try {
+    const summaryParts: string[] = [];
+    if (checkpoint.region) summaryParts.push(`region=${checkpoint.region}`);
+    if (checkpoint.selectedOrgName)
+      summaryParts.push(`org=${checkpoint.selectedOrgName}`);
+    if (checkpoint.selectedProjectName)
+      summaryParts.push(`project=${checkpoint.selectedProjectName}`);
+    if (checkpoint.selectedEnvName)
+      summaryParts.push(`env=${checkpoint.selectedEnvName}`);
+    if (derivedLabel) summaryParts.push(`framework=${derivedLabel}`);
+    if (checkpoint.introConcluded) summaryParts.push('intro=done');
+    getUI().emitRunResumed?.({
+      fromCheckpointAt: checkpoint.savedAt,
+      // `runPhase` is intentionally omitted from the restored state above
+      // (so it's re-evaluated on resume); the checkpoint itself doesn't
+      // carry a typed RunPhase here. Use 'unknown' so orchestrators
+      // know not to trust a stale phase value.
+      lastPhase: 'unknown',
+      restoredStateSummary: summaryParts.join(', '),
+    });
+  } catch {
+    /* restore must not be blocked by a UI emit */
+  }
+
   // Return only the fields that are safe to restore.
   // Credentials, runPhase, activation state, and post-run steps are
   // intentionally omitted so they get re-evaluated on resume.

@@ -815,7 +815,7 @@ describe('AgentUI — per-event data_version', () => {
     expect((event as unknown as { data_version: number }).data_version).toBe(1);
   });
 
-  it('stamps data_version on tool_call', () => {
+  it('stamps data_version on tool_call', async () => {
     const ui = new AgentUI();
     // Bugbot regression: previous version of this test passed
     // `toolName` (the wrong key) — vitest/esbuild skip type-checking
@@ -825,12 +825,19 @@ describe('AgentUI — per-event data_version', () => {
     // caller), which gave false confidence. Use the correct `tool`
     // key here AND assert the wire shape includes it, so a future
     // typo can't sneak through.
+    //
+    // PR B11: `tool_call` is now v2 (added `id` for correlation with
+    // `tool_response`). Read the version from the registry so future
+    // bumps don't require updating this assertion.
+    const { EVENT_DATA_VERSIONS } = await import('../../lib/agent-events.js');
     ui.emitToolCall({
       tool: 'Edit',
       summary: 'edit src/foo.ts',
     });
     const event = eventsOfType('progress').at(-1)!;
-    expect((event as unknown as { data_version: number }).data_version).toBe(1);
+    expect((event as unknown as { data_version: number }).data_version).toBe(
+      EVENT_DATA_VERSIONS.tool_call,
+    );
     expect(event.data).toMatchObject({
       event: 'tool_call',
       tool: 'Edit',

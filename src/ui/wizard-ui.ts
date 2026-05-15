@@ -626,6 +626,84 @@ export interface WizardUI {
   }): void;
 
   /**
+   * Emitted at the top of each outer-loop attempt, AFTER any backoff
+   * sleep has elapsed and a fresh AbortController has been wired up
+   * but BEFORE the inner SDK query fires. Pair with `emitTransientRetry`
+   * (which fires at the DECISION point, before the sleep) to render
+   * an accurate attempt lifecycle: orchestrators see the "deciding to
+   * retry, sleeping Ns" envelope, then the matching "attempt N now
+   * running" envelope once work resumes.
+   *
+   * `backoffMs` carries the actual sleep that elapsed. Omitted on the
+   * wire for the cold-start attempt (no preceding sleep).
+   *
+   * Optional — only AgentUI emits. InkUI / LoggingUI no-op (the
+   * existing retry banner / log line already covers their UX).
+   */
+  emitAttemptStarted?(data: {
+    attemptNumber: number;
+    totalBudget: number;
+    reason: 'cold_start' | 'stall_retry' | 'auth_refresh' | 'network_retry';
+    backoffMs?: number;
+  }): void;
+
+  /**
+   * Orchestrator-facing rollup for multi-item operations. The wizard
+   * emits this at every meaningful step boundary of a long-running
+   * operation (post-agent queue advance, MCP install across editors,
+   * event-plan track() write). Carries the canonical
+   * `(stage, current, total)` triple — the emitter computes
+   * `percent` and clamps `current` to the `[0, total]` window so a
+   * misbehaving caller can't ship `percent > 100`.
+   *
+   * Distinct from the fine-grained per-item events (`post_agent_step`,
+   * `tool_call`): orchestrators that just want a single progress bar
+   * subscribe to `progress_estimate` and ignore the noisier stream.
+   *
+   * Optional — only AgentUI emits. InkUI / LoggingUI no-op (the TUI's
+   * journey stepper / panel already shows progress; CI logs the
+   * per-step lines).
+   */
+  emitProgressEstimate?(args: {
+    /** Stable, opaque stage id (e.g. `'post_agent_steps'`). */
+    stage: string;
+    /** Items completed so far. */
+    current: number;
+    /** Total items in this stage (>= 1). */
+    total: number;
+  }): void;
+
+  /**
+   * Emitted at the END of each cold-start phase boundary with the
+   * phase's measured duration. Parent agents subscribing to NDJSON use
+   * these to render which phase is currently active during the spinner
+   * (subscribe and update on each fire), surface per-phase diagnostics
+   * on a slow cold start, and aggregate per-phase timings across runs.
+   *
+   * Always emitted in a `try/finally` boundary by the runner so a
+   * thrown phase still ships its timing breadcrumb. See
+   * `ColdStartPhase` in `agent-events.ts` for the five canonical phase
+   * ids.
+   *
+   * Optional — only AgentUI emits. InkUI / LoggingUI no-op (the TUI
+   * already surfaces the labeled activity line; CI logs the per-phase
+   * step messages).
+   */
+  emitColdStartBreakdown?(args: {
+    /** Which cold-start phase this breakdown covers. */
+    phase:
+      | 'skill_staging'
+      | 'package_manager_detection'
+      | 'framework_detection'
+      | 'mcp_bootstrap'
+      | 'gateway_probe';
+    /** ms timestamp captured before the phase began. */
+    startedAt: number;
+    /** ms timestamp captured in the `finally` after the phase exited. */
+    finishedAt: number;
+  }): void;
+
+  /**
    * Emitted just before the Claude Agent SDK runs an auto- or manual-
    * triggered context compaction. Pairs with `emitCompactionCompleted`
    * so orchestrators can render a "still working — compacting context"
@@ -651,5 +729,194 @@ export interface WizardUI {
     preTokens: number;
     postTokens?: number;
     durationMs?: number;
+  }): void;
+
+  /**
+   * Coarse-grained "now editing X" rollup mirroring write-tool calls
+   * onto a single NDJSON event. Distinct from the fine-grained
+   * `tool_call` / `file_change_planned` / `file_change_applied`
+   * series — orchestrators that want a single "active file" header
+   * subscribe to `current_file`; audit-trail consumers keep parsing
+   * the fine-grained events. Debounced to ~1 emission per 250ms per
+   * (path, operation) tuple at the wire boundary.
+   *
+   * Optional — only AgentUI emits to NDJSON. InkUI / LoggingUI no-op
+   * (the TUI already renders an active-file row; CI logs the
+   * per-file plan/apply pair).
+   */
+  emitCurrentFile?(data: {
+    path: string;
+    relativePath: string;
+    operation: 'create' | 'modify' | 'delete';
+  }): void;
+
+  /**
+   * Coaching-tier mirror of the wizard's stall detector onto NDJSON.
+   * Three escalating tiers fire at 10s / 30s / 60s of silence; each
+   * tier emits at most once per stall window. Lets parent agents
+   * surface escalating UX ("the wizard's been quiet for 10s…" →
+   * "concerning…" → "consider retrying") in lockstep with the TUI's
+   * stall hints. Distinct from `heartbeat` (fixed cadence regardless
+   * of progress).
+   *
+   * Optional — only AgentUI emits. InkUI / LoggingUI no-op (the TUI
+   * has its own stall-hint banner).
+   */
+  emitStallStatus?(data: {
+    tier: 'noticed' | 'concerning' | 'critical';
+    durationMs: number;
+    lastActivity: number;
+    hint?: string;
+  }): void;
+
+  /**
+   * Reset the per-window stall-tier guard. Optional — AgentUI tracks
+   * the gate, InkUI / LoggingUI no-op. Callers invoke this when the
+   * inner agent resumes producing tool calls / status updates so the
+   * next stall window starts fresh.
+   */
+  resetStallStatus?(): void;
+
+  /**
+   * Emitted as the first envelope after `run_started` when the wizard
+   * restarts from a checkpoint (post-crash, post-SIGINT, post-token-
+   * expiry). Lets orchestrators distinguish a fresh cold start from
+   * a resumed run without parsing the run-start status. Carries the
+   * checkpoint timestamp + last-known phase + a free-form summary of
+   * restored state (region, org, project, framework — pre-redacted).
+   *
+   * Optional — only AgentUI emits.
+   */
+  emitRunResumed?(data: {
+    fromCheckpointAt: string;
+    lastPhase:
+      | 'cold_start'
+      | 'agent_running'
+      | 'finalizing'
+      | 'completed'
+      | 'error'
+      | 'unknown';
+    restoredStateSummary: string;
+  }): void;
+
+  /**
+   * Emitted at PostToolUse for write tools (Edit / Write / MultiEdit
+   * / NotebookEdit) when the tool reports a failure. Pairs with the
+   * preceding `recordFileChangePlanned` for the same path so an
+   * orchestrator can label the failed write on the already-rendered
+   * preview without parsing tool_result text. `errorClass`
+   * discriminates the common failure modes (permission / not_found /
+   * syntax / timeout / generic) so the orchestrator can branch by kind
+   * — `timeout` callers can retry without changing input, `permission`
+   * callers should escalate to the user, etc.
+   *
+   * Optional — only AgentUI emits. InkUI / LoggingUI no-op (the TUI
+   * surfaces tool failures via the existing FileWritesPanel; CI logs
+   * the stderr stream).
+   */
+  emitFileChangeFailed?(data: {
+    path: string;
+    operation: 'create' | 'modify' | 'delete';
+    errorClass: 'permission' | 'not_found' | 'syntax' | 'timeout' | 'generic';
+    errorMessage: string;
+  }): void;
+
+  /**
+   * Aggregated rollup of every tool call the inner agent made.
+   * Emitted at two boundaries: (1) phase finalize, before
+   * `run_phase: finalizing` so the orchestrator can render the
+   * inner-agent tool summary before the post-agent steps section
+   * appears; (2) terminal exit (`wizardSuccessExit` /
+   * `wizardAbort`), so the orchestrator always sees a final
+   * cumulative rollup covering the whole run.
+   *
+   * Dedup-safe: the emitter no-ops when the payload signature is
+   * identical to the previous emission (so a duplicate boundary
+   * call doesn't double-emit). `totalCalls === 0` is suppressed at
+   * the wire — absence of the event means no tools were called.
+   *
+   * Optional — only AgentUI emits. InkUI / LoggingUI no-op (the
+   * TUI already renders per-task progress; CI logs the per-call
+   * stream).
+   */
+  emitToolCallSummary?(): void;
+
+  /**
+   * Emitted at PostToolUse for EVERY tool the inner agent calls
+   * (not just write tools). Pairs with the preceding `tool_call`
+   * via the SDK-provided `tool_use_id` correlation field so
+   * orchestrators can render the outcome, duration, and a
+   * sanitized output preview on the already-displayed tool action.
+   *
+   * Today the wizard emits `tool_call` at PreToolUse but NOTHING
+   * at PostToolUse for non-write tools — orchestrators see "Bash:
+   * pnpm install" and then radio silence until the next
+   * `tool_call`. Three independent audit subagents flagged this
+   * as the biggest parent-agent UX cliff in the wire today.
+   *
+   * `contentHead` is bounded (1024 bytes) and sanitized via
+   * `redactString` so a misbehaving Bash command can't leak
+   * env-value secrets. `errorMessage` is bounded (256 bytes).
+   * `outcome === 'denied'` is reserved for the rare path where the
+   * SDK's permission gate rejected the call pre-execution.
+   *
+   * Optional — only AgentUI emits to NDJSON. InkUI / LoggingUI
+   * no-op (the TUI surfaces tool outcomes via TodoWrite / file
+   * panels; CI logs the stream).
+   */
+  emitToolResponse?(data: {
+    tool: string;
+    id?: string;
+    outcome: 'success' | 'error' | 'denied';
+    durationMs: number;
+    exitCode?: number;
+    contentHead?: string;
+    isError: boolean;
+    errorMessage?: string;
+    summary?: string;
+  }): void;
+
+  /**
+   * MCP server lifecycle state transition. Fires at every state
+   * boundary for both the in-process `wizard_tools` server (one per
+   * run; transitions are `available` on successful boot, `failed`
+   * on boot error) and the `editor_install` flow (zero-or-more per
+   * run; transitions include `not_applicable` when no editor is
+   * detected, `needs_user_choice` when the user is asked to pick a
+   * client, `install_skipped` when they decline, `installed` /
+   * `failed` on the terminal outcome).
+   *
+   * Today parent agents (Claude Code, Codex, Cursor) parsing the
+   * NDJSON stream have no visibility into MCP server state
+   * transitions — the wizard silently boots its in-process server
+   * and silently installs (or skips) editor MCP configs. This event
+   * fills the gap with a `{ server, state, transition_ts, detail? }`
+   * envelope so an orchestrator can render "MCP server: available",
+   * "Editor install: needs your choice", etc.
+   *
+   * `detail` is optional, operator-friendly free text. Orchestrators
+   * branch on `(server, state)` for machine contract and surface
+   * `detail` verbatim to the human. Each call site wraps the emit in
+   * try/catch so a misbehaving emitter never blocks the actual MCP
+   * work — the lifecycle event is observational, not load-bearing.
+   *
+   * Optional — only AgentUI emits to NDJSON. InkUI / LoggingUI no-op
+   * (the TUI shows MCP install state via McpScreen; CI logs the
+   * install / skip messages inline).
+   */
+  emitMcpStatus?(data: {
+    server: 'wizard_tools' | 'editor_install';
+    state:
+      | 'unavailable'
+      | 'available'
+      | 'needs_auth'
+      | 'needs_install'
+      | 'needs_user_choice'
+      | 'install_skipped'
+      | 'installed'
+      | 'failed'
+      | 'not_applicable';
+    transition_ts: number;
+    detail?: string;
   }): void;
 }
