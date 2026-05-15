@@ -259,3 +259,7 @@ GitHub Actions workflows in `.github/workflows/`:
 - [`docs/external-services.md`](./docs/external-services.md) — third-party services the wizard talks to
 - [`docs/ux-improvements.md`](./docs/ux-improvements.md) — UX backlog and recently-shipped polish
 - [`docs/releasing.md`](./docs/releasing.md) — release process and versioning
+
+## Design
+
+Before any work in `src/ui/tui/**`, read [`docs/design/wizard-design-kit.md`](./docs/design/wizard-design-kit.md) — principles, color/glyph tokens, voice library, receipts format, and the per-screen iteration prompt template. The kit is the contract; deviations need explicit approval.
