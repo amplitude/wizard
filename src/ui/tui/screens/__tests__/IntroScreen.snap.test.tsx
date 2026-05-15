@@ -83,9 +83,12 @@ describe('IntroScreen snapshots', () => {
     });
     const { frame } = renderSnapshot(<IntroScreen store={store} />, store);
     expect(frame).toContain('Next.js (detected)');
-    // Continue (sign-in vs create) / Change framework / Cancel actions
-    expect(frame).toContain('Continue — sign in');
-    expect(frame).toContain('create');
+    // Single `Continue` action (the existing-account escape moved to
+    // SignupEmailScreen as a Tab keybind) + Change framework / Cancel.
+    expect(frame).toContain('Continue');
+    expect(frame).not.toContain('Continue — sign in');
+    expect(frame).not.toContain('Continue — create');
+    expect(frame).not.toContain('Sign in to an existing Amplitude account');
     expect(frame).toContain('Change framework');
     expect(frame).toContain('Cancel');
   });
@@ -356,7 +359,11 @@ describe('IntroScreen — welcome-back panel', () => {
     const { frame } = renderSnapshot(<IntroScreen store={store} />, store);
     expect(frame).toContain('AI-powered analytics setup in minutes');
     expect(frame).not.toContain('Welcome back');
-    expect(frame).toContain('Continue — sign in');
+    // Unauthenticated users see a single `Continue` — the existing-account
+    // escape lives on SignupEmailScreen now.
+    expect(frame).toContain('Continue');
+    expect(frame).not.toContain('Continue — sign in');
+    expect(frame).not.toContain('Continue — create');
   });
 
   it('keeps the marketing tagline when ampli.json is absent', () => {

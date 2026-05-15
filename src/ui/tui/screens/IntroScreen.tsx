@@ -454,9 +454,7 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
                 ? narrow
                   ? 'Signed in — continue'
                   : `You're signed in as ${session.userEmail}. Continue to workspace setup.`
-                : narrow
-                  ? 'Sign in or create account'
-                  : 'Sign in to an existing Amplitude account, or create a new one'
+                : undefined
             }
             options={[
               {
@@ -464,29 +462,12 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
                   ? narrow
                     ? 'Continue'
                     : 'Continue — workspace setup'
-                  : narrow
-                    ? 'Continue — sign in'
-                    : 'Continue — sign in to Amplitude',
-                value: 'continue_signin',
-                ...(!narrow
-                  ? {
-                      hint: session.userEmail
-                        ? 'same login'
-                        : 'existing account',
-                    }
+                  : 'Continue',
+                value: 'continue',
+                ...(!narrow && session.userEmail
+                  ? { hint: 'same login' as const }
                   : {}),
               },
-              ...(!session.userEmail
-                ? [
-                    {
-                      label: narrow
-                        ? 'Continue — new account'
-                        : 'Continue — create a new account',
-                      value: 'continue_create' as const,
-                      ...(!narrow ? { hint: 'new organization' as const } : {}),
-                    },
-                  ]
-                : []),
               ...workspacePicks.map((pick) => ({
                 label: pick.isWildcard
                   ? `${pick.label}${narrow ? '' : '  — pick a workspace'}`
@@ -538,14 +519,16 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
                 'is monorepo': workspace.isMonorepo,
               };
 
-              if (
-                choice === 'continue_signin' ||
-                choice === 'continue_create'
-              ) {
-                const path =
-                  choice === 'continue_create'
-                    ? AuthOnboardingPath.CreateAccount
-                    : AuthOnboardingPath.SignIn;
+              if (choice === 'continue') {
+                // Unauthenticated users always enter the create-account
+                // flow; the existing-account escape lives on
+                // SignupEmailScreen as a Tab keybind. Signed-in users
+                // pick SignIn so the create-account-only flow entries
+                // (SignupEmail / SigningUp / ToS / SignupFullName) fall
+                // through transparently.
+                const path = session.userEmail
+                  ? AuthOnboardingPath.SignIn
+                  : AuthOnboardingPath.CreateAccount;
                 store.setAuthOnboardingPath(path);
                 analytics.wizardCapture('intro action', {
                   ...analyticsBase,
