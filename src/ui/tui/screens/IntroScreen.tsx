@@ -520,12 +520,8 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
               };
 
               if (choice === 'continue') {
-                // Unauthenticated users always enter the create-account
-                // flow; the existing-account escape lives on
-                // SignupEmailScreen as a Tab keybind. Signed-in users
-                // pick SignIn so the create-account-only flow entries
-                // (SignupEmail / SigningUp / ToS / SignupFullName) fall
-                // through transparently.
+                // Unauth users → create-account flow; the existing-user
+                // escape is the Tab keybind on SignupEmailScreen.
                 const path = session.userEmail
                   ? AuthOnboardingPath.SignIn
                   : AuthOnboardingPath.CreateAccount;

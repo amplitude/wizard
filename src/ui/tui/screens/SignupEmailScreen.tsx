@@ -48,15 +48,12 @@ export const SignupEmailScreen = ({ store }: SignupEmailScreenProps) => {
   );
   useScreenHints(hints);
 
-  // TextInput from @inkjs/ui swallows Esc — wire it explicitly so users
-  // can step back to the Intro picker (or rewind to Welcome if no
-  // earlier screen has anything to revert). Tab is the inline escape
-  // for users who already have an account: flipping authOnboardingPath
-  // makes isCreateAccountOnboarding(s) return false, which short-circuits
-  // every downstream create-account-only flow entry and routes them to
-  // AuthScreen for browser OAuth. We don't use setSignupAbandoned here
-  // because that flag's contract is "ceremony probed and aborted" — on
-  // this screen no probe has fired yet.
+  // @inkjs/ui's TextInput handles its own keypress events — wire Esc
+  // (back-nav) and Tab (sign-in escape) on the screen. Tab flips
+  // authOnboardingPath; create-account-only flow entries short-circuit
+  // and the router routes to AuthScreen for browser OAuth. Not
+  // setSignupAbandoned — that flag's contract is "ceremony probed and
+  // aborted", and on this screen no probe has fired yet.
   useScreenInput((_input, key) => {
     if (key.escape) {
       analytics.wizardCapture('signup email screen back');
