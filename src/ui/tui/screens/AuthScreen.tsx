@@ -92,10 +92,6 @@ function useMeasuredRows(ref: RefObject<DOMElement | null>): number {
 
 export const AuthScreen = ({ store }: AuthScreenProps) => {
   useWizardStore(store);
-  // Esc → back to RegionSelect. Self-disables on the very first run
-  // (no region picked yet, canGoBack=false) so it doesn't hijack the
-  // OAuth-waiting phase.
-  useEscapeBack(store);
 
   const { session } = store;
   const contentArea = useContentArea();
@@ -516,6 +512,19 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
   //     60s threshold was longer than the user reported putting up with
   //     before quitting and re-running.
   const oauthWaiting = pendingOrgs === null && !manualFallbackOpen;
+
+  // Esc → back to RegionSelect when canGoBack is true. Explicitly
+  // disabled while oauthWaiting=true: that phase has its own Esc
+  // handler below that exits via wizardSuccessExit, and Ink
+  // broadcasts the same keypress to every useScreenInput subscriber
+  // in parallel. Without this gate, goBack() fires synchronously
+  // (mutating session state and starting the DissolveTransition
+  // wipe), then the async wizardSuccessExit kills the process
+  // mid-animation — the user sees a partial wipe before the wizard
+  // vanishes. accountConfirm has the same pattern but isn't gated
+  // here yet (latent — tracked as follow-up; the discoverable case
+  // today is the Tab-from-SignupEmail → oauth-wait path).
+  useEscapeBack(store, { enabled: !oauthWaiting });
   // After email capture + ToS, "authentication" sounds like we're still
   // waiting on the user; the real wait is browser OAuth completing.
   const oauthWaitHeadline = isCreateAccountOnboarding(session)
