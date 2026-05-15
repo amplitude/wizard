@@ -200,13 +200,20 @@ describe('env-picker hang — structural fallback gate on Auth.isComplete', () =
     expect(store.currentScreen).toBe(Screen.DataSetup);
   });
 
-  it('does not block when the resolved project is missing from pendingOrgs (stale checkpoint)', () => {
-    // Edge case: the checkpoint had `selectedProjectId='stale-proj'` but
-    // the user switched accounts / lost access since. `pendingOrgs` no
-    // longer contains that project. The structural gate must walk past
-    // this state — the existing stale-org useEffect in AuthScreen will
-    // clear selectedOrgId on next render, and other gates will keep the
-    // user on Auth.
+  it('parks on Auth when the resolved project is missing from pendingOrgs (stale IDs)', () => {
+    // The live restart-after-reset bug surfaced through this exact path:
+    // AuthScreen's auto-resolve effect writes `selectedOrgId/ProjectId`
+    // from the FIRST `pendingOrgs` snapshot (returned by
+    // `resolveCredentials`); the `authTask` then runs OAuth and
+    // `setOAuthComplete` REPLACES `pendingOrgs` with a fresh fetch.
+    // If the two snapshots' IDs don't match (re-fetch race, ordering
+    // difference, account changes between calls, stale session memory),
+    // the structural gate's first lookup misses — and pre-fix that
+    // bailed out to `false`, letting Auth.isComplete return true and
+    // the router advance past Auth → Setup with NO env picker on
+    // screen. The fix falls through to `pendingOrgs[0].projects[0]`
+    // (the same heuristic resolveCredentials used when it issued the
+    // deferral), keeping the user on Auth until they pick an env.
     const session = buildSession({ installDir: '/tmp/fake' });
     const store = new WizardStore(Flow.Wizard);
     store.session = session;
@@ -222,13 +229,14 @@ describe('env-picker hang — structural fallback gate on Auth.isComplete', () =
     session.pendingOrgs = multiEnvPendingOrgs(); // org-1/proj-1, not stale-proj
     session.pendingEnvSelection = false;
 
-    // Stale selectedProjectId — structural gate doesn't fire, but the
-    // normal Auth.isComplete predicate still passes (org/project IDs are
-    // set, credentials non-null, pendingEnvSelection=false). The router
-    // advances. This is the existing pre-fix behavior; the structural
-    // gate is precisely scoped to "pendingOrgs has the project AND that
-    // project has multi-envs" so we don't regress unrelated paths.
-    expect(store.currentScreen).toBe(Screen.DataSetup);
+    // Post-fix: the gate falls through to `pendingOrgs[0].projects[0]`
+    // (the multi-env project), returns `true`, Auth.isComplete returns
+    // `false`, router parks on Auth. AuthScreen's stale-org useEffect
+    // will clear selectedOrgId on the next render, so the user sees
+    // the picker normally — but the critical guarantee is the router
+    // doesn't walk past Auth into the Setup-bucket screens with no
+    // picker surface.
+    expect(store.currentScreen).toBe(Screen.Auth);
   });
 
   it('still works in conjunction with pendingEnvSelection=true (both gates active)', () => {
