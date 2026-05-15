@@ -1101,6 +1101,208 @@ describe('WizardStore session ref stability (env-picker race regression)', () =>
     expect(session.introConcluded).toBe(true);
   });
 
+  // Regression: env-picker hang after `git reset --hard` followed by
+  // re-running the wizard. PR #778 invalidates the stale checkpoint, so
+  // the session starts WITHOUT prior org/project IDs hydrated. Self-heal
+  // clears the API key. `resolveCredentials` lands at
+  // `needs_user_choice/environment_selection`. `applyEnvSelectionDeferral`
+  // mutates the session in place. The router must park on Auth so the
+  // env picker renders — NOT walk past Auth into the Setup-bucket
+  // screens, which is the user-reported "Stepper shows ✓ Welcome ✓ Auth
+  // ● Setup with no env-picker rendered" symptom.
+  //
+  // Notably, in this scenario `selectedOrgId === null` AND
+  // `selectedProjectId === null`. PR #775's structural fallback gate
+  // (`needsEnvPickStillRequired`) previously short-circuited to `false`
+  // when the IDs were null — leaving only `pendingEnvSelection` as the
+  // gate. Any silent clear of that flag (still unidentified — 4 PRs of
+  // history) landed the user on Setup. This commit extends the
+  // structural gate to use the same first-org/first-project fallback
+  // `resolveCredentials` used when it issued the deferral, so the
+  // structural gate covers the no-pre-selection path too.
+  //
+  // This pins the post-#778 path (no checkpoint hydration) — distinct
+  // from the test below which simulates the path where the user
+  // explicitly Resumed a checkpoint. Both must land on Auth.
+  it('parks on Auth after checkpoint invalidation + multi-env defer (restart-after-reset)', async () => {
+    const { WizardStore } = await import('../store.js');
+    const store = new WizardStore(Flow.Wizard);
+
+    // (1) bin.ts: buildSessionFromOptions — fresh session, no checkpoint
+    // hydration because loadCheckpoint() returned null (PR #778 invalidated).
+    const session = buildSession({});
+    // `tryResolveZone` (mocked in this test file) returns null, so without
+    // an explicit region the router would park on RegionSelect, not Auth.
+    // In the real wizard, the stored user's zone surfaces through
+    // `getStoredUser`; pin it here so the test focuses on the env-picker
+    // gate, not region resolution.
+    session.region = 'us';
+
+    // (2) startTUI(session) — initialSession assignment.
+    store.session = session;
+    expect(store.currentScreen).toBe(Screen.Intro);
+
+    // (3) bin.ts: self-heal cleared the orphan API key (already on disk —
+    //     just a side effect we don't model here). `resolveCredentials`
+    //     then fetches the user, hits the multi-env defer branch, and
+    //     mutates the session in place. NOTE: this path does NOT set
+    //     `selectedOrgId/Name/ProjectId/Name` — only `pendingOrgs` +
+    //     pending tokens. That's the key difference from the
+    //     checkpoint-resumed path below.
+    session.pendingOrgs = [
+      {
+        id: 'org-1',
+        name: 'Acme',
+        projects: [
+          {
+            id: 'proj-1',
+            name: 'Demo',
+            environments: [
+              {
+                name: 'Development',
+                rank: 1,
+                app: { id: 'app-1', apiKey: 'k1' },
+              },
+              {
+                name: 'Production',
+                rank: 2,
+                app: { id: 'app-2', apiKey: 'k2' },
+              },
+            ],
+          },
+        ],
+      },
+    ];
+    session.pendingAuthIdToken = 'id';
+    session.pendingAuthAccessToken = 'at';
+
+    // (4) bin.ts: applyEnvSelectionDeferral
+    session.selectedEnvName = null;
+    session.selectedAppId = null;
+    session.credentials = null;
+    session.pendingEnvSelection = true;
+
+    // (5) tui.store.session = session
+    store.session = session;
+
+    // The user dismisses the welcome screen.
+    store.concludeIntro();
+
+    // EXPECTATION: router parks on Auth so AuthScreen renders the env
+    // picker. Pre-fix, the bug surfaces here: if any path silently
+    // advanced past Auth (e.g. by clearing pendingEnvSelection without
+    // setting credentials, or by Auth.isComplete returning true), the
+    // router would jump straight to Setup or Run, producing the
+    // user-visible "✓ Welcome ✓ Auth ● Setup" stepper with no picker.
+    expect(store.currentScreen).toBe(Screen.Auth);
+    expect(store.session.pendingEnvSelection).toBe(true);
+    expect(store.session.credentials).toBeNull();
+    expect(store.session.pendingOrgs).not.toBeNull();
+  });
+
+  // Smoking-gun: structural gate alone (pendingEnvSelection=false)
+  // must still hold the user on Auth in the restart-after-reset
+  // scenario. This pins the gap PR #775 left behind — when no
+  // selectedOrgId/ProjectId have been picked yet, the structural gate
+  // previously short-circuited and any path that clobbered the flag
+  // dropped the user onto Setup. With the fallback in place, the
+  // gate uses `pendingOrgs[0].projects[0]` (the same heuristic
+  // `resolveCredentials` uses) and stays load-bearing.
+  it('structural gate alone holds Auth in restart-after-reset (pendingEnvSelection clobbered)', () => {
+    const session = buildSession({});
+    session.introConcluded = true;
+    session.region = 'us';
+    // applyEnvSelectionDeferral has fired AND something later clobbered
+    // the flag back to false (the recurring bug class).
+    session.pendingEnvSelection = false;
+    // Simulate the worst case for isolating the structural gate: every
+    // OTHER Auth.isComplete clause has been satisfied somehow (some
+    // silent path landed credentials + names without the user picking
+    // an env — the symptom 4 prior PRs chased). The structural gate is
+    // the ONLY thing keeping the user on Auth here.
+    session.credentials = {
+      accessToken: 'tok',
+      idToken: 'id',
+      projectApiKey: 'k1',
+      host: 'https://api2.amplitude.com',
+      appId: 0,
+    };
+    session.selectedOrgName = 'Acme';
+    session.selectedProjectName = 'Demo';
+    // CRITICAL: post-#778 restart-after-reset path leaves IDs null even
+    // when names land — `resolveCredentials` multi-env defer branch
+    // doesn't populate selectedOrgId/ProjectId. PR #775's structural
+    // gate short-circuited to false in this case (because guard 2
+    // required IDs). Without the IDs-null fallback in this commit,
+    // Auth.isComplete returns true and the user lands on Setup with no
+    // env picker — the user-reported hang.
+    session.selectedOrgId = null;
+    session.selectedProjectId = null;
+    session.selectedEnvName = null;
+    session.pendingOrgs = [
+      {
+        id: 'org-1',
+        name: 'Acme',
+        projects: [
+          {
+            id: 'proj-1',
+            name: 'Demo',
+            environments: [
+              { name: 'Production', rank: 1, app: { id: 'a1', apiKey: 'k1' } },
+              { name: 'Development', rank: 2, app: { id: 'a2', apiKey: 'k2' } },
+            ],
+          },
+        ],
+      },
+    ];
+
+    const authEntry = FLOWS[Flow.Wizard].find((e) => e.screen === Screen.Auth);
+    if (!authEntry?.isComplete) {
+      throw new Error('Auth entry missing isComplete — test setup error');
+    }
+
+    // Without the IDs-null fallback in this commit,
+    // `needsEnvPickStillRequired` returns false (because
+    // selectedOrgId/ProjectId are null) and Auth.isComplete returns
+    // true. With the fallback, the gate consults pendingOrgs[0]
+    // .projects[0] and returns true → isComplete=false.
+    expect(authEntry.isComplete(session)).toBe(false);
+
+    // Sanity: the router actually parks on Auth.
+    const router = new WizardRouter(Flow.Wizard);
+    expect(router.resolve(session)).toBe(Screen.Auth);
+  });
+
+  // Counter-test: structural gate must NOT fire on the manual-API-key
+  // path (pendingOrgs is null when resolveCredentials lands at
+  // 'api_key_notice'), even with selectedEnvName null. The first guard
+  // (`pendingOrgs === null`) keeps that path passing through unchanged.
+  it('structural gate does not block manual-API-key path (pendingOrgs null)', () => {
+    const session = buildSession({});
+    session.introConcluded = true;
+    session.region = 'us';
+    session.pendingEnvSelection = false;
+    session.pendingOrgs = null;
+    session.selectedOrgId = 'org-1';
+    session.selectedOrgName = 'Acme';
+    session.selectedProjectId = 'proj-1';
+    session.selectedProjectName = 'Demo';
+    session.selectedEnvName = null;
+    session.credentials = {
+      accessToken: 'tok',
+      idToken: 'id',
+      projectApiKey: 'manual-key',
+      host: 'https://api2.amplitude.com',
+      appId: 0,
+    };
+
+    const authEntry = FLOWS[Flow.Wizard].find((e) => e.screen === Screen.Auth);
+    if (!authEntry?.isComplete) {
+      throw new Error('Auth entry missing isComplete — test setup error');
+    }
+    expect(authEntry.isComplete(session)).toBe(true);
+  });
+
   it('propagates in-place external mutations after an in-store setKey, including pendingEnvSelection', async () => {
     const { WizardStore } = await import('../store.js');
     const store = new WizardStore(Flow.Wizard);
