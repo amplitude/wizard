@@ -24,6 +24,10 @@ import { useTimedCoaching } from '../hooks/useTimedCoaching.js';
 import { PickerMenu, TerminalLink } from '../primitives/index.js';
 import { Colors, Icons } from '../styles.js';
 import { BrailleSpinner } from '../components/BrailleSpinner.js';
+import {
+  ProjectPicker,
+  type ProjectPickerEntry,
+} from '../components/ProjectPicker.js';
 import { DEFAULT_AMPLITUDE_ZONE } from '../../../lib/constants.js';
 import { isCreateAccountOnboarding } from '../../../lib/wizard-session.js';
 import { resolveZone } from '../../../lib/zone-resolution.js';
@@ -877,61 +881,106 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
         </Box>
       )}
 
-      {/* Step 3: project picker (multiple projects only) */}
-      {needsProjectPick && effectiveOrg && (
-        <Box flexDirection="column">
-          <Box ref={projectChromeRef} flexDirection="column">
-            <Text bold color={Colors.heading}>
-              Select a project
-            </Text>
-            <Text color={Colors.secondary}>
-              in <Text color={Colors.body}>{effectiveOrg.name}</Text>
-            </Text>
-            <Box marginTop={1} />
-          </Box>
-          <Box>
-            <PickerMenu<OrgEntry['projects'][number] | PickerAction>
-              availableRows={pickerBudget(projectChromeRows)}
-              options={[
-                ...effectiveOrg.projects.map((project) => ({
-                  label: project.name,
-                  value: project as OrgEntry['projects'][number] | PickerAction,
-                })),
-                {
-                  label: 'Create new project\u2026',
-                  value: CREATE_ACTION as PickerAction,
-                },
-                ...(pendingOrgs && pendingOrgs.length > 1
-                  ? [
-                      {
-                        label: 'Start over',
-                        value: RESTART_ACTION as PickerAction,
-                      },
-                    ]
-                  : []),
-              ]}
-              onSelect={(value) => {
-                const picked = Array.isArray(value) ? value[0] : value;
-                if (picked === CREATE_ACTION) {
-                  handleCreateProject('project');
-                  return;
-                }
-                if (picked === RESTART_ACTION) {
-                  handleStartOver('project');
-                  return;
-                }
-                if (isPickerAction(picked)) return;
-                setSelectedProject(picked);
+      {/* Step 3: project picker (multiple projects only).
+          Gated swap \u2014 when WIZARD_NEW_UX=1, render the new fuzzy +
+          column-scoped picker. Legacy PickerMenu path untouched. */}
+      {needsProjectPick &&
+        effectiveOrg &&
+        process.env.WIZARD_NEW_UX === '1' && (
+          <Box flexDirection="column">
+            <Box ref={projectChromeRef} flexDirection="column">
+              <Text bold color={Colors.heading}>
+                Select a project
+              </Text>
+              <Text color={Colors.secondary}>
+                in <Text color={Colors.body}>{effectiveOrg.name}</Text>
+              </Text>
+              <Box marginTop={1} />
+            </Box>
+            <ProjectPicker
+              projects={effectiveOrg.projects.map(
+                (p): ProjectPickerEntry => ({
+                  id: p.id,
+                  name: p.name,
+                  orgName: effectiveOrg.name,
+                  orgId: effectiveOrg.id,
+                  envName: p.environments?.[0]?.name ?? null,
+                }),
+              )}
+              onSelect={(picked) => {
+                const projectObj = effectiveOrg.projects.find(
+                  (p) => p.id === picked.id,
+                );
+                if (!projectObj) return;
+                setSelectedProject(projectObj);
                 store.setOrgAndProject(
                   effectiveOrg,
-                  picked,
+                  projectObj,
                   session.installDir,
                 );
               }}
+              onCreate={() => handleCreateProject('project')}
             />
           </Box>
-        </Box>
-      )}
+        )}
+      {needsProjectPick &&
+        effectiveOrg &&
+        process.env.WIZARD_NEW_UX !== '1' && (
+          <Box flexDirection="column">
+            <Box ref={projectChromeRef} flexDirection="column">
+              <Text bold color={Colors.heading}>
+                Select a project
+              </Text>
+              <Text color={Colors.secondary}>
+                in <Text color={Colors.body}>{effectiveOrg.name}</Text>
+              </Text>
+              <Box marginTop={1} />
+            </Box>
+            <Box>
+              <PickerMenu<OrgEntry['projects'][number] | PickerAction>
+                availableRows={pickerBudget(projectChromeRows)}
+                options={[
+                  ...effectiveOrg.projects.map((project) => ({
+                    label: project.name,
+                    value: project as
+                      | OrgEntry['projects'][number]
+                      | PickerAction,
+                  })),
+                  {
+                    label: 'Create new project\u2026',
+                    value: CREATE_ACTION as PickerAction,
+                  },
+                  ...(pendingOrgs && pendingOrgs.length > 1
+                    ? [
+                        {
+                          label: 'Start over',
+                          value: RESTART_ACTION as PickerAction,
+                        },
+                      ]
+                    : []),
+                ]}
+                onSelect={(value) => {
+                  const picked = Array.isArray(value) ? value[0] : value;
+                  if (picked === CREATE_ACTION) {
+                    handleCreateProject('project');
+                    return;
+                  }
+                  if (picked === RESTART_ACTION) {
+                    handleStartOver('project');
+                    return;
+                  }
+                  if (isPickerAction(picked)) return;
+                  setSelectedProject(picked);
+                  store.setOrgAndProject(
+                    effectiveOrg,
+                    picked,
+                    session.installDir,
+                  );
+                }}
+              />
+            </Box>
+          </Box>
+        )}
 
       {/* Step 4: environment picker (multiple environments only) */}
       {needsEnvPick && (
