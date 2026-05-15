@@ -165,6 +165,14 @@ import {
   orchestrationCommand,
 } from './src/commands';
 
+/**
+ * Nested-agent detection result, populated by the bootstrap block below and
+ * read by the `wizard launched` yargs middleware. Hoisted to module scope so
+ * the middleware doesn't re-run env-var detection just to attach the
+ * `'nested agent'` property.
+ */
+let nestedAgent: ReturnType<typeof detectNestedAgent> = null;
+
 // ── Observability bootstrap ─────────────────────────────────────────
 // Initialize structured logging early so all code paths can use it.
 // The terminal sink routes log output through the UI singleton (getUI()),
@@ -262,9 +270,12 @@ import {
   // were already sanitized at the top of this file before any import could
   // snapshot them. This block is diagnostic-only: it surfaces the signal so
   // outer agent orchestrators can log it, and gives humans debugging auth
-  // weirdness a breadcrumb.
-  const nested = detectNestedAgent();
-  if (nested) {
+  // weirdness a breadcrumb. Result is hoisted into `nestedAgent` (module
+  // scope) so the `wizard launched` middleware can include it as a property
+  // without re-running detection.
+  nestedAgent = detectNestedAgent();
+  if (nestedAgent) {
+    const nested = nestedAgent; // local alias keeps the existing block unchanged
     const detail =
       `Detected nested agent invocation via ${nested.envVar}=${nested.envValue}. ` +
       `Inherited outer-agent env vars were sanitized; the setup agent will run normally.`;
@@ -291,6 +302,133 @@ import {
       getUI().log.info(detail);
     }
   }
+}
+
+/**
+ * Best-effort yargs subcommand detection from raw argv. Used by the root
+ * `wizard launched` event to tag a run with the subcommand it invoked
+ * without waiting for yargs to parse. Returns the first positional that
+ * looks like a kebab-case word (matches yargs command names like `login`,
+ * `whoami`, `ci-bootstrap`); falls back to `'default'` for the main wizard
+ * flow. Flag values that happen to be word-shaped (`--install-dir /tmp`)
+ * are filtered by the `startsWith('-')` skip, and path/url-shaped tokens
+ * are filtered by the regex.
+ */
+function detectSubcommandFromArgv(argv: readonly string[]): string {
+  for (const arg of argv) {
+    if (!arg.startsWith('-') && /^[a-z][a-z0-9-]*$/.test(arg)) {
+      return arg;
+    }
+  }
+  return 'default';
+}
+
+/**
+ * Extract the lowercase domain from an email. Returns null for missing or
+ * malformed input. Used by the `wizard launched` event so we can chart
+ * adoption by email provider (gmail.com, microsoft.com, etc.) without
+ * landing the local-part in telemetry. The yargs `coerce` on `--email`
+ * already runs `EMAIL_REGEX` validation, so by the time this is called
+ * the value is well-formed — the defensive null-check is for env-var or
+ * config paths that may bypass the coerce hook.
+ */
+function emailDomainFromArg(value: unknown): string | null {
+  if (typeof value !== 'string' || value.length === 0) return null;
+  const at = value.lastIndexOf('@');
+  if (at < 1 || at >= value.length - 1) return null;
+  return value.slice(at + 1).toLowerCase();
+}
+
+/**
+ * Bag of properties for the `wizard launched` root event. Built from the
+ * parsed yargs argv inside a middleware so every flag the user actually
+ * passed shows up on the event — booleans pass through, enumerated strings
+ * pass through, free-text / credential-bearing strings collapse to a
+ * `<key> provided` boolean. `--email` additionally exposes the email
+ * domain so we can chart adoption by provider without storing PII.
+ *
+ * Auto-attached via session properties (do not re-pass): `$app_name`,
+ * `mode`, `wizard_version`, `platform`, `node_version`, `'session id'`,
+ * `'run id'`. The Amplitude `device_id` is the persistent install ID.
+ */
+function wizardLaunchedProperties(
+  argv: Record<string, unknown>,
+): Record<string, unknown> {
+  const present = (key: string): boolean => {
+    const v = argv[key];
+    if (v === undefined || v === null) return false;
+    if (typeof v === 'string') return v.length > 0;
+    return true;
+  };
+  const bool = (key: string): boolean => argv[key] === true;
+  const str = (key: string): string | null => {
+    const v = argv[key];
+    return typeof v === 'string' && v.length > 0 ? v : null;
+  };
+
+  return {
+    // Environment context (computed at bootstrap; nested via module-scope hoist)
+    subcommand: detectSubcommandFromArgv(process.argv.slice(2)),
+    'is tty': Boolean(process.stdout.isTTY),
+    'ci env detected': Boolean(process.env.CI),
+    'node arch': process.arch,
+    'nested agent': nestedAgent !== null,
+
+    // Public boolean flags — pass through directly
+    debug: bool('debug'),
+    verbose: bool('verbose'),
+    ci: bool('ci'),
+    agent: bool('agent'),
+    yes: bool('yes'),
+    force: bool('force'),
+    json: bool('json'),
+    human: bool('human'),
+    default: bool('default'),
+    'auto approve': bool('auto-approve'),
+    'accept tos': bool('accept-tos'),
+    'confirm app': bool('confirm-app'),
+    signup: bool('signup'),
+    'local mcp': bool('local-mcp'),
+    dev: bool('dev'),
+
+    // Internal toggles that change agent behavior
+    'skip bootstrap': bool('skip-bootstrap'),
+    'skill tiers': bool('skill-tiers'),
+    'ai sdk probe': bool('ai-sdk-probe'),
+    'ai sdk probe strict': bool('ai-sdk-probe-strict'),
+    'ai sdk console': bool('ai-sdk-console'),
+    'ai sdk inner loop': bool('ai-sdk-inner-loop'),
+
+    // Enumerated / low-cardinality strings — pass value through
+    'auth onboarding': str('auth-onboarding'),
+    'compaction window': str('compaction-window'),
+
+    // Targeting flags — high cardinality, not credential-bearing.
+    // Log presence so we can chart how often agents pre-scope a run.
+    'app id provided': present('app-id'),
+    'app name provided': present('app-name'),
+    'project id provided': present('project-id'),
+    'workspace id provided': present('workspace-id'),
+    'org provided': present('org'),
+    'env provided': present('env'),
+
+    // Credential-bearing / PII-bearing — presence only.
+    'api key provided': present('api-key'),
+    'token provided': present('token'),
+    'proxy bearer provided': present('proxy-bearer'),
+    'full name provided': present('full-name'),
+
+    // Email — presence + non-sensitive domain. Local-part is dropped.
+    'email provided': present('email'),
+    'email domain': emailDomainFromArg(argv.email),
+
+    // Path-bearing strings — presence only (paths may contain usernames).
+    'install dir provided': present('install-dir'),
+    'cache dir provided': present('cache-dir'),
+    'log path provided': present('log'),
+    'context path provided': present('context'),
+    'plan id provided': present('plan-id'),
+  };
 }
 
 if (process.env.NODE_ENV === 'test') {
@@ -708,6 +846,24 @@ void yargs(hideBin(process.argv))
       );
     }
     return true;
+  })
+  // Root telemetry event. Fires once per parsed invocation, before any
+  // command handler runs. Sees the full argv bag so every flag — including
+  // credentials and PII — can be redacted to presence-only properties
+  // (with a per-field non-sensitive extract where useful, e.g. email
+  // domain). Runs after `.check()` so invalid invocations (e.g. malformed
+  // `--app-id`) don't pollute the funnel; runs before the command handler
+  // so the event lands before any agent / TUI / network work. Wrapped in
+  // try/catch so a telemetry exception can never break the wizard.
+  .middleware((argv) => {
+    try {
+      analytics.wizardCapture(
+        'wizard launched',
+        wizardLaunchedProperties(argv as Record<string, unknown>),
+      );
+    } catch {
+      // Telemetry must never block the run.
+    }
   })
   // Reject unknown flags and subcommands. Catches typos like `--app-ids` or
   // `--instal-dir` that would otherwise silently fall through. Middleware for
