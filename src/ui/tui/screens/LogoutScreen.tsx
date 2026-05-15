@@ -14,12 +14,26 @@ import { clearApiKey } from '../../../utils/api-key-store.js';
 import { clearCheckpoint } from '../../../lib/session-checkpoint.js';
 import { clearAuthFieldsInAmpliConfig } from '../../../lib/ampli-config.js';
 import { wizardSuccessExit } from '../../../utils/wizard-abort.js';
+import { getOAuthSettingsFile } from '../../../utils/storage-paths.js';
+
+// PR 7 (timeline-ux): opt-in gate for the redesigned Logout UX. The new
+// branch prints an explicit receipt naming the email + credentials path;
+// the legacy branch stays unchanged when the flag is unset. Read lazily
+// so per-test env overrides take effect (see AuthScreen for the same
+// pattern).
+const isNewUxEnabled = (): boolean => process.env.WIZARD_NEW_UX === '1';
 
 interface LogoutScreenProps {
   onComplete: () => void;
   installDir: string;
   /** Called to clear in-memory session state after disk credentials are wiped. */
   onLoggedOut?: () => void;
+  /**
+   * Email of the user being logged out, for the new-UX receipt line.
+   * Optional — when missing, the receipt falls back to the legacy copy so
+   * callers that haven't been updated still render coherently.
+   */
+  userEmail?: string | null;
 }
 
 enum Phase {
@@ -31,6 +45,7 @@ export const LogoutScreen = ({
   onComplete,
   installDir,
   onLoggedOut,
+  userEmail,
 }: LogoutScreenProps) => {
   const [phase, setPhase] = useState<Phase>(Phase.Confirm);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
@@ -96,11 +111,22 @@ export const LogoutScreen = ({
           />
         )}
 
-        {phase === Phase.Done && (
-          <Text color={Colors.secondary}>
-            Logged out. Restart the wizard to re-authenticate.
-          </Text>
-        )}
+        {phase === Phase.Done &&
+          (isNewUxEnabled() ? (
+            <Box flexDirection="column" overflow="hidden">
+              <Text color={Colors.success}>
+                removed credentials for {userEmail ?? 'this account'} from{' '}
+                {getOAuthSettingsFile()}
+              </Text>
+              <Text color={Colors.secondary}>
+                Restart the wizard to re-authenticate.
+              </Text>
+            </Box>
+          ) : (
+            <Text color={Colors.secondary}>
+              Logged out. Restart the wizard to re-authenticate.
+            </Text>
+          ))}
       </Box>
     </Box>
   );

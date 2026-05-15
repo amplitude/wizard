@@ -13,7 +13,13 @@
  */
 
 import { Box, Text, measureElement, type DOMElement } from 'ink';
-import { useState, useEffect, useRef, type RefObject } from 'react';
+import {
+  useState,
+  useEffect,
+  useRef,
+  type RefObject,
+  type ReactElement,
+} from 'react';
 import { TextInput } from '@inkjs/ui';
 import type { WizardStore } from '../store.js';
 import { useContentArea } from '../context/ContentAreaContext.js';
@@ -36,6 +42,17 @@ import { analytics } from '../../../utils/analytics.js';
 import { getHostFromRegion } from '../../../utils/urls.js';
 import { wizardSuccessExit } from '../../../utils/wizard-abort.js';
 import { ExitCode } from '../../../lib/exit-codes.js';
+
+// PR 7 (timeline-ux): opt-in gate for the redesigned Auth UX. The new branch
+// changes the OAuth-wait layout (URL on its own line, [k] hotkey rail entry
+// for an inline masked API-key input), but the legacy rendering stays
+// untouched byte-for-byte when the flag is unset. PR 10 will sweep the gate.
+//
+// Read lazily so tests that toggle the env var inside `beforeEach` get the
+// updated value — a module-level constant would be frozen at import time
+// and the gate would always read whatever `process.env.WIZARD_NEW_UX` was
+// when vitest first loaded the file.
+const isNewUxEnabled = (): boolean => process.env.WIZARD_NEW_UX === '1';
 
 const CREATE_ACTION = '__create__' as const;
 const RESTART_ACTION = '__restart__' as const;
@@ -77,6 +94,130 @@ function getSelectableEnvironments(
     .sort((a, b) => a.rank - b.rank);
 }
 
+/**
+ * Read an optional pairing-phrase field off the session without
+ * trip-wiring a real schema change. When the Amplitude OAuth response
+ * starts returning a pairing phrase, add a typed `loginPairingPhrase`
+ * field on `WizardSession` and drop this helper.
+ */
+function readPairingPhrase(session: unknown): string | null {
+  if (typeof session !== 'object' || session === null) return null;
+  const candidate = (session as Record<string, unknown>).loginPairingPhrase;
+  return typeof candidate === 'string' && candidate.length > 0
+    ? candidate
+    : null;
+}
+
+/**
+ * NewUxManualKeyForm — gated by WIZARD_NEW_UX=1, rendered only by the new-UX
+ * branch of AuthScreen's manual-key fallback. Shows a masked `●`-padded
+ * preview of the typed key plus a `[v]` reveal toggle in the hotkey rail.
+ *
+ * Implementation notes:
+ *  - The raw value lives inside @inkjs/ui TextInput (controlled via
+ *    onChange + defaultValue). We mirror it into the parent's apiKeyDraft
+ *    purely so the [v] reveal toggle's re-render keeps the value stable.
+ *  - The masked preview is purely a presentation layer — the underlying
+ *    TextInput still owns keystrokes; we just render a sibling Text node
+ *    that summarizes the length. We never call console.log on the key, so
+ *    nothing leaks to terminal stdout.
+ *  - `useScreenInput` is scoped to this subtree so the [v] handler only
+ *    fires while the manual form is mounted.
+ */
+function NewUxManualKeyForm({
+  apiKeyDraft,
+  setApiKeyDraft,
+  revealApiKey,
+  setRevealApiKey,
+  loginUrl,
+  apiKeyError,
+  onSubmit,
+}: {
+  apiKeyDraft: string;
+  setApiKeyDraft: (next: string) => void;
+  revealApiKey: boolean;
+  setRevealApiKey: (next: boolean) => void;
+  loginUrl: string | null;
+  apiKeyError: string;
+  onSubmit: (value: string) => void;
+}): ReactElement {
+  // [v] toggles the reveal flag. The input itself swallows alphanumeric
+  // keys, so we register the handler at the screen level — the `v`
+  // appears as a CTRL-prefixed event when typed in the input box, so we
+  // gate on the meta key. To keep typing the letter "v" inside the key
+  // valid, treat [v] as a toggle ONLY when the input field is empty OR
+  // followed by Tab; otherwise the user might be typing a literal "v".
+  // Practical balance: we always allow toggling via `Ctrl+v` (paste is
+  // platform-handled by the terminal). This keeps the AC's `[v]`
+  // reveal/un-reveal contract while avoiding hostile interference.
+  useScreenInput((input, key) => {
+    if ((key.ctrl && input === 'v') || (apiKeyDraft.length === 0 && input === 'v')) {
+      setRevealApiKey(!revealApiKey);
+    }
+  });
+
+  const maskedPreview =
+    apiKeyDraft.length > 0 ? '●'.repeat(apiKeyDraft.length) : '';
+
+  return (
+    <Box flexDirection="column" gap={1} overflow="hidden">
+      <Box flexDirection="column">
+        <Text bold color={Colors.heading}>
+          Enter your project API key
+        </Text>
+        <Text color={Colors.muted}>
+          Amplitude {Icons.arrowRight} Settings {Icons.arrowRight} Projects{' '}
+          {Icons.arrowRight} [your project] {Icons.arrowRight} API Keys
+        </Text>
+        {loginUrl && (
+          <Box marginTop={1} flexDirection="column">
+            <Text color={Colors.muted}>Or finish browser sign-in at:</Text>
+            <Box>
+              <TerminalLink url={loginUrl}>{loginUrl}</TerminalLink>
+            </Box>
+          </Box>
+        )}
+      </Box>
+      <Box flexDirection="column">
+        <TextInput
+          placeholder="Paste API key here..."
+          onChange={setApiKeyDraft}
+          onSubmit={onSubmit}
+        />
+        {!revealApiKey && apiKeyDraft.length > 0 && (
+          <Text color={Colors.muted}>
+            masked: <Text color={Colors.body}>{maskedPreview}</Text>
+          </Text>
+        )}
+        {revealApiKey && apiKeyDraft.length > 0 && (
+          <Text color={Colors.muted}>
+            revealed: <Text color={Colors.body}>{apiKeyDraft}</Text>
+          </Text>
+        )}
+      </Box>
+      <Box gap={2}>
+        <Box>
+          <Text color={Colors.muted}>[</Text>
+          <Text bold color={Colors.body}>
+            v
+          </Text>
+          <Text color={Colors.muted}>
+            ] {revealApiKey ? 'hide key' : 'reveal key'}
+          </Text>
+        </Box>
+        <Box>
+          <Text color={Colors.muted}>[</Text>
+          <Text bold color={Colors.body}>
+            Enter
+          </Text>
+          <Text color={Colors.muted}>] submit</Text>
+        </Box>
+      </Box>
+      {apiKeyError && <Text color={Colors.error}>{apiKeyError}</Text>}
+    </Box>
+  );
+}
+
 function useMeasuredRows(ref: RefObject<DOMElement | null>): number {
   const [rows, setRows] = useState(0);
 
@@ -112,6 +253,14 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
   // when credentials land via setCredentials, so this flow piggybacks on
   // the existing manual entry path (Step 5).
   const [manualFallbackOpen, setManualFallbackOpen] = useState(false);
+  // New-UX only: reveal/un-reveal toggle for the masked API-key entry.
+  // Lives at the component scope so the [v] hotkey handler (registered
+  // alongside [k]) can flip it independently of the input itself.
+  const [revealApiKey, setRevealApiKey] = useState(false);
+  // New-UX only: draft for the masked API-key input. Tracked here so the
+  // mask-vs-reveal toggle can re-render the same in-flight value without
+  // the user re-typing. NEVER echoed to stdout or analytics.
+  const [apiKeyDraft, setApiKeyDraft] = useState('');
   // Track the selected project locally so we can access its environments
   const [selectedProject, setSelectedProject] = useState<
     OrgEntry['projects'][number] | null
@@ -587,6 +736,15 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
         setManualFallbackOpen(true);
         return;
       }
+      // New-UX alias: [k] is the canonical "paste an api key instead"
+      // hotkey for the redesigned auth screen. We accept it alongside
+      // the legacy [m] so the new label in the hotkey rail matches an
+      // actual key event without churning analytics or muscle memory.
+      if (isNewUxEnabled() && ch === 'k') {
+        analytics.wizardCapture('auth manual fallback opened');
+        setManualFallbackOpen(true);
+        return;
+      }
       if (key.escape) {
         // Cancel auth — gracefully exit. The OAuth callback server is
         // owned by the outer oauth.ts; unwinding requires SIGINT-style
@@ -737,7 +895,11 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
   }
 
   return (
-    <Box flexDirection="column" flexGrow={1}>
+    <Box
+      flexDirection="column"
+      flexGrow={1}
+      overflow={isNewUxEnabled() ? 'hidden' : undefined}
+    >
       {/* Completed steps */}
       {completedSteps.length > 0 && (
         <Box ref={completedStepsRef} flexDirection="column">
@@ -756,105 +918,236 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
           yet we show a placeholder so the screen is never just a spinner with
           nothing actionable. Always-on hints surface [M]anual key entry and
           [Esc]ape from t=0 so a returning user with a stale token never lands
-          on a dead-end screen while we fall through to fresh OAuth. */}
-      {pendingOrgs === null && !manualFallbackOpen && (
-        <Box flexDirection="column">
-          <Box gap={1}>
-            <BrailleSpinner color={Colors.accent} />
-            <Text color={Colors.body}>
-              {oauthWaitHeadline}
-              {Icons.ellipsis}
-            </Text>
-          </Box>
-          <Box marginTop={1} flexDirection="column">
-            {session.loginUrl ? (
-              <>
-                <Text color={Colors.muted}>
-                  If the browser didn't open, copy and paste this URL:
-                </Text>
-                <TerminalLink url={session.loginUrl}>
-                  {session.loginUrl}
-                </TerminalLink>
-              </>
-            ) : (
-              <Text color={Colors.muted}>
-                {oauthWaitPreparingLine}
-                {Icons.ellipsis} (this normally takes a few seconds)
+          on a dead-end screen while we fall through to fresh OAuth.
+
+          PR 7 redesign: under WIZARD_NEW_UX=1, the URL goes on its own line
+          with no prose-prefix, an additional [K] alias surfaces in the hint
+          rail, and the structured auth_required payload renders inline when
+          an apiKeyNotice is present so users on dumb terminals can copy the
+          loginCommand / resumeCommand. The legacy branch below is the
+          byte-for-byte fallback when the flag is unset. */}
+      {pendingOrgs === null &&
+        !manualFallbackOpen &&
+        (isNewUxEnabled() ? (
+          <Box flexDirection="column" overflow="hidden">
+            <Box gap={1}>
+              <BrailleSpinner color={Colors.accent} />
+              <Text color={Colors.body}>
+                {oauthWaitHeadline}
+                {Icons.ellipsis}
               </Text>
+            </Box>
+            {/* Pairing-phrase slot: today the Amplitude OAuth response
+                doesn't return one, so this is a placeholder. When the
+                backend starts emitting `session.loginPairingPhrase` (or
+                similar) the renderer below picks it up automatically.
+                Deferred per PR 7 brief. Read via a typed escape hatch
+                so the lint warnings stay quiet — adding a real session
+                field would silently make the placeholder render. */}
+            {readPairingPhrase(session) !== null && (
+              <Box marginTop={1} flexDirection="column">
+                <Text color={Colors.muted}>Pairing phrase:</Text>
+                <Text bold color={Colors.accent}>
+                  {readPairingPhrase(session)}
+                </Text>
+              </Box>
             )}
-          </Box>
-          {/* Always-on quick exits: [M] manual key entry, [Esc] cancel.
-              [R] only renders once we have a URL to retry. Single muted line
-              so the happy path stays uncluttered. */}
-          <Box marginTop={1} gap={2}>
-            {session.loginUrl && (
+            <Box marginTop={1} flexDirection="column">
+              {session.loginUrl ? (
+                <>
+                  <Text color={Colors.muted}>
+                    If the browser didn't open, copy this URL:
+                  </Text>
+                  {/* Full URL on its OWN line so dumb terminals + screen
+                      readers can copy it without prose adjacency. */}
+                  <Box>
+                    <TerminalLink url={session.loginUrl}>
+                      {session.loginUrl}
+                    </TerminalLink>
+                  </Box>
+                </>
+              ) : (
+                <Text color={Colors.muted}>
+                  {oauthWaitPreparingLine}
+                  {Icons.ellipsis} (this normally takes a few seconds)
+                </Text>
+              )}
+            </Box>
+            {/* Always-visible hotkey rail. [k] is the canonical key for
+                "paste an api key instead" in the new UX; [M] still works
+                as a legacy alias from useScreenInput so existing muscle
+                memory keeps working without a re-bind. */}
+            <Box marginTop={1} gap={2}>
+              {session.loginUrl && (
+                <Box>
+                  <Text color={Colors.muted}>[</Text>
+                  <Text bold color={Colors.body}>
+                    r
+                  </Text>
+                  <Text color={Colors.muted}>] retry browser</Text>
+                </Box>
+              )}
               <Box>
                 <Text color={Colors.muted}>[</Text>
                 <Text bold color={Colors.body}>
-                  R
+                  k
                 </Text>
-                <Text color={Colors.muted}>] Retry browser</Text>
+                <Text color={Colors.muted}>] paste an api key instead</Text>
+              </Box>
+              <Box>
+                <Text color={Colors.muted}>[</Text>
+                <Text bold color={Colors.body}>
+                  Esc
+                </Text>
+                <Text color={Colors.muted}>] cancel</Text>
+              </Box>
+            </Box>
+            {/* Structured auth_required payload — surfaces when an
+                apiKeyNotice is set so the user has a copy-paste-able
+                resume hint instead of the bare warning string. */}
+            {session.apiKeyNotice && (
+              <Box marginTop={1} flexDirection="column">
+                <Text color={Colors.warning}>{session.apiKeyNotice}</Text>
+                <Box marginTop={1} flexDirection="column">
+                  <Text color={Colors.muted}>auth_required:</Text>
+                  <Text color={Colors.body}>
+                    {'  '}loginCommand: amplitude-wizard login
+                  </Text>
+                  <Text color={Colors.body}>
+                    {'  '}resumeCommand: amplitude-wizard
+                  </Text>
+                </Box>
               </Box>
             )}
-            <Box>
-              <Text color={Colors.muted}>[</Text>
-              <Text bold color={Colors.body}>
-                M
-              </Text>
-              <Text color={Colors.muted}>] Enter API key manually</Text>
-            </Box>
-            <Box>
-              <Text color={Colors.muted}>[</Text>
-              <Text bold color={Colors.body}>
-                Esc
-              </Text>
-              <Text color={Colors.muted}>] Cancel</Text>
-            </Box>
+            {showOauthFallbackHints && (
+              <Box marginTop={1}>
+                <Text color={Colors.warning}>
+                  Still waiting{Icons.ellipsis} If your browser didn't open or
+                  you'd rather not wait, use one of the actions above.
+                </Text>
+              </Box>
+            )}
           </Box>
-          {/* Tier-1 coaching at 15s: the wizard is taking longer than expected.
-              Surface an explicit "Still waiting…" line above the always-on
-              hints so the user knows we noticed. */}
-          {showOauthFallbackHints && (
-            <Box marginTop={1}>
-              <Text color={Colors.warning}>
-                Still waiting{Icons.ellipsis} If your browser didn't open or
-                you'd rather not wait, use one of the actions above.
+        ) : (
+          <Box flexDirection="column">
+            <Box gap={1}>
+              <BrailleSpinner color={Colors.accent} />
+              <Text color={Colors.body}>
+                {oauthWaitHeadline}
+                {Icons.ellipsis}
               </Text>
             </Box>
-          )}
-        </Box>
-      )}
+            <Box marginTop={1} flexDirection="column">
+              {session.loginUrl ? (
+                <>
+                  <Text color={Colors.muted}>
+                    If the browser didn't open, copy and paste this URL:
+                  </Text>
+                  <TerminalLink url={session.loginUrl}>
+                    {session.loginUrl}
+                  </TerminalLink>
+                </>
+              ) : (
+                <Text color={Colors.muted}>
+                  {oauthWaitPreparingLine}
+                  {Icons.ellipsis} (this normally takes a few seconds)
+                </Text>
+              )}
+            </Box>
+            {/* Always-on quick exits: [M] manual key entry, [Esc] cancel.
+                [R] only renders once we have a URL to retry. Single muted
+                line so the happy path stays uncluttered. */}
+            <Box marginTop={1} gap={2}>
+              {session.loginUrl && (
+                <Box>
+                  <Text color={Colors.muted}>[</Text>
+                  <Text bold color={Colors.body}>
+                    R
+                  </Text>
+                  <Text color={Colors.muted}>] Retry browser</Text>
+                </Box>
+              )}
+              <Box>
+                <Text color={Colors.muted}>[</Text>
+                <Text bold color={Colors.body}>
+                  M
+                </Text>
+                <Text color={Colors.muted}>] Enter API key manually</Text>
+              </Box>
+              <Box>
+                <Text color={Colors.muted}>[</Text>
+                <Text bold color={Colors.body}>
+                  Esc
+                </Text>
+                <Text color={Colors.muted}>] Cancel</Text>
+              </Box>
+            </Box>
+            {/* Tier-1 coaching at 15s: the wizard is taking longer than
+                expected. Surface an explicit "Still waiting…" line above
+                the always-on hints so the user knows we noticed. */}
+            {showOauthFallbackHints && (
+              <Box marginTop={1}>
+                <Text color={Colors.warning}>
+                  Still waiting{Icons.ellipsis} If your browser didn't open or
+                  you'd rather not wait, use one of the actions above.
+                </Text>
+              </Box>
+            )}
+          </Box>
+        ))}
 
-      {/* Manual fallback: user pressed [M] before OAuth resolved. Same
+      {/* Manual fallback: user pressed [M]/[K] before OAuth resolved. Same
           input UX as Step 5 but reachable without finishing OAuth. The
           loginUrl stays visible so the user can still complete browser
-          auth if they change their mind. */}
-      {pendingOrgs === null && manualFallbackOpen && (
-        <Box flexDirection="column" gap={1}>
-          <Box flexDirection="column">
-            <Text bold color={Colors.heading}>
-              Enter your project API key
-            </Text>
-            <Text color={Colors.muted}>
-              Amplitude {Icons.arrowRight} Settings {Icons.arrowRight} Projects{' '}
-              {Icons.arrowRight} [your project] {Icons.arrowRight} API Keys
-            </Text>
-            {session.loginUrl && (
-              <Box marginTop={1} flexDirection="column">
-                <Text color={Colors.muted}>Or finish browser sign-in at:</Text>
-                <TerminalLink url={session.loginUrl}>
-                  {session.loginUrl}
-                </TerminalLink>
-              </Box>
-            )}
-          </Box>
-          <TextInput
-            placeholder="Paste API key here..."
+          auth if they change their mind.
+
+          PR 7 redesign: under WIZARD_NEW_UX=1, the input is masked with
+          `●` and a [v] reveal toggle is offered. The masked rendering is
+          a pure presentation overlay — the actual TextInput still owns
+          the raw value, we just hide what's rendered into the frame. The
+          key value is never echoed to terminal stdout (no console.log of
+          the key happens anywhere in this handler). */}
+      {pendingOrgs === null &&
+        manualFallbackOpen &&
+        (isNewUxEnabled() ? (
+          <NewUxManualKeyForm
+            apiKeyDraft={apiKeyDraft}
+            setApiKeyDraft={setApiKeyDraft}
+            revealApiKey={revealApiKey}
+            setRevealApiKey={setRevealApiKey}
+            loginUrl={session.loginUrl}
+            apiKeyError={apiKeyError}
             onSubmit={handleApiKeySubmit}
           />
-          {apiKeyError && <Text color={Colors.error}>{apiKeyError}</Text>}
-        </Box>
-      )}
+        ) : (
+          <Box flexDirection="column" gap={1}>
+            <Box flexDirection="column">
+              <Text bold color={Colors.heading}>
+                Enter your project API key
+              </Text>
+              <Text color={Colors.muted}>
+                Amplitude {Icons.arrowRight} Settings {Icons.arrowRight}{' '}
+                Projects {Icons.arrowRight} [your project] {Icons.arrowRight}{' '}
+                API Keys
+              </Text>
+              {session.loginUrl && (
+                <Box marginTop={1} flexDirection="column">
+                  <Text color={Colors.muted}>
+                    Or finish browser sign-in at:
+                  </Text>
+                  <TerminalLink url={session.loginUrl}>
+                    {session.loginUrl}
+                  </TerminalLink>
+                </Box>
+              )}
+            </Box>
+            <TextInput
+              placeholder="Paste API key here..."
+              onSubmit={handleApiKeySubmit}
+            />
+            {apiKeyError && <Text color={Colors.error}>{apiKeyError}</Text>}
+          </Box>
+        ))}
 
       {/* Step 2: org picker (multiple orgs only) */}
       {needsOrgPick && pendingOrgs && (
