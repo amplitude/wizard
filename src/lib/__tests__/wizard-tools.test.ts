@@ -2281,3 +2281,350 @@ describe('confirm_event_plan name-casing flow', () => {
     ]);
   });
 });
+
+// ---------------------------------------------------------------------------
+// set_agent_tasks / update_agent_task — the agent's self-reported task list
+//
+// These tools let the inner agent declare a plan at the start of every run
+// and update each row as work progresses. The wizard renders the list below
+// the canonical 4-step skeleton so users see what the agent itself is
+// thinking, not just the wizard's scaffolding.
+// ---------------------------------------------------------------------------
+
+describe('set_agent_tasks / update_agent_task', () => {
+  let setUI: typeof import('../../ui').setUI;
+  let LoggingUI: typeof import('../../ui/logging-ui').LoggingUI;
+  let __resetFirstAgentPlanForTests: typeof import('../wizard-tools').__resetFirstAgentPlanForTests;
+  let tmpDir: string;
+
+  beforeEach(async () => {
+    ({ setUI } = await import('../../ui'));
+    ({ LoggingUI } = await import('../../ui/logging-ui'));
+    ({ __resetFirstAgentPlanForTests } = await import('../wizard-tools'));
+    __resetFirstAgentPlanForTests();
+    tmpDir = makeTmpDir();
+  });
+
+  afterEach(() => {
+    __resetFirstAgentPlanForTests();
+    setUI(new LoggingUI());
+    cleanup(tmpDir);
+  });
+
+  // Capture-UI: records every setAgentTasks / updateAgentTask call so the
+  // test can assert atom-equivalent behavior without spinning up the InkUI
+  // store. This is the same pattern other UI-coupled tool tests use.
+  function makeCaptureUI() {
+    const setCalls: Array<
+      Array<{
+        id: string;
+        title: string;
+        status: 'pending' | 'in_progress' | 'done';
+      }>
+    > = [];
+    const updateCalls: Array<{
+      id: string;
+      status: 'pending' | 'in_progress' | 'done';
+      title?: string;
+    }> = [];
+    const list: Array<{
+      id: string;
+      title: string;
+      status: 'pending' | 'in_progress' | 'done';
+    }> = [];
+    const ui = new LoggingUI();
+    ui.setAgentTasks = (tasks) => {
+      setCalls.push(tasks.map((t) => ({ ...t })));
+      list.length = 0;
+      for (const t of tasks) list.push({ ...t });
+    };
+    ui.updateAgentTask = (id, patch) => {
+      updateCalls.push({ ...patch, id });
+      const idx = list.findIndex((t) => t.id === id);
+      if (idx === -1) return false;
+      list[idx] = {
+        ...list[idx],
+        status: patch.status,
+        ...(patch.title !== undefined ? { title: patch.title } : {}),
+      };
+      return true;
+    };
+    return { ui, setCalls, updateCalls, list };
+  }
+
+  it('set_agent_tasks records the full task list and forwards it to the UI', async () => {
+    const capture = makeCaptureUI();
+    setUI(capture.ui);
+    const tools = await getTools(tmpDir);
+    const tool = findTool(tools, 'set_agent_tasks');
+
+    const result = await callTool(tool, {
+      tasks: [
+        { id: 'a', title: 'Add SDK import', status: 'pending' },
+        { id: 'b', title: 'Initialize SDK', status: 'in_progress' },
+        { id: 'c', title: 'Wire signup track call', status: 'pending' },
+      ],
+      reason: 'declaring initial plan after discovery',
+    });
+
+    expect(result.isError).toBeFalsy();
+    expect(result.content[0].text).toBe('ok: 3 tasks');
+    expect(capture.setCalls).toHaveLength(1);
+    expect(capture.setCalls[0]).toEqual([
+      { id: 'a', title: 'Add SDK import', status: 'pending' },
+      { id: 'b', title: 'Initialize SDK', status: 'in_progress' },
+      { id: 'c', title: 'Wire signup track call', status: 'pending' },
+    ]);
+  });
+
+  it('set_agent_tasks rejects duplicate task ids', async () => {
+    setUI(makeCaptureUI().ui);
+    const tools = await getTools(tmpDir);
+    const tool = findTool(tools, 'set_agent_tasks');
+
+    const result = await callTool(tool, {
+      tasks: [
+        { id: 'dup', title: 'first', status: 'pending' },
+        { id: 'dup', title: 'second', status: 'pending' },
+      ],
+      reason: 'should fail',
+    });
+    const parsed = parseToolError(result);
+    expect(parsed.error).toContain('duplicate task id');
+    expect(parsed.suggestedTool).toBe('mcp__wizard-tools__set_agent_tasks');
+  });
+
+  // -------------------------------------------------------------------------
+  // Schema-level validation (Zod). The SDK runs `inputSchema.parse()` before
+  // calling the handler at the agent boundary, so unit tests that invoke
+  // `tool.handler` directly bypass it. The inputSchema is captured as a
+  // record of named Zod fields on the registered tool — we wrap it in a
+  // `z.object(...)` to exercise the same parse path the SDK would.
+  // -------------------------------------------------------------------------
+
+  async function getSetAgentTasksZodObject() {
+    const { z: zod } = await import('zod');
+    const tools = await getTools(tmpDir);
+    const tool = findTool(tools, 'set_agent_tasks') as ToolDef & {
+      inputSchema?: Record<string, unknown>;
+    };
+    expect(tool.inputSchema).toBeTruthy();
+    return zod.object(tool.inputSchema as Parameters<typeof zod.object>[0]);
+  }
+
+  it('set_agent_tasks input schema rejects an empty list', async () => {
+    setUI(makeCaptureUI().ui);
+    const schema = await getSetAgentTasksZodObject();
+    const parsed = schema.safeParse({
+      tasks: [],
+      reason: 'empty plan should fail',
+    });
+    expect(parsed.success).toBe(false);
+  });
+
+  it('set_agent_tasks input schema rejects a missing title', async () => {
+    setUI(makeCaptureUI().ui);
+    const schema = await getSetAgentTasksZodObject();
+    const parsed = schema.safeParse({
+      tasks: [{ id: 'a', status: 'pending' }],
+      reason: 'malformed should fail',
+    });
+    expect(parsed.success).toBe(false);
+  });
+
+  it('set_agent_tasks input schema rejects an invalid status enum', async () => {
+    setUI(makeCaptureUI().ui);
+    const schema = await getSetAgentTasksZodObject();
+    const parsed = schema.safeParse({
+      tasks: [{ id: 'a', title: 'broken', status: 'completed' }],
+      reason: 'invalid status should fail',
+    });
+    expect(parsed.success).toBe(false);
+  });
+
+  it('update_agent_task patches the matching row', async () => {
+    const capture = makeCaptureUI();
+    setUI(capture.ui);
+    const tools = await getTools(tmpDir);
+    const setTool = findTool(tools, 'set_agent_tasks');
+    const updateTool = findTool(tools, 'update_agent_task');
+
+    await callTool(setTool, {
+      tasks: [{ id: 'init', title: 'Initialize SDK', status: 'pending' }],
+      reason: 'seed',
+    });
+
+    const result = await callTool(updateTool, {
+      id: 'init',
+      status: 'in_progress',
+      reason: 'starting init',
+    });
+    expect(result.isError).toBeFalsy();
+    expect(result.content[0].text).toBe('ok');
+    expect(capture.list[0]).toEqual({
+      id: 'init',
+      title: 'Initialize SDK',
+      status: 'in_progress',
+    });
+  });
+
+  it('update_agent_task can refine the title alongside the status', async () => {
+    const capture = makeCaptureUI();
+    setUI(capture.ui);
+    const tools = await getTools(tmpDir);
+    const setTool = findTool(tools, 'set_agent_tasks');
+    const updateTool = findTool(tools, 'update_agent_task');
+
+    await callTool(setTool, {
+      tasks: [{ id: 'wire', title: 'Wire signup', status: 'pending' }],
+      reason: 'seed',
+    });
+    await callTool(updateTool, {
+      id: 'wire',
+      status: 'in_progress',
+      title: 'Wire signup -> SignupForm.tsx onSubmit',
+      reason: 'refined title',
+    });
+    expect(capture.list[0].title).toBe(
+      'Wire signup -> SignupForm.tsx onSubmit',
+    );
+    expect(capture.list[0].status).toBe('in_progress');
+  });
+
+  it('update_agent_task returns guidance when the id is unknown', async () => {
+    const capture = makeCaptureUI();
+    setUI(capture.ui);
+    const tools = await getTools(tmpDir);
+    const tool = findTool(tools, 'update_agent_task');
+
+    const result = await callTool(tool, {
+      id: 'never-declared',
+      status: 'done',
+      reason: 'should fail',
+    });
+    const parsed = parseToolError(result);
+    expect(parsed.error).toContain('unknown task id');
+    expect(parsed.suggestedTool).toBe('mcp__wizard-tools__set_agent_tasks');
+    expect(parsed.guidance).toContain('set_agent_tasks');
+  });
+
+  it('set_agent_tasks is idempotent — calling twice replaces the list', async () => {
+    const capture = makeCaptureUI();
+    setUI(capture.ui);
+    const tools = await getTools(tmpDir);
+    const setTool = findTool(tools, 'set_agent_tasks');
+
+    await callTool(setTool, {
+      tasks: [{ id: 'a', title: 'first plan', status: 'pending' }],
+      reason: 'initial plan',
+    });
+    await callTool(setTool, {
+      tasks: [
+        { id: 'x', title: 'revised step 1', status: 'in_progress' },
+        { id: 'y', title: 'revised step 2', status: 'pending' },
+      ],
+      reason: 'discovered another file to wire',
+    });
+    expect(capture.setCalls).toHaveLength(2);
+    expect(capture.list).toEqual([
+      { id: 'x', title: 'revised step 1', status: 'in_progress' },
+      { id: 'y', title: 'revised step 2', status: 'pending' },
+    ]);
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Integration-style — agent calls set_agent_tasks then update_agent_task
+// twice, the in-memory store reflects each transition.
+// ---------------------------------------------------------------------------
+
+describe('agent task list — end-to-end through WizardStore', () => {
+  let setUI: typeof import('../../ui').setUI;
+  let LoggingUI: typeof import('../../ui/logging-ui').LoggingUI;
+  let InkUI: typeof import('../../ui/tui/ink-ui').InkUI;
+  let WizardStore: typeof import('../../ui/tui/store').WizardStore;
+  let __resetFirstAgentPlanForTests: typeof import('../wizard-tools').__resetFirstAgentPlanForTests;
+  let tmpDir: string;
+
+  beforeEach(async () => {
+    ({ setUI } = await import('../../ui'));
+    ({ LoggingUI } = await import('../../ui/logging-ui'));
+    ({ InkUI } = await import('../../ui/tui/ink-ui'));
+    ({ WizardStore } = await import('../../ui/tui/store'));
+    ({ __resetFirstAgentPlanForTests } = await import('../wizard-tools'));
+    __resetFirstAgentPlanForTests();
+    tmpDir = makeTmpDir();
+  });
+
+  afterEach(() => {
+    __resetFirstAgentPlanForTests();
+    setUI(new LoggingUI());
+    cleanup(tmpDir);
+  });
+
+  it('declares a plan then transitions two rows visibly through the store', async () => {
+    const store = new WizardStore();
+    setUI(new InkUI(store));
+    const tools = await getTools(tmpDir);
+    const setTool = findTool(tools, 'set_agent_tasks');
+    const updateTool = findTool(tools, 'update_agent_task');
+
+    // The agent inspects the codebase and declares its plan.
+    await callTool(setTool, {
+      tasks: [
+        {
+          id: 'install',
+          title: 'pnpm add @amplitude/unified',
+          status: 'pending',
+        },
+        {
+          id: 'init',
+          title: 'Initialize SDK in src/main.tsx',
+          status: 'pending',
+        },
+        {
+          id: 'wire',
+          title: 'Wire signup track call',
+          status: 'pending',
+        },
+      ],
+      reason: 'initial plan after discovery',
+    });
+    expect(store.agentTasks.map((t) => t.status)).toEqual([
+      'pending',
+      'pending',
+      'pending',
+    ]);
+
+    // First transition: install begins.
+    await callTool(updateTool, {
+      id: 'install',
+      status: 'in_progress',
+      reason: 'starting install',
+    });
+    expect(store.agentTasks.find((t) => t.id === 'install')?.status).toBe(
+      'in_progress',
+    );
+
+    // Second transition: install finishes, init begins.
+    await callTool(updateTool, {
+      id: 'install',
+      status: 'done',
+      reason: 'install complete',
+    });
+    await callTool(updateTool, {
+      id: 'init',
+      status: 'in_progress',
+      reason: 'starting init',
+    });
+    expect(store.agentTasks.find((t) => t.id === 'install')?.status).toBe(
+      'done',
+    );
+    expect(store.agentTasks.find((t) => t.id === 'init')?.status).toBe(
+      'in_progress',
+    );
+    expect(store.agentTasks.find((t) => t.id === 'wire')?.status).toBe(
+      'pending',
+    );
+  });
+});

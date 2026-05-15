@@ -131,6 +131,27 @@ The wizard runs explicit cleanup hooks AFTER your run (see \`cleanupIntegrationS
   'When running Grep to discover analytics patterns or instrumentation surfaces, always pass `head_limit: 20` and exclude `node_modules/**`, `dist/**`, `build/**`, `**/*.test.*`, `**/*.spec.*` via the `glob` parameter. If the unfiltered result is large, use `output_mode: "count"` first to size the search, then narrow the pattern or path before requesting filenames. Wide unfiltered Grep results trigger context compaction and slow the run.',
 
   'Lint / format / build at end-of-run MUST be scoped to files you edited — pass explicit paths to `npx prettier --write <files>` / `npx eslint --fix <files>` / `npx tsc --noEmit`. Project-wide commands (`npm run build` / `npm run lint` / `pnpm lint` / `yarn lint` / `npx prettier --write .`) are forbidden — they hang on large repos. Rationale, time budget (combined <60s), and the third-attempt stop rule: read `.claude/skills/wizard-prompt-supplement/references/lint-scoping.md`.',
+
+  `Self-reported task list — separate from \`TodoWrite\` (the canonical 4-step skeleton). You MUST surface YOUR OWN plan to the user via the wizard-tools \`set_agent_tasks\` and \`update_agent_task\` MCP functions so they can see what you are actually doing, not just spinner state.
+
+Lifecycle:
+  - **Start of every run**: after you have inspected the codebase enough to plan (typically right after the discovery batch), call \`set_agent_tasks\` with your initial plan. Use 5-12 tasks; each task should take 30 seconds to 2 minutes of agent work. Tasks must be SPECIFIC AND OBSERVABLE — name the file or the concrete action ("Add @amplitude/analytics-browser import to src/index.tsx"), NOT a category ("Install SDK").
+  - **Before starting a task**: call \`update_agent_task\` with that task's id and status="in_progress".
+  - **After completing a task**: call \`update_agent_task\` with status="done".
+  - **If the plan changes mid-run** (e.g. you discover another file that needs wiring, or a step you planned is no longer needed): call \`set_agent_tasks\` again with a FRESH FULL LIST. Do not try to patch around the old plan.
+
+Granularity guidance — coarser than tool calls (don't write a row for "Read package.json"), finer than the wizard's 4-step skeleton ("Install SDK" is too coarse — break it into the specific files / commands you will run). Good examples:
+  - "Add @amplitude/unified install to package.json via pnpm add"
+  - "Initialize Amplitude in src/main.tsx with API key from env"
+  - "Wire signup track call in components/SignupForm.tsx onSubmit"
+  - "Update amplitude-setup-report.md with instrumented events"
+
+Bad examples (too coarse or unobservable):
+  - "Set things up"
+  - "Do the work"
+  - "Install SDK" (which file? which package manager?)
+
+Distinct from \`TodoWrite\`: that drives the canonical 4-step skeleton ("Detect / Install / Plan / Wire"). This drives a SEPARATE list rendered below the skeleton in the wizard's RunScreen.`,
 ];
 
 /**
