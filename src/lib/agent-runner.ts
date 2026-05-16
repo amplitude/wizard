@@ -1968,6 +1968,45 @@ async function runAgentWizardBody(
   // Commit the instrumented event plan to the Amplitude tracking plan as
   // planned events so the names show up in the Data tab immediately — even
   // before any track() call fires in the user's app.
+  // Pagination breadcrumb (SCALE_RESEARCH §C.2 + LLM_RELIABILITY_RESEARCH §B.2):
+  // capture how many planned events the agent emitted and whether the run
+  // crossed the pagination threshold. This lets us see how often >50-event
+  // codebases hit the wizard before the chunked write phase is end-to-end
+  // wired through the SDK (the schema + tools land in this PR; the
+  // multi-session driver is a follow-up — see PR description).
+  // Pagination breadcrumb is fire-and-forget — wrap in try/catch so a failed
+  // dynamic import or unexpected runtime error here can never block the
+  // critical commitPlannedEventsStep that follows. Without this guard a
+  // module-load issue or analytics throw would prevent the user's approved
+  // event plan from being committed to the Amplitude tracking plan.
+  try {
+    const eventCount = agentResult.plannedEvents?.length ?? 0;
+    const { shouldPaginate, resolveChunkSize, buildBatches } = await import(
+      './event-plan-pagination.js'
+    );
+    const paginated = shouldPaginate(eventCount);
+    const chunkSize = resolveChunkSize();
+    const totalBatches = paginated
+      ? buildBatches(eventCount, chunkSize).length
+      : 1;
+    logToFile(
+      `[agent-runner] event plan: ${eventCount} events, paginated=${paginated}, chunkSize=${chunkSize}, batches=${totalBatches}`,
+    );
+    analytics.wizardCapture('event plan paginated', {
+      'event count': eventCount,
+      paginated,
+      'chunk size': chunkSize,
+      'total batches': totalBatches,
+      integration: config.metadata.integration,
+    });
+  } catch (err) {
+    logToFile(
+      `[agent-runner] pagination breadcrumb failed (non-fatal): ${
+        err instanceof Error ? err.message : String(err)
+      }`,
+    );
+  }
+
   const plannedEventsSummary = await commitPlannedEventsStep(
     agentResult.plannedEvents ?? [],
     accessToken,

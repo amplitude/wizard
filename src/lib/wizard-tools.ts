@@ -14,7 +14,11 @@ import AdmZip from 'adm-zip';
 import { z } from 'zod';
 import { logToFile } from '../utils/debug';
 import { atomicWriteJSON } from '../utils/atomic-write';
-import { readLocalEventPlan } from './event-plan-parser.js';
+import {
+  readLocalEventPlan,
+  readLocalEventPlanRich,
+} from './event-plan-parser.js';
+import { MIN_CHUNK_SIZE, MAX_CHUNK_SIZE } from './event-plan-pagination.js';
 import { recordEventPlanDecision } from './agent/event-plan-feedback-state.js';
 import {
   ensureDir,
@@ -1001,10 +1005,31 @@ export function normalizeEventName(raw: string): string {
  *
  * Returns true on success, false on any filesystem error (the caller logs
  * but doesn't fail the tool call over persistence issues).
+ *
+ * Accepts the canonical `{name, description}` shape and also the richer
+ * `{name, description, callsites?: [{filePath, anchor?}]}` shape introduced
+ * by SCALE_RESEARCH §C.1 for the paginated write phase. The richer shape
+ * persists the planned call-site so the agent can re-read it and resume
+ * after a context compaction without re-deriving placement from scratch.
+ * Optional fields are dropped from the on-disk JSON when absent so the
+ * file stays scannable for small projects.
  */
+export interface PersistableEvent {
+  name: string;
+  description: string;
+  /**
+   * Optional planned call-sites for this event. Each entry pairs an absolute
+   * or repo-relative `filePath` with a short `anchor` (function/handler name)
+   * the agent can grep for if the line shifts. Used by paginated write phase
+   * (>50 events) so the rich plan survives compaction. Absent for
+   * single-batch runs to keep the file lightweight.
+   */
+  callsites?: Array<{ filePath: string; anchor?: string }>;
+}
+
 export function persistEventPlan(
   workingDirectory: string,
-  events: Array<{ name: string; description: string }>,
+  events: ReadonlyArray<PersistableEvent>,
 ): boolean {
   try {
     // Refuse to materialize an event plan in a directory the wizard wasn't
@@ -1018,7 +1043,23 @@ export function persistEventPlan(
       return false;
     }
     ensureDir(getProjectMetaDir(workingDirectory), 0o755);
-    atomicWriteJSON(getEventsFile(workingDirectory), events);
+    // Strip empty/undefined callsites so the on-disk JSON stays minimal for
+    // small projects (the field is purely additive — readers that don't
+    // know about it ignore it). Callsites are kept as-emitted otherwise.
+    const normalized = events.map((e) => {
+      const out: PersistableEvent = {
+        name: e.name,
+        description: e.description,
+      };
+      if (e.callsites && e.callsites.length > 0) {
+        out.callsites = e.callsites.map((c) => ({
+          filePath: c.filePath,
+          ...(c.anchor !== undefined ? { anchor: c.anchor } : {}),
+        }));
+      }
+      return out;
+    });
+    atomicWriteJSON(getEventsFile(workingDirectory), normalized);
     return true;
   } catch (err) {
     logToFile(
@@ -1974,7 +2015,9 @@ You MUST NOT ask the user clarifying questions in response to feedback. Make a r
 Reminder: every track() call you ship MUST include 1-3 user-meaningful properties (rules in the system prompt). The Setup Report MUST reconcile every approved-plan event into Instrumented / Autocaptured / Dropped buckets with totals matching the plan size.
 
 If the user gives feedback, revise your plan and call this tool again — loop until approved or skipped.
-Returns: "approved", "skipped", or "feedback: <user message>"`,
+Returns: "approved", "skipped", or "feedback: <user message>".
+
+For codebases with >50 events the wizard runs the WRITE phase in chunks of ~25 events at a time. You can supply optional batchIndex/totalBatches/chunkSize fields to label the proposed plan as paginated; absent them the wizard treats the events array as a single full plan (existing behavior). Each event may also carry a callsites[] array — when present it's persisted to .amplitude/events.json so the rich plan survives a context compaction.`,
     {
       events: z
         .array(
@@ -1989,17 +2032,104 @@ Returns: "approved", "skipped", or "feedback: <user message>"`,
               .describe(
                 'One short sentence (≤20 words) stating when this event fires. Do NOT include file paths, property lists, autocapture rationale, or implementation notes — those belong in internal planning, not in the user-facing plan.',
               ),
+            callsites: z
+              .array(
+                z.object({
+                  filePath: z
+                    .string()
+                    .describe(
+                      'Repo-relative path to the file where this event will be instrumented (e.g. "src/app/checkout/page.tsx"). Used to keep the rich plan recoverable across context compaction.',
+                    ),
+                  anchor: z
+                    .string()
+                    .optional()
+                    .describe(
+                      'Optional handler/function name the track() call will go inside (e.g. "onSubmit"). Survives line-number drift better than a numeric line.',
+                    ),
+                }),
+              )
+              .optional()
+              .describe(
+                'Optional list of planned call-sites for this event. Persisted to .amplitude/events.json as recovery context for paginated write phases.',
+              ),
           }),
         )
         .min(1)
         .describe('The list of events you plan to instrument'),
+      decision: z
+        .enum(['confirm', 'edit', 'skip'])
+        .optional()
+        .describe(
+          'Optional self-declared intent. Forward-compatible field — the wizard still routes the user-facing prompt through the TUI. "confirm" = ask the user to approve, "edit" = the agent has revised an earlier plan, "skip" = the agent wants to skip the review (the user still has final say).',
+        ),
+      batchIndex: z
+        .number()
+        .int()
+        .min(0)
+        .optional()
+        .describe(
+          '0-indexed batch number when the plan is paginated. Must be < totalBatches. Absent for single-batch plans (legacy shape).',
+        ),
+      totalBatches: z
+        .number()
+        .int()
+        .min(1)
+        .optional()
+        .describe(
+          'Total number of batches in the paginated plan. Absent for single-batch plans (legacy shape).',
+        ),
+      chunkSize: z
+        .number()
+        .int()
+        .min(MIN_CHUNK_SIZE)
+        .max(MAX_CHUNK_SIZE)
+        .optional()
+        .describe(
+          `Events per batch (declared by the agent for transparency). Default 25; configurable via AMPLITUDE_WIZARD_EVENT_PLAN_CHUNK_SIZE. Must be in [${MIN_CHUNK_SIZE}, ${MAX_CHUNK_SIZE}] to match the validator. Omit for single-batch (legacy) plans. The runner is the source of truth for chunking — this field is informational.`,
+        ),
       reason: reasonField,
     },
     async (args: {
-      events: Array<{ name: string; description: string }>;
+      events: Array<{
+        name: string;
+        description: string;
+        callsites?: Array<{ filePath: string; anchor?: string }>;
+      }>;
+      decision?: 'confirm' | 'edit' | 'skip';
+      batchIndex?: number;
+      totalBatches?: number;
+      chunkSize?: number;
       reason: string;
     }) => {
       const { DEMO_MODE } = await import('./constants.js');
+      // Validate optional batch metadata before any other work. We reject
+      // structurally-invalid combinations (batchIndex without totalBatches,
+      // batchIndex >= totalBatches, etc.) at the tool boundary so a typo in
+      // the agent's call doesn't silently produce a malformed plan on disk.
+      // Pure helper — see src/lib/event-plan-pagination.ts.
+      const { validateBatchMetadata } = await import(
+        './event-plan-pagination.js'
+      );
+      const batchError = validateBatchMetadata({
+        batchIndex: args.batchIndex,
+        totalBatches: args.totalBatches,
+        chunkSize: args.chunkSize,
+        eventCount: args.events.length,
+      });
+      if (batchError) {
+        logToFile(`confirm_event_plan: rejected batch metadata: ${batchError}`);
+        return toWizardToolErrorContent({
+          error: `invalid batch metadata — ${batchError}`,
+          guidance:
+            'Re-call without batch fields (batchIndex / totalBatches / chunkSize) to fall back to single-batch behavior, or fix the metadata and retry. batchIndex must be < totalBatches; both must be present together; chunkSize must be a positive integer when supplied.',
+          suggestedTool: 'mcp__wizard-tools__confirm_event_plan',
+          context: `batchIndex: ${String(
+            args.batchIndex,
+          )}; totalBatches: ${String(args.totalBatches)}; chunkSize: ${String(
+            args.chunkSize,
+          )}; eventCount: ${args.events.length}`,
+        });
+      }
       // Soft-gate the name format. Agents historically saw conflicting
       // guidance (commandments said Title Case, the tool schema said
       // lowercase) and emitted mixed shapes — so we still want to
@@ -2015,9 +2145,21 @@ Returns: "approved", "skipped", or "feedback: <user message>"`,
           ? original.replace(/\s+/g, ' ')
           : normalizeEventName(original);
         if (normalized !== original) normalizationCount += 1;
+        // Preserve callsites verbatim — they're additive, used by the
+        // paginated write phase for compaction-recovery context. We trim
+        // filePath for safety but otherwise don't shape them here.
+        const callsites = e.callsites
+          ?.filter((c) => c.filePath && c.filePath.trim().length > 0)
+          .map((c) => ({
+            filePath: c.filePath.trim(),
+            ...(c.anchor && c.anchor.trim().length > 0
+              ? { anchor: c.anchor.trim() }
+              : {}),
+          }));
         return {
           name: normalized,
           description: e.description?.trim() || '',
+          ...(callsites && callsites.length > 0 ? { callsites } : {}),
         };
       });
       if (normalizationCount > 0) {
@@ -2029,13 +2171,24 @@ Returns: "approved", "skipped", or "feedback: <user message>"`,
         DEMO_MODE && normalizedEvents.length > 5
           ? normalizedEvents.slice(0, 5)
           : normalizedEvents;
+      const batchTag =
+        args.batchIndex !== undefined && args.totalBatches !== undefined
+          ? ` batch=${args.batchIndex + 1}/${args.totalBatches}`
+          : '';
       logToFile(
         `confirm_event_plan: ${events.length} events${
           DEMO_MODE ? ' (demo mode)' : ''
-        }`,
+        }${batchTag}`,
       );
+      // Strip callsites from the plan handed to the UI — the user-facing
+      // prompt only needs name + description; callsites are an internal
+      // recovery artifact persisted to disk.
+      const uiEvents = events.map(({ name, description }) => ({
+        name,
+        description,
+      }));
       const decision: EventPlanDecision = await withActiveUserPrompt(() =>
-        getUI().promptEventPlan(events),
+        getUI().promptEventPlan(uiEvents),
       );
       let text: string;
       if (decision.decision === 'revised') {
@@ -2059,14 +2212,129 @@ Returns: "approved", "skipped", or "feedback: <user message>"`,
       // watcher and return-run loader see the same {name, description} shape
       // regardless of what the agent would otherwise emit. Only write on
       // approved to avoid overwriting a prior good plan with a rejected one.
+      //
+      // Paginated plans: batchIndex 0 (or absent) is always a fresh write;
+      // subsequent batches MERGE into the existing file by name so the
+      // call-site annotations from later batches accumulate without
+      // dropping events confirmed in earlier batches.
       if (decision.decision === 'approved') {
-        const persisted = persistEventPlan(workingDirectory, events);
+        const isFirstBatch =
+          args.batchIndex === undefined || args.batchIndex === 0;
+        let toPersist: typeof events = events;
+        if (!isFirstBatch) {
+          // Merge with existing on-disk plan so we don't lose earlier batches.
+          // Use the rich reader that preserves callsites so annotations from
+          // prior batches accumulate across compaction boundaries. `null`
+          // means missing/unparseable on disk — in that case there's nothing
+          // to merge and we just persist the new batch on its own.
+          const existing = readLocalEventPlanRich(workingDirectory) ?? [];
+          const byName = new Map<
+            string,
+            {
+              name: string;
+              description: string;
+              callsites?: Array<{ filePath: string; anchor?: string }>;
+            }
+          >();
+          for (const e of existing) byName.set(e.name, e);
+          for (const e of events) byName.set(e.name, e);
+          toPersist = Array.from(byName.values()) as typeof events;
+        }
+        const persisted = persistEventPlan(workingDirectory, toPersist);
         logToFile(
-          `confirm_event_plan: persist=${persisted} events=${events.length}`,
+          `confirm_event_plan: persist=${persisted} events=${toPersist.length}${batchTag}`,
         );
       }
-      logToFile(`confirm_event_plan result: ${text}`);
+      logToFile(`confirm_event_plan result: ${text}${batchTag}`);
       return { content: [{ type: 'text' as const, text }] };
+    },
+  );
+
+  // -- propose_event_plan ---------------------------------------------------
+  // Lightweight pre-flight tool the agent calls when it has a list of
+  // candidate events and wants the wizard to compute a batching strategy
+  // BEFORE entering the user-facing confirm_event_plan flow. For small
+  // projects (≤50 events) the response says "single batch, just call
+  // confirm_event_plan with the whole list" — preserving today's behavior.
+  // For larger projects it returns suggested batch boundaries the runner
+  // will use to drive the chunked write phase (SCALE_RESEARCH §C.2).
+  //
+  // This tool is read-only: it does not persist anything, does not block on
+  // the user, and does not call into the UI. Its sole purpose is to push
+  // chunking math out of the agent's head.
+  const proposeEventPlan = tool(
+    'propose_event_plan',
+    `Compute the recommended batching strategy for a candidate event list BEFORE asking the user to confirm.
+
+Call this tool when you have ≥1 candidate event and want the wizard to tell you how to chunk the write phase. Returns JSON: { totalEvents, paginated, chunkSize, suggestedBatches: [{batchIndex, totalBatches, start, end, eventNames}] }.
+
+For small plans (≤50 events) suggestedBatches has a single entry covering all events. For larger plans the wizard splits into chunks of ~25 events (configurable via AMPLITUDE_WIZARD_EVENT_PLAN_CHUNK_SIZE) so each batch can be confirmed and instrumented under fresh context — avoiding context rot at ~120 events and compaction-induced plan amnesia at ~200 events.
+
+This tool does not persist or prompt; it's a pure computation. Follow up with confirm_event_plan(events, batchIndex, totalBatches) per batch.`,
+    {
+      events: z
+        .array(
+          z.object({
+            name: z
+              .string()
+              .describe(
+                'Title Case event name (same shape as confirm_event_plan).',
+              ),
+            description: z
+              .string()
+              .optional()
+              .describe('Optional one-line description.'),
+          }),
+        )
+        .min(1)
+        .describe(
+          'The candidate event list, in the order they should be batched.',
+        ),
+      reason: reasonField,
+    },
+    async (args: {
+      events: Array<{ name: string; description?: string }>;
+      reason: string;
+    }) => {
+      const { buildBatches, resolveChunkSize, shouldPaginate } = await import(
+        './event-plan-pagination.js'
+      );
+      const totalEvents = args.events.length;
+      const chunkSize = resolveChunkSize();
+      const paginated = shouldPaginate(totalEvents);
+      // Below the threshold we still emit a single batch entry so the
+      // schema is uniform — the agent can iterate the array unconditionally.
+      // For non-paginated plans use max(totalEvents, 1) for the build call so
+      // we always get one batch covering [0, totalEvents). The reported
+      // `chunkSize` always echoes the resolved (validator-compatible) value
+      // so an agent can hand it straight to confirm_event_plan without
+      // tripping the chunkSize ≥ MIN_CHUNK_SIZE check on small projects.
+      const effectiveChunk = paginated ? chunkSize : Math.max(totalEvents, 1);
+      const batches = buildBatches(totalEvents, effectiveChunk);
+      const suggestedBatches = batches.map((b) => ({
+        batchIndex: b.batchIndex,
+        totalBatches: b.totalBatches,
+        start: b.start,
+        end: b.end,
+        eventNames: args.events.slice(b.start, b.end).map((e) => e.name),
+      }));
+      // Report the resolved (validator-compatible) chunkSize unconditionally.
+      // When paginated is false the field is informational — the agent will
+      // skip batch metadata entirely. Echoing the resolved default avoids
+      // returning a value (e.g. 1–4 for a tiny project) that confirm_event_plan
+      // would reject as below MIN_CHUNK_SIZE if the agent forwarded it.
+      const payload = {
+        totalEvents,
+        paginated,
+        chunkSize,
+        suggestedBatches,
+      };
+      logToFile(
+        `propose_event_plan: total=${totalEvents} paginated=${paginated} chunkSize=${chunkSize} effectiveChunk=${effectiveChunk} batches=${batches.length}`,
+      );
+      return {
+        content: [{ type: 'text' as const, text: JSON.stringify(payload) }],
+      };
     },
   );
 
@@ -2441,6 +2709,7 @@ Returns: "ok: <planId>" on successful persistence, an error string otherwise. Id
       confirm,
       choose,
       confirmEventPlan,
+      proposeEventPlan,
       reportStatus,
       recordDashboard,
       // PR 2 of DEFER_DASHBOARD_PLAN: additive — registered so it is
@@ -2469,6 +2738,10 @@ export const WIZARD_TOOL_NAMES = [
   `${SERVER_NAME}:confirm`,
   `${SERVER_NAME}:choose`,
   `${SERVER_NAME}:confirm_event_plan`,
+  // Lightweight pre-flight that returns suggested batch boundaries for the
+  // agent. Call this BEFORE confirm_event_plan when the candidate list is
+  // ≥1 event — the response tells you whether to single-batch or paginate.
+  `${SERVER_NAME}:propose_event_plan`,
   `${SERVER_NAME}:report_status`,
   `${SERVER_NAME}:record_dashboard`,
   // PR 2 of DEFER_DASHBOARD_PLAN: registered so the agent CAN call it,
