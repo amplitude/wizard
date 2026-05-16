@@ -15,7 +15,10 @@ import { z } from 'zod';
 import { logToFile } from '../utils/debug';
 import { atomicWriteJSON } from '../utils/atomic-write';
 import { readLocalEventPlan } from './event-plan-parser.js';
-import { recordEventPlanDecision } from './agent/event-plan-feedback-state.js';
+import {
+  getLatestEventPlanDecision,
+  recordEventPlanDecision,
+} from './agent/event-plan-feedback-state.js';
 import {
   ensureDir,
   getDashboardFile,
@@ -79,6 +82,117 @@ export {
 
 let activeUserPromptCount = 0;
 const promptReleaseListeners = new Set<() => void>();
+
+/**
+ * One-shot guard so the `agent plan declared` Amplitude event fires
+ * once per wizard run — at the first `set_agent_tasks` call. Mid-run
+ * plan revisions (the agent discovers another file to wire and calls
+ * `set_agent_tasks` again with a bigger list) shouldn't count as new
+ * declarations for the telemetry channel.
+ *
+ * Reset via `__resetFirstAgentPlanForTests` so unit tests for the tool
+ * can assert the gate.
+ */
+let firstAgentPlanFired = false;
+
+/** Test-only: reset the `agent plan declared` one-shot guard. */
+export function __resetFirstAgentPlanForTests(): void {
+  firstAgentPlanFired = false;
+}
+
+// ---------------------------------------------------------------------------
+// Event-wiring task ordering guard
+// ---------------------------------------------------------------------------
+//
+// PR #801 introduced the agent self-reported task list (`set_agent_tasks` /
+// `update_agent_task`). A subsequent live-run report (a user screenshot
+// showed three agent tasks already marked `done` — one of them being
+// "Wire track() calls for AI Diagram Generated in
+// excalidraw-app/components/AI.tsx" — BEFORE `confirm_event_plan` had been
+// called and approved) revealed that the agent will speculatively (or in
+// some cases, prematurely) mark wiring rows complete before the user has
+// approved the event plan. That is a serious trust failure: the wizard
+// renders "done" next to instrumentation the user never approved.
+//
+// This guard runs at the tool boundary. It blocks two specific transitions
+// when the most recent `confirm_event_plan` outcome is anything other than
+// `approved`:
+//   1. `set_agent_tasks` containing a wire-event-shaped task with an
+//      initial status of `in_progress` or `done`.
+//   2. `update_agent_task` transitioning a wire-event-shaped row to
+//      `in_progress` or `done`.
+//
+// Approved-state lookup uses the process-singleton in
+// `event-plan-feedback-state.ts` (already maintained by `confirm_event_plan`).
+// The guard returns a structured `toWizardToolErrorContent` payload — the
+// agent reads the `guidance` field and self-corrects rather than crashing.
+
+/**
+ * Heuristic: does this task title describe writing an Amplitude SDK call
+ * site into user code? The patterns deliberately match the verbs and
+ * tokens the agent uses for wiring work — `wire`, `track(`, `identify(`,
+ * `setGroup(`, `instrument`, or an explicit `event:` qualifier.
+ *
+ * Case-insensitive. The match is intentionally narrow — neutral phases
+ * like "Detect framework", "Install SDK", "Initialize Amplitude", or
+ * "Plan events to track" pass freely so the agent's pre-approval plan
+ * (discovery + install + plan) stays unrestricted.
+ *
+ * Exported for the unit tests; not part of the public API.
+ */
+export function isEventWiringTitle(title: string): boolean {
+  if (!title) return false;
+  // `instrument` matches as a stem so `instrumenting` / `instrumented` are
+  // caught alongside `instrument`. `wire` stays a whole-word match so
+  // unrelated tokens like `wireframe` don't trip the guard.
+  return /\bwire\b|\binstrument|track\(|identify\(|setGroup\(|\bevent:/i.test(
+    title,
+  );
+}
+
+type AgentTaskOrderingViolationType =
+  | 'pre_approval_initial_status'
+  | 'pre_approval_in_progress'
+  | 'pre_approval_done';
+
+/**
+ * Fire `agent task ordering violation` to Amplitude so we can measure how
+ * common this is. Lazy-imports to avoid a static dependency cycle on the
+ * analytics client (same pattern `agent plan declared` uses).
+ */
+function emitAgentTaskOrderingViolation(args: {
+  violation_type: AgentTaskOrderingViolationType;
+  task_title: string;
+}): void {
+  void (async () => {
+    try {
+      const { analytics } = await import('../utils/analytics.js');
+      analytics.wizardCapture('agent task ordering violation', {
+        'violation type': args.violation_type,
+        'task title': args.task_title.slice(0, 160),
+      });
+    } catch (err) {
+      logToFile(
+        `agent task ordering violation: analytics emit failed: ${
+          err instanceof Error ? err.message : String(err)
+        }`,
+      );
+    }
+  })();
+}
+
+/**
+ * Has the user approved the most recent event plan? `confirm_event_plan`
+ * publishes outcomes to a process-local singleton; this is a thin read
+ * over that state. `null` (the agent has never called the tool) and any
+ * non-`approved` decision (`skipped` / `feedback`) both count as
+ * not-approved — wiring tasks cannot transition until an explicit approve
+ * lands.
+ */
+function isEventPlanApproved(): boolean {
+  const latest = getLatestEventPlanDecision();
+  return latest?.decision === 'approved';
+}
 
 /**
  * True while at least one blocking wizard-tools user prompt
@@ -2424,6 +2538,273 @@ Returns: "ok: <planId>" on successful persistence, an error string otherwise. Id
     },
   );
 
+  // -- set_agent_tasks ------------------------------------------------------
+  //
+  // The agent declares its own task list at the start of a run and updates
+  // it as work progresses. Distinct from the wizard's canonical 4-step
+  // skeleton (`Detect / Install / Plan / Wire`), this surfaces the agent's
+  // actual plan ("Add @amplitude/analytics-browser import to src/index.tsx")
+  // so the user sees what the agent is thinking, not just that it's still
+  // spinning. Rendered in the RunScreen below the canonical task list.
+  //
+  // Granularity: 5-12 tasks per run. Each task should take 30 seconds to
+  // 2 minutes of agent work — coarser than tool calls, finer than the
+  // wizard's 4-step skeleton.
+  //
+  // Per-server cache of the latest agent task list. The UI doesn't surface
+  // the current list back to the tool layer, so `update_agent_task` would
+  // otherwise have no way to look up a task's title for the ordering
+  // guard. Kept inside the closure so each `createWizardToolsServer`
+  // instance has its own state; resetting only requires a fresh server.
+  const agentTaskTitleById = new Map<string, string>();
+
+  const setAgentTasks = tool(
+    'set_agent_tasks',
+    `Declare the agent's task list for this run, replacing any prior list wholesale. Call this ONCE at the start of every run after inspecting the codebase enough to plan, and again whenever the plan changes mid-run (e.g. you discover another file that needs wiring).
+
+Tasks must be specific and observable — name the file or the concrete action ("Add @amplitude/analytics-browser import to src/index.tsx", NOT "Install SDK"). Aim for 5-12 tasks per run; each should take roughly 30 seconds to 2 minutes of agent work.
+
+Distinct from \`TodoWrite\`: that drives the canonical 4-step wizard skeleton. This tool drives a SEPARATE list rendered below the skeleton so the user sees your actual plan.
+
+Returns: "ok: N tasks" on success.`,
+    {
+      tasks: z
+        .array(
+          z.object({
+            id: z
+              .string()
+              .min(1)
+              .max(120)
+              .describe(
+                'Stable handle for this row, used by `update_agent_task`. Pick anything unique within this list (e.g. "init-sdk", "wire-signup-track"). Must be non-empty.',
+              ),
+            title: z
+              .string()
+              .min(1)
+              .max(160)
+              .describe(
+                'Short, specific, observable description of the work. Name files or concrete actions ("Add Amplitude import to src/main.tsx"), not categories ("Install SDK").',
+              ),
+            status: z
+              .enum(['pending', 'in_progress', 'done'])
+              .describe(
+                'Initial status — `pending` for not-yet-started rows, `in_progress` for the one you are about to start, `done` if you already completed it.',
+              ),
+          }),
+        )
+        .min(1)
+        .max(20)
+        .describe(
+          'The full task list. 5-12 entries is the sweet spot. Replaces any prior list.',
+        ),
+      reason: reasonField,
+    },
+    (args: {
+      tasks: Array<{
+        id: string;
+        title: string;
+        status: 'pending' | 'in_progress' | 'done';
+      }>;
+      reason: string;
+    }) => {
+      // Reject duplicate ids — the agent owns the namespace but a dupe
+      // makes `update_agent_task` ambiguous.
+      const ids = new Set<string>();
+      for (const t of args.tasks) {
+        if (ids.has(t.id)) {
+          return toWizardToolErrorContent({
+            error: `duplicate task id: ${t.id}`,
+            guidance: `Every task id must be unique within the list. Rename one of the duplicates and retry.`,
+            suggestedTool: 'mcp__wizard-tools__set_agent_tasks',
+            context: `tasks: ${args.tasks.length}`,
+          });
+        }
+        ids.add(t.id);
+      }
+
+      // Event-wiring task ordering guard: pre-approval task lists may
+      // include wire-event rows ONLY at status="pending" — never seeded
+      // with in_progress / done. Approval lookup uses the same singleton
+      // `confirm_event_plan` populates. See `isEventWiringTitle` and the
+      // commandment block for rationale.
+      if (!isEventPlanApproved()) {
+        const violating = args.tasks.find(
+          (t) => isEventWiringTitle(t.title) && t.status !== 'pending',
+        );
+        if (violating) {
+          emitAgentTaskOrderingViolation({
+            violation_type: 'pre_approval_initial_status',
+            task_title: violating.title,
+          });
+          return toWizardToolErrorContent({
+            error: `event-wiring task seeded with status="${violating.status}" before event plan approval`,
+            guidance:
+              'Event-wiring tasks (anything that adds track(), identify(), setGroup(), or other Amplitude SDK call sites) cannot be seeded with status="in_progress" or "done" until confirm_event_plan has been called AND the user has approved the plan. Re-call set_agent_tasks with this row set to "pending" (or omit it entirely until approval lands), then call confirm_event_plan. After approval, you can transition the wiring rows normally.',
+            suggestedTool: 'mcp__wizard-tools__confirm_event_plan',
+            context: `task: ${violating.title}; status: ${violating.status}`,
+          });
+        }
+      }
+
+      logToFile(`set_agent_tasks: ${args.tasks.length} tasks`);
+
+      // Refresh the per-server title cache so `update_agent_task` can
+      // look titles up for the ordering guard. Wholesale replacement
+      // mirrors the UI semantics (each set_agent_tasks call replaces the
+      // list).
+      agentTaskTitleById.clear();
+      for (const t of args.tasks) {
+        agentTaskTitleById.set(t.id, t.title);
+      }
+
+      try {
+        getUI().setAgentTasks(args.tasks);
+      } catch (err) {
+        logToFile(
+          `set_agent_tasks: ui.setAgentTasks failed: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+      }
+
+      // Telemetry: capture the first plan declaration per run so we can
+      // measure how often the agent actually plans vs falls back to
+      // ad-hoc tool calls. Lazy-import to avoid a static dependency
+      // cycle on the analytics client.
+      void (async () => {
+        try {
+          if (firstAgentPlanFired) return;
+          firstAgentPlanFired = true;
+          const { analytics } = await import('../utils/analytics.js');
+          analytics.wizardCapture('agent plan declared', {
+            'task count': args.tasks.length,
+          });
+        } catch (err) {
+          logToFile(
+            `set_agent_tasks: analytics emit failed: ${
+              err instanceof Error ? err.message : String(err)
+            }`,
+          );
+        }
+      })();
+
+      return {
+        content: [
+          { type: 'text' as const, text: `ok: ${args.tasks.length} tasks` },
+        ],
+      };
+    },
+  );
+
+  // -- update_agent_task ----------------------------------------------------
+  //
+  // Patch a single agent task by id. Called as the agent transitions a row
+  // through `pending → in_progress → done`. Returns an error response if
+  // the id was never declared via `set_agent_tasks` — the agent must seed
+  // the list before patching it.
+  const updateAgentTask = tool(
+    'update_agent_task',
+    `Update a single agent task's status by id. Call this with status="in_progress" BEFORE starting work on a task, and with status="done" AFTER completing it. The id must match an entry from your most recent \`set_agent_tasks\` call.
+
+If the plan changes mid-run (you discover another file to wire, or a step you planned is no longer needed), call \`set_agent_tasks\` again with a fresh full list instead of trying to patch.
+
+Returns: "ok" on success, an error response if the id is unknown.`,
+    {
+      id: z
+        .string()
+        .min(1)
+        .max(120)
+        .describe(
+          'The id of the task to update — must match an entry from the most recent `set_agent_tasks` call.',
+        ),
+      status: z
+        .enum(['pending', 'in_progress', 'done'])
+        .describe(
+          'New status for the task. Transition `pending → in_progress` when you start work, `in_progress → done` when you finish.',
+        ),
+      title: z
+        .string()
+        .min(1)
+        .max(160)
+        .optional()
+        .describe(
+          'Optional updated title. Use when you want to refine the description as you learn more (e.g. a placeholder "wire signup" becomes "wire signup -> SignupForm.tsx onSubmit").',
+        ),
+      reason: reasonField,
+    },
+    (args: {
+      id: string;
+      status: 'pending' | 'in_progress' | 'done';
+      title?: string;
+      reason: string;
+    }) => {
+      logToFile(
+        `update_agent_task: id="${args.id}" status=${args.status}${
+          args.title ? ` title="${args.title}"` : ''
+        }`,
+      );
+
+      // Event-wiring task ordering guard: block in_progress / done
+      // transitions on wire-event rows until the user has approved the
+      // event plan. We look up the title from the per-server cache
+      // populated by `set_agent_tasks`; falling back to the optional
+      // refined title argument catches the case where the agent renames
+      // a row into wire-event shape on the same call.
+      if (args.status !== 'pending' && !isEventPlanApproved()) {
+        const cachedTitle = agentTaskTitleById.get(args.id) ?? '';
+        const effectiveTitle = args.title ?? cachedTitle;
+        if (effectiveTitle && isEventWiringTitle(effectiveTitle)) {
+          emitAgentTaskOrderingViolation({
+            violation_type:
+              args.status === 'done'
+                ? 'pre_approval_done'
+                : 'pre_approval_in_progress',
+            task_title: effectiveTitle,
+          });
+          return toWizardToolErrorContent({
+            error: `event-wiring task transitioned to "${args.status}" before event plan approval`,
+            guidance:
+              'Event-wiring tasks (anything that adds track(), identify(), setGroup(), or other Amplitude SDK call sites) cannot transition to "in_progress" or "done" until confirm_event_plan has been called AND the user has approved the plan. Call confirm_event_plan first; only after it returns "approved" may you transition the wiring rows.',
+            suggestedTool: 'mcp__wizard-tools__confirm_event_plan',
+            context: `task: ${effectiveTitle}; status: ${args.status}`,
+          });
+        }
+      }
+
+      // Title refinements land in the cache so subsequent updates see
+      // the latest text when re-checking the guard.
+      if (args.title !== undefined) {
+        agentTaskTitleById.set(args.id, args.title);
+      }
+
+      let ok = false;
+      try {
+        ok = getUI().updateAgentTask(args.id, {
+          status: args.status,
+          ...(args.title !== undefined ? { title: args.title } : {}),
+        });
+      } catch (err) {
+        logToFile(
+          `update_agent_task: ui.updateAgentTask failed: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+      }
+
+      if (!ok) {
+        return toWizardToolErrorContent({
+          error: `unknown task id: ${args.id}`,
+          guidance:
+            'No agent task with that id has been declared. Call `set_agent_tasks` first with the full task list, then call `update_agent_task` to transition rows.',
+          suggestedTool: 'mcp__wizard-tools__set_agent_tasks',
+          context: `id: ${args.id}; status: ${args.status}`,
+        });
+      }
+
+      return { content: [{ type: 'text' as const, text: 'ok' }] };
+    },
+  );
+
   // -- Assemble server ------------------------------------------------------
 
   const rawServer = createSdkMcpServer({
@@ -2448,6 +2829,8 @@ Returns: "ok: <planId>" on successful persistence, an error string otherwise. Id
       // in and retires `record_dashboard`.
       recordDashboardPlan,
       wizardFeedback,
+      setAgentTasks,
+      updateAgentTask,
     ],
   });
 
@@ -2475,6 +2858,8 @@ export const WIZARD_TOOL_NAMES = [
   // but no prompt copy references it yet. PR 4 wires it in.
   `${SERVER_NAME}:record_dashboard_plan`,
   `${SERVER_NAME}:wizard_feedback`,
+  `${SERVER_NAME}:set_agent_tasks`,
+  `${SERVER_NAME}:update_agent_task`,
 ];
 
 /**

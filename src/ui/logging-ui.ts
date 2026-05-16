@@ -284,6 +284,44 @@ export class LoggingUI implements WizardUI {
     // No-op in CI mode
   }
 
+  // Track the agent's last reported task list so we can log transitions.
+  private _agentTasks: Array<{
+    id: string;
+    title: string;
+    status: 'pending' | 'in_progress' | 'done';
+  }> = [];
+
+  setAgentTasks(
+    tasks: Array<{
+      id: string;
+      title: string;
+      status: 'pending' | 'in_progress' | 'done';
+    }>,
+  ): void {
+    this._agentTasks = tasks.map((t) => ({ ...t }));
+    console.log(`◌  agent plan: ${tasks.length} tasks`);
+  }
+
+  updateAgentTask(
+    id: string,
+    patch: {
+      status: 'pending' | 'in_progress' | 'done';
+      title?: string;
+    },
+  ): boolean {
+    const idx = this._agentTasks.findIndex((t) => t.id === id);
+    if (idx === -1) return false;
+    this._agentTasks[idx] = {
+      ...this._agentTasks[idx],
+      status: patch.status,
+      ...(patch.title !== undefined ? { title: patch.title } : {}),
+    };
+    console.log(
+      `◌  agent task ${patch.status}: ${this._agentTasks[idx].title}`,
+    );
+    return true;
+  }
+
   recordFileChangePlanned(data: {
     path: string;
     operation: 'create' | 'modify' | 'delete';

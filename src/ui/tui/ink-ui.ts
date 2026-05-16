@@ -306,6 +306,26 @@ export class InkUI implements WizardUI {
     this.store.setEventPlan(events);
   }
 
+  setAgentTasks(
+    tasks: Array<{
+      id: string;
+      title: string;
+      status: 'pending' | 'in_progress' | 'done';
+    }>,
+  ): void {
+    this.store.setAgentTasks(tasks);
+  }
+
+  updateAgentTask(
+    id: string,
+    patch: {
+      status: 'pending' | 'in_progress' | 'done';
+      title?: string;
+    },
+  ): boolean {
+    return this.store.updateAgentTask(id, patch);
+  }
+
   setEventIngestionDetected(_eventNames: string[]): void {
     // In TUI mode, DataIngestionCheckScreen handles this via polling — no-op here.
   }
