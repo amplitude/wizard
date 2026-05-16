@@ -4,6 +4,10 @@
  * Tabs:
  *   - Progress (default): full-width ProgressList, elapsed timer, currently
  *     editing file, inline event plan, and compact conditional tips
+ *   - Events (when a plan is proposed): EventPlanViewer
+ *   - Diff: persistent diff tab listing every file the agent has touched,
+ *     with a colored unified diff for the selected file. Replaces the
+ *     old `/diff <path>` slash command.
  *   - Logs: LogViewer tailing the wizard log file
  *   - Snake: easter egg game
  *
@@ -30,6 +34,7 @@ import {
 import type { ProgressItem } from '../primitives/index.js';
 import { Colors, Icons, SPINNER_FRAMES, SPINNER_INTERVAL } from '../styles.js';
 import { RetryStatusChip } from '../components/RetryBanner.js';
+import { DiffTab } from '../components/DiffTab.js';
 import { FileWritesPanel } from '../components/FileWritesPanel.js';
 import { FinalizingPanel } from '../components/FinalizingPanel.js';
 import { ActiveTaskSubsteps } from '../components/ActiveTaskSubsteps.js';
@@ -678,6 +683,18 @@ export const RunScreen = ({ store }: RunScreenProps) => {
           },
         ]
       : []),
+    // Persistent Diff tab — replaces the old `/diff <path>` slash
+    // command. Lives between Events and Logs so a user watching the
+    // agent work can jump from "what's it doing right now" (Progress)
+    // straight to "what did it actually write" without taking their
+    // hand off the keyboard. The tab subscribes narrowly to
+    // `fileWritesTotal` for ledger walks, so it doesn't add per-frame
+    // render cost on the Progress tab.
+    {
+      id: 'diff',
+      label: 'Diff',
+      component: <DiffTab store={store} />,
+    },
     {
       id: 'logs',
       label: 'Logs',

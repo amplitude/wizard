@@ -156,8 +156,8 @@ describe('FileWritesPanel', () => {
     const out = stripAnsi(lastFrame() ?? '');
     expect(out).toContain('2 written');
     // Header should not show the in-flight progress "X/Y" pattern. The
-    // "/diff" hint is allowed (it's a slash-command discoverability cue
-    // surfaced once at least one write has applied).
+    // "Diff tab" hint is allowed (it's a discoverability cue surfaced
+    // once at least one write has applied).
     expect(out).not.toMatch(/\d+\/\d+ written/);
   });
 
