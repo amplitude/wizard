@@ -7,8 +7,7 @@
  *
  *   - `supportsUnicode()` — true unless `WIZARD_FORCE_ASCII=1` is set or
  *     the runtime locale plainly excludes UTF-8.
- *   - `supportsTruecolor()` — true when `COLORTERM === 'truecolor'`,
- *     unless `WIZARD_FORCE_NO_COLOR=1` is set.
+ *   - `widthBucket(cols)` — maps a raw column count into named buckets.
  *
  * Kept inline in this PR because the design-kit-level
  * `useTerminalCapabilities()` hook (PR #783 of the closed redesign
@@ -21,11 +20,6 @@ export function supportsUnicode(): boolean {
     process.env.LC_ALL || process.env.LC_CTYPE || process.env.LANG || '';
   if (!lang) return true;
   return /utf-?8/i.test(lang);
-}
-
-export function supportsTruecolor(): boolean {
-  if (process.env.WIZARD_FORCE_NO_COLOR === '1') return false;
-  return process.env.COLORTERM === 'truecolor';
 }
 
 /**

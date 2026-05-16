@@ -38,21 +38,6 @@ export const voice = {
     return `editing ${shortPath(p)}`;
   },
 
-  /** `installing @amplitude/analytics-browser with pnpm` */
-  installing(pkg: string, mgr?: string): string {
-    return mgr ? `installing ${pkg} with ${mgr}` : `installing ${pkg}`;
-  },
-
-  /** `installed @amplitude/analytics-browser@2.x` */
-  installed(pkg: string): string {
-    return `installed ${pkg}`;
-  },
-
-  /** `wiring up Signup Completed` */
-  wiringEvent(name: string): string {
-    return `wiring up ${name}`;
-  },
-
   /** Idle / planning fallback for the voice line. */
   thinking(): string {
     return 'thinking…';
