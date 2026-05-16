@@ -195,15 +195,6 @@ export function getLegacyAmpliHomeOAuthPath(): string {
   return join(homedir(), '.ampli.json');
 }
 
-/**
- * Path for a downloaded skill bundle (zip). Lives under `os.tmpdir()` because
- * it's a transient download immediately extracted into `<installDir>/.claude/`.
- * `os.tmpdir()` is used (not literal `/tmp/`) so the wizard works on Windows.
- */
-export function skillDownloadPath(skillId: string): string {
-  return join(tmpdir(), `amplitude-skill-${skillId}.zip`);
-}
-
 // ── Per-project metadata dir (in user's project root) ─────────────────
 
 /** Per-project metadata dir: `<installDir>/.amplitude/`. */

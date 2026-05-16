@@ -40,7 +40,7 @@ export const MAX_CONSECUTIVE_BASH_DENIES = 5;
  * gets blocked with a clear "use the cached body" message that breaks
  * the loop instead of letting it burn turns.
  */
-export const MAX_LOAD_SKILL_PER_ID = 2;
+const MAX_LOAD_SKILL_PER_ID = 2;
 
 /** Matches `sleep <number>` at the start of a command or after a chain operator. */
 const SLEEP_COMMAND_PATTERN = /(?:^|[;&|\n]\s*)\s*sleep\s+(\d+(?:\.\d+)?)/i;

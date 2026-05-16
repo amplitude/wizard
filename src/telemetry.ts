@@ -20,7 +20,7 @@ export function traceStep<T>(step: string, callback: () => T): T {
   return withWizardSpan(`step.${step}`, 'wizard.step', { step }, callback);
 }
 
-export function updateProgress(step: string) {
+function updateProgress(step: string) {
   // Track progress as a session property so it reflects the current step
   // on all subsequent events (useful for debugging which step errored).
   analytics.setSessionProperty('progress', step);

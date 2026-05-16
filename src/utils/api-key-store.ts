@@ -66,27 +66,6 @@ function tightenEnvMode(envPath: string): void {
 
 const ENV_KEY_NAME = 'AMPLITUDE_API_KEY';
 
-// ── Test-only helpers ─────────────────────────────────────────────────
-//
-// These were used by the old keychain implementation to fake out binary
-// discovery and headless-Linux detection. The current implementation
-// has neither concept, so the helpers are kept as no-ops to avoid
-// breaking unit tests that import them. Drop after one release once
-// every test file has been updated.
-
-/** @deprecated No-op since the keychain backend was removed. */
-export function __setBinaryAvailableForTests(
-  _name: string,
-  _available: boolean | undefined,
-): void {
-  // Intentionally empty — preserved for test back-compat only.
-}
-
-/** @deprecated No-op since the keychain backend was removed. */
-export function __resetHeadlessCacheForTests(): void {
-  // Intentionally empty — preserved for test back-compat only.
-}
-
 // ── .env.local fallback ───────────────────────────────────────────────────────
 
 function envRead(installDir: string): string | null {

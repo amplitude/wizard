@@ -32,27 +32,9 @@ export function resolveTelemetryApiKey(): string {
 }
 
 /** HTTP API URL for `@amplitude/analytics-node` (same shape as manual HTTP ingest). */
-export function getAmplitudeNodeServerUrl(): string {
+function getAmplitudeNodeServerUrl(): string {
   const base = process.env.AMPLITUDE_SERVER_URL ?? 'https://api2.amplitude.com';
   return `${base.replace(/\/$/, '')}/2/httpapi`;
-}
-
-/**
- * Extract a standard property bag from the current session.
- * Used by store-level analytics and available for ad-hoc captures.
- */
-export function sessionProperties(
-  session: WizardSession,
-): Record<string, unknown> {
-  return {
-    integration: session.integration,
-    'detected framework': session.detectedFrameworkLabel,
-    typescript: session.typescript,
-    'app id': session.credentials?.appId,
-    'discovered features': session.discoveredFeatures,
-    'additional features': session.additionalFeatureQueue,
-    'run phase': session.runPhase,
-  };
 }
 
 /**
@@ -349,12 +331,6 @@ export class Analytics {
     }
   }
 }
-
-/**
- * Full Amplitude `event_type` for CLI/TUI product feedback.
- * Same string as `wizardCapture('feedback submitted', …)`.
- */
-export const WIZARD_FEEDBACK_EVENT_TYPE = 'wizard cli: feedback submitted';
 
 export const analytics = new Analytics();
 

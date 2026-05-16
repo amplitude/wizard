@@ -14,9 +14,7 @@ export const KEYS = {
   SPACE: ' ',
 };
 
-export const TEST_ARGS = {};
-
-export const log = {
+const log = {
   success: (message: string) => {
     green(`[SUCCESS] ${message}`);
   },
@@ -28,7 +26,7 @@ export const log = {
   },
 };
 
-export class WizardTestEnv {
+class WizardTestEnv {
   taskHandle: ChildProcess;
 
   constructor(
@@ -165,7 +163,7 @@ export class WizardTestEnv {
  * Initialize a git repository in the given directory
  * @param projectDir
  */
-export function initGit(projectDir: string): void {
+function initGit(projectDir: string): void {
   try {
     execSync('git init', { cwd: projectDir });
     // Add all files to the git repo
@@ -189,7 +187,7 @@ export function initGit(projectDir: string): void {
  * if in doubt, please commit your local non-test changes first!
  * @param projectDir
  */
-export function cleanupGit(projectDir: string): void {
+function cleanupGit(projectDir: string): void {
   try {
     // Remove the .git directory
     execSync(`rm -rf ${projectDir}/.git`);
@@ -207,7 +205,7 @@ export function cleanupGit(projectDir: string): void {
  *
  * @param projectDir
  */
-export function revertLocalChanges(projectDir: string): void {
+function revertLocalChanges(projectDir: string): void {
   try {
     // Revert tracked files
     execSync('git checkout .', { cwd: projectDir });
@@ -279,7 +277,7 @@ export function modifyFile(
  * @param {string} filePath
  * @param {(string | string[])} content
  */
-export function checkFileContents(
+function checkFileContents(
   filePath: string,
   content: string | string[],
 ) {

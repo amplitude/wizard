@@ -29,7 +29,7 @@ import * as path from 'node:path';
  * can reasonably operate on." Add new ones when adding new framework
  * support — keep this list aligned with `FRAMEWORK_REGISTRY`.
  */
-export const PROJECT_MARKER_FILES = [
+const PROJECT_MARKER_FILES = [
   'package.json',
   'pyproject.toml',
   'requirements.txt',
@@ -53,7 +53,7 @@ export const PROJECT_MARKER_FILES = [
  * even though the framework is supported and detected by
  * `detectUnityProject` (`src/frameworks/unity/utils.ts`).
  */
-export const PROJECT_MARKER_PATHS = [
+const PROJECT_MARKER_PATHS = [
   // Unity 2017+ — present in every Unity project
   'ProjectSettings/ProjectVersion.txt',
 ] as const;
@@ -65,7 +65,7 @@ export const PROJECT_MARKER_PATHS = [
  * doesn't work. We do a single non-recursive `readdir` and check
  * extensions; the cost is bounded by the number of files at the root.
  */
-export const PROJECT_MARKER_EXTENSIONS = [
+const PROJECT_MARKER_EXTENSIONS = [
   // Unreal Engine — project descriptor
   '.uproject',
 ] as const;

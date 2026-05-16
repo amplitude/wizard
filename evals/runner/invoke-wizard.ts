@@ -101,7 +101,7 @@ export type LiveAuthMode =
  * when neither path is configured — better than running in a default
  * mode and silently bypassing the gateway.
  */
-export function resolveLiveAuthMode(
+function resolveLiveAuthMode(
   options: InvokeWizardOptions,
 ): LiveAuthMode {
   const oauthToken = process.env.WIZARD_OAUTH_TOKEN;

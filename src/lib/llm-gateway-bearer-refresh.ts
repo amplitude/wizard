@@ -35,7 +35,7 @@
 import { logToFile } from '../utils/debug.js';
 
 /** How often the periodic refresh timer fires while the agent is running. */
-export const GATEWAY_BEARER_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
+const GATEWAY_BEARER_REFRESH_INTERVAL_MS = 5 * 60 * 1000;
 
 type McpServersConfig = Record<string, unknown>;
 

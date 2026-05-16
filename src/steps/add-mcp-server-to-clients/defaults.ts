@@ -21,7 +21,7 @@ export const DefaultMCPClientConfig = z
   })
   .passthrough();
 
-export const AVAILABLE_FEATURES = {
+const AVAILABLE_FEATURES = {
   'Data & Analytics': [
     {
       value: 'dashboards',

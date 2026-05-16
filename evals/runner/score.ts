@@ -47,7 +47,7 @@ import { scorer as l3BuildPasses } from '../scorers/layer3-build/build-passes.js
  * The full scorer stack. Order matters — Layer 0 runs first; if any
  * Layer 0 scorer hard-fails, downstream layers are skipped.
  */
-export const SCORERS: Scorer[] = [
+const SCORERS: Scorer[] = [
   // Layer 0 — hard-fail gate.
   l0NoHardcodedKey,
   l0CorrectSdk,

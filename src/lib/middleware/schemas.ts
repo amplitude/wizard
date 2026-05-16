@@ -30,7 +30,7 @@ import type {
 
 // ── Leaf schemas ────────────────────────────────────────────────────────────
 
-export const sdkUsageSchema: z.ZodType<SDKUsage> = z.object({
+const sdkUsageSchema: z.ZodType<SDKUsage> = z.object({
   input_tokens: z.number().optional(),
   output_tokens: z.number().optional(),
   cache_read_input_tokens: z.number().optional(),
@@ -44,7 +44,7 @@ export const sdkUsageSchema: z.ZodType<SDKUsage> = z.object({
   total_cost_usd: z.number().optional(),
 });
 
-export const sdkContentBlockSchema: z.ZodType<SDKContentBlock> = z
+const sdkContentBlockSchema: z.ZodType<SDKContentBlock> = z
   .object({
     type: z.string(),
     text: z.string().optional(),
@@ -53,21 +53,17 @@ export const sdkContentBlockSchema: z.ZodType<SDKContentBlock> = z
   })
   .passthrough();
 
-export const sdkCompactMetadataSchema: z.ZodType<SDKCompactMetadata> = z.object(
-  {
-    pre_tokens: z.number().optional(),
-    trigger: z.string().optional(),
-  },
-);
+const sdkCompactMetadataSchema: z.ZodType<SDKCompactMetadata> = z.object({
+  pre_tokens: z.number().optional(),
+  trigger: z.string().optional(),
+});
 
-export const sdkModelUsageEntrySchema: z.ZodType<SDKModelUsageEntry> = z.object(
-  {
-    inputTokens: z.number().optional(),
-    outputTokens: z.number().optional(),
-    cacheCreationInputTokens: z.number().optional(),
-    cacheReadInputTokens: z.number().optional(),
-  },
-);
+const sdkModelUsageEntrySchema: z.ZodType<SDKModelUsageEntry> = z.object({
+  inputTokens: z.number().optional(),
+  outputTokens: z.number().optional(),
+  cacheCreationInputTokens: z.number().optional(),
+  cacheReadInputTokens: z.number().optional(),
+});
 
 const sdkMessageBodySchema = z
   .object({
@@ -181,7 +177,7 @@ const sdkKnownMessageSchema = z.discriminatedUnion('type', [
  * in types.ts has a `[key: string]: unknown` index signature, so each branch
  * (with `.passthrough()`) is a structural subtype.
  */
-export const sdkMessageSchema = z.union([
+const sdkMessageSchema = z.union([
   sdkKnownMessageSchema,
   sdkOtherMessageSchema,
 ]) as unknown as z.ZodType<SDKMessage>;

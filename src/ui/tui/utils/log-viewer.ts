@@ -64,7 +64,7 @@ export function classifyLogLine(line: string): LogEntryKind {
   return 'default';
 }
 
-export function getLogEntryColor(kind: LogEntryKind): string {
+function getLogEntryColor(kind: LogEntryKind): string {
   switch (kind) {
     case 'error':
       return Colors.error;

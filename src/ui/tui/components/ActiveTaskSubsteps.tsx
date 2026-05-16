@@ -34,7 +34,7 @@ import type { ToolActivity } from '../store.js';
 export const DEFAULT_MAX_SUBSTEPS = 3;
 
 /** Minimum terminal width before substeps render. Below this we save space. */
-export const MIN_WIDTH_FOR_SUBSTEPS = 60;
+const MIN_WIDTH_FOR_SUBSTEPS = 60;
 
 interface ActiveTaskSubstepsProps {
   activities: readonly ToolActivity[];

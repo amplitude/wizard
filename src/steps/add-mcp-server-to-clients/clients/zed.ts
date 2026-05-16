@@ -5,7 +5,7 @@ import { DefaultMCPClient, MCPServerConfig } from '../MCPClient';
 import { buildMCPUrl } from '../defaults';
 import type { CloudRegion } from '../../../utils/types';
 
-export const ZedMCPConfig = z
+const ZedMCPConfig = z
   .object({
     context_servers: z.record(
       z.string(),

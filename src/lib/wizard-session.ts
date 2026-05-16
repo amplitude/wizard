@@ -141,7 +141,7 @@ export function toCredentialAppId(
  * Coerces `appId` from string to a branded positive integer.
  * All boolean flags default to false; `installDir` defaults to cwd.
  */
-export const CliArgsSchema = z.object({
+const CliArgsSchema = z.object({
   appId: z
     .union([z.string(), z.number()])
     .optional()
@@ -182,23 +182,6 @@ export const CliArgsSchema = z.object({
   signupFullName: z.string().nullable().optional().default(null),
   acceptTos: z.boolean().default(false),
   region: z.enum(['us', 'eu']).nullable().optional().default(null),
-});
-
-/**
- * Zod schema for validated Amplitude credentials.
- * Exported for incremental adoption at credential-construction sites.
- */
-export const CredentialsSchema = z.object({
-  accessToken: z.string().min(1, 'accessToken is required'),
-  idToken: z.string().optional(),
-  projectApiKey: z.string().min(1, 'projectApiKey is required'),
-  host: z.string().url('host must be a valid URL'),
-  /**
-   * Numeric Amplitude app ID. Branded `AppId` on success or the literal
-   * `0` sentinel when the env hasn't been picked yet. Construct via
-   * `toCredentialAppId(value)` at the trust boundary.
-   */
-  appId: z.union([AppIdSchema, z.literal(0)]),
 });
 
 function parseAppIdArg(value: string | undefined): AppId | undefined {

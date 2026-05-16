@@ -649,21 +649,3 @@ export async function refreshAccessToken(
     ).toISOString(),
   };
 }
-
-// ── Legacy shim — keeps existing callers compiling ───────────────────
-
-export type OAuthConfig = { scopes: string[]; signup?: boolean };
-
-/** @deprecated Use performAmplitudeAuth() directly. */
-export async function performOAuthFlow(
-  _config: OAuthConfig,
-): Promise<OAuthTokenResponse> {
-  const result = await performAmplitudeAuth({});
-  return {
-    access_token: result.accessToken,
-    id_token: result.idToken,
-    refresh_token: result.refreshToken,
-    token_type: 'Bearer',
-    expires_in: 3600,
-  };
-}

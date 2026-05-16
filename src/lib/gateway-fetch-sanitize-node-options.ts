@@ -24,7 +24,7 @@ export function mergeNodeOptions(
 }
 
 /** Absolute path to the compiled `--require` bootstrap (same dir as this file). */
-export function resolveRegisterGatewayFetchSanitizePath(): string {
+function resolveRegisterGatewayFetchSanitizePath(): string {
   return path.join(__dirname, 'register-gateway-fetch-sanitize-bootstrap.js');
 }
 
