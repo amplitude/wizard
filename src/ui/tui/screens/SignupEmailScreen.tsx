@@ -40,23 +40,33 @@ export const SignupEmailScreen = ({ store }: SignupEmailScreenProps) => {
   const hints = useMemo<readonly KeyHint[]>(
     () => [
       { key: 'Enter', label: 'Continue' },
+      { key: 'Tab', label: 'Sign in' },
       { key: 'Esc', label: routerCanGoBack ? 'Back' : 'Welcome' },
     ],
     [routerCanGoBack],
   );
   useScreenHints(hints);
 
-  // TextInput from @inkjs/ui swallows Esc — wire it explicitly so users
-  // can step back to the Intro picker (or rewind to Welcome if no
-  // earlier screen has anything to revert).
+  // @inkjs/ui's TextInput handles its own keypress events — wire Esc
+  // (back-nav) and Tab (sign-in escape) on the screen. Tab routes
+  // through store.switchToLogin(), which flips authOnboardingPath +
+  // resets ceremony state + fires 'signup switched to login'. The
+  // router then short-circuits the create-account-only flow entries
+  // and resolves AuthScreen for browser OAuth.
   useScreenInput((_input, key) => {
-    if (!key.escape) return;
-    analytics.wizardCapture('signup email screen back');
-    if (store.canGoBack()) {
-      store.goBack();
+    if (key.escape) {
+      analytics.wizardCapture('signup email screen back');
+      if (store.canGoBack()) {
+        store.goBack();
+        return;
+      }
+      store.backToWelcome();
       return;
     }
-    store.backToWelcome();
+    if (key.tab) {
+      store.switchToLogin();
+      return;
+    }
   });
 
   const handleSubmit = (value: string) => {
@@ -103,6 +113,10 @@ export const SignupEmailScreen = ({ store }: SignupEmailScreenProps) => {
       <Box marginTop={1} flexDirection="column">
         <Text color={Colors.muted}>
           {Icons.dot} We&apos;ll use this to create your Amplitude account
+        </Text>
+        <Text color={Colors.muted}>
+          {Icons.dot} Already have an account? Press Tab to sign in via
+          browser
         </Text>
       </Box>
     </Box>

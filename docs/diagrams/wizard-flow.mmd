@@ -2,16 +2,17 @@
 title: Wizard flow
 ---
 flowchart TD
-    INTRO["IntroScreen<br/>(shows detected framework — detection runs before TUI starts;<br/>falls back to generic if undetected)<br/>One menu: Continue — sign in vs Continue — create account, then framework/region/directory/cancel<br/>(non-interactive: --auth-onboarding sign-in or create-account)<br/>If a crash-recovery checkpoint exists for this project,<br/>the user is prompted to resume or start fresh"]
+    INTRO["IntroScreen<br/>(shows detected framework — detection runs before TUI starts;<br/>falls back to generic if undetected)<br/>One Continue action (path derived from session.userEmail), then framework/region/directory/cancel<br/>(non-interactive: --auth-onboarding sign-in or create-account)<br/>If a crash-recovery checkpoint exists for this project,<br/>the user is prompted to resume or start fresh"]
     INTRO --> REGION_SELECT
 
     REGION_SELECT["RegionSelect: US or EU?<br/>(Enter = US default · skipped for returning users)"]
     REGION_SELECT --> CREATE_ACCOUNT_PATH
 
-    CREATE_ACCOUNT_PATH{Create new Amplitude account?<br/>(Intro picker; CLI --auth-onboarding create-account in non-TUI modes)}
-    CREATE_ACCOUNT_PATH -->|no — sign in to existing| AUTH
-    CREATE_ACCOUNT_PATH -->|yes — new account| SIGNUP_EMAIL["SignupEmailScreen<br/>(collect user email)"]
-    SIGNUP_EMAIL --> SIGNING_UP_PROBE["SigningUpScreen<br/>(POST email-only — server decides next step)"]
+    CREATE_ACCOUNT_PATH{Create-account path?<br/>— authOnboardingPath set by Continue handler from session.userEmail<br/>— CLI --auth-onboarding create-account in non-TUI modes}
+    CREATE_ACCOUNT_PATH -->|no — signed in or sign-in path forced| AUTH
+    CREATE_ACCOUNT_PATH -->|yes — unauthenticated| SIGNUP_EMAIL["SignupEmailScreen<br/>(collect user email · Tab abandons signup to browser OAuth)"]
+    SIGNUP_EMAIL -->|Tab — already have an account| AUTH
+    SIGNUP_EMAIL -->|Enter — email submitted| SIGNING_UP_PROBE["SigningUpScreen<br/>(POST email-only — server decides next step)"]
     SIGNING_UP_PROBE --> SERVER_RESPONSE{server response}
     SERVER_RESPONSE -->|oauth — success| AUTH
     SERVER_RESPONSE -->|requires_auth — existing user| AUTH
