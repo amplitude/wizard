@@ -2752,8 +2752,11 @@ Returns: "ok" on success, an error response if the id is unknown.`,
       // a row into wire-event shape on the same call.
       if (args.status !== 'pending' && !isEventPlanApproved()) {
         const cachedTitle = agentTaskTitleById.get(args.id) ?? '';
-        const effectiveTitle = args.title ?? cachedTitle;
-        if (effectiveTitle && isEventWiringTitle(effectiveTitle)) {
+        const newTitle = args.title ?? '';
+        const isWire =
+          isEventWiringTitle(cachedTitle) || isEventWiringTitle(newTitle);
+        const effectiveTitle = newTitle || cachedTitle;
+        if (isWire) {
           emitAgentTaskOrderingViolation({
             violation_type:
               args.status === 'done'
