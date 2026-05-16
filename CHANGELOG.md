@@ -1,5 +1,71 @@
 # Changelog
 
+## [1.18.0](https://github.com/amplitude/wizard/compare/wizard-v1.17.0...wizard-v1.18.0) (2026-05-16)
+
+
+### Features
+
+* **agent-mode:** parent-agent contract polish — SIGINT + auth_required + run_phase + lock_held + Zod-at-emit ([#714](https://github.com/amplitude/wizard/issues/714)) ([de497f4](https://github.com/amplitude/wizard/commit/de497f47171b3055310b68f1568e869aec2278ee))
+* **agent-mode:** tool_response envelope + tool_call.id correlation ([#730](https://github.com/amplitude/wizard/issues/730)) ([f49da82](https://github.com/amplitude/wizard/commit/f49da82db55fef8cd4eb291955003b87ece8e55a))
+* **analytics:** capture run duration + version on setup-complete event for speed trending ([#774](https://github.com/amplitude/wizard/issues/774)) ([6647c08](https://github.com/amplitude/wizard/commit/6647c0848402689f961e65740ea07511f48ecee4))
+* **commandments:** mandate 1-3 properties per track() + plan reconciliation in Setup Report ([#751](https://github.com/amplitude/wizard/issues/751)) ([162356b](https://github.com/amplitude/wizard/commit/162356b251f65aa05a95e5106768348aaa86ea96))
+* consume terms_acceptance from needs_information with local-constant fallback ([#675](https://github.com/amplitude/wizard/issues/675)) ([fa7fc30](https://github.com/amplitude/wizard/commit/fa7fc302f6d9d69b9755bddb395da1d2e7f84abe))
+* **evals:** Haiku-vs-Sonnet quality A/B harness for one-shot LLM call sites ([#606](https://github.com/amplitude/wizard/issues/606)) ([02d101b](https://github.com/amplitude/wizard/commit/02d101b1c7b9cc81ea96deb6a9aedfb075a88d4d))
+* **orchestration:** v2 foundation — durable state, lifecycle, status/resume commands (PR 1 of 3) ([#689](https://github.com/amplitude/wizard/issues/689)) ([5761ef7](https://github.com/amplitude/wizard/commit/5761ef716b4d5d4eb9597713c4b699bea952667a))
+* **signup:** support arbitrary needs_information.required combinations (BA-149) ([#753](https://github.com/amplitude/wizard/issues/753)) ([90b77a2](https://github.com/amplitude/wizard/commit/90b77a22588aa6f425283a57ca8d4d529b9198bf))
+* **telemetry:** add wizard launched root event with arg fingerprint ([#781](https://github.com/amplitude/wizard/issues/781)) ([2624a70](https://github.com/amplitude/wizard/commit/2624a701ba1458a2a07bc4ab91638690770e8e45))
+* **tui:** /version slash command for wizard + protocol version visibility ([#768](https://github.com/amplitude/wizard/issues/768)) ([3abc1d7](https://github.com/amplitude/wizard/commit/3abc1d723bd9a6b38780049b0971090cee0f6d23))
+* **tui:** cancel outro reports preserved-file state ([#770](https://github.com/amplitude/wizard/issues/770)) ([2c0bd94](https://github.com/amplitude/wizard/commit/2c0bd94397cb292c70aabb9d33da3149001cbc32))
+* **tui:** collapse intro picker + add Tab sign-in escape on SignupEmail ([#795](https://github.com/amplitude/wizard/issues/795)) ([39635a2](https://github.com/amplitude/wizard/commit/39635a2b34e1a737ca897c22df310617804ad5fa))
+* **tui:** delight pass — gradient wordmark, picker flash, spinner moods, typewriter, voice ([#773](https://github.com/amplitude/wizard/issues/773)) ([bc2786f](https://github.com/amplitude/wizard/commit/bc2786fd36c48f279d73168c0e093c566cb8151d))
+* **tui:** error + recovery polish — hotkey pills, retry backoff, last-activity anchor ([#771](https://github.com/amplitude/wizard/issues/771)) ([a916110](https://github.com/amplitude/wizard/commit/a91611042239f4afdb6361c64454209d0f3b155d))
+* **tui:** events-per-minute sparkline on DataIngestionCheck ([#764](https://github.com/amplitude/wizard/issues/764)) ([c19f53d](https://github.com/amplitude/wizard/commit/c19f53d120c2c4e0c10cf2f274eb262da1c1d0a5))
+* **tui:** register /help slash command and Tab autocomplete in palette ([#769](https://github.com/amplitude/wizard/issues/769)) ([78e5954](https://github.com/amplitude/wizard/commit/78e5954b1702dfb7db089ccafad6cad11c4497c4))
+* **ui:** add diff viewer (live toast, /diff slash command, end-of-run summary) ([#599](https://github.com/amplitude/wizard/issues/599)) ([927f05c](https://github.com/amplitude/wizard/commit/927f05c3387e19c9468ab1bd2fbb652c654d6b99))
+
+
+### Bug Fixes
+
+* **auth:** add structural fallback gate so Auth.isComplete blocks even when pendingEnvSelection gets clobbered ([#775](https://github.com/amplitude/wizard/issues/775)) ([f195bbd](https://github.com/amplitude/wizard/commit/f195bbd177876e58de4876ee39014f45753af8c6))
+* **auth:** block flow forward-walk while env selection is pending (race fix) ([#760](https://github.com/amplitude/wizard/issues/760)) ([fa68152](https://github.com/amplitude/wizard/commit/fa68152cb49cf00968f163316dfe3b37251a17bb))
+* **auth:** clear credentials on needs_user_choice/environment_selection so env picker renders ([#747](https://github.com/amplitude/wizard/issues/747)) ([39644a8](https://github.com/amplitude/wizard/commit/39644a894561e5941b6fc659d91f7c1bd4ed0641))
+* **auth:** env picker renders after reset when fresh pendingOrgs has stale selectedOrgId/ProjectId ([#797](https://github.com/amplitude/wizard/issues/797)) ([37b3cc2](https://github.com/amplitude/wizard/commit/37b3cc2939bb11e920940a35a8c1772bf8ca77b9))
+* **auth:** structural gate falls back to first-org/first-project when no IDs selected ([#780](https://github.com/amplitude/wizard/issues/780)) ([e26e504](https://github.com/amplitude/wizard/commit/e26e50421d7b1853bf299075a8ad88a0af5236ae))
+* **bash-policy:** allow `pwd` / `ls` / `ls <path>` to cut top-deny pattern ([#798](https://github.com/amplitude/wizard/issues/798)) ([4e0ae9f](https://github.com/amplitude/wizard/commit/4e0ae9f817bda6979e17d762f84c23b2f09c300e))
+* **bugbot:** move resolveCommonOpts into try/catch in all 6 orch handlers ([#759](https://github.com/amplitude/wizard/issues/759)) ([533155f](https://github.com/amplitude/wizard/commit/533155f28c0a4fd36421d8b40cc41a0b88f834a0))
+* **checkpoint:** invalidate stale checkpoint when project metadata is missing ([#778](https://github.com/amplitude/wizard/issues/778)) ([eb1b237](https://github.com/amplitude/wizard/commit/eb1b237388eea8b310735e78537dba4123787e83))
+* **commandments:** forbid proposing events covered by autocapture ([#744](https://github.com/amplitude/wizard/issues/744)) ([cc3256e](https://github.com/amplitude/wizard/commit/cc3256e87316b7185042203240d4afe00855e64b))
+* **event-plan:** feedback now actually round-trips through the LLM and the revised plan renders verbatim ([#701](https://github.com/amplitude/wizard/issues/701)) ([8409487](https://github.com/amplitude/wizard/commit/8409487fb3cc00e5ee66bafba03694e995c96fa2))
+* **observability:** truncate raw SSE frames in error logs + better classification of mid-stream 400s ([#705](https://github.com/amplitude/wizard/issues/705)) ([95be862](https://github.com/amplitude/wizard/commit/95be86286baae732ce5118bb5ae98873f68ea38c))
+* **reliability:** bail synchronously on AUTH_RETRY_LIMIT — controller.abort alone doesn't stop SDK retries ([#710](https://github.com/amplitude/wizard/issues/710)) ([41f7a52](https://github.com/amplitude/wizard/commit/41f7a52a76af8a765bba4a476d724a6041fde12f))
+* **reliability:** suppress SDK Stream-closed noise during task_notification race ([#614](https://github.com/amplitude/wizard/issues/614)) ([d300cd1](https://github.com/amplitude/wizard/commit/d300cd1b4e44edc36da00d58da27ac17c83e7a67))
+* **self-heal:** follow-up to [#703](https://github.com/amplitude/wizard/issues/703) — clear stale env pre-selection after needs_user_choice ([#709](https://github.com/amplitude/wizard/issues/709)) ([3e9c1cf](https://github.com/amplitude/wizard/commit/3e9c1cfc4bd592b4383d8d1727ac4586af96b872))
+* **self-heal:** unstall second run after .amplitude/ wipe — surface env-selection instead of silent defer ([#703](https://github.com/amplitude/wizard/issues/703)) ([80c4ae2](https://github.com/amplitude/wizard/commit/80c4ae2fffade46974d80da847a09e577a19dbe9))
+* **test:** bump agent-interface inter-attempt token refresh timeout to 30s ([#777](https://github.com/amplitude/wizard/issues/777)) ([ba7fd3e](https://github.com/amplitude/wizard/commit/ba7fd3efda6c19ece6637372604c637b169b14a4))
+* **test:** stabilize OutroScreen preserveFiles K-test process.exit spy ([#776](https://github.com/amplitude/wizard/issues/776)) ([19c74d3](https://github.com/amplitude/wizard/commit/19c74d3372aec66b4dfe8f2ca63707c46c85a8a5))
+* **tui:** /diagnostics and /debug print full storage paths inline ([#750](https://github.com/amplitude/wizard/issues/750)) ([28b784e](https://github.com/amplitude/wizard/commit/28b784ed032771ff08576c1584f285b13b068df7))
+* **tui:** clear sticky currentFile pill when agent activity is quiet ([#765](https://github.com/amplitude/wizard/issues/765)) ([4e48bcd](https://github.com/amplitude/wizard/commit/4e48bcd7407c59b1becb4a825afe05544d5bab50))
+* **tui:** clearOverlays on hard resets (setRegionForced / resetForFreshStart / cancelWizard) ([#727](https://github.com/amplitude/wizard/issues/727)) ([4c1ba8f](https://github.com/amplitude/wizard/commit/4c1ba8f2ecb2bbc4f212df6f27df5691433d72bd))
+* **tui:** collapse dead vertical space + visual polish on Progress tab ([#688](https://github.com/amplitude/wizard/issues/688)) ([9b0e52e](https://github.com/amplitude/wizard/commit/9b0e52e679d8d2e43d01929c1cafd3220b04a03f))
+* **tui:** drop digit-shortcut UI hints on &gt;10-option PickerMenu lists ([#767](https://github.com/amplitude/wizard/issues/767)) ([aee4b1f](https://github.com/amplitude/wizard/commit/aee4b1fa23649ecc1f26944e5b9c8e1535de2f9a))
+* **tui:** Events tab shows wired-code names as files land ([#749](https://github.com/amplitude/wizard/issues/749)) ([ad9cabc](https://github.com/amplitude/wizard/commit/ad9cabc14b293c52eb125ce04215d223615d0792))
+* **tui:** hold event-plan screen during feedback round-trip + drop stale Events-tab copy ([#745](https://github.com/amplitude/wizard/issues/745)) ([a8da803](https://github.com/amplitude/wizard/commit/a8da80346692e84453ba678945ea1aac83ba93de))
+* **tui:** Outro reads event list from wired code, splits autocapture from instrumented ([#746](https://github.com/amplitude/wizard/issues/746)) ([8c7edbf](https://github.com/amplitude/wizard/commit/8c7edbfe83563a909c3174da4fb7df293d7d7991))
+* **tui:** patch nanostores map.setKey to mutate $session in place ([#762](https://github.com/amplitude/wizard/issues/762)) ([2d9e603](https://github.com/amplitude/wizard/commit/2d9e603a2385af4012c1af996706cc395f009d0b))
+* **tui:** progressive coaching + Esc + watchdog on event-plan revision screen ([#761](https://github.com/amplitude/wizard/issues/761)) ([53cf6a1](https://github.com/amplitude/wizard/commit/53cf6a1ccaf49b696230452eccf432739126b58e))
+* **tui:** stop overdraw across Setup Report, /diff overlay, slash palette, outro ([#779](https://github.com/amplitude/wizard/issues/779)) ([eab7fad](https://github.com/amplitude/wizard/commit/eab7fad73c5cb9e0fec51a8ece679ea3688d3986))
+* **tui:** suppress duplicate status pill when it would echo the active task label ([#695](https://github.com/amplitude/wizard/issues/695)) ([01af8e8](https://github.com/amplitude/wizard/commit/01af8e86d5a26e6f2d39d941144f6fc0b7c87818))
+* **wizard-tools:** respect human-intended event-name casing in confirm_event_plan ([#743](https://github.com/amplitude/wizard/issues/743)) ([3884f2d](https://github.com/amplitude/wizard/commit/3884f2d500b2c4c79da9cc959fa0f20d0343c342))
+
+
+### Performance Improvements
+
+* **agent:** disallow unused Claude Code built-in tools to reduce cold-start tokens ([#628](https://github.com/amplitude/wizard/issues/628)) ([0946c42](https://github.com/amplitude/wizard/commit/0946c4282b56e6baa54c56bc8cb1a716e6d8090c))
+* **agent:** memoize AI-SDK gateway probe per session ([#642](https://github.com/amplitude/wizard/issues/642)) ([7bebef0](https://github.com/amplitude/wizard/commit/7bebef060fd0c4cc32e910260ee147c7e112d64a))
+* **agent:** parallelize cold-start probe + pm-detect + MCP bootstrap ([#644](https://github.com/amplitude/wizard/issues/644)) ([ef7b12d](https://github.com/amplitude/wizard/commit/ef7b12d48bfa28c2461cfa2193b9b68b63fa742f))
+* **build:** bundle wizard via tsup for faster cold-start ([#692](https://github.com/amplitude/wizard/issues/692)) ([06506f7](https://github.com/amplitude/wizard/commit/06506f73ff6ec8804665810b2e0524cd5ae6f307))
+* **health:** collapse Statuspage pair fetches into summary.json + keep-alive ([#647](https://github.com/amplitude/wizard/issues/647)) ([a0514c6](https://github.com/amplitude/wizard/commit/a0514c64013389b5c81cd2daa875dc7fc161dcf8))
+
 ## [1.17.0](https://github.com/amplitude/wizard/compare/wizard-v1.16.0...wizard-v1.17.0) (2026-05-09)
 
 
