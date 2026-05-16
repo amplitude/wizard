@@ -38,6 +38,7 @@ import { TypewriterFilename } from '../components/TypewriterFilename.js';
 import { resolveRunStatusPill } from './run-status-pill.js';
 import { useStdoutDimensions } from '../hooks/useStdoutDimensions.js';
 import { useResolvedZone } from '../hooks/useResolvedZone.js';
+import { RunTimeline } from '../components/RunTimeline.js';
 import { DiscoveredFeature } from '../../../lib/wizard-session.js';
 import {
   ADDITIONAL_FEATURE_LABELS,
@@ -637,6 +638,12 @@ const ProgressTab = ({ store }: { store: WizardStore }) => {
 export const RunScreen = ({ store }: RunScreenProps) => {
   useWizardStore(store);
   useScreenHints(RUN_HINTS);
+
+  // New RunTimeline body (opt-in via WIZARD_NEW_UX=1). The legacy
+  // TabContainer path below is byte-identical when the flag is unset.
+  if (process.env.WIZARD_NEW_UX === '1') {
+    return <RunTimeline store={store} />;
+  }
 
   // The bottom status pill ("what is the wizard doing right now") used
   // to live in TabContainer's chrome row, but it's content semantics,
