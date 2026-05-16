@@ -1,4 +1,28 @@
 #!/usr/bin/env node
+// Suppress [DEP0205] DeprecationWarning emitted by @sentry/node's transitive
+// dependency (import-in-the-middle) when it calls `module.register()` on
+// Node.js >= 23. The upstream dependency hasn't migrated to
+// `module.registerHooks()` yet; there's nothing actionable for end users.
+// Must run before any import that could trigger Sentry init.
+{
+  // eslint-disable-next-line @typescript-eslint/no-unsafe-assignment
+  const _origEmitWarning: typeof process.emitWarning =
+    process.emitWarning.bind(process);
+  process.emitWarning = ((...args: Parameters<typeof process.emitWarning>) => {
+    const warning = args[0];
+    const msg =
+      typeof warning === 'string'
+        ? warning
+        : warning instanceof Error
+        ? warning.message
+        : '';
+    if (msg.includes('module.register()') && msg.includes('deprecated')) {
+      return;
+    }
+    return _origEmitWarning(...(args as [string, string]));
+  }) as typeof process.emitWarning;
+}
+
 // Sanitize inherited Claude Code / Agent SDK env vars BEFORE anything else
 // loads. The wizard spawns its own Claude Agent SDK subprocess and any
 // transitive import that snapshots env at module init would otherwise see
