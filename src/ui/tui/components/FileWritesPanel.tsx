@@ -239,7 +239,7 @@ export const FileWritesPanel = ({
             ? `${completedCount}/${totalCount} written`
             : `${totalCount} written`}
         </Text>
-        {/* Discoverability hint for the /diff slash command — addresses the
+        {/* Discoverability hint for the Diff tab — addresses the
             user's "what actually changed?" question right at the moment
             they're watching files fly by. Only surfaces once at least one
             write has applied so we don't spam the hint mid-planning. */}
@@ -247,7 +247,7 @@ export const FileWritesPanel = ({
           <>
             <Text color={Colors.subtle}> {Icons.dot} </Text>
             <Text color={Colors.muted}>
-              type <Text color={Colors.accent}>/diff</Text> to review
+              open the <Text color={Colors.accent}>Diff</Text> tab to review
             </Text>
           </>
         )}

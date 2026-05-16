@@ -94,7 +94,7 @@ export function summarizeDiff(
  * additions/deletions/hunks and never render the unified-patch text — they
  * can pass `includePatch: false` to skip the redundant `createPatch` call,
  * which runs the same O(n·m) diff a second time. Defaults to true so the
- * outro / DiffViewer / `/diff` paths keep the patch body.
+ * outro / DiffViewer / Diff-tab paths keep the patch body.
  */
 export interface SummarizeLedgerEntryOptions {
   includePatch?: boolean;
@@ -157,13 +157,13 @@ export function summarizeLedgerEntry(
 
 /**
  * Walk every entry in the ledger and produce the diff summaries the
- * outro / `/diff` command consume. Order matches the ledger's own
+ * outro / RunScreen Diff tab consume. Order matches the ledger's own
  * insertion order (chronological by first PreToolUse capture). Skips
  * entries where {@link summarizeLedgerEntry} returns null.
  *
  * `options` is forwarded to {@link summarizeLedgerEntry} so summary-only
- * callers (e.g. the `/diff` summary command, which only renders +/-
- * counts and never reads the patch body) can pass `{ includePatch: false }`
+ * callers (e.g. the Diff-tab file list, which only renders +/- counts
+ * and never reads the patch body) can pass `{ includePatch: false }`
  * and skip the redundant `createPatch` call per entry.
  */
 export function summarizeLedgerDiffs(
@@ -183,7 +183,7 @@ export function summarizeLedgerDiffs(
  * Find the most recent ledger entry for a given path and return its
  * diff summary. Returns `null` when no entry exists for that path or
  * when the entry has no diffable content. Used by the per-file
- * `file_changed` NDJSON emission and `/diff <path>`.
+ * `file_changed` NDJSON emission and the RunScreen Diff tab.
  *
  * The lookup path is normalized the same way the ledger normalized it
  * during capture (`resolve()` against the install dir). Without this,

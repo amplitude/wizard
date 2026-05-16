@@ -1,0 +1,29 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`RunScreen — Diff tab snapshots > 60 cols — narrow terminal still renders the tab 1`] = `
+" Changed files · 2 files
+ ❯   src/instrument.ts · +1/-0
+ │ ✓ src/app/layout.tsx · +3/-1
+
+ NEW src/instrument.ts · +1 / -0
+
+ @@ -0,0 +1,1 @@
+ +import * as amp from "@amplitude/analytics-browser";
+
+
+  Progress   Diff   Logs   Snake (WASD)                                          ← → to switch tabs"
+`;
+
+exports[`RunScreen — Diff tab snapshots > 80 cols — file list + selected diff 1`] = `
+" Changed files · 2 files
+ ❯   src/instrument.ts · +1/-0
+ │ ✓ src/app/layout.tsx · +3/-1
+
+ NEW src/instrument.ts · +1 / -0
+
+ @@ -0,0 +1,1 @@
+ +import * as amp from "@amplitude/analytics-browser";
+
+
+  Progress   Diff   Logs   Snake (WASD)                                          ← → to switch tabs"
+`;

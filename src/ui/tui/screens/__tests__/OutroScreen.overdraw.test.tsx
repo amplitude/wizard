@@ -113,9 +113,10 @@ describe('OutroScreen overdraw regressions', () => {
       'Palette.tsx',
       'Welcome.tsx',
     ];
-    // The "Use /diff <path> to view a file diff." hint contains the
-    // literal `<path>` placeholder; the regression target is file rows
-    // — assert against those tokens directly.
+    // The footer hint (now: "Open the Diff tab to inspect any file.")
+    // can contain plain text that incidentally matches "tsx" — the
+    // regression target is file rows, so assert against those tokens
+    // directly.
     for (const line of frame.split('\n')) {
       const hits = fileTokens.filter((t) => line.includes(t));
       expect(

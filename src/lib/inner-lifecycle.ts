@@ -441,9 +441,9 @@ export function createInnerLifecycleHooks(config: InnerLifecycleConfig): {
           // Same swallow rationale as recordFileChangePlanned above.
         }
         // Capture the pre-write content into the canonical ledger so a
-        // cancelled / errored run can revert this file AND the diff viewer
-        // / `/diff` slash command have a source of truth. No-op when no
-        // ledger has been initialised (probe calls, unit tests).
+        // cancelled / errored run can revert this file AND the diff
+        // viewer / RunScreen Diff tab have a source of truth. No-op when
+        // no ledger has been initialised (probe calls, unit tests).
         try {
           getFileChangeLedger()?.recordPreWrite(path);
         } catch {
