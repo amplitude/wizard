@@ -18,9 +18,9 @@
  *   - hunk header → `Colors.accent`
  *   - context    → `Colors.muted`
  *
- * Keyboard nav (detail mode): j/down to scroll forward, k/up to scroll
- * back, q/esc to exit. Owned by the parent surface — DiffViewer just
- * renders the slice given by `scrollOffset`.
+ * Keyboard nav (detail mode): PageDown to scroll forward, PageUp to scroll
+ * back. Owned by the parent surface — DiffViewer just renders the slice
+ * given by `scrollOffset`.
  */
 
 import { Box, Text } from 'ink';
@@ -159,7 +159,7 @@ export const DiffViewer = ({
             <Text color={Colors.muted}>
               {patchLines.length - scrollOffset - maxLines} more line
               {patchLines.length - scrollOffset - maxLines === 1 ? '' : 's'}{' '}
-              {Icons.dot} press j/k or arrow keys to scroll
+              {Icons.dot} press PageUp/PageDown to scroll
             </Text>
           </Box>
         )}

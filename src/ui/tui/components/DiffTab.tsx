@@ -238,7 +238,8 @@ export const DiffTab = ({ store, maxLines = DEFAULT_MAX_LINES }: DiffTabProps) =
     return <EmptyState />;
   }
 
-  const selected = files[selectedIndex];
+  const clampedIndex = Math.min(selectedIndex, files.length - 1);
+  const selected = files[clampedIndex];
 
   return (
     // Outer Box uses `overflow="hidden"` — same defense the rest of the
@@ -247,7 +248,7 @@ export const DiffTab = ({ store, maxLines = DEFAULT_MAX_LINES }: DiffTabProps) =
     <Box flexDirection="column" flexGrow={1} overflow="hidden">
       <FileList
         files={files}
-        selectedIndex={selectedIndex}
+        selectedIndex={clampedIndex}
         installDir={store.session.installDir}
       />
       <Box marginTop={1} paddingX={1} flexDirection="column">
