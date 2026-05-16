@@ -31,12 +31,15 @@ import type {
   ColdStartPhase,
   MCPStatusServer,
   MCPStatusState,
+  ModelContext,
+  ModelTier,
 } from '../lib/agent-events';
 import {
   EVENT_DATA_VERSIONS,
   TOOL_RESPONSE_CONTENT_HEAD_MAX_BYTES,
   TOOL_RESPONSE_ERROR_MESSAGE_MAX_BYTES,
   TOOL_RESPONSE_SUMMARY_MAX_CHARS,
+  WIZARD_PROTOCOL_VERSION,
   appIdResponseSchema,
   buildColdStartBreakdown,
   buildProgressEstimate,
@@ -1489,6 +1492,98 @@ export class AgentUI implements WizardUI {
       'progress',
       `tool_response: ${payload.tool} -> ${payload.outcome} (${payload.durationMs}ms)`,
       { data: { event: 'tool_response', ...payload } },
+    );
+  }
+
+  // ── PR B8: wizard_capabilities (startup announcement) ───────────────
+  //
+  // Emitted exactly once per run, as the FIRST orchestrator-facing
+  // envelope after `run_started` and BEFORE `run_phase: cold_start`.
+  // The agent-runner wires the call site immediately after
+  // `startRun()` — see `agent-runner.ts`.
+  //
+  // Payload mirrors the full `EVENT_DATA_VERSIONS` registry so an
+  // orchestrator can branch on per-event versions at parse time
+  // without a wizard upgrade. `supportedEvents` is the same set,
+  // pre-sorted, so orchestrators that only care about presence
+  // ("does this wizard emit `progress_estimate`?") don't have to
+  // sort on their side.
+  //
+  // `mode` is hardcoded to `'agent'` here because AgentUI is the
+  // only `WizardUI` implementation that emits NDJSON. The field is
+  // on the contract (see `WizardCapabilitiesMode`) so future CI /
+  // interactive emitters don't need a schema bump.
+
+  emitWizardCapabilities(): void {
+    // Snapshot the registry as a plain object so JSON.stringify
+    // produces stable, insertion-ordered output (the registry is
+    // declared as a `const` literal — its key order is the
+    // declaration order, which the orchestrator contract pins on).
+    const eventDataVersions: Record<string, number> = {
+      ...EVENT_DATA_VERSIONS,
+    };
+    const supportedEvents = Object.keys(EVENT_DATA_VERSIONS).sort();
+    emit(
+      'lifecycle',
+      `wizard_capabilities: protocol v${WIZARD_PROTOCOL_VERSION}, ${supportedEvents.length} events`,
+      {
+        data: {
+          event: 'wizard_capabilities',
+          protocolVersion: WIZARD_PROTOCOL_VERSION,
+          eventDataVersions,
+          supportedEvents,
+          mode: 'agent',
+        },
+      },
+    );
+  }
+
+  // ── PR B9: model_used (subsystem model-awareness) ──────────────────
+  //
+  // Parent agents have no visibility into which Claude model the
+  // wizard's inner agent and one-shot classifiers are actually
+  // running. `model_used` fires once per unique `(model, context)`
+  // pair per run so an orchestrator can render "inner agent: Sonnet
+  // 4.6, classifier: Haiku 4.5" or attribute cost / latency to the
+  // right tier without parsing the wizard binary version.
+  //
+  // Dedup is intentionally per `(model, context)` rather than per
+  // `model` — the same alias firing in two contexts (e.g. a Haiku
+  // probe at startup and a Haiku classifier mid-run) is a meaningful
+  // signal the orchestrator wants to see; only EXACT pair-repeats
+  // get suppressed. The dedup set lives on the AgentUI instance so
+  // it survives across the run but resets cleanly per `new AgentUI()`
+  // (e.g. in tests).
+
+  /**
+   * Dedup set for `model_used` emissions. Keyed on `${context}\0${model}`
+   * (NUL separator so a model alias containing a delimiter — e.g. a
+   * test fixture with a `:` in it — can't collide with another
+   * context's key by accident).
+   */
+  private _modelUsedEmitted = new Set<string>();
+
+  emitModelUsed(data: {
+    model: string;
+    modelDisplay: string;
+    modelTier: ModelTier;
+    context: ModelContext;
+  }): void {
+    const dedupKey = `${data.context}\0${data.model}`;
+    if (this._modelUsedEmitted.has(dedupKey)) return;
+    this._modelUsedEmitted.add(dedupKey);
+    emit(
+      'lifecycle',
+      `model_used: ${data.context}=${data.modelDisplay} (${data.modelTier})`,
+      {
+        data: {
+          event: 'model_used',
+          model: data.model,
+          modelDisplay: data.modelDisplay,
+          modelTier: data.modelTier,
+          context: data.context,
+        },
+      },
     );
   }
 

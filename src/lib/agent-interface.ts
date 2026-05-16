@@ -61,8 +61,10 @@ import {
 } from './agent-state';
 import { createInnerLifecycleHooks } from './inner-lifecycle';
 import {
+  classifyModelTier,
   classifyWriteOperation,
   deriveStallTier,
+  formatModelDisplay,
   sanitizeErrorMessageForLog,
   truncateLogMessage,
 } from './agent-events';
@@ -3038,6 +3040,27 @@ export async function runAgent(
           ...(attemptStartedBackoffMs > 0
             ? { backoffMs: attemptStartedBackoffMs }
             : {}),
+        });
+      } catch {
+        // Never let a UI emit failure abort the attempt.
+      }
+
+      // PR B9: announce the resolved inner-agent model the SDK is
+      // about to query with. Fires on every attempt boundary —
+      // `emitModelUsed` dedups internally on the `(model, context)`
+      // pair so a retry that keeps the same alias is a no-op on the
+      // wire, while a (future) attempt that switches to the SDK
+      // fallback alias emits a second `model_used` envelope so
+      // orchestrators can attribute the new tier. The emit is wrapped
+      // in try/catch — model_used is observational and must never
+      // abort the attempt.
+      try {
+        const innerModel = agentConfig.model;
+        getUI().emitModelUsed?.({
+          model: innerModel,
+          modelDisplay: formatModelDisplay(innerModel),
+          modelTier: classifyModelTier(innerModel),
+          context: 'inner_agent',
         });
       } catch {
         // Never let a UI emit failure abort the attempt.

@@ -23,6 +23,8 @@ import { getConsoleQueryStack } from './agent/console-query-stack.js';
 import { selectModel } from './agent/model-config.js';
 import { getAgentDriver } from './agent-driver.js';
 import { parseAnthropicCustomHeaderBlock } from '../utils/custom-headers.js';
+import { getUI } from '../ui/index.js';
+import { classifyModelTier, formatModelDisplay } from './agent-events.js';
 
 export type ConsoleCredentials =
   | { kind: 'gateway'; baseUrl: string; apiKey: string }
@@ -208,6 +210,22 @@ async function queryConsoleWithVercelAiSdk(
     'oneshot',
     agentConfig.useDirectApiKey ?? false,
   );
+
+  // PR B9: announce the classifier-tier model the slash-console call
+  // is about to run. Pure observability — emitter dedups on (model,
+  // context) so back-to-back slash prompts in the same run are a
+  // no-op on the wire. try/catch so a misbehaving emitter never
+  // blocks the call.
+  try {
+    getUI().emitModelUsed?.({
+      model: oneshotModel,
+      modelDisplay: formatModelDisplay(oneshotModel),
+      modelTier: classifyModelTier(oneshotModel),
+      context: 'classifier',
+    });
+  } catch {
+    // observational; never block console query.
+  }
 
   const result = streamText({
     model: provider(oneshotModel),
