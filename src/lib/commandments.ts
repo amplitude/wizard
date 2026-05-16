@@ -151,6 +151,13 @@ Bad examples (too coarse or unobservable):
   - "Do the work"
   - "Install SDK" (which file? which package manager?)
 
+**Task lifecycle ordering — strict, enforced by the tool:**
+  - Event-wiring tasks — anything that involves adding \`track()\`, \`identify()\`, \`setGroup()\`, or other Amplitude SDK call sites to user code — MUST NOT appear in your initial \`set_agent_tasks\` call (or be marked \`in_progress\` / \`done\` later) until \`confirm_event_plan\` has been called AND returned an approved result. Detection / install / SDK-init / "plan events" tasks are unaffected — only the per-event wiring rows.
+  - Before approval, you may have a single high-level task like "Plan events to track and wait for user approval". After approval, call \`set_agent_tasks\` AGAIN with a fresh full list that now adds the approved per-event wiring rows.
+  - If a user rejects the plan, your wiring tasks must not exist — re-plan and call \`set_agent_tasks\` with the revised list once the new plan is approved.
+  - The wizard-tools server enforces this: a pre-approval \`set_agent_tasks\` containing a wire-event row with any status other than \`pending\`, or an \`update_agent_task\` that transitions a wire-event row to \`in_progress\` / \`done\`, is rejected with a structured error. Read the error and wait for approval.
+  - This rule protects user trust: showing "Wire Signup Completed — done" before the user approved tracking Signup Completed is a serious UX failure.
+
 Distinct from \`TodoWrite\`: that drives the canonical 4-step skeleton ("Detect / Install / Plan / Wire"). This drives a SEPARATE list rendered below the skeleton in the wizard's RunScreen.`,
 ];
 

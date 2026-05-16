@@ -1940,11 +1940,19 @@ describe('isWizardPromptActive / onWizardPromptRelease', () => {
     __resetWizardPromptStateForTests();
   });
 
-  afterEach(() => {
+  afterEach(async () => {
     __resetWizardPromptStateForTests();
     // Restore default UI so other suites that rely on `getUI()` see a clean
     // LoggingUI singleton. `setUI` always replaces — there's no `clearUI`.
     setUI(new LoggingUI());
+    // confirm_event_plan publishes its outcome to the process-singleton
+    // in `event-plan-feedback-state`. Reset so an "approved" decision
+    // from this suite doesn't bypass the wire-event ordering guard in
+    // later suites.
+    const { resetEventPlanFeedbackState } = await import(
+      '../agent/event-plan-feedback-state'
+    );
+    resetEventPlanFeedbackState();
   });
 
   // Build a fake UI whose prompt methods return a Promise we control. Lets us
@@ -2198,11 +2206,22 @@ describe('confirm_event_plan name-casing flow', () => {
     tmpDir = makeTmpDir();
     ({ setUI } = await import('../../ui'));
     ({ LoggingUI } = await import('../../ui/logging-ui'));
+    // confirm_event_plan publishes its outcome to the process-singleton
+    // in `event-plan-feedback-state`. Reset between tests so an "approved"
+    // from this suite does not leak into the ordering-guard suites below.
+    const { resetEventPlanFeedbackState } = await import(
+      '../agent/event-plan-feedback-state'
+    );
+    resetEventPlanFeedbackState();
   });
-  afterEach(() => {
+  afterEach(async () => {
     cleanup(tmpDir);
     // Restore a fresh LoggingUI so neighbouring suites see a clean singleton.
     setUI(new LoggingUI());
+    const { resetEventPlanFeedbackState } = await import(
+      '../agent/event-plan-feedback-state'
+    );
+    resetEventPlanFeedbackState();
   });
 
   function makeAutoApproveUI(): import('../../ui').WizardUI {
@@ -2295,18 +2314,27 @@ describe('set_agent_tasks / update_agent_task', () => {
   let setUI: typeof import('../../ui').setUI;
   let LoggingUI: typeof import('../../ui/logging-ui').LoggingUI;
   let __resetFirstAgentPlanForTests: typeof import('../wizard-tools').__resetFirstAgentPlanForTests;
+  let resetEventPlanFeedbackState: typeof import('../agent/event-plan-feedback-state').resetEventPlanFeedbackState;
   let tmpDir: string;
 
   beforeEach(async () => {
     ({ setUI } = await import('../../ui'));
     ({ LoggingUI } = await import('../../ui/logging-ui'));
     ({ __resetFirstAgentPlanForTests } = await import('../wizard-tools'));
+    ({ resetEventPlanFeedbackState } = await import(
+      '../agent/event-plan-feedback-state'
+    ));
     __resetFirstAgentPlanForTests();
+    // Each test should start with a clean event-plan singleton so a prior
+    // suite's `recordEventPlanDecision({ decision: 'approved' })` does not
+    // bypass the ordering guard here.
+    resetEventPlanFeedbackState();
     tmpDir = makeTmpDir();
   });
 
   afterEach(() => {
     __resetFirstAgentPlanForTests();
+    resetEventPlanFeedbackState();
     setUI(new LoggingUI());
     cleanup(tmpDir);
   });
@@ -2475,18 +2503,21 @@ describe('set_agent_tasks / update_agent_task', () => {
     const setTool = findTool(tools, 'set_agent_tasks');
     const updateTool = findTool(tools, 'update_agent_task');
 
+    // Title intentionally uses non-wire-event vocabulary so this title-
+    // refinement test isn't blocked by the event-wiring ordering guard.
+    // Wire-shaped refinements get their own coverage below.
     await callTool(setTool, {
-      tasks: [{ id: 'wire', title: 'Wire signup', status: 'pending' }],
+      tasks: [{ id: 'init', title: 'Initialize SDK', status: 'pending' }],
       reason: 'seed',
     });
     await callTool(updateTool, {
-      id: 'wire',
+      id: 'init',
       status: 'in_progress',
-      title: 'Wire signup -> SignupForm.tsx onSubmit',
+      title: 'Initialize SDK in src/main.tsx with API key',
       reason: 'refined title',
     });
     expect(capture.list[0].title).toBe(
-      'Wire signup -> SignupForm.tsx onSubmit',
+      'Initialize SDK in src/main.tsx with API key',
     );
     expect(capture.list[0].status).toBe('in_progress');
   });
@@ -2534,6 +2565,430 @@ describe('set_agent_tasks / update_agent_task', () => {
 });
 
 // ---------------------------------------------------------------------------
+// Event-wiring task ordering guard — pre-approval transitions blocked
+//
+// PR #801 (agent self-reported task list) shipped without a check that
+// `update_agent_task` was being called on a wire-event row only after the
+// user had approved the event plan. A live screenshot caught the agent
+// marking "Wire track() calls for AI Diagram Generated" as `done` before
+// `confirm_event_plan` had been called. The tool now blocks two specific
+// transitions until the most recent `confirm_event_plan` returns
+// `approved`:
+//   1. `set_agent_tasks` containing a wire-event-shaped row with an
+//      initial status other than `pending`.
+//   2. `update_agent_task` transitioning a wire-event-shaped row to
+//      `in_progress` / `done`.
+// ---------------------------------------------------------------------------
+
+describe('event-wiring task ordering guard', () => {
+  let setUI: typeof import('../../ui').setUI;
+  let LoggingUI: typeof import('../../ui/logging-ui').LoggingUI;
+  let __resetFirstAgentPlanForTests: typeof import('../wizard-tools').__resetFirstAgentPlanForTests;
+  let isEventWiringTitle: typeof import('../wizard-tools').isEventWiringTitle;
+  let resetEventPlanFeedbackState: typeof import('../agent/event-plan-feedback-state').resetEventPlanFeedbackState;
+  let recordEventPlanDecision: typeof import('../agent/event-plan-feedback-state').recordEventPlanDecision;
+  let tmpDir: string;
+
+  beforeEach(async () => {
+    ({ setUI } = await import('../../ui'));
+    ({ LoggingUI } = await import('../../ui/logging-ui'));
+    ({ __resetFirstAgentPlanForTests, isEventWiringTitle } = await import(
+      '../wizard-tools'
+    ));
+    ({ resetEventPlanFeedbackState, recordEventPlanDecision } = await import(
+      '../agent/event-plan-feedback-state'
+    ));
+    __resetFirstAgentPlanForTests();
+    resetEventPlanFeedbackState();
+    tmpDir = makeTmpDir();
+  });
+
+  afterEach(() => {
+    __resetFirstAgentPlanForTests();
+    resetEventPlanFeedbackState();
+    setUI(new LoggingUI());
+    cleanup(tmpDir);
+  });
+
+  // -------------------------------------------------------------------------
+  // Pure keyword matcher — exercises the regex without spinning up a server.
+  // -------------------------------------------------------------------------
+
+  describe('isEventWiringTitle()', () => {
+    it('matches "wire" as a standalone token', () => {
+      expect(isEventWiringTitle('Wire signup track call')).toBe(true);
+      expect(isEventWiringTitle('wire AI Diagram Generated')).toBe(true);
+      expect(isEventWiringTitle('WIRE SIGNUP')).toBe(true);
+    });
+
+    it('matches "track(" as a function reference', () => {
+      expect(
+        isEventWiringTitle('Add track() call to SignupForm.tsx onSubmit'),
+      ).toBe(true);
+      expect(isEventWiringTitle('amplitude.track(...) for export')).toBe(true);
+    });
+
+    it('matches "instrument"', () => {
+      expect(isEventWiringTitle('Instrument signup flow')).toBe(true);
+      expect(isEventWiringTitle('instrumenting AI generation')).toBe(true);
+    });
+
+    it('matches "event:" as a qualifier', () => {
+      expect(isEventWiringTitle('event: AI Diagram Generated')).toBe(true);
+    });
+
+    it('matches identify( and setGroup( call sites', () => {
+      expect(isEventWiringTitle('Add identify() call on login')).toBe(true);
+      expect(isEventWiringTitle('Insert setGroup() after org join')).toBe(true);
+    });
+
+    it('does NOT match neutral / planning task titles', () => {
+      expect(isEventWiringTitle('Detect framework')).toBe(false);
+      expect(isEventWiringTitle('Install SDK')).toBe(false);
+      expect(isEventWiringTitle('Initialize SDK in src/main.tsx')).toBe(false);
+      expect(isEventWiringTitle('Plan events to track')).toBe(false);
+      expect(
+        isEventWiringTitle('Plan events to track and wait for user approval'),
+      ).toBe(false);
+      expect(isEventWiringTitle('Update amplitude-setup-report.md')).toBe(
+        false,
+      );
+      expect(isEventWiringTitle('pnpm add @amplitude/unified')).toBe(false);
+    });
+
+    it('is case-insensitive across all match families', () => {
+      expect(isEventWiringTitle('TRACK( call')).toBe(true);
+      expect(isEventWiringTitle('IDENTIFY( on login')).toBe(true);
+      expect(isEventWiringTitle('SETGROUP( after join')).toBe(true);
+      expect(isEventWiringTitle('INSTRUMENT signup')).toBe(true);
+      expect(isEventWiringTitle('EVENT: foo')).toBe(true);
+    });
+  });
+
+  // -------------------------------------------------------------------------
+  // set_agent_tasks — pre-approval seeding
+  // -------------------------------------------------------------------------
+
+  function makeCaptureUI() {
+    const ui = new LoggingUI();
+    ui.setAgentTasks = () => {};
+    ui.updateAgentTask = () => true;
+    return ui;
+  }
+
+  it('set_agent_tasks accepts a wire-event row pre-approval at status="pending"', async () => {
+    setUI(makeCaptureUI());
+    const tools = await getTools(tmpDir);
+    const tool = findTool(tools, 'set_agent_tasks');
+
+    const result = await callTool(tool, {
+      tasks: [
+        { id: 'a', title: 'Install SDK', status: 'pending' },
+        {
+          id: 'b',
+          title: 'Wire track() call for Signup Completed',
+          status: 'pending',
+        },
+      ],
+      reason: 'pre-approval plan with wire row still pending',
+    });
+
+    expect(result.isError).toBeFalsy();
+    expect(result.content[0].text).toBe('ok: 2 tasks');
+  });
+
+  it('set_agent_tasks rejects a wire-event row seeded at status="done" pre-approval', async () => {
+    setUI(makeCaptureUI());
+    const tools = await getTools(tmpDir);
+    const tool = findTool(tools, 'set_agent_tasks');
+
+    const result = await callTool(tool, {
+      tasks: [
+        { id: 'a', title: 'Install SDK', status: 'done' },
+        {
+          id: 'b',
+          title: 'Wire track() calls for AI Diagram Generated',
+          status: 'done',
+        },
+      ],
+      reason: 'should be blocked',
+    });
+
+    const parsed = parseToolError(result);
+    expect(parsed.error).toContain('event-wiring task');
+    expect(parsed.error).toContain('done');
+    expect(parsed.suggestedTool).toBe('mcp__wizard-tools__confirm_event_plan');
+    expect(parsed.guidance).toContain('confirm_event_plan');
+  });
+
+  it('set_agent_tasks rejects a wire-event row seeded at status="in_progress" pre-approval', async () => {
+    setUI(makeCaptureUI());
+    const tools = await getTools(tmpDir);
+    const tool = findTool(tools, 'set_agent_tasks');
+
+    const result = await callTool(tool, {
+      tasks: [
+        {
+          id: 'wire',
+          title: 'Wire signup track call',
+          status: 'in_progress',
+        },
+      ],
+      reason: 'should be blocked',
+    });
+
+    const parsed = parseToolError(result);
+    expect(parsed.error).toContain('in_progress');
+    expect(parsed.suggestedTool).toBe('mcp__wizard-tools__confirm_event_plan');
+  });
+
+  // -------------------------------------------------------------------------
+  // update_agent_task — pre-approval transitions
+  // -------------------------------------------------------------------------
+
+  it('update_agent_task blocks a wire-event row from going to in_progress pre-approval', async () => {
+    setUI(makeCaptureUI());
+    const tools = await getTools(tmpDir);
+    const setTool = findTool(tools, 'set_agent_tasks');
+    const updateTool = findTool(tools, 'update_agent_task');
+
+    // Seed with the wire row at pending — allowed pre-approval.
+    await callTool(setTool, {
+      tasks: [
+        {
+          id: 'wire',
+          title: 'Wire track() call for Signup Completed',
+          status: 'pending',
+        },
+      ],
+      reason: 'seed',
+    });
+
+    // Now try to mark it in_progress without an approved plan.
+    const result = await callTool(updateTool, {
+      id: 'wire',
+      status: 'in_progress',
+      reason: 'should be blocked',
+    });
+
+    const parsed = parseToolError(result);
+    expect(parsed.error).toContain('in_progress');
+    expect(parsed.error).toContain('before event plan approval');
+    expect(parsed.suggestedTool).toBe('mcp__wizard-tools__confirm_event_plan');
+  });
+
+  it('update_agent_task blocks a wire-event row from going to done pre-approval', async () => {
+    setUI(makeCaptureUI());
+    const tools = await getTools(tmpDir);
+    const setTool = findTool(tools, 'set_agent_tasks');
+    const updateTool = findTool(tools, 'update_agent_task');
+
+    await callTool(setTool, {
+      tasks: [
+        {
+          id: 'wire',
+          title:
+            'Wire track() calls for AI Diagram Generated in excalidraw-app/components/AI.tsx',
+          status: 'pending',
+        },
+      ],
+      reason: 'seed',
+    });
+
+    const result = await callTool(updateTool, {
+      id: 'wire',
+      status: 'done',
+      reason: 'should be blocked',
+    });
+
+    const parsed = parseToolError(result);
+    expect(parsed.error).toContain('done');
+    expect(parsed.error).toContain('before event plan approval');
+  });
+
+  it('update_agent_task still allows non-wire transitions pre-approval', async () => {
+    setUI(makeCaptureUI());
+    const tools = await getTools(tmpDir);
+    const setTool = findTool(tools, 'set_agent_tasks');
+    const updateTool = findTool(tools, 'update_agent_task');
+
+    await callTool(setTool, {
+      tasks: [
+        { id: 'detect', title: 'Detect framework', status: 'pending' },
+        {
+          id: 'install',
+          title: 'pnpm add @amplitude/unified',
+          status: 'pending',
+        },
+        {
+          id: 'init',
+          title: 'Initialize SDK in src/main.tsx',
+          status: 'pending',
+        },
+        { id: 'plan', title: 'Plan events to track', status: 'pending' },
+      ],
+      reason: 'seed',
+    });
+
+    for (const id of ['detect', 'install', 'init', 'plan']) {
+      const result = await callTool(updateTool, {
+        id,
+        status: 'done',
+        reason: `complete ${id}`,
+      });
+      expect(result.isError).toBeFalsy();
+    }
+  });
+
+  // -------------------------------------------------------------------------
+  // Post-approval — same operations succeed once confirm_event_plan returned
+  // an approved decision.
+  // -------------------------------------------------------------------------
+
+  it('set_agent_tasks accepts wire-event rows at any status once the plan is approved', async () => {
+    setUI(makeCaptureUI());
+    recordEventPlanDecision({
+      decision: 'approved',
+      events: [{ name: 'Signup Completed', description: 'fires on signup' }],
+    });
+    const tools = await getTools(tmpDir);
+    const tool = findTool(tools, 'set_agent_tasks');
+
+    const result = await callTool(tool, {
+      tasks: [
+        { id: 'a', title: 'Install SDK', status: 'done' },
+        {
+          id: 'b',
+          title: 'Wire track() call for Signup Completed',
+          status: 'in_progress',
+        },
+        {
+          id: 'c',
+          title: 'Wire track() call for Login Completed',
+          status: 'pending',
+        },
+      ],
+      reason: 'post-approval revised plan',
+    });
+
+    expect(result.isError).toBeFalsy();
+    expect(result.content[0].text).toBe('ok: 3 tasks');
+  });
+
+  it('update_agent_task allows wire-event transitions once the plan is approved', async () => {
+    setUI(makeCaptureUI());
+    const tools = await getTools(tmpDir);
+    const setTool = findTool(tools, 'set_agent_tasks');
+    const updateTool = findTool(tools, 'update_agent_task');
+
+    await callTool(setTool, {
+      tasks: [
+        {
+          id: 'wire',
+          title: 'Wire track() call for Signup Completed',
+          status: 'pending',
+        },
+      ],
+      reason: 'seed pre-approval',
+    });
+
+    // User approves the event plan via confirm_event_plan — the
+    // decision is published to the same process-singleton the guard
+    // reads.
+    recordEventPlanDecision({
+      decision: 'approved',
+      events: [{ name: 'Signup Completed', description: 'fires on signup' }],
+    });
+
+    const inProgress = await callTool(updateTool, {
+      id: 'wire',
+      status: 'in_progress',
+      reason: 'starting wiring after approval',
+    });
+    expect(inProgress.isError).toBeFalsy();
+
+    const done = await callTool(updateTool, {
+      id: 'wire',
+      status: 'done',
+      reason: 'wiring complete',
+    });
+    expect(done.isError).toBeFalsy();
+  });
+
+  it('skipped / feedback decisions do NOT unlock wire-event transitions', async () => {
+    setUI(makeCaptureUI());
+    const tools = await getTools(tmpDir);
+    const setTool = findTool(tools, 'set_agent_tasks');
+    const updateTool = findTool(tools, 'update_agent_task');
+
+    await callTool(setTool, {
+      tasks: [
+        {
+          id: 'wire',
+          title: 'Wire track() call for Signup Completed',
+          status: 'pending',
+        },
+      ],
+      reason: 'seed',
+    });
+
+    // skipped — user opted out of approving, so wiring should NOT happen.
+    recordEventPlanDecision({
+      decision: 'skipped',
+      events: [],
+    });
+    const skippedAttempt = await callTool(updateTool, {
+      id: 'wire',
+      status: 'in_progress',
+      reason: 'should still be blocked after skip',
+    });
+    expect(parseToolError(skippedAttempt).error).toContain(
+      'before event plan approval',
+    );
+
+    // feedback — user wants revisions; not an approval.
+    recordEventPlanDecision({
+      decision: 'feedback',
+      events: [],
+      feedback: 'rename them',
+    });
+    const feedbackAttempt = await callTool(updateTool, {
+      id: 'wire',
+      status: 'done',
+      reason: 'should still be blocked after feedback',
+    });
+    expect(parseToolError(feedbackAttempt).error).toContain(
+      'before event plan approval',
+    );
+  });
+
+  it('refined-title update that introduces wire shape is blocked pre-approval', async () => {
+    setUI(makeCaptureUI());
+    const tools = await getTools(tmpDir);
+    const setTool = findTool(tools, 'set_agent_tasks');
+    const updateTool = findTool(tools, 'update_agent_task');
+
+    // Seed with a neutral title, then try to refine it into wire shape
+    // and mark in_progress in a single call. The guard inspects the
+    // *new* title (the refinement) so the agent can't sneak past it by
+    // renaming on the fly.
+    await callTool(setTool, {
+      tasks: [{ id: 'x', title: 'Plan work', status: 'pending' }],
+      reason: 'seed neutral',
+    });
+
+    const result = await callTool(updateTool, {
+      id: 'x',
+      status: 'done',
+      title: 'Wire track() call for Signup Completed',
+      reason: 'should be blocked',
+    });
+    const parsed = parseToolError(result);
+    expect(parsed.error).toContain('event-wiring task');
+  });
+});
+
+// ---------------------------------------------------------------------------
 // Integration-style — agent calls set_agent_tasks then update_agent_task
 // twice, the in-memory store reflects each transition.
 // ---------------------------------------------------------------------------
@@ -2544,6 +2999,7 @@ describe('agent task list — end-to-end through WizardStore', () => {
   let InkUI: typeof import('../../ui/tui/ink-ui').InkUI;
   let WizardStore: typeof import('../../ui/tui/store').WizardStore;
   let __resetFirstAgentPlanForTests: typeof import('../wizard-tools').__resetFirstAgentPlanForTests;
+  let resetEventPlanFeedbackState: typeof import('../agent/event-plan-feedback-state').resetEventPlanFeedbackState;
   let tmpDir: string;
 
   beforeEach(async () => {
@@ -2552,12 +3008,17 @@ describe('agent task list — end-to-end through WizardStore', () => {
     ({ InkUI } = await import('../../ui/tui/ink-ui'));
     ({ WizardStore } = await import('../../ui/tui/store'));
     ({ __resetFirstAgentPlanForTests } = await import('../wizard-tools'));
+    ({ resetEventPlanFeedbackState } = await import(
+      '../agent/event-plan-feedback-state'
+    ));
     __resetFirstAgentPlanForTests();
+    resetEventPlanFeedbackState();
     tmpDir = makeTmpDir();
   });
 
   afterEach(() => {
     __resetFirstAgentPlanForTests();
+    resetEventPlanFeedbackState();
     setUI(new LoggingUI());
     cleanup(tmpDir);
   });
