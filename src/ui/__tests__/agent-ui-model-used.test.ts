@@ -235,10 +235,12 @@ describe('formatModelDisplay (PR B9: human-readable label)', () => {
   });
 
   it('falls back to the raw alias when the shape is unknown', () => {
-    // Operator override or non-Claude alias — surface the raw
-    // string verbatim instead of fabricating a label.
     expect(formatModelDisplay('gpt-4o')).toBe('gpt-4o');
     expect(formatModelDisplay('mistral-large')).toBe('mistral-large');
+  });
+
+  it('strips the anthropic/ gateway prefix even in the fallback path', () => {
+    expect(formatModelDisplay('anthropic/custom-model')).toBe('custom-model');
   });
 });
 

@@ -2121,8 +2121,9 @@ export function classifyModelTier(model: string): ModelTier {
  * themselves.
  *
  * Heuristic-only: matches the `<family>-<major>-<minor>[-<datestamp>]`
- * shape the Claude aliases follow and falls back to the original
- * alias when the shape doesn't match. Pure (no env reads, no I/O).
+ * shape the Claude aliases follow and falls back to the normalized
+ * alias (gateway prefix stripped) when the shape doesn't match.
+ * Pure (no env reads, no I/O).
  *
  *   'claude-sonnet-4-6'              → 'Sonnet 4.6'
  *   'claude-haiku-4-5-20251001'      → 'Haiku 4.5'
@@ -2133,7 +2134,7 @@ export function classifyModelTier(model: string): ModelTier {
 export function formatModelDisplay(model: string): string {
   const normalized = model.toLowerCase().replace(/^anthropic\//, '');
   const match = /^claude-(opus|sonnet|haiku)-(\d+)-(\d+)/.exec(normalized);
-  if (!match) return model;
+  if (!match) return normalized;
   const family = match[1];
   const major = match[2];
   const minor = match[3];
