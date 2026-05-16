@@ -213,13 +213,36 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
   const selectableEnvs = getSelectableEnvironments(effectiveProject);
   const hasMultipleEnvs = selectableEnvs.length > 1;
 
-  // Auto-select the environment when there's only one with an API key
+  // Auto-select the environment when there's only one with an API key.
+  //
+  // Skipped when `pendingEnvSelection` is true: the resolver explicitly
+  // told us the user must choose (`needs_user_choice / environment_selection`)
+  // because it saw multiple envs with keys at credential-resolution time.
+  // The fresh `pendingOrgs` from `setOAuthComplete` can return a SECOND
+  // shape where one of those envs has lost its API key between fetches
+  // (provisioning lag, role change, key rotation, even a transient server
+  // response). Auto-selecting the surviving env here would silently
+  // bypass the deferral and route the user past Auth into the Setup-
+  // bucket screens with no picker — the user-reported 8-PR
+  // "frozen-after-reset" symptom. Honour the deferral and let the user
+  // see / pick (the env picker is widened below to render even a single-
+  // env list while the deferral is active so the user has something to
+  // act on instead of a dead screen). Once the user makes a choice,
+  // `setSelectedEnvName` clears `pendingEnvSelection` via `setCredentials`
+  // (or the env-picker `onSelect` calls `setSelectedEnvName` directly,
+  // which paired with the manual env-pick path clears the flag too).
   useEffect(() => {
+    if (session.pendingEnvSelection) return;
     if (projectChosen && !selectedEnv && selectableEnvs.length === 1) {
       setSelectedEnv(selectableEnvs[0]);
       store.setSelectedEnvName(selectableEnvs[0].name);
     }
-  }, [projectChosen, selectedEnv, selectableEnvs.length]);
+  }, [
+    session.pendingEnvSelection,
+    projectChosen,
+    selectedEnv,
+    selectableEnvs.length,
+  ]);
 
   // True once the user has picked an environment (or it was auto-selected),
   // or there are no environments to pick from (falls through to manual key entry).
@@ -390,8 +413,24 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
     effectiveOrg !== null &&
     effectiveOrg.projects.length > 1 &&
     !selectedProject;
+  // Show the env picker when either:
+  //   (a) there are multiple envs with keys — the normal case, user needs
+  //       to pick one
+  //   (b) the resolver explicitly deferred (`pendingEnvSelection=true`)
+  //       and there's at least one env with a key — the auto-select-when-
+  //       1-env effect above is gated on `!pendingEnvSelection`, so we
+  //       must surface SOMETHING actionable here. Otherwise the user
+  //       lands on Auth with org/project resolved, no env selected, and
+  //       no picker — a dead screen that fixes the env-picker silently-
+  //       auto-resolves bug but creates a new freeze. Rendering the
+  //       picker even with one option lets the user explicitly confirm
+  //       and unblocks the flow.
   const needsEnvPick =
-    projectChosen && hasMultipleEnvs && !selectedEnv && !needsProjectPick;
+    projectChosen &&
+    !selectedEnv &&
+    !needsProjectPick &&
+    (hasMultipleEnvs ||
+      (session.pendingEnvSelection && selectableEnvs.length > 0));
   const needsApiKey =
     effectiveOrg !== null &&
     projectChosen &&
