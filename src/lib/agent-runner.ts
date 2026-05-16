@@ -27,7 +27,8 @@ import {
   buildWizardMetadata,
 } from './agent-interface';
 import { runAgentDispatch } from './agent/run-agent-dispatch.js';
-import { getLlmGatewayUrlFromHost, getMcpUrlFromZone } from '../utils/urls';
+import { getMcpUrlFromZone } from '../utils/urls';
+import { getWizardProxyBase } from './api.js';
 import { DEFAULT_AMPLITUDE_ZONE, OUTBOUND_URLS } from './constants.js';
 import { resolveZone } from './zone-resolution.js';
 import { getVersionCheckInfo, getVersionWarning } from './version-check';
@@ -1208,11 +1209,12 @@ async function runAgentWizardBody(
     });
   }
 
-  // Skills URL: derived from the same host as the LLM proxy.
-  // Always tries remote first; falls back to bundled if fetch fails.
-  // Override with SKILLS_URL env var for testing.
+  // Skills URL: served from the data API host (`core.amplitude.com/wizard`),
+  // NOT the LLM proxy at `wizard.amplitude.com`. The LLM proxy only serves
+  // `/v1/messages`; routing skills through it would always 404. Region-pinned
+  // via `getWizardProxyBase(cloudRegion)`. Override with SKILLS_URL for tests.
   const skillsBaseUrl =
-    process.env.SKILLS_URL || getLlmGatewayUrlFromHost(host) + '/skills';
+    process.env.SKILLS_URL || getWizardProxyBase(cloudRegion) + '/skills';
 
   // The previous restore-on-outro hook was paired with the destructive
   // `backupAndFixClaudeSettings` flow. The new scoping (writing our env
