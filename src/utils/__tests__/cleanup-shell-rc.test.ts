@@ -1,11 +1,12 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'node:fs';
-import * as os from 'node:os';
 import * as path from 'node:path';
 import { cleanupShellCompletionLine } from '../cleanup-shell-rc.js';
+import { createTempDir } from './helpers/temp-dir.js';
 
 describe('cleanupShellCompletionLine', () => {
   let tmpHome: string;
+  let cleanup: () => void;
   let zshrc: string;
   let bashrc: string;
   let bashProfile: string;
@@ -13,7 +14,7 @@ describe('cleanupShellCompletionLine', () => {
   let originalUserProfile: string | undefined;
 
   beforeEach(() => {
-    tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'cleanup-rc-test-'));
+    ({ dir: tmpHome, cleanup } = createTempDir('cleanup-rc-test-'));
     zshrc = path.join(tmpHome, '.zshrc');
     bashrc = path.join(tmpHome, '.bashrc');
     bashProfile = path.join(tmpHome, '.bash_profile');
@@ -28,7 +29,7 @@ describe('cleanupShellCompletionLine', () => {
     else process.env.HOME = originalHome;
     if (originalUserProfile === undefined) delete process.env.USERPROFILE;
     else process.env.USERPROFILE = originalUserProfile;
-    fs.rmSync(tmpHome, { recursive: true, force: true });
+    cleanup();
   });
 
   it('removes the completion block from ~/.zshrc', () => {
