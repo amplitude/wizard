@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as fs from 'node:fs';
-import * as os from 'node:os';
 import * as path from 'node:path';
+import { createTempDir } from '../../utils/__tests__/helpers/temp-dir.js';
 import {
   parseAmpliConfig,
   isConfigured,
@@ -246,13 +246,14 @@ describe('mergeAmpliConfig', () => {
 
 describe('readAmpliConfig + writeAmpliConfig round-trip', () => {
   let tmpDir: string;
+  let cleanup: () => void;
 
   beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ampli-config-test-'));
+    ({ dir: tmpDir, cleanup } = createTempDir('ampli-config-test-'));
   });
 
   afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    cleanup();
   });
 
   it('auto-migrates a legacy WorkspaceId file to ProjectId on next save', () => {
@@ -354,13 +355,14 @@ describe('readAmpliConfig + writeAmpliConfig round-trip', () => {
 
 describe('writeAmpliConfig partial-binding guard', () => {
   let tmpDir: string;
+  let cleanup: () => void;
 
   beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ampli-config-partial-'));
+    ({ dir: tmpDir, cleanup } = createTempDir('ampli-config-partial-'));
   });
 
   afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    cleanup();
   });
 
   it('refuses to persist {OrgId: "21", ProjectId: ""} (the bug 2 shape)', () => {
@@ -451,13 +453,14 @@ describe('writeAmpliConfig partial-binding guard', () => {
 
 describe('clearAuthFieldsInAmpliConfig', () => {
   let tmpDir: string;
+  let cleanup: () => void;
 
   beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ampli-config-clear-'));
+    ({ dir: tmpDir, cleanup } = createTempDir('ampli-config-clear-'));
   });
 
   afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    cleanup();
   });
 
   it('removes both WorkspaceId and ProjectId (belt-and-suspenders)', () => {
@@ -508,13 +511,14 @@ describe('clearAuthFieldsInAmpliConfig', () => {
 
 describe('Phase G-1: ampli.json mirror writes are disabled', () => {
   let tmpDir: string;
+  let cleanup: () => void;
 
   beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'phase-g1-'));
+    ({ dir: tmpDir, cleanup } = createTempDir('phase-g1-'));
   });
 
   afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    cleanup();
   });
 
   it('writeAmpliConfig does not create ampli.json on a fresh project', () => {

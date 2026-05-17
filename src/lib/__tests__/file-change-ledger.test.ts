@@ -10,15 +10,7 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import {
-  existsSync,
-  mkdirSync,
-  mkdtempSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 
 import {
@@ -28,17 +20,19 @@ import {
   getFileChangeLedger,
   resetFileChangeLedger,
 } from '../file-change-ledger';
+import { createTempDir } from '../../utils/__tests__/helpers/temp-dir.js';
 
 describe('FileChangeLedger', () => {
   let installDir: string;
+  let cleanup: () => void;
 
   beforeEach(() => {
-    installDir = mkdtempSync(join(tmpdir(), 'wiz-ledger-'));
+    ({ dir: installDir, cleanup } = createTempDir('wiz-ledger-'));
     resetFileChangeLedger();
   });
 
   afterEach(() => {
-    rmSync(installDir, { recursive: true, force: true });
+    cleanup();
     resetFileChangeLedger();
   });
 
@@ -102,7 +96,8 @@ describe('FileChangeLedger', () => {
     });
 
     it('ignores paths outside the install directory', () => {
-      const outside = mkdtempSync(join(tmpdir(), 'wiz-outside-'));
+      const { dir: outside, cleanup: cleanupOutside } =
+        createTempDir('wiz-outside-');
       try {
         const target = join(outside, 'leaked.ts');
         writeFileSync(target, 'pre');
@@ -111,7 +106,7 @@ describe('FileChangeLedger', () => {
         ledger.recordPostWrite(target, 'post');
         expect(ledger.getEntries()).toHaveLength(0);
       } finally {
-        rmSync(outside, { recursive: true, force: true });
+        cleanupOutside();
       }
     });
   });
