@@ -13,11 +13,11 @@
  */
 
 import * as fs from 'node:fs';
-import * as os from 'node:os';
 import * as path from 'node:path';
 import React from 'react';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { render } from 'ink-testing-library';
+import { createTempDir } from '../../../../utils/__tests__/helpers/temp-dir.js';
 
 vi.mock('../../../../utils/ampli-settings.js', () => ({
   getStoredUser: () => undefined,
@@ -140,11 +140,12 @@ async function waitForFrameMatching(
 
 describe('DataIngestionCheckScreen — tracking plan + skip guard', () => {
   let installDir: string;
+  let cleanup: () => void;
 
   beforeEach(() => {
-    installDir = fs.mkdtempSync(
-      path.join(os.tmpdir(), 'wizard-tracking-plan-test-'),
-    );
+    ({ dir: installDir, cleanup } = createTempDir(
+      'wizard-tracking-plan-test-',
+    ));
     fetchHasAnyEventsMcpMock.mockReset();
     fetchProjectActivationStatusMock.mockReset();
     fetchProjectEventTypesMock.mockReset();
@@ -166,7 +167,7 @@ describe('DataIngestionCheckScreen — tracking plan + skip guard', () => {
   });
 
   afterEach(() => {
-    fs.rmSync(installDir, { recursive: true, force: true });
+    cleanup();
   });
 
   it('renders the planned events from .amplitude/events.json on mount', () => {

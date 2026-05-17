@@ -38,8 +38,8 @@
 import React from 'react';
 import { describe, it, expect, beforeAll, afterEach } from 'vitest';
 import * as fs from 'fs';
-import * as os from 'os';
 import * as path from 'path';
+import { createTempDir } from '../../../../utils/__tests__/helpers/temp-dir.js';
 import { render } from 'ink-testing-library';
 import { OutroScreen } from '../OutroScreen.js';
 import { makeStoreForSnapshot } from '../../__tests__/snapshot-utils.js';
@@ -86,9 +86,7 @@ describe('OutroScreen overdraw regressions', () => {
     // Pattern-match the user's evidence: long paths, several file rows,
     // a mix of MOD / NEW operations. Each rendered line must contain at
     // most one file's basename — Yoga should never mash two rows.
-    const installDir = fs.mkdtempSync(
-      path.join(os.tmpdir(), 'wizard-overdraw-d-'),
-    );
+    const { dir: installDir } = createTempDir('wizard-overdraw-d-');
     seedLedger(installDir, [
       'excalidraw-app/index.tsx',
       'excalidraw-app/components/AddToLibrary.tsx',
@@ -128,9 +126,7 @@ describe('OutroScreen overdraw regressions', () => {
   it('Bug D — every rendered diff summary row keeps its NEW/MOD/DEL prefix', () => {
     // When rows mash, the leading "MOD"/"NEW" prefix of all-but-the-first
     // row gets clipped. Assert one prefix per file.
-    const installDir = fs.mkdtempSync(
-      path.join(os.tmpdir(), 'wizard-overdraw-d2-'),
-    );
+    const { dir: installDir } = createTempDir('wizard-overdraw-d2-');
     seedLedger(installDir, [
       'excalidraw-app/components/AddToLibrary.tsx',
       'excalidraw-app/components/Palette.tsx',
