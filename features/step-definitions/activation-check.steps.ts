@@ -1,44 +1,21 @@
 import { Given, When, Then, Before } from '@cucumber/cucumber';
 import assert from 'node:assert';
-import { WizardRouter } from '../../src/ui/tui/router.js';
-import { Screen, Flow } from '../../src/ui/tui/flows.js';
-import {
-  buildSession,
-  OutroKind,
-  type WizardSession,
-} from '../../src/lib/wizard-session.js';
+import type { WizardRouter } from '../../src/ui/tui/router.js';
+import { Screen } from '../../src/ui/tui/flows.js';
+import { OutroKind, type WizardSession } from '../../src/lib/wizard-session.js';
+import { advancePastAuth, newRouterAndSession } from '../support/helpers.js';
 
 // ── Shared state ──────────────────────────────────────────────────────────────
 
 let router: WizardRouter;
 let session: WizardSession;
 
-function mockCredentials(): WizardSession['credentials'] {
-  return {
-    accessToken: 'access-abc',
-    projectApiKey: 'api-key-xyz',
-    host: 'https://api.amplitude.com',
-    appId: 123456,
-  };
-}
-
-/** Advance past intro + region + auth so the flow reaches DataSetup. */
-function advancePastAuth(s: WizardSession): void {
-  s.introConcluded = true;
-  s.credentials = mockCredentials();
-  s.region = 'us';
-  s.selectedOrgId = 'org-1';
-  s.selectedOrgName = 'Test Org';
-  s.selectedProjectName = 'Default';
-  s.selectedEnvName = 'Default';
-}
-
 // ── Lifecycle ─────────────────────────────────────────────────────────────────
 
 Before(function () {
-  router = new WizardRouter(Flow.Wizard);
-  session = buildSession({});
+  ({ router, session } = newRouterAndSession());
   advancePastAuth(session);
+  session.selectedOrgId = 'org-1';
 });
 
 // ── Given ─────────────────────────────────────────────────────────────────────

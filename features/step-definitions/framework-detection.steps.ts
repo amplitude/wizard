@@ -1,13 +1,11 @@
 import { Given, When, Then, Before } from '@cucumber/cucumber';
 import assert from 'node:assert';
-import { WizardRouter } from '../../src/ui/tui/router.js';
-import { Screen, Flow } from '../../src/ui/tui/flows.js';
-import {
-  buildSession,
-  type WizardSession,
-} from '../../src/lib/wizard-session.js';
+import type { WizardRouter } from '../../src/ui/tui/router.js';
+import { Screen } from '../../src/ui/tui/flows.js';
+import { type WizardSession } from '../../src/lib/wizard-session.js';
 import { Integration } from '../../src/lib/constants.js';
 import type { FrameworkConfig } from '../../src/lib/framework-config.js';
+import { advancePastAuth, newRouterAndSession } from '../support/helpers.js';
 
 // ── Shared state ──────────────────────────────────────────────────────────────
 
@@ -61,26 +59,13 @@ function makeConfigWithQuestion(key: string): FrameworkConfig {
   };
 }
 
-function advancePastAuth(s: WizardSession): void {
-  s.credentials = {
-    accessToken: 'tok',
-    projectApiKey: 'key',
-    host: 'https://api.amplitude.com',
-    appId: 0,
-  };
-  s.selectedOrgName = 'Test Org';
-  s.selectedProjectName = 'Default';
-  s.selectedEnvName = 'Default';
-  s.region = 'us';
-  s.projectHasData = false;
-}
-
 // ── Lifecycle ─────────────────────────────────────────────────────────────────
 
 Before(function () {
-  router = new WizardRouter(Flow.Wizard);
-  session = buildSession({});
+  ({ router, session } = newRouterAndSession());
   advancePastAuth(session);
+  // framework-detection scenarios start from Intro (introConcluded stays false).
+  session.introConcluded = false;
 });
 
 // ── Given ─────────────────────────────────────────────────────────────────────
@@ -130,11 +115,6 @@ When('I confirm the detection', function () {
   session.setupConfirmed = true;
 });
 
-When('I confirm', function () {
-  session.introConcluded = true;
-  session.setupConfirmed = true;
-});
-
 When('there are no unresolved setup questions', function () {
   // frameworkConfig has no setup questions — needsSetup returns false
   if (session.frameworkConfig) {
@@ -162,13 +142,6 @@ When('the wizard cannot auto-detect my framework', function () {
   session.detectionComplete = true;
   session.frameworkConfig = null;
   session.integration = null;
-});
-
-When('I select a framework from the picker', function () {
-  const config = makeConfig('Vue');
-  session.frameworkConfig = config;
-  session.integration = Integration.vue;
-  session.detectionComplete = true;
 });
 
 When('I answer all questions', function () {
@@ -219,21 +192,6 @@ Then('the generic integration should be selected automatically', function () {
   );
 });
 
-Then('I should see the framework picker menu', function () {
-  // Router shows Intro with no frameworkConfig — IntroScreen shows picker
-  const screen = router.resolve(session);
-  assert.strictEqual(
-    screen,
-    Screen.Intro,
-    `Expected Intro (picker) but got ${screen}`,
-  );
-  assert.strictEqual(
-    session.frameworkConfig,
-    null,
-    'Expected frameworkConfig to be null (picker state)',
-  );
-});
-
 Then(
   'I should see the framework picker menu without attempting auto-detection',
   function () {
@@ -273,20 +231,6 @@ Then('I should see a picker for each undetected question', function () {
     screen,
     Screen.Setup,
     `Expected Setup (question picker) but got ${screen}`,
-  );
-});
-
-Then('I should see the selected framework displayed', function () {
-  // After picking from the framework picker, router shows Intro (confirm screen)
-  const screen = router.resolve(session);
-  assert.strictEqual(
-    screen,
-    Screen.Intro,
-    `Expected Intro (showing selected framework) but got ${screen}`,
-  );
-  assert.ok(
-    session.frameworkConfig !== null,
-    'Expected frameworkConfig to be set after selection',
   );
 });
 

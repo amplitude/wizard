@@ -1,13 +1,13 @@
 import { Given, Then, Before } from '@cucumber/cucumber';
 import assert from 'node:assert';
-import { WizardRouter } from '../../src/ui/tui/router.js';
-import { Screen, Flow } from '../../src/ui/tui/flows.js';
+import type { WizardRouter } from '../../src/ui/tui/router.js';
+import { Screen } from '../../src/ui/tui/flows.js';
 import {
-  buildSession,
   type WizardSession,
   RunPhase,
   OutroKind,
 } from '../../src/lib/wizard-session.js';
+import { advancePastAuth, newRouterAndSession } from '../support/helpers.js';
 
 // ── Shared state ──────────────────────────────────────────────────────────────
 
@@ -17,21 +17,9 @@ let session: WizardSession;
 // ── Lifecycle ─────────────────────────────────────────────────────────────────
 
 Before(function () {
-  router = new WizardRouter(Flow.Wizard);
-  session = buildSession({});
+  ({ router, session } = newRouterAndSession());
   // Advance past intro, auth, region, data setup, setup, run, mcp, data ingestion, checklist, slack
-  session.introConcluded = true;
-  session.credentials = {
-    accessToken: 'tok',
-    projectApiKey: 'key',
-    host: 'https://api.amplitude.com',
-    appId: 0,
-  };
-  session.selectedOrgName = 'Test Org';
-  session.selectedProjectName = 'Default';
-  session.selectedEnvName = 'Default';
-  session.region = 'us';
-  session.projectHasData = false;
+  advancePastAuth(session);
   session.setupConfirmed = true;
   session.mcpComplete = true;
   session.dataIngestionConfirmed = true;

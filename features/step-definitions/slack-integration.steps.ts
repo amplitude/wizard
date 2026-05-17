@@ -3,37 +3,22 @@ import assert from 'node:assert';
 import { WizardRouter } from '../../src/ui/tui/router.js';
 import { Screen, Flow } from '../../src/ui/tui/flows.js';
 import {
-  buildSession,
   RunPhase,
   OutroKind,
   SlackOutcome,
   type CloudRegion,
   type WizardSession,
 } from '../../src/lib/wizard-session.js';
+import { advancePastAuth, newRouterAndSession } from '../support/helpers.js';
 
 // ── Shared state ──────────────────────────────────────────────────────────────
 
 let router: WizardRouter;
 let session: WizardSession;
 
-function mockCredentials(): WizardSession['credentials'] {
-  return {
-    accessToken: 'access-abc',
-    projectApiKey: 'api-key-xyz',
-    host: 'https://api.amplitude.com',
-    appId: 123456,
-  };
-}
-
 /** Advance past intro, auth, region, data setup, framework detection, run, mcp — lands on Slack. */
 function advancePastMcp(s: WizardSession): void {
-  s.introConcluded = true;
-  s.credentials = mockCredentials();
-  s.selectedOrgName = 'Test Org';
-  s.selectedProjectName = 'Default';
-  s.selectedEnvName = 'Default';
-  s.region = 'us';
-  s.projectHasData = false;
+  advancePastAuth(s);
   s.setupConfirmed = true;
   s.runPhase = RunPhase.Completed;
   s.outroData = { kind: OutroKind.Success };
@@ -45,8 +30,7 @@ function advancePastMcp(s: WizardSession): void {
 // ── Lifecycle ─────────────────────────────────────────────────────────────────
 
 Before(function () {
-  router = new WizardRouter(Flow.Wizard);
-  session = buildSession({});
+  ({ router, session } = newRouterAndSession());
 });
 
 // ── Given ─────────────────────────────────────────────────────────────────────
@@ -62,8 +46,7 @@ Given('my region is {string}', function (region: string) {
 });
 
 Given('I run the standalone slack command', function () {
-  router = new WizardRouter(Flow.SlackSetup);
-  session = buildSession({});
+  ({ router, session } = newRouterAndSession({ flow: Flow.SlackSetup }));
 });
 
 // ── When ──────────────────────────────────────────────────────────────────────
