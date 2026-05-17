@@ -11,7 +11,7 @@
  */
 
 import { Box, Text } from 'ink';
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import { TextInput } from '@inkjs/ui';
 import type { WizardStore } from '../store.js';
 import { useWizardStore } from '../hooks/useWizardStore.js';
@@ -20,6 +20,11 @@ import { useScreenHints } from '../hooks/useScreenHints.js';
 import { Colors, Icons } from '../styles.js';
 import type { KeyHint } from '../components/KeyHintBar.js';
 import { analytics } from '../../../utils/analytics.js';
+
+const HINTS: readonly KeyHint[] = Object.freeze([
+  { key: 'Enter', label: 'Continue' },
+  { key: 'Esc', label: 'Back' },
+]);
 
 interface SignupFullNameScreenProps {
   store: WizardStore;
@@ -32,14 +37,7 @@ export const SignupFullNameScreen = ({ store }: SignupFullNameScreenProps) => {
   const [draft, setDraft] = useState(session.signupFullName ?? '');
   const [error, setError] = useState<string | null>(null);
 
-  const hints = useMemo<readonly KeyHint[]>(
-    () => [
-      { key: 'Enter', label: 'Continue' },
-      { key: 'Esc', label: 'Back' },
-    ],
-    [],
-  );
-  useScreenHints(hints);
+  useScreenHints(HINTS);
 
   // Esc clears the email entirely (not just rewinds — the prior email
   // is forgotten) and resets the ceremony state via `setSignupEmail`'s

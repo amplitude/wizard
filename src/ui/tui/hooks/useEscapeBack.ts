@@ -19,12 +19,11 @@
 import { useMemo } from 'react';
 import type { WizardStore } from '../store.js';
 import type { KeyHint } from '../components/KeyHintBar.js';
-import { useScreenHints } from './useScreenHints.js';
+import { EMPTY_HINTS, useScreenHints } from './useScreenHints.js';
 import { useScreenInput } from './useScreenInput.js';
 import { useWizardStore } from './useWizardStore.js';
 
 const BACK_HINT: KeyHint = { key: 'Esc', label: 'Back' };
-const EMPTY_HINTS: readonly KeyHint[] = Object.freeze([]);
 
 interface UseEscapeBackOptions {
   /** Hints to render alongside `[Esc] Back`. */
