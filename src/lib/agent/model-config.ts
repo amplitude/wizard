@@ -44,35 +44,29 @@ export function selectModel(mode: ModelTier, useDirectApiKey: boolean): string {
   return useDirectApiKey ? alias : `anthropic/${alias}`;
 }
 
+/**
+ * Resolve a model alias from a `WIZARD_*_MODEL` override, falling back
+ * to `defaultAlias`. The Agent SDK rejects a fallback equal to the
+ * primary with "Fallback model cannot be the same as the main model",
+ * so an override that collides with {@link FALLBACK_MODEL_DIRECT} is
+ * ignored — the wizard would otherwise crash on every run.
+ */
+function aliasFromEnvOverride(
+  envVar: 'WIZARD_CLAUDE_MODEL' | 'WIZARD_HAIKU_MODEL',
+  defaultAlias: string,
+): string {
+  const override = process.env[envVar]?.trim();
+  if (!override) return defaultAlias;
+  if (override === FALLBACK_MODEL_DIRECT) return defaultAlias;
+  return override;
+}
+
 function standardAlias(): string {
-  const override = process.env.WIZARD_CLAUDE_MODEL?.trim();
-  if (override && override.length > 0) {
-    // The Agent SDK rejects a fallback equal to the primary with
-    // "Fallback model cannot be the same as the main model". If the
-    // operator pins the standard tier to the same alias the SDK uses
-    // for fallback, fall through to the default to keep the invariant.
-    if (override === FALLBACK_MODEL_DIRECT) {
-      return 'claude-sonnet-4-6';
-    }
-    return override;
-  }
-  return 'claude-sonnet-4-6';
+  return aliasFromEnvOverride('WIZARD_CLAUDE_MODEL', 'claude-sonnet-4-6');
 }
 
 function haikuAlias(): string {
-  const override = process.env.WIZARD_HAIKU_MODEL?.trim();
-  if (override && override.length > 0) {
-    // Mirror the standardAlias() guard: the Agent SDK rejects a fallback
-    // equal to the primary with "Fallback model cannot be the same as the
-    // main model". An operator pinning Haiku to the same alias the SDK
-    // uses for fallback would trip the same invariant — fall through to
-    // the default.
-    if (override === FALLBACK_MODEL_DIRECT) {
-      return HAIKU_MODEL_DIRECT;
-    }
-    return override;
-  }
-  return HAIKU_MODEL_DIRECT;
+  return aliasFromEnvOverride('WIZARD_HAIKU_MODEL', HAIKU_MODEL_DIRECT);
 }
 
 /**
