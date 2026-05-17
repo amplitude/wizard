@@ -19,6 +19,7 @@ import { useScreenInput } from '../hooks/useScreenInput.js';
 import { useScreenHints } from '../hooks/useScreenHints.js';
 import { Colors, Icons } from '../styles.js';
 import type { KeyHint } from '../components/KeyHintBar.js';
+import { ScreenHeader } from './screen-header.js';
 import { analytics } from '../../../utils/analytics.js';
 
 interface SignupFullNameScreenProps {
@@ -66,12 +67,7 @@ export const SignupFullNameScreen = ({ store }: SignupFullNameScreenProps) => {
 
   return (
     <Box flexDirection="column" flexGrow={1}>
-      <Box flexDirection="column" marginBottom={1}>
-        <Text bold color={Colors.heading}>
-          One more thing
-        </Text>
-        <Text color={Colors.muted}>What&apos;s your full name?</Text>
-      </Box>
+      <ScreenHeader title="One more thing" subtitle="What's your full name?" />
 
       <Box flexDirection="column" marginBottom={1}>
         <TextInput

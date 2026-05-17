@@ -20,6 +20,7 @@ import { useEscapeBack } from '../hooks/useEscapeBack.js';
 import { PickerMenu } from '../primitives/index.js';
 import { Colors, Icons } from '../styles.js';
 import type { KeyHint } from '../components/KeyHintBar.js';
+import { ScreenHeader } from './screen-header.js';
 import {
   KNOWN_DOC_KINDS,
   type DocKind,
@@ -77,14 +78,10 @@ export const ToSScreen = ({ store }: ToSScreenProps) => {
 
   return (
     <Box flexDirection="column" flexGrow={1}>
-      <Box flexDirection="column" marginBottom={1}>
-        <Text bold color={Colors.heading}>
-          Terms of Service
-        </Text>
-        <Text color={Colors.muted}>
-          By continuing, you agree to Amplitude&apos;s terms
-        </Text>
-      </Box>
+      <ScreenHeader
+        title="Terms of Service"
+        subtitle="By continuing, you agree to Amplitude's terms"
+      />
 
       <Box flexDirection="column" marginBottom={1}>
         <Text>
