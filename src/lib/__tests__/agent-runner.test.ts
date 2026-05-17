@@ -19,6 +19,7 @@ import {
   agentArtifactsLookComplete,
   agentEventsInstrumented,
   buildDashboardDeferredMessage,
+  buildGatewayAbortSpec,
   classifyAgentOutcome,
   classifyApiErrorSubtype,
   refreshTokenIfStale,
@@ -195,6 +196,115 @@ describe('classifyApiErrorSubtype', () => {
           message: '',
         }),
       ).toBe('other');
+    });
+  });
+});
+
+describe('buildGatewayAbortSpec — golden behavior pins', () => {
+  // The gateway-error abort path is the single most user-visible failure
+  // shape on long runs: an exhausted retry budget or a Vertex 400 will
+  // surface this exact copy to a real user (and the matching `code`
+  // discriminator to an orchestrator parsing the NDJSON stream).
+  //
+  // The text is duplicated nowhere — this helper is the only producer.
+  // The byte-for-byte snapshots below are the contract; if a future
+  // refactor moves words around, this suite has to be updated *first*
+  // and the change reviewed as a copy change, not a refactor.
+
+  describe('GATEWAY_DOWN — retry-recoverable', () => {
+    it('pins all six fields for a typical "API Error: 400 terminated" message', () => {
+      const spec = buildGatewayAbortSpec({
+        kind: AgentErrorType.GATEWAY_DOWN,
+        rawMessage: 'API Error: 400 terminated',
+      });
+      expect(spec.code).toBe('GATEWAY_DOWN');
+      expect(spec.recoverable).toBe('retry');
+      expect(spec.sentrySummary).toBe('API Error: 400 terminated');
+      expect(spec.emitMessage).toBe(
+        'LLM gateway unavailable: API Error: 400 terminated',
+      );
+      expect(spec.errorSummary).toBe(
+        'LLM gateway unavailable: API Error: 400 terminated',
+      );
+      expect(spec.suggestedCommand).toBeUndefined();
+      expect(spec.userMessage).toContain('Amplitude LLM gateway unavailable');
+      expect(spec.userMessage).toContain('API Error: 400 terminated');
+      expect(spec.userMessage).toContain('wizard@amplitude.com');
+    });
+
+    it('falls back to "unknown" / "API Error: 400 terminated" when message is empty', () => {
+      const spec = buildGatewayAbortSpec({
+        kind: AgentErrorType.GATEWAY_DOWN,
+        rawMessage: '',
+      });
+      expect(spec.sentrySummary).toBe('LLM gateway unavailable');
+      expect(spec.emitMessage).toBe('LLM gateway unavailable: unknown');
+      expect(spec.errorSummary).toBe('LLM gateway unavailable: unknown');
+      // The user-facing message inlines the upstream error and shows the
+      // canonical fallback so the user has SOMETHING to reference even
+      // when the SDK never gave us a usable string.
+      expect(spec.userMessage).toContain('API Error: 400 terminated');
+    });
+
+    it('sanitizes raw SSE bodies before surfacing to user-visible copy', () => {
+      // Real-world: Sentry #7442894144 — raw error string included the
+      // entire failing SSE response body. This pins that the helper
+      // routes through `sanitizeErrorMessageForLog`, which suppresses
+      // `event:` SSE protocol lines with a "[N SSE frame suppressed]"
+      // marker. The marker's presence is the contract here — it proves
+      // we routed through the sanitizer instead of inlining the raw
+      // string verbatim into user-facing copy.
+      const sseBody =
+        'API Error: 400 terminated\nevent: error\ndata: {"type":"overloaded_error"}\n\nevent: message_stop\ndata: {}';
+      const spec = buildGatewayAbortSpec({
+        kind: AgentErrorType.GATEWAY_DOWN,
+        rawMessage: sseBody,
+      });
+      // Both downstream surfaces (user-facing Outro + orchestrator
+      // emit envelope) must have routed through the sanitizer.
+      expect(spec.userMessage).toContain('SSE frame suppressed');
+      expect(spec.userMessage).not.toContain('event: message_stop');
+      expect(spec.emitMessage).toContain('SSE frame suppressed');
+      expect(spec.emitMessage).not.toContain('event: message_stop');
+    });
+  });
+
+  describe('GATEWAY_INVALID_REQUEST — fatal, upgrade-only', () => {
+    it('pins fatal recoverable + upgrade-command suggestedAction', () => {
+      const spec = buildGatewayAbortSpec({
+        kind: AgentErrorType.GATEWAY_INVALID_REQUEST,
+        rawMessage: 'Invalid request sent to model provider',
+      });
+      expect(spec.code).toBe('GATEWAY_INVALID_REQUEST');
+      expect(spec.recoverable).toBe('fatal');
+      expect(spec.suggestedCommand).toEqual([
+        'npm',
+        'install',
+        '-g',
+        '@amplitude/wizard@latest',
+      ]);
+      expect(spec.emitMessage).toBe(
+        'Wizard request rejected by gateway: Invalid request sent to model provider',
+      );
+      expect(spec.errorSummary).toBe(
+        'Wizard request rejected by gateway: Invalid request sent to model provider',
+      );
+      // Copy must mention the upgrade path — that's the only remediation.
+      expect(spec.userMessage).toContain('npm i -g @amplitude/wizard@latest');
+      expect(spec.userMessage).toContain(
+        'Wizard request rejected by Amplitude gateway',
+      );
+    });
+
+    it('falls back to "Wizard request rejected by gateway" / "unknown"', () => {
+      const spec = buildGatewayAbortSpec({
+        kind: AgentErrorType.GATEWAY_INVALID_REQUEST,
+        rawMessage: '',
+      });
+      expect(spec.sentrySummary).toBe('Wizard request rejected by gateway');
+      expect(spec.emitMessage).toBe(
+        'Wizard request rejected by gateway: unknown',
+      );
     });
   });
 });
