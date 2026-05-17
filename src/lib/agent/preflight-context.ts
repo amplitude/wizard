@@ -236,6 +236,17 @@ function renderProject(input: PreflightContextInput): string {
   return lines.join('\n');
 }
 
+/**
+ * Format a `name (id: X)` value for an entity that may have a name, id,
+ * or neither. Returns `'?'` when both are missing — matches the unknown
+ * sentinel used by {@link line}.
+ */
+function renderNameAndId(name: string | null, id: string | null): string {
+  if (name) return id ? `${name} (id: ${id})` : name;
+  if (id) return `id: ${id}`;
+  return '?';
+}
+
 function renderAmplitude(input: PreflightContextInput): string {
   const lines: string[] = ['## Amplitude state'];
   // `userEmail: null` means the wizard hasn't observed an authenticated
@@ -244,26 +255,15 @@ function renderAmplitude(input: PreflightContextInput): string {
   // sign-in prompt if we reported "signed in" without an email.
   const auth = input.userEmail ? `signed in (${input.userEmail})` : '?';
   lines.push(line('auth', auth));
-  if (input.selectedOrgName || input.selectedOrgId) {
-    const value = input.selectedOrgName
-      ? `${input.selectedOrgName}${
-          input.selectedOrgId ? ` (id: ${input.selectedOrgId})` : ''
-        }`
-      : `id: ${input.selectedOrgId}`;
-    lines.push(line('org', value));
-  } else {
-    lines.push(line('org', '?'));
-  }
-  if (input.selectedProjectName || input.selectedProjectId) {
-    const value = input.selectedProjectName
-      ? `${input.selectedProjectName}${
-          input.selectedProjectId ? ` (id: ${input.selectedProjectId})` : ''
-        }`
-      : `id: ${input.selectedProjectId}`;
-    lines.push(line('project', value));
-  } else {
-    lines.push(line('project', '?'));
-  }
+  lines.push(
+    line('org', renderNameAndId(input.selectedOrgName, input.selectedOrgId)),
+  );
+  lines.push(
+    line(
+      'project',
+      renderNameAndId(input.selectedProjectName, input.selectedProjectId),
+    ),
+  );
   if (input.selectedEnvName) {
     lines.push(line('environment', input.selectedEnvName));
   }
