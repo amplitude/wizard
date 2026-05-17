@@ -40,8 +40,8 @@ Built with [Ink](https://github.com/vadimdemedes/ink) (React for CLIs) + nanosto
 | `store.ts` | `WizardStore`, `Screen`, `Overlay`, `Flow` — nanostore-backed reactive state |
 | `router.ts` | `WizardRouter` — resolves active screen from session state via flow pipeline; manages overlay stack |
 | `flows.ts` | Declarative flow pipelines (`Screen` + `Flow` enums, `FlowEntry` arrays) |
-| `screen-registry.tsx` | Maps all 24 screen/overlay names (18 `Screen` + 6 `Overlay`) to React components |
-| `screens/` | 17 screen components (Auth, Run, Outro, MCP, Slack, etc.) — `Screen.Options` resolves to `null` and has no component file |
+| `screen-registry.tsx` | Maps the 25 screen/overlay names (19 `Screen` + 6 `Overlay`) to React components |
+| `screens/` | 20 screen `.tsx` files (Auth, Run, Outro, MCP, Slack, etc.). 19 are wired through `screen-registry.tsx`; `EventPlanFullScreen` is rendered as a standalone full-screen view by `App.tsx` and does not get its own router entry |
 | `components/` | `ConsoleView`, `JourneyStepper`, `HeaderBar`, `KeyHintBar`, `AmplitudeLogo`, `BrailleSpinner` |
 | `hooks/` | `useWizardStore` (stable subscription), `useAsyncEffect` (AbortController-based), `useScreenInput`, `useEscapeBack`, `useStdoutDimensions` |
 | `utils/` | `withTimeout`, `withRetry`, `classifyError`, `diagnostics` (flow evaluation + sanitized snapshots) |
@@ -146,7 +146,7 @@ Key additions:
 - `atomic-write.ts` — crash-safe JSON writes via temp-file + rename. Used by session checkpointing and config persistence.
 - `token-refresh.ts` — silent OAuth token refresh using stored refresh tokens. Proactively refreshes 5 minutes before expiry, falls back to full browser auth on failure.
 - `storage-paths.ts` — single source of truth for every path the wizard reads or writes. Per-user cache at `~/.amplitude/wizard/`, per-project metadata at `<installDir>/.amplitude/`. Override the cache root with `AMPLITUDE_WIZARD_CACHE_DIR` (used by tests).
-- `storage-migration.ts` — one-shot migration from the old `$TMPDIR/amplitude-wizard-*` + project-root dotfile layout. Idempotent, runs at startup. Drop after one release.
+- `storage-migration.ts` — one-shot migration from the old `$TMPDIR/amplitude-wizard-*` + project-root dotfile layout to `~/.amplitude/wizard/` and `<installDir>/.amplitude/`. Idempotent, runs at startup. Retire once telemetry confirms the legacy paths are no longer present in the field.
 
 ## Session storage
 
@@ -202,7 +202,7 @@ This repo enforces **conventional commit** PR titles and commit messages. The ty
 - **Session is the single source of truth.** All state lives in `WizardSession`. Screens and steps read from and write to the session; they do not communicate directly.
 - **Flows are declarative.** Each flow is a pipeline of `{ screen, show, isComplete }` entries. Navigation advances automatically when `isComplete` returns true.
 - **Overlays interrupt without breaking flow.** `OutageScreen` and other overlays are pushed onto an overlay stack and popped when resolved, resuming the flow where it left off. Overlay enum (`src/ui/tui/router.ts`): `Outage`, `Snake`, `Mcp`, `Slack`, `Logout`, `Login`.
-- **Slash commands are always available.** `/region`, `/login`, `/logout`, `/whoami`, `/create-project`, `/mcp`, `/slack`, `/feedback`, `/clear`, `/help`, `/debug`, `/diagnostics`, `/snake`, `/exit` must be interceptable at any point in the session. The canonical list lives in `src/ui/tui/console-commands.ts` — update both together.
+- **Slash commands are always available.** `/region`, `/login`, `/logout`, `/whoami`, `/create-project`, `/mcp`, `/slack`, `/feedback`, `/clear`, `/help`, `/debug`, `/diagnostics`, `/diff`, `/snake`, `/version`, `/exit` must be interceptable at any point in the session. The canonical list lives in `src/ui/tui/console-commands.ts` — update both together.
 - **Framework configs are data-driven.** No switch statements or per-framework routing. Everything goes through `FrameworkConfig` + `FRAMEWORK_REGISTRY`. The universal runner handles all shared behavior.
 - **Agent commandments** (`src/lib/commandments.ts`) are always injected as system prompt. Key rules: never hardcode secrets, always use `wizard-tools` MCP for env vars and package manager detection, must call `confirm_event_plan` before writing `track()` calls.
 - **Detection order matters.** The `Integration` enum order in `constants.ts` controls both auto-detection priority (first match wins) and display order in the CLI select menu.
