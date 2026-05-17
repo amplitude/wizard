@@ -4,13 +4,9 @@
  * Respects the dedup flag from TurnCounterPlugin.
  */
 
-import type {
-  Middleware,
-  MiddlewareContext,
-  MiddlewareStore,
-  SDKMessage,
-} from '../types';
+import type { MiddlewareContext, MiddlewareStore, SDKMessage } from '../types';
 import type { TurnData } from './turn-counter';
+import { PhaseSnapshotPlugin } from './base';
 
 /** Matches SDK usage.cache_creation (ephemeral 5m vs 1h for pricing). */
 export interface CacheCreationBreakdown {
@@ -35,7 +31,18 @@ export interface CacheData {
   }>;
 }
 
-export class CacheTrackerPlugin implements Middleware {
+type CacheSnapshot = {
+  phase: string;
+  cacheReadTokens: number;
+  cacheCreationTokens: number;
+  cacheCreation5m: number;
+  cacheCreation1h: number;
+};
+
+export class CacheTrackerPlugin extends PhaseSnapshotPlugin<
+  CacheSnapshot,
+  CacheData
+> {
   readonly name = 'cache';
 
   private phaseRead = 0;
@@ -46,14 +53,6 @@ export class CacheTrackerPlugin implements Middleware {
   private totalCreation = 0;
   private totalCreation5m = 0;
   private totalCreation1h = 0;
-  private phaseSnapshots: Array<{
-    phase: string;
-    cacheReadTokens: number;
-    cacheCreationTokens: number;
-    cacheCreation5m: number;
-    cacheCreation1h: number;
-  }> = [];
-  private currentPhase = 'setup';
 
   onMessage(
     message: SDKMessage,
@@ -80,47 +79,27 @@ export class CacheTrackerPlugin implements Middleware {
       this.totalCreation += creation;
     }
 
-    store.set('cache', this.getData());
+    this.publish(store);
   }
 
-  onPhaseTransition(
-    fromPhase: string,
-    toPhase: string,
-    _ctx: MiddlewareContext,
-    store: MiddlewareStore,
-  ): void {
-    this.phaseSnapshots.push({
-      phase: fromPhase,
+  protected buildPhaseSnapshot(phase: string): CacheSnapshot {
+    return {
+      phase,
       cacheReadTokens: this.phaseRead,
       cacheCreationTokens: this.phaseCreation,
       cacheCreation5m: this.phaseCreation5m,
       cacheCreation1h: this.phaseCreation1h,
-    });
-    this.currentPhase = toPhase;
+    };
+  }
+
+  protected resetPhaseState(): void {
     this.phaseRead = 0;
     this.phaseCreation = 0;
     this.phaseCreation5m = 0;
     this.phaseCreation1h = 0;
-    store.set('cache', this.getData());
   }
 
-  onFinalize(
-    _resultMessage: SDKMessage,
-    _totalDurationMs: number,
-    _ctx: MiddlewareContext,
-    store: MiddlewareStore,
-  ): void {
-    this.phaseSnapshots.push({
-      phase: this.currentPhase,
-      cacheReadTokens: this.phaseRead,
-      cacheCreationTokens: this.phaseCreation,
-      cacheCreation5m: this.phaseCreation5m,
-      cacheCreation1h: this.phaseCreation1h,
-    });
-    store.set('cache', this.getData());
-  }
-
-  private getData(): CacheData {
+  protected buildData(): CacheData {
     return {
       phaseRead: this.phaseRead,
       phaseCreation: this.phaseCreation,

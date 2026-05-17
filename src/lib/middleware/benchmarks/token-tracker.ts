@@ -8,7 +8,6 @@
  */
 
 import type {
-  Middleware,
   MiddlewareContext,
   MiddlewareStore,
   SDKMessage,
@@ -16,6 +15,8 @@ import type {
 } from '../types';
 import type { TurnData } from './turn-counter';
 import { setSpanMeasurement } from '../../observability/index';
+import { inputTokensWithCache } from './_usage';
+import { PhaseSnapshotPlugin } from './base';
 
 export interface TokenData {
   phaseInput: number;
@@ -34,7 +35,17 @@ export interface TokenData {
   }>;
 }
 
-export class TokenTrackerPlugin implements Middleware {
+type TokenSnapshot = {
+  phase: string;
+  inputTokens: number;
+  outputTokens: number;
+  messagesWithUsage: number;
+};
+
+export class TokenTrackerPlugin extends PhaseSnapshotPlugin<
+  TokenSnapshot,
+  TokenData
+> {
   readonly name = 'tokens';
 
   private phaseInput = 0;
@@ -42,13 +53,6 @@ export class TokenTrackerPlugin implements Middleware {
   private totalInput = 0;
   private totalOutput = 0;
   private lastUsage: SDKUsage | null = null;
-  private phaseSnapshots: Array<{
-    phase: string;
-    inputTokens: number;
-    outputTokens: number;
-    messagesWithUsage: number;
-  }> = [];
-  private currentPhase = 'setup';
   private phaseMessagesWithUsage = 0;
 
   onMessage(
@@ -63,10 +67,7 @@ export class TokenTrackerPlugin implements Middleware {
 
     const usage = message.message?.usage;
     if (usage) {
-      const input =
-        Number(usage.input_tokens ?? 0) +
-        Number(usage.cache_read_input_tokens ?? 0) +
-        Number(usage.cache_creation_input_tokens ?? 0);
+      const input = inputTokensWithCache(usage);
       const output = Number(usage.output_tokens ?? 0);
       this.phaseInput += input;
       this.phaseOutput += output;
@@ -76,42 +77,36 @@ export class TokenTrackerPlugin implements Middleware {
       this.phaseMessagesWithUsage += 1;
     }
 
-    store.set('tokens', this.getData());
+    this.publish(store);
   }
 
-  onPhaseTransition(
-    fromPhase: string,
-    toPhase: string,
-    _ctx: MiddlewareContext,
-    store: MiddlewareStore,
-  ): void {
-    this.phaseSnapshots.push({
-      phase: fromPhase,
+  protected buildPhaseSnapshot(phase: string): TokenSnapshot {
+    return {
+      phase,
       inputTokens: this.phaseInput,
       outputTokens: this.phaseOutput,
       messagesWithUsage: this.phaseMessagesWithUsage,
-    });
-    this.currentPhase = toPhase;
+    };
+  }
+
+  protected resetPhaseState(): void {
     this.phaseInput = 0;
     this.phaseOutput = 0;
     this.phaseMessagesWithUsage = 0;
-    store.set('tokens', this.getData());
   }
 
-  onFinalize(
-    resultMessage: SDKMessage,
-    _totalDurationMs: number,
-    _ctx: MiddlewareContext,
-    store: MiddlewareStore,
-  ): void {
-    this.phaseSnapshots.push({
-      phase: this.currentPhase,
-      inputTokens: this.phaseInput,
-      outputTokens: this.phaseOutput,
-      messagesWithUsage: this.phaseMessagesWithUsage,
-    });
-    store.set('tokens', this.getData());
+  protected buildData(): TokenData {
+    return {
+      phaseInput: this.phaseInput,
+      phaseOutput: this.phaseOutput,
+      totalInput: this.totalInput,
+      totalOutput: this.totalOutput,
+      lastUsage: this.lastUsage,
+      phaseSnapshots: [...this.phaseSnapshots],
+    };
+  }
 
+  protected onFinalizeExtra(resultMessage: SDKMessage): void {
     // Promote token totals to Sentry trace measurements so they show up as
     // first-class metrics in the active root span. No-op when there is no
     // active span or telemetry is disabled — purely additive to benchmark
@@ -147,16 +142,5 @@ export class TokenTrackerPlugin implements Middleware {
     // matching how the rest of the wizard reports token spend).
     setSpanMeasurement('agent.tokens.total_input', this.totalInput, 'token');
     setSpanMeasurement('agent.tokens.total_output', this.totalOutput, 'token');
-  }
-
-  private getData(): TokenData {
-    return {
-      phaseInput: this.phaseInput,
-      phaseOutput: this.phaseOutput,
-      totalInput: this.totalInput,
-      totalOutput: this.totalOutput,
-      lastUsage: this.lastUsage,
-      phaseSnapshots: [...this.phaseSnapshots],
-    };
   }
 }

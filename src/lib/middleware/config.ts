@@ -94,6 +94,21 @@ const BenchmarkConfigFileSchema = z
   })
   .passthrough();
 
+/**
+ * Apply env-var overrides that take precedence over both defaults and any
+ * loaded config file. Used for parallel runs that need distinct output paths
+ * without rewriting `.benchmark-config.json`.
+ */
+function applyEnvOverrides(config: BenchmarkConfig): BenchmarkConfig {
+  if (process.env.AMPLITUDE_WIZARD_BENCHMARK_FILE) {
+    config.output.benchmarkPath = process.env.AMPLITUDE_WIZARD_BENCHMARK_FILE;
+  }
+  if (process.env.AMPLITUDE_WIZARD_LOG_FILE) {
+    config.output.logPath = process.env.AMPLITUDE_WIZARD_LOG_FILE;
+  }
+  return config;
+}
+
 export function loadBenchmarkConfig(installDir: string): BenchmarkConfig {
   const defaults = buildDefaultConfig(installDir);
   const configPath =
@@ -104,18 +119,10 @@ export function loadBenchmarkConfig(installDir: string): BenchmarkConfig {
     const result = BenchmarkConfigFileSchema.safeParse(JSON.parse(raw));
     if (!result.success) throw result.error;
     const parsed = result.data;
-    const config: BenchmarkConfig = {
+    const config: BenchmarkConfig = applyEnvOverrides({
       plugins: { ...defaults.plugins, ...parsed.plugins },
       output: { ...defaults.output, ...parsed.output },
-    };
-
-    // Env var overrides for parallel runs
-    if (process.env.AMPLITUDE_WIZARD_BENCHMARK_FILE) {
-      config.output.benchmarkPath = process.env.AMPLITUDE_WIZARD_BENCHMARK_FILE;
-    }
-    if (process.env.AMPLITUDE_WIZARD_LOG_FILE) {
-      config.output.logPath = process.env.AMPLITUDE_WIZARD_LOG_FILE;
-    }
+    });
 
     // If benchmark output is disabled, disable the jsonWriter plugin
     if (!config.output.benchmarkEnabled) {
@@ -126,17 +133,7 @@ export function loadBenchmarkConfig(installDir: string): BenchmarkConfig {
     return config;
   } catch {
     // No config file or invalid JSON — use defaults
-    const config = defaults;
-
-    // Env var overrides
-    if (process.env.AMPLITUDE_WIZARD_BENCHMARK_FILE) {
-      config.output.benchmarkPath = process.env.AMPLITUDE_WIZARD_BENCHMARK_FILE;
-    }
-    if (process.env.AMPLITUDE_WIZARD_LOG_FILE) {
-      config.output.logPath = process.env.AMPLITUDE_WIZARD_LOG_FILE;
-    }
-
-    return config;
+    return applyEnvOverrides(defaults);
   }
 }
 

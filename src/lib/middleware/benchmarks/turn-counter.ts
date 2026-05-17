@@ -6,12 +6,8 @@
  * counts + a duplicate flag for downstream plugins.
  */
 
-import type {
-  Middleware,
-  MiddlewareContext,
-  MiddlewareStore,
-  SDKMessage,
-} from '../types';
+import type { MiddlewareContext, MiddlewareStore, SDKMessage } from '../types';
+import { PhaseSnapshotPlugin } from './base';
 
 export interface TurnData {
   /** Whether the current message is a duplicate of the last processed turn */
@@ -24,15 +20,18 @@ export interface TurnData {
   phaseSnapshots: Array<{ phase: string; turns: number }>;
 }
 
-export class TurnCounterPlugin implements Middleware {
+type TurnSnapshot = { phase: string; turns: number };
+
+export class TurnCounterPlugin extends PhaseSnapshotPlugin<
+  TurnSnapshot,
+  TurnData
+> {
   readonly name = 'turns';
 
   private lastMessageId: string | null = null;
   private phaseTurns = 0;
   private totalTurns = 0;
   private isDuplicate = false;
-  private phaseSnapshots: Array<{ phase: string; turns: number }> = [];
-  private currentPhase = 'setup';
 
   onMessage(
     message: SDKMessage,
@@ -41,7 +40,7 @@ export class TurnCounterPlugin implements Middleware {
   ): void {
     if (message.type !== 'assistant') {
       this.isDuplicate = false;
-      store.set('turns', this.getData());
+      this.publish(store);
       return;
     }
 
@@ -54,36 +53,19 @@ export class TurnCounterPlugin implements Middleware {
       this.totalTurns++;
     }
 
-    store.set('turns', this.getData());
+    this.publish(store);
   }
 
-  onPhaseTransition(
-    fromPhase: string,
-    _toPhase: string,
-    _ctx: MiddlewareContext,
-    store: MiddlewareStore,
-  ): void {
-    this.phaseSnapshots.push({ phase: fromPhase, turns: this.phaseTurns });
-    this.currentPhase = _toPhase;
+  protected buildPhaseSnapshot(phase: string): TurnSnapshot {
+    return { phase, turns: this.phaseTurns };
+  }
+
+  protected resetPhaseState(): void {
     this.phaseTurns = 0;
     this.lastMessageId = null;
-    store.set('turns', this.getData());
   }
 
-  onFinalize(
-    _resultMessage: SDKMessage,
-    _totalDurationMs: number,
-    _ctx: MiddlewareContext,
-    store: MiddlewareStore,
-  ): void {
-    this.phaseSnapshots.push({
-      phase: this.currentPhase,
-      turns: this.phaseTurns,
-    });
-    store.set('turns', this.getData());
-  }
-
-  private getData(): TurnData {
+  protected buildData(): TurnData {
     return {
       isDuplicate: this.isDuplicate,
       phaseTurns: this.phaseTurns,
