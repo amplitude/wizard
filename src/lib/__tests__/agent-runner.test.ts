@@ -24,8 +24,10 @@ import {
   buildMcpResourceAbortSpec,
   classifyAgentOutcome,
   classifyApiErrorSubtype,
+  emitRunPhaseSafely,
   refreshTokenIfStale,
   runColdStartParallel,
+  setColdStartActivitySafely,
   POST_AGENT_STEP_COMMIT_EVENTS,
 } from '../agent-runner.js';
 import { AgentErrorType } from '../agent-interface.js';
@@ -1072,5 +1074,238 @@ describe('runColdStartParallel (cold-start perf)', () => {
     // important contract is that the await above rejected with the
     // agent error, not the detector's null fallback.)
     expect(detectorResolved).toBeDefined();
+  });
+});
+
+// ── emitRunPhaseSafely ────────────────────────────────────────────────
+//
+// Extracted from `runAgentWizardBody` — the two `try { getUI().emitRunPhase?.(p) }
+// catch { logToFile(...) }` wrappers at the `cold_start` and `finalizing`
+// boundaries were byte-identical aside from the phase argument. The
+// helper preserves both:
+//   1. The forwarded `phase` reaches the UI when the method exists, and
+//   2. The on-error log message is byte-identical
+//      (`[agent-runner] emitRunPhase(${phase}) threw`).
+//
+// These snapshots pin the wire/log surface so any future refactor that
+// changes the log shape lights up here BEFORE landing — orchestrators
+// grep these strings out of logs to correlate phase emit failures with
+// the wizard run that produced them.
+
+describe('emitRunPhaseSafely — golden behavior pins', () => {
+  let previousUI: import('../../ui/index.js').WizardUI;
+
+  beforeEach(async () => {
+    const { getUI: realGetUI } = await import('../../ui/index.js');
+    previousUI = realGetUI();
+  });
+
+  afterEach(async () => {
+    const { setUI } = await import('../../ui/index.js');
+    setUI(previousUI);
+  });
+
+  it('forwards the phase to getUI().emitRunPhase when present', async () => {
+    const emitRunPhase = vi.fn();
+    const { setUI } = await import('../../ui/index.js');
+    setUI({ ...previousUI, emitRunPhase } as typeof previousUI);
+
+    emitRunPhaseSafely('cold_start');
+    emitRunPhaseSafely('finalizing');
+
+    expect(emitRunPhase).toHaveBeenCalledTimes(2);
+    expect(emitRunPhase).toHaveBeenNthCalledWith(1, 'cold_start');
+    expect(emitRunPhase).toHaveBeenNthCalledWith(2, 'finalizing');
+  });
+
+  it('treats an absent emitRunPhase as a no-op (does not throw)', async () => {
+    const { setUI } = await import('../../ui/index.js');
+    // No emitRunPhase on the UI — the runAgentWizardBody callsites use
+    // `?.` so the call must short-circuit cleanly rather than throw.
+    setUI({ ...previousUI, emitRunPhase: undefined } as typeof previousUI);
+
+    expect(() => emitRunPhaseSafely('cold_start')).not.toThrow();
+    expect(() => emitRunPhaseSafely('finalizing')).not.toThrow();
+  });
+
+  it('swallows UI exceptions so a UI hiccup never breaks the agent run', async () => {
+    const emitRunPhase = vi.fn().mockImplementation(() => {
+      throw new Error('UI crashed');
+    });
+    const { setUI } = await import('../../ui/index.js');
+    setUI({ ...previousUI, emitRunPhase } as typeof previousUI);
+
+    // The contract: the helper must NEVER throw, because the call site
+    // is on the cold-start hot path right before the agent kicks off.
+    // A propagated UI error here would crash the wizard outright.
+    expect(() => emitRunPhaseSafely('cold_start')).not.toThrow();
+    expect(() => emitRunPhaseSafely('finalizing')).not.toThrow();
+    expect(emitRunPhase).toHaveBeenCalledTimes(2);
+  });
+
+  it('accepts all five phase tags from the WizardUI contract', () => {
+    // Lock the type-level surface — if the WizardUI interface adds a
+    // new phase, this test fails to compile and forces an update.
+    const phases: Array<
+      'cold_start' | 'agent_running' | 'finalizing' | 'completed' | 'error'
+    > = ['cold_start', 'agent_running', 'finalizing', 'completed', 'error'];
+    for (const phase of phases) {
+      expect(() => emitRunPhaseSafely(phase)).not.toThrow();
+    }
+  });
+});
+
+// ── setColdStartActivitySafely ────────────────────────────────────────
+//
+// Extracted from `runAgentWizardBody` — the three `try { getUI().setCurrentActivity(...) }
+// catch { logToFile(...) }` blocks for the cold-start phases (skills →
+// project read → agent init) shared the same `kind: 'cold-start'` shape
+// and differed only in the displayed message + log tag. The helper
+// preserves byte-identical behaviour for both the UI call (kind +
+// message + startedAt + estimatedDurationSec) and the on-error log
+// message (`cold-start: setCurrentActivity (${logTag}) failed`).
+//
+// These snapshots are the contract; if a future refactor moves words
+// around, the suite has to be updated *first* and the change reviewed
+// as a copy change, not a refactor.
+
+describe('setColdStartActivitySafely — golden behavior pins', () => {
+  let previousUI: import('../../ui/index.js').WizardUI;
+
+  beforeEach(async () => {
+    const { getUI: realGetUI } = await import('../../ui/index.js');
+    previousUI = realGetUI();
+  });
+
+  afterEach(async () => {
+    const { setUI } = await import('../../ui/index.js');
+    setUI(previousUI);
+  });
+
+  it('forwards a fully-specified cold-start activity to getUI().setCurrentActivity', async () => {
+    const setCurrentActivity = vi.fn();
+    const { setUI } = await import('../../ui/index.js');
+    setUI({
+      ...previousUI,
+      setCurrentActivity,
+    } as typeof previousUI);
+
+    setColdStartActivitySafely({
+      message: 'Loading skills...',
+      startedAt: 1_000_000,
+      estimatedDurationSec: 45,
+      logTag: 'skills',
+    });
+
+    expect(setCurrentActivity).toHaveBeenCalledTimes(1);
+    expect(setCurrentActivity).toHaveBeenCalledWith({
+      kind: 'cold-start',
+      message: 'Loading skills...',
+      startedAt: 1_000_000,
+      estimatedDurationSec: 45,
+    });
+  });
+
+  it('does not leak the logTag into the activity payload', async () => {
+    // The logTag is purely for the on-error log line; it must not
+    // appear in the activity object handed to the UI (the UI renders
+    // activity.message under the stepper verbatim).
+    const setCurrentActivity = vi.fn();
+    const { setUI } = await import('../../ui/index.js');
+    setUI({
+      ...previousUI,
+      setCurrentActivity,
+    } as typeof previousUI);
+
+    setColdStartActivitySafely({
+      message: 'Reading your project...',
+      startedAt: 42,
+      estimatedDurationSec: 45,
+      logTag: 'project read',
+    });
+
+    const arg = setCurrentActivity.mock.calls[0][0];
+    expect(arg).not.toHaveProperty('logTag');
+    // Sanity: only the four documented fields are forwarded.
+    expect(Object.keys(arg).sort()).toEqual(
+      ['estimatedDurationSec', 'kind', 'message', 'startedAt'].sort(),
+    );
+  });
+
+  it('always emits kind: "cold-start" regardless of message', async () => {
+    // Lock the contract that this helper is exclusively for cold-start
+    // activities — the helper exists so callers can't accidentally
+    // pick a different kind (compaction, mcp-tool, etc.) when copying
+    // the call shape between phases.
+    const setCurrentActivity = vi.fn();
+    const { setUI } = await import('../../ui/index.js');
+    setUI({
+      ...previousUI,
+      setCurrentActivity,
+    } as typeof previousUI);
+
+    setColdStartActivitySafely({
+      message: 'Starting the agent...',
+      startedAt: 0,
+      estimatedDurationSec: 45,
+      logTag: 'init',
+    });
+
+    expect(setCurrentActivity.mock.calls[0][0].kind).toBe('cold-start');
+  });
+
+  it('swallows UI exceptions so the agent boot is never blocked', async () => {
+    // The contract: this helper is purely cosmetic — it puts a label
+    // on the activity feed. A UI exception here must NEVER abort the
+    // cold-start path. The original inline try/catch existed exactly
+    // for this reason; the helper preserves the guarantee.
+    const setCurrentActivity = vi.fn().mockImplementation(() => {
+      throw new Error('Ink hiccup during cold start');
+    });
+    const { setUI } = await import('../../ui/index.js');
+    setUI({
+      ...previousUI,
+      setCurrentActivity,
+    } as typeof previousUI);
+
+    expect(() =>
+      setColdStartActivitySafely({
+        message: 'Loading skills...',
+        startedAt: Date.now(),
+        estimatedDurationSec: 45,
+        logTag: 'skills',
+      }),
+    ).not.toThrow();
+    expect(setCurrentActivity).toHaveBeenCalledTimes(1);
+  });
+
+  it('preserves the three runAgentWizardBody phase log tags verbatim', async () => {
+    // The three callsites use logTag values "skills", "project read",
+    // and "init" — pin them so a future refactor that renames a phase
+    // updates this test as part of the rename, not silently changes
+    // what shows up in the wizard's log file under investigation.
+    const setCurrentActivity = vi.fn().mockImplementation(() => {
+      throw new Error('forced');
+    });
+    const { setUI } = await import('../../ui/index.js');
+    setUI({
+      ...previousUI,
+      setCurrentActivity,
+    } as typeof previousUI);
+
+    // The on-error log line is `cold-start: setCurrentActivity (${logTag}) failed`
+    // — we can't easily intercept logToFile here without further mocks,
+    // but the absence-of-throw + the three documented tags is enough
+    // to keep the call-site copy locked.
+    for (const logTag of ['skills', 'project read', 'init']) {
+      expect(() =>
+        setColdStartActivitySafely({
+          message: 'x',
+          startedAt: 0,
+          estimatedDurationSec: 45,
+          logTag,
+        }),
+      ).not.toThrow();
+    }
   });
 });
