@@ -885,6 +885,134 @@ export const EVENT_PLAN_FEEDBACK_REINJECTION_PROMPT =
   'Your last `confirm_event_plan` returned user feedback that you have not acted on. Revise the event plan based on the feedback and call `confirm_event_plan` again. Do NOT ask the user clarifying questions — make a reasonable interpretation. The user can give more feedback in the next round.';
 
 /**
+ * Emit a one-line summary if the stderr filter swallowed any
+ * hook-bridge-race lines during the just-finished attempt. Keeps the
+ * noise volume observable (regressions show up as a growing suppressed
+ * count) without flooding the per-line log.
+ *
+ * Extracted from `runAgent`'s inline closure.
+ */
+export function logSuppressedHookBridgeNoise(
+  count: number,
+  attempt: number,
+): void {
+  if (count === 0) return;
+  logToFile(
+    `Suppressed ${count} hook-bridge-race stderr line${
+      count === 1 ? '' : 's'
+    } from prior subprocess (attempt ${attempt + 1}; see issue #297)`,
+  );
+}
+
+/**
+ * Best-effort cleanup of an SDK Query iterator before discarding it.
+ *
+ * The SDK's `query()` is typed as `AsyncIterable<unknown>` here but its
+ * concrete `Query` implementation extends `AsyncGenerator`, so calling
+ * `.return()` at runtime signals the underlying subprocess to tear down
+ * stdio cleanly. Without this, a tool call still in flight from a prior
+ * attempt can fire our PreToolUse hook on a closed bridge, surfacing as
+ * `Error in hook callback hook_0: Error: Stream closed`. See issue #297.
+ *
+ * Errors thrown by `.return()` itself are expected during teardown and
+ * are swallowed (best-effort cleanup; throwing here would mask the real
+ * cause of whatever triggered the drain).
+ *
+ * Extracted from `runAgent`'s inline `drainPriorResponse` closure.
+ */
+export async function drainPriorResponse(
+  prior: AsyncIterable<unknown> | undefined,
+): Promise<void> {
+  if (!prior) return;
+  const generator = prior as {
+    return?: (value?: unknown) => Promise<unknown>;
+  };
+  if (typeof generator.return !== 'function') return;
+  try {
+    await generator.return(undefined);
+  } catch (err) {
+    logToFile(
+      'drainPriorResponse: .return() threw (expected during teardown):',
+      err instanceof Error ? err.message : String(err),
+    );
+  }
+}
+
+/**
+ * Stream-delta → status pill throttled emitter.
+ *
+ * `runAgent` consumes high-frequency `content_block_delta` envelopes from
+ * the SDK (one per few tokens of model output). Surfacing every delta
+ * would thrash the spinner; suppressing them entirely leaves the user
+ * staring at a static spinner during 30s+ tool calls. This factory wraps
+ * the trade-off as a self-contained widget:
+ *
+ *   - `enqueue(delta)` appends to a rolling 160-char buffer and schedules
+ *     a single `setTimeout` flush per 150ms window.
+ *   - `flush` (private, fired by the timer) trims, deduplicates, drops
+ *     anything that looks like raw Anthropic stream-event JSON, then
+ *     forwards the line to the spinner / UI / log.
+ *   - `reset()` cancels any in-flight timer and clears the buffer. Called
+ *     between retry attempts so a stalled attempt's last words don't
+ *     bleed into a fresh retry.
+ *
+ * Extracted from the inline closures inside `runAgent` (around line 2769
+ * before the move). The only outer state these closures touched was
+ * `spinner` (now a parameter); `getUI()`, `logToFile`,
+ * `truncateLogMessage`, and `looksLikeStreamEventLine` were already
+ * module-scope imports.
+ */
+export function createStreamPillEmitter(spinner: SpinnerHandle): {
+  enqueue: (delta: string) => void;
+  reset: () => void;
+} {
+  const STREAM_PILL_INTERVAL_MS = 150;
+  const STREAM_PILL_MAX_CHARS = 80;
+  let buffer = '';
+  let timer: ReturnType<typeof setTimeout> | null = null;
+  const flush = (): void => {
+    timer = null;
+    const line = buffer.replace(/\s+/g, ' ').trim();
+    if (!line) return;
+    // Defense in depth: if the rolling tail looks like Anthropic stream-event
+    // protocol JSON (e.g. `{"type":"content_block_delta","index":0,...`), drop
+    // it instead of surfacing the raw frame in the status pill. The SDK path
+    // already filters these at the message layer, but a `text_delta` whose
+    // payload is itself JSON (the model occasionally narrates with a JSON
+    // example, or a tool result snippet flows through as text) would
+    // otherwise reach the user as `{"type":"content_block_delta",...` —
+    // which is exactly the production leak the user reported.
+    if (looksLikeStreamEventLine(line)) return;
+    spinner.message(line);
+    getUI().pushStatus(line);
+    // Mirror the throttled status pill into the per-project log so the TUI
+    // Logs tab stays useful during long tool calls. Stream deltas never hit
+    // handleSDKMessage, so without this the file can look idle while Progress
+    // shows the model's voice (users assume logging is broken).
+    logToFile('stream status:', truncateLogMessage(line, 512));
+  };
+  return {
+    enqueue(delta: string): void {
+      if (!delta) return;
+      // Keep a rolling tail just larger than the pill width so successive
+      // deltas overwrite older text and the user always sees the model's
+      // most recent voice.
+      buffer = (buffer + delta).slice(-(STREAM_PILL_MAX_CHARS * 2));
+      if (timer === null) {
+        timer = setTimeout(flush, STREAM_PILL_INTERVAL_MS);
+      }
+    },
+    reset(): void {
+      if (timer !== null) {
+        clearTimeout(timer);
+        timer = null;
+      }
+      buffer = '';
+    },
+  };
+}
+
+/**
  * Create a stop hook callback that handles unresolved event-plan feedback,
  * drains the additional feature queue, then collects a remark, then allows
  * stop.
@@ -2722,49 +2850,16 @@ export async function runAgent(
     };
 
     /**
-     * Best-effort cleanup of the prior attempt's Query iterator before
-     * starting the next attempt. The SDK's `query()` is typed as
-     * `AsyncIterable<unknown>` here but its concrete `Query` implementation
-     * extends `AsyncGenerator`, so calling `.return()` at runtime signals
-     * the underlying subprocess to tear down stdio cleanly. Without this,
-     * a tool call still in flight from the prior attempt can fire our
-     * PreToolUse hook on a closed bridge, surfacing as `Error in hook
-     * callback hook_0: Error: Stream closed`. See issue #297. Errors
-     * thrown by `.return()` itself are expected during teardown and are
-     * swallowed.
+     * Drain helper now lives at module scope as `drainPriorResponse` so it
+     * can be unit-tested in isolation. See its JSDoc for the issue #297
+     * rationale.
      */
-    const drainPriorResponse = async (
-      prior: AsyncIterable<unknown> | undefined,
-    ): Promise<void> => {
-      if (!prior) return;
-      const generator = prior as {
-        return?: (value?: unknown) => Promise<unknown>;
-      };
-      if (typeof generator.return !== 'function') return;
-      try {
-        await generator.return(undefined);
-      } catch (err) {
-        logToFile(
-          'drainPriorResponse: .return() threw (expected during teardown):',
-          err instanceof Error ? err.message : String(err),
-        );
-      }
-    };
 
     /**
-     * Emit a one-line summary if the stderr filter swallowed any
-     * hook-bridge-race lines during the just-finished attempt. Keeps
-     * the noise volume observable (regressions show up as a growing
-     * suppressed count) without flooding the per-line log.
+     * Hook-bridge-noise summary helper now lives at module scope as
+     * `logSuppressedHookBridgeNoise` so it can be unit-tested in
+     * isolation. See its JSDoc for the issue #297 rationale.
      */
-    const logSuppressedHookBridgeNoise = (count: number, attempt: number) => {
-      if (count === 0) return;
-      logToFile(
-        `Suppressed ${count} hook-bridge-race stderr line${
-          count === 1 ? '' : 's'
-        } from prior subprocess (attempt ${attempt + 1}; see issue #297)`,
-      );
-    };
 
     // Streaming text-delta → status pill plumbing.
     //
@@ -2774,54 +2869,14 @@ export async function runAgent(
     // pill alive during 30s+ tool calls — without this the user sees a
     // static spinner and assumes the agent is hung.
     //
-    // We keep an 80-char rolling tail of recent assistant text and flush
-    // at most once per `STREAM_PILL_INTERVAL_MS` so the UI doesn't thrash.
-    // Cleared between attempts via `resetStreamPill()` so a stalled
+    // Implementation moved to `createStreamPillEmitter` (module scope) so
+    // the throttling + JSON-leak guard can be unit-tested in isolation.
+    // `resetStreamPill()` is called between attempts so a stalled
     // attempt's last words don't bleed into a fresh retry.
-    const STREAM_PILL_INTERVAL_MS = 150;
-    const STREAM_PILL_MAX_CHARS = 80;
-    let streamPillBuffer = '';
-    let streamPillTimer: ReturnType<typeof setTimeout> | null = null;
-    const flushStreamPill = (): void => {
-      streamPillTimer = null;
-      const line = streamPillBuffer.replace(/\s+/g, ' ').trim();
-      if (!line) return;
-      // Defense in depth: if the rolling tail looks like Anthropic stream-event
-      // protocol JSON (e.g. `{"type":"content_block_delta","index":0,...`), drop
-      // it instead of surfacing the raw frame in the status pill. The SDK path
-      // already filters these at the message layer, but a `text_delta` whose
-      // payload is itself JSON (the model occasionally narrates with a JSON
-      // example, or a tool result snippet flows through as text) would
-      // otherwise reach the user as `{"type":"content_block_delta",...` —
-      // which is exactly the production leak the user reported.
-      if (looksLikeStreamEventLine(line)) return;
-      spinner.message(line);
-      getUI().pushStatus(line);
-      // Mirror the throttled status pill into the per-project log so the TUI
-      // Logs tab stays useful during long tool calls. Stream deltas never hit
-      // handleSDKMessage, so without this the file can look idle while Progress
-      // shows the model's voice (users assume logging is broken).
-      logToFile('stream status:', truncateLogMessage(line, 512));
-    };
-    const enqueueStreamDelta = (delta: string): void => {
-      if (!delta) return;
-      // Keep a rolling tail just larger than the pill width so successive
-      // deltas overwrite older text and the user always sees the model's
-      // most recent voice.
-      streamPillBuffer = (streamPillBuffer + delta).slice(
-        -(STREAM_PILL_MAX_CHARS * 2),
-      );
-      if (streamPillTimer === null) {
-        streamPillTimer = setTimeout(flushStreamPill, STREAM_PILL_INTERVAL_MS);
-      }
-    };
-    const resetStreamPill = (): void => {
-      if (streamPillTimer !== null) {
-        clearTimeout(streamPillTimer);
-        streamPillTimer = null;
-      }
-      streamPillBuffer = '';
-    };
+    const streamPill = createStreamPillEmitter(spinner);
+    const enqueueStreamDelta = (delta: string): void =>
+      streamPill.enqueue(delta);
+    const resetStreamPill = (): void => streamPill.reset();
 
     // PR B4: each pass through the loop sets `attemptStartedBackoffMs`
     // to the sleep that just elapsed (only meaningful for attempt > 0).
