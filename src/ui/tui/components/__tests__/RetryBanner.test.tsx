@@ -16,7 +16,6 @@
 
 import React from 'react';
 import { describe, it, expect } from 'vitest';
-import { render } from 'ink-testing-library';
 import {
   RetryStatusChip,
   RetryBanner,
@@ -25,17 +24,7 @@ import {
   RETRY_GRACE_MS,
 } from '../RetryBanner.js';
 import type { RetryState } from '../../../../lib/wizard-session.js';
-
-// eslint-disable-next-line no-control-regex
-const ANSI = /\x1b\[[0-9;]*[A-Za-z]/g;
-const stripAnsi = (s: string): string => s.replace(ANSI, '');
-
-function frameOf(node: React.ReactElement): string {
-  const { lastFrame, unmount } = render(node);
-  const out = stripAnsi(lastFrame() ?? '');
-  unmount();
-  return out;
-}
+import { frameOf } from '../../__tests__/helpers/render-frame.js';
 
 const baseRetry = (overrides: Partial<RetryState> = {}): RetryState => ({
   attempt: 2,

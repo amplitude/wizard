@@ -56,12 +56,7 @@ import { waitForFrame } from '../../__tests__/ink-stdin.js';
 import { Integration } from '../../../../lib/constants.js';
 import { OutroKind } from '../../session-constants.js';
 
-// eslint-disable-next-line no-control-regex
-const ANSI_CSI = /\x1b\[[0-9;]*[A-Za-z]/g;
-// eslint-disable-next-line no-control-regex
-const ANSI_OSC = /\x1b\][^\x07]*\x07/g;
-const stripAnsi = (s: string): string =>
-  s.replace(ANSI_CSI, '').replace(ANSI_OSC, '');
+import { stripAnsi } from '../../__tests__/helpers/strip-ansi.js';
 
 function writeEventPlan(
   installDir: string,

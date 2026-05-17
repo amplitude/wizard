@@ -22,9 +22,7 @@ import {
 } from '../DiscoveryFeed.js';
 import type { DiscoveryFact } from '../../../../lib/wizard-session.js';
 
-// eslint-disable-next-line no-control-regex
-const ANSI = /\x1b\[[0-9;]*[A-Za-z]/g;
-const stripAnsi = (s: string): string => s.replace(ANSI, '');
+import { stripAnsi } from '../../__tests__/helpers/strip-ansi.js';
 
 const t0 = 1_700_000_000_000;
 const WIDE = 120;

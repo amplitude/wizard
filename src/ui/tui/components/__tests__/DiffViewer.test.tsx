@@ -23,9 +23,7 @@ import {
 import type { FileDiffSummary } from '../../../../lib/file-change-diff.js';
 import { Colors } from '../../styles.js';
 
-// eslint-disable-next-line no-control-regex
-const ANSI = /\x1b\[[0-9;]*[A-Za-z]/g;
-const stripAnsi = (s: string): string => s.replace(ANSI, '');
+import { stripAnsi } from '../../__tests__/helpers/strip-ansi.js';
 
 const samplePatch = `Index: a.txt
 ===================================================================

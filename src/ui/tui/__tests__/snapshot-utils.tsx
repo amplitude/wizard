@@ -45,6 +45,7 @@ import { WizardStore } from '../store.js';
 import type { WizardSession } from '../store.js';
 import type { KeyHint } from '../components/KeyHintBar.js';
 import { __getScreenHintsForTests } from '../hooks/useScreenHints.js';
+import { stripAnsi } from './helpers/strip-ansi.js';
 
 /**
  * Pin the wizard cache root to a deterministic path BEFORE any screen
@@ -73,24 +74,6 @@ if (!process.env.AMPLITUDE_WIZARD_CACHE_DIR) {
 const SNAPSHOT_INSTALL_DIR = fs.mkdtempSync(
   path.join(os.tmpdir(), 'wizard-snapshot-'),
 );
-
-/**
- * Strip ANSI escapes so snapshots are readable in PR reviews AND
- * deterministic across TTY-capable / non-TTY runs.
- *
- *   CSI: ESC [ <params> <command-byte>      — color, style, cursor
- *   OSC: ESC ] <params> BEL                 — OSC 8 hyperlinks (TerminalLink)
- *
- * Without the OSC strip, running `pnpm test -u` on a TTY-capable terminal
- * (iTerm2, VS Code) would embed unstripped `\x1b]8;;URL\x07text\x1b]8;;\x07`
- * into snapshots; CI (non-TTY) would then fail with a confusing diff.
- */
-// eslint-disable-next-line no-control-regex
-const ANSI_CSI_REGEX = /\x1b\[[0-9;]*[A-Za-z]/g;
-// eslint-disable-next-line no-control-regex
-const ANSI_OSC_REGEX = /\x1b\][^\x07]*\x07/g;
-const stripAnsi = (s: string): string =>
-  s.replace(ANSI_CSI_REGEX, '').replace(ANSI_OSC_REGEX, '');
 
 /**
  * Trim trailing whitespace from each line. Ink right-pads lines to the

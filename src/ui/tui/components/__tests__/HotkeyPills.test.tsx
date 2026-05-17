@@ -9,17 +9,8 @@
 
 import React from 'react';
 import { describe, it, expect } from 'vitest';
-import { render } from 'ink-testing-library';
 import { HotkeyPills } from '../HotkeyPills.js';
-
-// eslint-disable-next-line no-control-regex
-const ANSI = /\x1b\[[0-9;]*[A-Za-z]/g;
-const frameOf = (el: React.ReactElement): string => {
-  const { lastFrame, unmount } = render(el);
-  const out = (lastFrame() ?? '').replace(ANSI, '');
-  unmount();
-  return out;
-};
+import { frameOf } from '../../__tests__/helpers/render-frame.js';
 
 describe('HotkeyPills', () => {
   it('renders nothing when given no pills', () => {

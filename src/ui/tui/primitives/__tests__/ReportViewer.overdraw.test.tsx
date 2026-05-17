@@ -35,9 +35,7 @@ import { Box } from 'ink';
 import { ReportViewer } from '../ReportViewer.js';
 import { ContentAreaContext } from '../../context/ContentAreaContext.js';
 
-// eslint-disable-next-line no-control-regex
-const ANSI = /\x1b\[[0-9;]*[A-Za-z]/g;
-const strip = (s: string) => s.replace(ANSI, '');
+import { stripAnsi as strip } from '../../__tests__/helpers/strip-ansi.js';
 
 describe('ReportViewer overdraw', () => {
   it('renders at most `visibleLines` content rows when paginated', () => {

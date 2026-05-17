@@ -18,10 +18,7 @@ import { describe, it, expect } from 'vitest';
 import { render } from 'ink-testing-library';
 import { FileWritesPanel } from '../FileWritesPanel.js';
 import type { FileWriteEntry } from '../../store.js';
-
-// eslint-disable-next-line no-control-regex
-const ANSI = /\x1b\[[0-9;]*[A-Za-z]/g;
-const stripAnsi = (s: string): string => s.replace(ANSI, '');
+import { stripAnsi } from '../../__tests__/helpers/strip-ansi.js';
 
 const t0 = 1_700_000_000_000;
 

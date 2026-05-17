@@ -13,20 +13,11 @@
 
 import React from 'react';
 import { describe, it, expect } from 'vitest';
-import { render } from 'ink-testing-library';
 import { JourneyStepper } from '../JourneyStepper.js';
 import { WizardStore, Flow, RunPhase } from '../../store.js';
 import type { WizardSession } from '../../store.js';
 import { OutroKind } from '../../session-constants.js';
-
-// eslint-disable-next-line no-control-regex
-const ANSI_CSI = /\x1b\[[0-9;]*[A-Za-z]/g;
-const frameOf = (node: React.ReactElement): string => {
-  const { lastFrame, unmount } = render(node);
-  const out = (lastFrame() ?? '').replace(ANSI_CSI, '');
-  unmount();
-  return out;
-};
+import { frameOf } from '../../__tests__/helpers/render-frame.js';
 
 function makeStore(patch: Partial<WizardSession> = {}, flow = Flow.Wizard) {
   const store = new WizardStore(flow);
