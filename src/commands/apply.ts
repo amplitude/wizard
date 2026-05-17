@@ -1,5 +1,5 @@
 import type { CommandModule } from 'yargs';
-import { getUI, ExitCode } from './helpers';
+import { getUI, ExitCode, emitCliEnvelope } from './helpers';
 import { CLI_INVOCATION } from './context';
 
 export const applyCommand: CommandModule = {
@@ -83,9 +83,7 @@ export const applyCommand: CommandModule = {
       if (!guard.ok && !mode.allowDestructive) {
         if (mode.jsonOutput) {
           process.stdout.write(
-            JSON.stringify({
-              v: 1,
-              '@timestamp': new Date().toISOString(),
+            emitCliEnvelope({
               type: 'error',
               level: 'error',
               message: `apply refused: ${guard.details}`,
@@ -96,7 +94,7 @@ export const applyCommand: CommandModule = {
                 installDir,
                 hint: 'Pass --install-dir <abs-path> pointing at the project root, or --force to bypass.',
               },
-            }) + '\n',
+            }),
           );
         } else {
           getUI().log.error(`Apply refused: ${guard.details}`);
@@ -111,13 +109,11 @@ export const applyCommand: CommandModule = {
       ) => {
         if (mode.jsonOutput) {
           process.stdout.write(
-            JSON.stringify({
-              v: 1,
-              '@timestamp': new Date().toISOString(),
+            emitCliEnvelope({
               type: 'error',
               message: msg,
               data: { event: 'apply_failed', planId, ...extra },
-            }) + '\n',
+            }),
           );
         } else {
           getUI().log.error(msg);
@@ -163,9 +159,7 @@ export const applyCommand: CommandModule = {
       // wizard run, scoped to the plan's installDir + framework hint.
       if (mode.jsonOutput) {
         process.stdout.write(
-          JSON.stringify({
-            v: 1,
-            '@timestamp': new Date().toISOString(),
+          emitCliEnvelope({
             type: 'lifecycle',
             message: `applying plan ${planId}`,
             data: {
@@ -173,7 +167,7 @@ export const applyCommand: CommandModule = {
               planId,
               framework: result.plan.framework,
             },
-          }) + '\n',
+          }),
         );
 
         // Emit `setup_context` so the outer agent sees the resolved
@@ -214,12 +208,10 @@ export const applyCommand: CommandModule = {
           if (projectId) sources.projectId = 'saved';
           if (cliAppId) sources.appId = 'flag';
           process.stdout.write(
-            JSON.stringify({
-              v: 1,
-              '@timestamp': new Date().toISOString(),
+            emitCliEnvelope({
               type: 'lifecycle',
               message: 'setup_context (apply_started)',
-              data_version: 1,
+              dataVersion: 1,
               data: {
                 event: 'setup_context',
                 phase: 'apply_started',
@@ -246,7 +238,7 @@ export const applyCommand: CommandModule = {
                       },
                     }),
               },
-            }) + '\n',
+            }),
           );
         } catch {
           // Best-effort — never block apply on context emission.
@@ -270,9 +262,7 @@ export const applyCommand: CommandModule = {
           `kill the prior process and retry.`;
         if (mode.jsonOutput) {
           process.stdout.write(
-            JSON.stringify({
-              v: 1,
-              '@timestamp': new Date().toISOString(),
+            emitCliEnvelope({
               type: 'error',
               level: 'error',
               message: msg,
@@ -283,7 +273,7 @@ export const applyCommand: CommandModule = {
                 installDir,
                 holder: lock.holder,
               },
-            }) + '\n',
+            }),
           );
         } else {
           getUI().log.error(msg);
