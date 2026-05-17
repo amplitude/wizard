@@ -31,6 +31,7 @@ import { useWizardStore } from '../hooks/useWizardStore.js';
 import { useAsyncEffect } from '../hooks/useAsyncEffect.js';
 import { Colors, Icons } from '../styles.js';
 import { BrailleSpinner } from '../components/BrailleSpinner.js';
+import { ScreenHeader } from './screen-header.js';
 import { resolveZone } from '../../../lib/zone-resolution.js';
 import { DEFAULT_AMPLITUDE_ZONE } from '../../../lib/constants.js';
 import { createLogger } from '../../../lib/observability/logger.js';
@@ -257,12 +258,10 @@ export const SigningUpScreen = ({ store }: SigningUpScreenProps) => {
 
   return (
     <Box flexDirection="column" flexGrow={1}>
-      <Box flexDirection="column" marginBottom={1}>
-        <Text bold color={Colors.heading}>
-          Create your Amplitude account
-        </Text>
-        <Text color={Colors.muted}>{headerLabel}</Text>
-      </Box>
+      <ScreenHeader
+        title="Create your Amplitude account"
+        subtitle={headerLabel}
+      />
 
       {email && (
         <Box flexDirection="column" marginBottom={1}>

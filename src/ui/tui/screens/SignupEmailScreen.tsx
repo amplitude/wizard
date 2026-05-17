@@ -22,6 +22,7 @@ import { useScreenInput } from '../hooks/useScreenInput.js';
 import { useScreenHints } from '../hooks/useScreenHints.js';
 import { Colors, Icons } from '../styles.js';
 import type { KeyHint } from '../components/KeyHintBar.js';
+import { ScreenHeader } from './screen-header.js';
 import { EMAIL_REGEX } from '../../../lib/constants.js';
 import { analytics } from '../../../utils/analytics.js';
 
@@ -88,12 +89,10 @@ export const SignupEmailScreen = ({ store }: SignupEmailScreenProps) => {
 
   return (
     <Box flexDirection="column" flexGrow={1}>
-      <Box flexDirection="column" marginBottom={1}>
-        <Text bold color={Colors.heading}>
-          Create your Amplitude account
-        </Text>
-        <Text color={Colors.muted}>Enter your email to get started</Text>
-      </Box>
+      <ScreenHeader
+        title="Create your Amplitude account"
+        subtitle="Enter your email to get started"
+      />
 
       <Box flexDirection="column" marginBottom={1}>
         <TextInput

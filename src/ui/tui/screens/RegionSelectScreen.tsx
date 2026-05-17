@@ -17,6 +17,7 @@ import { useEscapeBack } from '../hooks/useEscapeBack.js';
 import { PickerMenu } from '../primitives/index.js';
 import { Colors, Icons } from '../styles.js';
 import type { KeyHint } from '../components/KeyHintBar.js';
+import { ScreenHeader } from './screen-header.js';
 import type { CloudRegion } from '../../../lib/wizard-session.js';
 
 const REGION_HINTS_BASE: readonly KeyHint[] = Object.freeze([
@@ -63,12 +64,7 @@ export const RegionSelectScreen = ({ store }: RegionSelectScreenProps) => {
 
   return (
     <Box flexDirection="column" flexGrow={1}>
-      <Box flexDirection="column" marginBottom={1}>
-        <Text bold color={Colors.heading}>
-          {heading}
-        </Text>
-        <Text color={Colors.muted}>{hint}</Text>
-      </Box>
+      <ScreenHeader title={heading} subtitle={hint} />
 
       <PickerMenu<CloudRegion>
         options={REGIONS}
