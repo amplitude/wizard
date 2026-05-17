@@ -6,9 +6,9 @@
  */
 
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { existsSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { existsSync, readFileSync, rmSync } from 'node:fs';
 import { join } from 'node:path';
+import { createTempDir } from '../../utils/__tests__/helpers/temp-dir.js';
 
 vi.mock('../observability', () => ({
   getRunId: () => 'run-abc',
@@ -28,12 +28,14 @@ import { CACHE_ROOT_OVERRIDE_ENV } from '../../utils/storage-paths';
 describe('AgentState', () => {
   let state: AgentState;
   let cacheRoot: string;
+  let cleanupCache: () => void;
   let originalOverride: string | undefined;
   const attemptId = 'att-xyz';
   let snapshotPath: string;
 
   beforeEach(() => {
-    cacheRoot = mkdtempSync(join(tmpdir(), 'wiz-state-cache-'));
+    ({ dir: cacheRoot, cleanup: cleanupCache } =
+      createTempDir('wiz-state-cache-'));
     originalOverride = process.env[CACHE_ROOT_OVERRIDE_ENV];
     process.env[CACHE_ROOT_OVERRIDE_ENV] = cacheRoot;
     snapshotPath = join(cacheRoot, 'state', `${attemptId}-${process.pid}.json`);
@@ -43,7 +45,7 @@ describe('AgentState', () => {
 
   afterEach(() => {
     if (existsSync(snapshotPath)) rmSync(snapshotPath);
-    rmSync(cacheRoot, { recursive: true, force: true });
+    cleanupCache();
     if (originalOverride === undefined) {
       delete process.env[CACHE_ROOT_OVERRIDE_ENV];
     } else {
