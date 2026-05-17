@@ -12,12 +12,6 @@ import type {
 } from '../types';
 import type { TurnData } from './turn-counter';
 
-/** Matches SDK usage.cache_creation (ephemeral 5m vs 1h for pricing). */
-export interface CacheCreationBreakdown {
-  ephemeral_5m_input_tokens: number;
-  ephemeral_1h_input_tokens: number;
-}
-
 export interface CacheData {
   phaseRead: number;
   phaseCreation: number;
