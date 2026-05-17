@@ -38,7 +38,7 @@ export interface ApplyLockHolder {
   planId: string;
 }
 
-export type AcquireResult =
+type AcquireResult =
   | { ok: true; release: () => void }
   | { ok: false; holder: ApplyLockHolder; reason: 'in_progress' };
 

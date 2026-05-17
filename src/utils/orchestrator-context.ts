@@ -25,7 +25,7 @@ import { resolve } from 'path';
 
 export const MAX_ORCHESTRATOR_CONTEXT_BYTES = 64 * 1024;
 
-export type LoadOrchestratorContextResult =
+type LoadOrchestratorContextResult =
   | { ok: true; content: string; sourcePath: string; bytes: number }
   | {
       ok: false;
