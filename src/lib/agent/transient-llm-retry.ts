@@ -279,30 +279,41 @@ export function isThrownErrorCountedAsUpstreamGatewayFailure(
 }
 
 /**
+ * Patterns that appear ONLY in thrown errors (never in mid-stream SDK
+ * output) and still warrant a transient retry. Joined with
+ * `AGENT_TRANSIENT_SDK_OUTPUT_PATTERNS` to form the thrown-error matcher
+ * so adding a new pattern updates both classifiers in one place.
+ *
+ *  - `tool_use` / `tool_result` — mid-conversation tool-block validation
+ *    errors that surface as a thrown SDK error, not a stream chunk.
+ *  - `Stream closed` — the SDK's own "stream ended unexpectedly" wrap.
+ *  - `invalid_request_error` — Anthropic's typed error shape for a
+ *    rejected request body (distinct from the proxy's API-Error wrap).
+ */
+const THROWN_ONLY_TRANSIENT_PATTERNS: ReadonlyArray<string> = [
+  'tool_use',
+  'tool_result',
+  'Stream closed',
+  'invalid_request_error',
+];
+
+/**
  * Thrown-error branch: worth a full retry (fresh conversation / drain prior
  * stream) when below MAX_RETRIES.
+ *
+ * Derived from `AGENT_TRANSIENT_SDK_OUTPUT_PATTERNS` plus a small set of
+ * thrown-only patterns so adding a new transient SDK output pattern (e.g.
+ * a new `API Error: NNN` status) automatically flows into the thrown-error
+ * classifier too. See `THROWN_ONLY_TRANSIENT_PATTERNS` for the extras.
  */
 export function isTransientThrownSdkErrorMessage(errMsg: string): boolean {
-  return (
-    errMsg.includes('tool_use') ||
-    errMsg.includes('tool_result') ||
-    errMsg.includes('API Error: 400') ||
-    errMsg.includes('API Error: 408') ||
-    errMsg.includes('API Error: 502') ||
-    errMsg.includes('API Error: 503') ||
-    errMsg.includes('API Error: 504') ||
-    errMsg.includes('API Error: 529') ||
-    errMsg.includes('DEADLINE_EXCEEDED') ||
-    // Per-chunk stream timeout — see comment on
-    // `AGENT_TRANSIENT_SDK_OUTPUT_PATTERNS`. The thrown-error branch needs
-    // the same matcher because the SDK can surface the proxy's chunk
-    // sentinel via either the stream output OR a thrown error, depending
-    // on where the timeout fired relative to the read loop.
-    errMsg.includes('chunk_deadline_exceeded') ||
-    errMsg.includes('stream chunk timeout') ||
-    errMsg.includes('Stream closed') ||
-    errMsg.includes('invalid_request_error')
-  );
+  for (const { pattern } of AGENT_TRANSIENT_SDK_OUTPUT_PATTERNS) {
+    if (errMsg.includes(pattern)) return true;
+  }
+  for (const pattern of THROWN_ONLY_TRANSIENT_PATTERNS) {
+    if (errMsg.includes(pattern)) return true;
+  }
+  return false;
 }
 
 // ── Backoff math ────────────────────────────────────────────────────

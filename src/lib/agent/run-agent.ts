@@ -376,6 +376,49 @@ function evaluatePreToolPolicy(args: {
 }
 
 /**
+ * Build the empty-usage telemetry envelope every error-path return shares.
+ * `streamText` only resolves `totalUsage` when the stream completes
+ * normally; on a throw / stream error there are no token counts to
+ * surface, so all four numeric fields are `undefined`. Centralized so the
+ * three error returns below don't drift on field ordering or naming.
+ */
+function emptyUsage(): RunAiSdkAgentResult['usage'] {
+  return {
+    inputTokens: undefined,
+    outputTokens: undefined,
+    cacheReadTokens: undefined,
+    cacheWriteTokens: undefined,
+    totalTokens: undefined,
+  };
+}
+
+/**
+ * Compose the runner's error-shaped return value. Pulls the
+ * `classifyRunnerThrow` envelope out, spreads in any partial text the
+ * stream already produced, and pins `finishReason: 'error'` so the
+ * dispatch bridge can branch on a stable string.
+ */
+function buildErrorResult(
+  classified: {
+    errorType: AgentErrorType;
+    message: string;
+    authSubkind?: AuthErrorSubkind;
+  },
+  textBuf: string,
+  toolCalls: Array<{ toolName: string; input: unknown }>,
+): RunAiSdkAgentResult {
+  return {
+    error: classified.errorType,
+    message: classified.message,
+    ...(classified.authSubkind ? { authSubkind: classified.authSubkind } : {}),
+    text: textBuf,
+    finishReason: 'error',
+    toolCalls,
+    usage: emptyUsage(),
+  };
+}
+
+/**
  * Classify a thrown error into the same `AgentErrorType` taxonomy the
  * legacy runner uses, so the NDJSON envelope shape is identical
  * across runners. Reuses `transient-llm-retry.ts` so adding new
@@ -614,23 +657,7 @@ export async function runAiSdkAgent(
       logToFile(
         `[ai-sdk-runner] streamText threw: ${classified.errorType} — ${classified.message}`,
       );
-      return {
-        error: classified.errorType,
-        message: classified.message,
-        ...(classified.authSubkind
-          ? { authSubkind: classified.authSubkind }
-          : {}),
-        text: '',
-        finishReason: 'error',
-        toolCalls,
-        usage: {
-          inputTokens: undefined,
-          outputTokens: undefined,
-          cacheReadTokens: undefined,
-          cacheWriteTokens: undefined,
-          totalTokens: undefined,
-        },
-      };
+      return buildErrorResult(classified, '', toolCalls);
     }
 
     let textBuf = '';
@@ -726,44 +753,12 @@ export async function runAiSdkAgent(
       logToFile(
         `[ai-sdk-runner] fullStream threw: ${classified.errorType} — ${classified.message}`,
       );
-      return {
-        error: classified.errorType,
-        message: classified.message,
-        ...(classified.authSubkind
-          ? { authSubkind: classified.authSubkind }
-          : {}),
-        text: textBuf,
-        finishReason: 'error',
-        toolCalls,
-        usage: {
-          inputTokens: undefined,
-          outputTokens: undefined,
-          cacheReadTokens: undefined,
-          cacheWriteTokens: undefined,
-          totalTokens: undefined,
-        },
-      };
+      return buildErrorResult(classified, textBuf, toolCalls);
     }
 
     if (streamError) {
       const classified = classifyRunnerThrow(streamError);
-      return {
-        error: classified.errorType,
-        message: classified.message,
-        ...(classified.authSubkind
-          ? { authSubkind: classified.authSubkind }
-          : {}),
-        text: textBuf,
-        finishReason: 'error',
-        toolCalls,
-        usage: {
-          inputTokens: undefined,
-          outputTokens: undefined,
-          cacheReadTokens: undefined,
-          cacheWriteTokens: undefined,
-          totalTokens: undefined,
-        },
-      };
+      return buildErrorResult(classified, textBuf, toolCalls);
     }
 
     const finishReason = await result.finishReason;
