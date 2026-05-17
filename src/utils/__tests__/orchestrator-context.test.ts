@@ -14,13 +14,13 @@
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'node:fs';
-import * as os from 'node:os';
 import * as path from 'node:path';
 import {
   MAX_ORCHESTRATOR_CONTEXT_BYTES,
   loadOrchestratorContext,
   resolveOrchestratorContextPath,
 } from '../orchestrator-context';
+import { createTempDir } from './helpers/temp-dir.js';
 
 describe('resolveOrchestratorContextPath', () => {
   it('returns the flag value when provided', () => {
@@ -62,13 +62,14 @@ describe('resolveOrchestratorContextPath', () => {
 
 describe('loadOrchestratorContext', () => {
   let tmpDir: string;
+  let cleanup: () => void;
 
   beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'orch-ctx-test-'));
+    ({ dir: tmpDir, cleanup } = createTempDir('orch-ctx-test-'));
   });
 
   afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    cleanup();
   });
 
   it('loads a normal markdown file and returns trimmed content', () => {

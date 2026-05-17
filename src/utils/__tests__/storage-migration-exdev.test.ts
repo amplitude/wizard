@@ -15,9 +15,8 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as fsActual from 'node:fs';
-import { mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { writeFileSync } from 'node:fs';
+import { createTempDir } from './helpers/temp-dir.js';
 
 // Mock fs BEFORE importing the migration module so renameSync is wrapped.
 // The wrapper routes every renameSync call through `renameSpy`. Tests
@@ -63,11 +62,16 @@ import {
 describe('runMigrationShim — EXDEV cross-device fallback', () => {
   let cacheRoot: string;
   let installDir: string;
+  let cleanupCacheRoot: () => void;
+  let cleanupInstallDir: () => void;
   let originalCacheOverride: string | undefined;
 
   beforeEach(() => {
-    cacheRoot = mkdtempSync(join(tmpdir(), 'wiz-migrate-exdev-'));
-    installDir = mkdtempSync(join(tmpdir(), 'wiz-migrate-exdev-proj-'));
+    ({ dir: cacheRoot, cleanup: cleanupCacheRoot } =
+      createTempDir('wiz-migrate-exdev-'));
+    ({ dir: installDir, cleanup: cleanupInstallDir } = createTempDir(
+      'wiz-migrate-exdev-proj-',
+    ));
     originalCacheOverride = process.env[CACHE_ROOT_OVERRIDE_ENV];
     process.env[CACHE_ROOT_OVERRIDE_ENV] = cacheRoot;
     renameSpy.mockReset();
@@ -76,8 +80,8 @@ describe('runMigrationShim — EXDEV cross-device fallback', () => {
   });
 
   afterEach(() => {
-    rmSync(cacheRoot, { recursive: true, force: true });
-    rmSync(installDir, { recursive: true, force: true });
+    cleanupCacheRoot();
+    cleanupInstallDir();
     if (originalCacheOverride === undefined) {
       delete process.env[CACHE_ROOT_OVERRIDE_ENV];
     } else {
