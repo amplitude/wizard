@@ -325,13 +325,11 @@ export const DataIngestionCheckScreen = ({
    */
   async function refreshToken(force = false): Promise<boolean> {
     try {
-      const { getStoredToken, getStoredUser, storeToken } = await import(
-        '../../../utils/ampli-settings.js'
-      );
+      const { getStoredToken, getStoredUser, storeToken } =
+        await import('../../../utils/ampli-settings.js');
       const { refreshAccessToken } = await import('../../../utils/oauth.js');
-      const { EXPIRY_BUFFER_MS } = await import(
-        '../../../utils/token-refresh.js'
-      );
+      const { EXPIRY_BUFFER_MS } =
+        await import('../../../utils/token-refresh.js');
       const user = getStoredUser();
       const stored = getStoredToken(user?.id, user?.zone);
       if (!stored || !user) return false;
@@ -450,15 +448,15 @@ export const DataIngestionCheckScreen = ({
         );
         // Fall back to the first org if the stored ID doesn't match (stale checkpoint).
         const org = currentSession.selectedOrgId
-          ? userInfo.orgs.find((o) => o.id === currentSession.selectedOrgId) ??
-            userInfo.orgs[0]
+          ? (userInfo.orgs.find((o) => o.id === currentSession.selectedOrgId) ??
+            userInfo.orgs[0])
           : userInfo.orgs[0];
         // Fall back to the first project if the stored ID doesn't match.
         const project =
           org && currentSession.selectedProjectId
-            ? org.projects.find(
+            ? (org.projects.find(
                 (p) => p.id === currentSession.selectedProjectId,
-              ) ?? org.projects[0]
+              ) ?? org.projects[0])
             : org?.projects[0];
 
         const restoredFields: Parameters<typeof store.restoreSessionIds>[0] =
@@ -948,7 +946,7 @@ export const DataIngestionCheckScreen = ({
 
         <Box marginTop={1}>
           {celebrationReady ? (
-            <KeyHintInline hint="Enter" label="Continue" />
+            <KeyHintInline hint="Enter" label="Continue" gap={1} />
           ) : (
             <Text color={Colors.body}>Verifying{Icons.ellipsis}</Text>
           )}

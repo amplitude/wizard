@@ -34,8 +34,16 @@ const ASK_HINT: KeyHint = { key: 'Tab', label: 'Ask a question' };
  * one-off hotkey advertisements; the persistent footer bar at the
  * bottom of the layout is `KeyHintBar` itself.
  */
-export const KeyHintInline = ({ hint, label }: { hint: string; label: string }) => (
-  <Box>
+export const KeyHintInline = ({
+  hint,
+  label,
+  gap,
+}: {
+  hint: string;
+  label: string;
+  gap?: number;
+}) => (
+  <Box gap={gap}>
     <Text color={Colors.muted}>[</Text>
     <Text color={Colors.body} bold>
       {hint}
