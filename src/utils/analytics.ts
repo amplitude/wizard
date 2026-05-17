@@ -375,3 +375,17 @@ export function captureWizardError(
     ...extra,
   });
 }
+
+/**
+ * Extract a human-readable message from an `unknown` caught in a `catch`
+ * block, with a fallback for non-Error throwables.
+ *
+ * Centralises the `err instanceof Error ? err.message : <fallback>` ternary
+ * that recurs across `captureWizardError` call sites so the telemetry
+ * "error message" property is consistent. The default fallback `'Unknown
+ * error'` matches the historical string used at the existing call sites —
+ * do not change it without auditing every consumer.
+ */
+export function errorMessage(err: unknown, fallback = 'Unknown error'): string {
+  return err instanceof Error ? err.message : fallback;
+}

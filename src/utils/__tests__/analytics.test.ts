@@ -56,7 +56,13 @@ vi.mock('../install-id', () => ({
 
 import { v4 as uuidv4 } from 'uuid';
 
-import { Analytics, resolveTelemetryApiKey } from '../analytics.js';
+import {
+  Analytics,
+  resolveTelemetryApiKey,
+  errorMessage,
+  captureWizardError,
+  analytics as analyticsSingleton,
+} from '../analytics.js';
 
 const mockUuidv4 = uuidv4 as MockedFunction<typeof uuidv4>;
 
@@ -137,6 +143,146 @@ describe('Analytics', () => {
   describe('wizardCapture', () => {
     it('should not throw when capturing wizard events', () => {
       expect(() => analytics.wizardCapture('test event')).not.toThrow();
+    });
+  });
+
+  describe('errorMessage', () => {
+    it('returns Error.message for Error instances', () => {
+      expect(errorMessage(new Error('boom'))).toBe('boom');
+    });
+
+    it('returns the default fallback for non-Error throwables', () => {
+      expect(errorMessage('plain string')).toBe('Unknown error');
+      expect(errorMessage({ foo: 'bar' })).toBe('Unknown error');
+      expect(errorMessage(null)).toBe('Unknown error');
+      expect(errorMessage(undefined)).toBe('Unknown error');
+    });
+
+    it('honours a custom fallback', () => {
+      expect(errorMessage(42, 'unknown')).toBe('unknown');
+    });
+
+    it('preserves the pre-refactor output verbatim', () => {
+      // Pin the exact pattern the refactored `captureWizardError` sites in
+      // `add-or-update-environment-variables.ts` relied on:
+      //   error instanceof Error ? error.message : 'Unknown error'
+      // If this snapshot drifts, the telemetry `error message` property
+      // shape has changed and downstream Amplitude dashboards may break.
+      const cases = [
+        new Error('write failed'),
+        'plain string',
+        { code: 'EACCES' },
+        null,
+        undefined,
+        42,
+      ];
+      expect(cases.map((c) => errorMessage(c))).toMatchInlineSnapshot(`
+        [
+          "write failed",
+          "Unknown error",
+          "Unknown error",
+          "Unknown error",
+          "Unknown error",
+          "Unknown error",
+        ]
+      `);
+    });
+  });
+
+  describe('captureWizardError', () => {
+    // The module-level `analytics` singleton was instantiated when the
+    // analytics module was first imported, before any `beforeEach` could
+    // clear mocks — and `vi.clearAllMocks()` wipes `mockCreateInstance`'s
+    // results array. We can still observe its track() calls by reading the
+    // mock function attached to the singleton's underlying client directly.
+    type TrackingClient = {
+      track: ReturnType<typeof vi.fn> & {
+        mock: { calls: unknown[][] };
+        mockClear(): void;
+      };
+    };
+    const getSingletonClient = (): TrackingClient =>
+      (analyticsSingleton as unknown as { client: TrackingClient }).client;
+
+    it('emits "wizard cli: error encountered" with the canonical property bag', () => {
+      // Snapshot the exact event shape so future refactors of
+      // `captureWizardError` do not silently change the Amplitude payload.
+      const client = getSingletonClient();
+      client.track.mockClear();
+
+      captureWizardError(
+        'Environment Variables',
+        'Permission denied',
+        'add-or-update-env:create-new',
+        { integration: 'nextjs' },
+      );
+
+      expect(client.track).toHaveBeenCalledTimes(1);
+      const [eventName, props] = client.track.mock.calls[0] as [
+        string,
+        Record<string, unknown>,
+      ];
+      expect(eventName).toBe('wizard cli: error encountered');
+      expect(props).toMatchObject({
+        'error category': 'Environment Variables',
+        'error message': 'Permission denied',
+        'error context': 'add-or-update-env:create-new',
+        integration: 'nextjs',
+      });
+    });
+
+    it('keeps property order stable: category → message → context → extras', () => {
+      const client = getSingletonClient();
+      client.track.mockClear();
+
+      captureWizardError('A', 'B', 'C', { extra: 'x' });
+      const props = client.track.mock.calls[0][1] as Record<string, unknown>;
+      const keys = Object.keys(props);
+      // Auto-injected base props ($app_name, session id, run id) appear
+      // first; the captureWizardError-owned keys come after and must
+      // retain their declared order.
+      const ownedKeys = keys.filter((k) =>
+        ['error category', 'error message', 'error context', 'extra'].includes(
+          k,
+        ),
+      );
+      expect(ownedKeys).toEqual([
+        'error category',
+        'error message',
+        'error context',
+        'extra',
+      ]);
+    });
+
+    it('produces the same payload as the pre-refactor inline ternary', () => {
+      // Regression guard for the `add-or-update-environment-variables.ts`
+      // refactor: replacing `error instanceof Error ? error.message :
+      // 'Unknown error'` with `errorMessage(error)` must emit identical
+      // event properties.
+      const client = getSingletonClient();
+
+      const sampleError = new Error('write failed');
+      // Pre-refactor shape (manual ternary).
+      client.track.mockClear();
+      captureWizardError(
+        'Environment Variables',
+        sampleError instanceof Error ? sampleError.message : 'Unknown error',
+        'add-or-update-env:create-new',
+        { integration: 'nextjs' },
+      );
+      const before = client.track.mock.calls[0];
+
+      // Post-refactor shape (helper).
+      client.track.mockClear();
+      captureWizardError(
+        'Environment Variables',
+        errorMessage(sampleError),
+        'add-or-update-env:create-new',
+        { integration: 'nextjs' },
+      );
+      const after = client.track.mock.calls[0];
+
+      expect(after).toEqual(before);
     });
   });
 
