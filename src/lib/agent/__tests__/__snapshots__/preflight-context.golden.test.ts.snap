@@ -1,0 +1,178 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`buildPreflightContext — golden snapshots > snapshot: EU region with id-only org/project (no display names) 1`] = `
+"# Pre-flight context (you have these answers; do NOT re-probe at start)
+
+## Project
+- cwd: <INSTALL_DIR>
+- framework: Django (id: django)
+- framework version: 5.0
+- package manager: ?
+- TypeScript: no
+
+## Amplitude state
+- auth: signed in (kelson.warner@amplitude.com)
+- org: id: 21
+- project: id: 99
+- region: eu
+- bound: yes
+
+## Environment
+- env files present: none
+- existing AMPLITUDE_* keys: none
+
+> The wizard already discovered the values above. Do NOT call \`detect_package_manager\`, \`check_env_keys\`, or other discovery tools on the very first turn just to re-derive them. Those tools remain available later if you need to verify a value the user just changed.
+"
+`;
+
+exports[`buildPreflightContext — golden snapshots > snapshot: JIT mode — large project, environment block suppressed 1`] = `
+"# Pre-flight context (large project — load on demand)
+
+## Project
+- cwd: <INSTALL_DIR>
+- framework: Next.js 15.3 (id: nextjs)
+- framework version: 15.3.0
+- package manager: pnpm (install: pnpm add)
+- TypeScript: yes
+
+## Amplitude state
+- auth: signed in (user@example.com)
+- org: Amplitude (id: 21)
+- project: test-delete-me (id: 12345)
+- environment: Production
+- region: us
+- bound: yes
+
+> This project is large (5000 files). Use \`read_file\`, \`grep\`, and the wizard's discovery tools (\`detect_package_manager\`, \`check_env_keys\`, \`Glob\`) **just-in-time** as you need information — don't try to load everything upfront. Loading the full project map into the prompt would burn attention budget that's better spent on the specific files you actually have to edit. The Project / Amplitude blocks above cover the values the wizard has cached; the rest of the codebase is yours to explore on demand.
+"
+`;
+
+exports[`buildPreflightContext — golden snapshots > snapshot: env-file scan with Amplitude keys present in multiple files 1`] = `
+"# Pre-flight context (you have these answers; do NOT re-probe at start)
+
+## Project
+- cwd: <INSTALL_DIR>
+- framework: Next.js (id: nextjs)
+- package manager: pnpm (install: pnpm add)
+- TypeScript: yes
+
+## Amplitude state
+- auth: ?
+- org: ?
+- project: ?
+- region: us
+- bound: no
+
+## Environment
+- env files present: .env.local, .env.example
+- existing AMPLITUDE_* keys:
+  - AMPLITUDE_API_KEY: present in .env.local, .env.example
+  - NEXT_PUBLIC_AMPLITUDE_API_KEY: present in .env.example
+
+> The wizard already discovered the values above. Do NOT call \`detect_package_manager\`, \`check_env_keys\`, or other discovery tools on the very first turn just to re-derive them. Those tools remain available later if you need to verify a value the user just changed.
+"
+`;
+
+exports[`buildPreflightContext — golden snapshots > snapshot: framework context with monorepo / workspace disambiguators 1`] = `
+"# Pre-flight context (you have these answers; do NOT re-probe at start)
+
+## Project
+- cwd: <INSTALL_DIR>
+- framework: Next.js 15.3 (id: nextjs)
+- framework version: 15.3.0
+- package manager: pnpm (install: pnpm add)
+- TypeScript: yes
+- framework context:
+  - router: app
+  - monorepo: true
+  - workspace: apps/web
+
+## Amplitude state
+- auth: ?
+- org: ?
+- project: ?
+- region: us
+- bound: no
+
+## Environment
+- env files present: none
+- existing AMPLITUDE_* keys: none
+
+> The wizard already discovered the values above. Do NOT call \`detect_package_manager\`, \`check_env_keys\`, or other discovery tools on the very first turn just to re-derive them. Those tools remain available later if you need to verify a value the user just changed.
+"
+`;
+
+exports[`buildPreflightContext — golden snapshots > snapshot: full happy path (Next.js, signed in, bound, US) 1`] = `
+"# Pre-flight context (you have these answers; do NOT re-probe at start)
+
+## Project
+- cwd: <INSTALL_DIR>
+- framework: Next.js 15.3 (id: nextjs)
+- framework version: 15.3.0
+- package manager: pnpm (install: pnpm add)
+- TypeScript: yes
+
+## Amplitude state
+- auth: signed in (user@example.com)
+- org: Amplitude (id: 21)
+- project: test-delete-me (id: 12345)
+- environment: Production
+- region: us
+- bound: yes
+
+## Environment
+- env files present: none
+- existing AMPLITUDE_* keys: none
+
+> The wizard already discovered the values above. Do NOT call \`detect_package_manager\`, \`check_env_keys\`, or other discovery tools on the very first turn just to re-derive them. Those tools remain available later if you need to verify a value the user just changed.
+"
+`;
+
+exports[`buildPreflightContext — golden snapshots > snapshot: minimal — null framework, null pm, no env files 1`] = `
+"# Pre-flight context (you have these answers; do NOT re-probe at start)
+
+## Project
+- cwd: <INSTALL_DIR>
+- framework: ?
+- package manager: ?
+- TypeScript: no
+
+## Amplitude state
+- auth: ?
+- org: ?
+- project: ?
+- region: us
+- bound: no
+
+## Environment
+- env files present: none
+- existing AMPLITUDE_* keys: none
+
+> The wizard already discovered the values above. Do NOT call \`detect_package_manager\`, \`check_env_keys\`, or other discovery tools on the very first turn just to re-derive them. Those tools remain available later if you need to verify a value the user just changed.
+"
+`;
+
+exports[`buildPreflightContext — golden snapshots > snapshot: multiple lockfiles (yarn primary + npm sibling) 1`] = `
+"# Pre-flight context (you have these answers; do NOT re-probe at start)
+
+## Project
+- cwd: <INSTALL_DIR>
+- framework: Vite + React (id: javascript_web)
+- package manager: Yarn V1 (install: yarn add)
+- other lockfiles present: npm
+- TypeScript: no
+
+## Amplitude state
+- auth: ?
+- org: ?
+- project: ?
+- region: us
+- bound: no
+
+## Environment
+- env files present: none
+- existing AMPLITUDE_* keys: none
+
+> The wizard already discovered the values above. Do NOT call \`detect_package_manager\`, \`check_env_keys\`, or other discovery tools on the very first turn just to re-derive them. Those tools remain available later if you need to verify a value the user just changed.
+"
+`;

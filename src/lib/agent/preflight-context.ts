@@ -156,6 +156,25 @@ function scanEnvFiles(installDir: string): EnvFileSnapshot[] {
   return snapshots;
 }
 
+/**
+ * Markdown-builder helper used by all three section renderers. Owns the
+ * `## Title` header + `\n`-joined body convention so each renderer can
+ * focus on what `line(...)` items it pushes rather than re-implementing
+ * the header / join pattern (PR #834 dedup deferral).
+ *
+ * The build function is invoked synchronously so it can `push` arbitrary
+ * raw strings (e.g. the `- framework context:` sub-list) in addition to
+ * formatted `line(...)` entries.
+ */
+function mdSection(
+  title: string,
+  build: (push: (line: string) => void) => void,
+): string {
+  const lines: string[] = [`## ${title}`];
+  build((line) => lines.push(line));
+  return lines.join('\n');
+}
+
 /** Render a single line of the form "- key: value" or "- key: ?" for unknowns. */
 function line(key: string, value: string | number | boolean | null): string {
   if (value === null || value === undefined || value === '') {
@@ -167,139 +186,146 @@ function line(key: string, value: string | number | boolean | null): string {
   return `- ${key}: ${value}`;
 }
 
+/**
+ * Format a "name (id: <id>)" pair where either side may be absent.
+ * Returns null when both are absent so callers can route to the `?`
+ * placeholder via {@link line}.
+ *
+ * Examples:
+ *   ("Amplitude", "21")  -> "Amplitude (id: 21)"
+ *   ("Amplitude", null)  -> "Amplitude"
+ *   (null,        "21")  -> "id: 21"
+ *   (null,        null)  -> null
+ */
+function nameWithId(name: string | null, id: string | null): string | null {
+  if (name) {
+    return id ? `${name} (id: ${id})` : name;
+  }
+  if (id) return `id: ${id}`;
+  return null;
+}
+
 function renderProject(input: PreflightContextInput): string {
-  const lines: string[] = ['## Project'];
-  lines.push(line('cwd', input.installDir));
+  return mdSection('Project', (push) => {
+    push(line('cwd', input.installDir));
 
-  let frameworkValue: string | null = null;
-  if (input.detectedFrameworkLabel) {
-    frameworkValue = input.detectedFrameworkLabel;
-    if (input.integration) frameworkValue += ` (id: ${input.integration})`;
-  } else if (input.integration) {
-    frameworkValue = String(input.integration);
-  }
-  lines.push(line('framework', frameworkValue));
-
-  if (input.frameworkVersion && input.frameworkVersion !== 'latest') {
-    lines.push(line('framework version', input.frameworkVersion));
-  }
-
-  // Package manager — primary lockfile + the install command the agent
-  // would otherwise have to fetch via detect_package_manager.
-  const pm = input.packageManagerInfo;
-  if (pm && pm.primary) {
-    lines.push(
-      line(
-        'package manager',
-        `${pm.primary.label} (install: ${pm.primary.installCommand})`,
-      ),
-    );
-    if (pm.detected.length > 1) {
-      // Compare by `label` rather than reference — callers (especially
-      // tests) often pass `primary` as a sibling object literal, not a
-      // shared reference into `detected`.
-      const others = pm.detected
-        .filter((d) => d.label !== pm.primary?.label)
-        .map((d) => d.label);
-      if (others.length > 0) {
-        lines.push(line('other lockfiles present', others.join(', ')));
-      }
+    let frameworkValue: string | null = null;
+    if (input.detectedFrameworkLabel) {
+      frameworkValue = input.detectedFrameworkLabel;
+      if (input.integration) frameworkValue += ` (id: ${input.integration})`;
+    } else if (input.integration) {
+      frameworkValue = String(input.integration);
     }
-  } else {
-    lines.push(line('package manager', '?'));
-  }
+    push(line('framework', frameworkValue));
 
-  lines.push(line('TypeScript', input.typescript));
+    if (input.frameworkVersion && input.frameworkVersion !== 'latest') {
+      push(line('framework version', input.frameworkVersion));
+    }
 
-  // Surface notable framework-context answers verbatim — these come from
-  // SetupScreen and frequently include monorepo / app-router / project-type
-  // disambiguators the agent would otherwise probe for. We stringify defensively
-  // so an unexpected value type can't blow up the prompt builder.
-  if (input.frameworkContext) {
-    const entries = Object.entries(input.frameworkContext).filter(
-      ([, v]) => v !== null && v !== undefined && v !== '',
-    );
-    if (entries.length > 0) {
-      lines.push('- framework context:');
-      for (const [k, v] of entries) {
-        let serialized: string;
-        try {
-          serialized = typeof v === 'string' ? v : JSON.stringify(v);
-        } catch {
-          serialized = '[unserializable]';
+    // Package manager — primary lockfile + the install command the agent
+    // would otherwise have to fetch via detect_package_manager.
+    const pm = input.packageManagerInfo;
+    if (pm && pm.primary) {
+      push(
+        line(
+          'package manager',
+          `${pm.primary.label} (install: ${pm.primary.installCommand})`,
+        ),
+      );
+      if (pm.detected.length > 1) {
+        // Compare by `label` rather than reference — callers (especially
+        // tests) often pass `primary` as a sibling object literal, not a
+        // shared reference into `detected`.
+        const others = pm.detected
+          .filter((d) => d.label !== pm.primary?.label)
+          .map((d) => d.label);
+        if (others.length > 0) {
+          push(line('other lockfiles present', others.join(', ')));
         }
-        lines.push(`  - ${k}: ${serialized}`);
+      }
+    } else {
+      push(line('package manager', '?'));
+    }
+
+    push(line('TypeScript', input.typescript));
+
+    // Surface notable framework-context answers verbatim — these come from
+    // SetupScreen and frequently include monorepo / app-router / project-type
+    // disambiguators the agent would otherwise probe for. We stringify defensively
+    // so an unexpected value type can't blow up the prompt builder.
+    if (input.frameworkContext) {
+      const entries = Object.entries(input.frameworkContext).filter(
+        ([, v]) => v !== null && v !== undefined && v !== '',
+      );
+      if (entries.length > 0) {
+        push('- framework context:');
+        for (const [k, v] of entries) {
+          let serialized: string;
+          try {
+            serialized = typeof v === 'string' ? v : JSON.stringify(v);
+          } catch {
+            serialized = '[unserializable]';
+          }
+          push(`  - ${k}: ${serialized}`);
+        }
       }
     }
-  }
-
-  return lines.join('\n');
+  });
 }
 
 function renderAmplitude(input: PreflightContextInput): string {
-  const lines: string[] = ['## Amplitude state'];
-  // `userEmail: null` means the wizard hasn't observed an authenticated
-  // session — don't tell the agent the user is signed in. The taxonomy
-  // / dashboard skills branch on this and would silently skip the
-  // sign-in prompt if we reported "signed in" without an email.
-  const auth = input.userEmail ? `signed in (${input.userEmail})` : '?';
-  lines.push(line('auth', auth));
-  if (input.selectedOrgName || input.selectedOrgId) {
-    const value = input.selectedOrgName
-      ? `${input.selectedOrgName}${
-          input.selectedOrgId ? ` (id: ${input.selectedOrgId})` : ''
-        }`
-      : `id: ${input.selectedOrgId}`;
-    lines.push(line('org', value));
-  } else {
-    lines.push(line('org', '?'));
-  }
-  if (input.selectedProjectName || input.selectedProjectId) {
-    const value = input.selectedProjectName
-      ? `${input.selectedProjectName}${
-          input.selectedProjectId ? ` (id: ${input.selectedProjectId})` : ''
-        }`
-      : `id: ${input.selectedProjectId}`;
-    lines.push(line('project', value));
-  } else {
-    lines.push(line('project', '?'));
-  }
-  if (input.selectedEnvName) {
-    lines.push(line('environment', input.selectedEnvName));
-  }
-  lines.push(line('region', input.cloudRegion));
-  lines.push(line('bound', input.projectBound));
-  return lines.join('\n');
+  return mdSection('Amplitude state', (push) => {
+    // `userEmail: null` means the wizard hasn't observed an authenticated
+    // session — don't tell the agent the user is signed in. The taxonomy
+    // / dashboard skills branch on this and would silently skip the
+    // sign-in prompt if we reported "signed in" without an email.
+    push(
+      line('auth', input.userEmail ? `signed in (${input.userEmail})` : '?'),
+    );
+    push(line('org', nameWithId(input.selectedOrgName, input.selectedOrgId)));
+    push(
+      line(
+        'project',
+        nameWithId(input.selectedProjectName, input.selectedProjectId),
+      ),
+    );
+    if (input.selectedEnvName) {
+      push(line('environment', input.selectedEnvName));
+    }
+    push(line('region', input.cloudRegion));
+    push(line('bound', input.projectBound));
+  });
 }
 
 function renderEnvironment(installDir: string): string {
-  const snapshots = scanEnvFiles(installDir);
-  const lines: string[] = ['## Environment'];
-  if (snapshots.length === 0) {
-    lines.push(line('env files present', 'none'));
-    lines.push(line('existing AMPLITUDE_* keys', 'none'));
-    return lines.join('\n');
-  }
-  const present = snapshots.map((s) => s.basename).join(', ');
-  lines.push(line('env files present', present));
+  return mdSection('Environment', (push) => {
+    const snapshots = scanEnvFiles(installDir);
+    if (snapshots.length === 0) {
+      push(line('env files present', 'none'));
+      push(line('existing AMPLITUDE_* keys', 'none'));
+      return;
+    }
+    push(
+      line('env files present', snapshots.map((s) => s.basename).join(', ')),
+    );
 
-  const allAmplitudeKeys = new Map<string, string[]>();
-  for (const snapshot of snapshots) {
-    for (const key of snapshot.amplitudeKeys) {
-      const where = allAmplitudeKeys.get(key) ?? [];
-      where.push(snapshot.basename);
-      allAmplitudeKeys.set(key, where);
+    const allAmplitudeKeys = new Map<string, string[]>();
+    for (const snapshot of snapshots) {
+      for (const key of snapshot.amplitudeKeys) {
+        const where = allAmplitudeKeys.get(key) ?? [];
+        where.push(snapshot.basename);
+        allAmplitudeKeys.set(key, where);
+      }
     }
-  }
-  if (allAmplitudeKeys.size === 0) {
-    lines.push(line('existing AMPLITUDE_* keys', 'none'));
-  } else {
-    lines.push('- existing AMPLITUDE_* keys:');
+    if (allAmplitudeKeys.size === 0) {
+      push(line('existing AMPLITUDE_* keys', 'none'));
+      return;
+    }
+    push('- existing AMPLITUDE_* keys:');
     for (const [key, files] of [...allAmplitudeKeys.entries()].sort()) {
-      lines.push(`  - ${key}: present in ${files.join(', ')}`);
+      push(`  - ${key}: present in ${files.join(', ')}`);
     }
-  }
-  return lines.join('\n');
+  });
 }
 
 /**
