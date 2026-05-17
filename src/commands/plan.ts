@@ -1,6 +1,6 @@
 import type { CommandModule } from 'yargs';
 import chalk from 'chalk';
-import { getUI, ExitCode } from './helpers';
+import { getUI, ExitCode, emitCliEnvelope } from './helpers';
 import { CLI_INVOCATION } from './context';
 
 export const planCommand: CommandModule = {
@@ -35,9 +35,7 @@ export const planCommand: CommandModule = {
       if (!guard.ok && !argv.force) {
         if (jsonOutput) {
           process.stdout.write(
-            JSON.stringify({
-              v: 1,
-              '@timestamp': new Date().toISOString(),
+            emitCliEnvelope({
               type: 'error',
               level: 'error',
               message: `plan refused: ${guard.details}`,
@@ -47,7 +45,7 @@ export const planCommand: CommandModule = {
                 installDir,
                 hint: 'Pass --install-dir <abs-path> pointing at the project root, or --force to bypass.',
               },
-            }) + '\n',
+            }),
           );
         } else {
           getUI().log.error(`Plan refused: ${guard.details}`);
@@ -88,12 +86,10 @@ export const planCommand: CommandModule = {
             if (orgId) sources.orgId = 'saved';
             if (projectId) sources.projectId = 'saved';
             process.stdout.write(
-              JSON.stringify({
-                v: 1,
-                '@timestamp': new Date().toISOString(),
+              emitCliEnvelope({
                 type: 'lifecycle',
                 message: 'setup_context (plan)',
-                data_version: 1,
+                dataVersion: 1,
                 data: {
                   event: 'setup_context',
                   phase: 'plan',
@@ -110,15 +106,13 @@ export const planCommand: CommandModule = {
                   // interactive choice."
                   requiresConfirmation: true,
                 },
-              }) + '\n',
+              }),
             );
           } catch {
             // Best-effort context — never block plan emission on it.
           }
           process.stdout.write(
-            JSON.stringify({
-              v: 1,
-              '@timestamp': new Date().toISOString(),
+            emitCliEnvelope({
               type: 'plan',
               message: detected
                 ? `plan ready: ${plan.frameworkName} (${plan.framework})`
@@ -142,7 +136,7 @@ export const planCommand: CommandModule = {
                   '--yes',
                 ],
               },
-            }) + '\n',
+            }),
           );
         } else {
           const ui = getUI();
@@ -169,13 +163,11 @@ export const planCommand: CommandModule = {
         const message = e instanceof Error ? e.message : String(e);
         if (jsonOutput) {
           process.stdout.write(
-            JSON.stringify({
-              v: 1,
-              '@timestamp': new Date().toISOString(),
+            emitCliEnvelope({
               type: 'error',
               message: `plan failed: ${message}`,
               data: { event: 'plan_failed' },
-            }) + '\n',
+            }),
           );
         } else {
           getUI().log.error(`Planning failed: ${message}`);
