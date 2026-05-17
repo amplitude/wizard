@@ -1,4 +1,5 @@
 import { createLogger } from '../observability/logger';
+import { fetchWithTimeout } from './_fetch';
 import {
   ServiceHealthStatus,
   type BaseHealthResult,
@@ -118,16 +119,13 @@ async function fetchStatuspageIndicator(
   url: string,
   timeoutMs = 5000,
 ): Promise<BaseHealthResult> {
+  const fetchResult = await fetchWithTimeout(url, timeoutMs);
+  if (!fetchResult.ok) return errResult(fetchResult.error);
+
+  const res = fetchResult.response;
+  if (!res.ok) return errResult(`HTTP ${res.status}`);
+
   try {
-    const controller = new AbortController();
-    const tid = setTimeout(() => controller.abort(), timeoutMs);
-    const res = await fetch(url, {
-      signal: controller.signal,
-    });
-    clearTimeout(tid);
-
-    if (!res.ok) return errResult(`HTTP ${res.status}`);
-
     const data = (await res.json()) as StatuspageStatusResponse;
     const indicator = data.status?.indicator ?? null;
     return {
@@ -135,18 +133,8 @@ async function fetchStatuspageIndicator(
       rawIndicator: indicator ?? undefined,
     };
   } catch (e) {
-    if (e instanceof Error && e.name === 'AbortError')
-      return errResult('Request timed out');
     return errResult(e instanceof Error ? e.message : 'Unknown error');
   }
-}
-
-async function fetchStatuspageSummary(
-  url: string,
-  timeoutMs = 5000,
-): Promise<ComponentHealthResult> {
-  const combined = await fetchStatuspageOverallAndComponents(url, timeoutMs);
-  return combined.components;
 }
 
 /**
@@ -158,19 +146,19 @@ export async function fetchStatuspageOverallAndComponents(
   url: string,
   timeoutMs = 5000,
 ): Promise<{ overall: BaseHealthResult; components: ComponentHealthResult }> {
+  const fetchResult = await fetchWithTimeout(url, timeoutMs);
+  if (!fetchResult.ok) {
+    const msg = fetchResult.error;
+    return { overall: errResult(msg), components: componentErrResult(msg) };
+  }
+
+  const res = fetchResult.response;
+  if (!res.ok) {
+    const msg = `HTTP ${res.status}`;
+    return { overall: errResult(msg), components: componentErrResult(msg) };
+  }
+
   try {
-    const controller = new AbortController();
-    const tid = setTimeout(() => controller.abort(), timeoutMs);
-    const res = await fetch(url, {
-      signal: controller.signal,
-    });
-    clearTimeout(tid);
-
-    if (!res.ok) {
-      const msg = `HTTP ${res.status}`;
-      return { overall: errResult(msg), components: componentErrResult(msg) };
-    }
-
     const data = (await res.json()) as StatuspageSummaryResponse;
     const indicator = data.status?.indicator ?? null;
     const overallStatus = mapIndicator(indicator);
@@ -197,14 +185,22 @@ export async function fetchStatuspageOverallAndComponents(
 
     return { overall, components };
   } catch (e) {
-    const msg =
-      e instanceof Error && e.name === 'AbortError'
-        ? 'Request timed out'
-        : e instanceof Error
-        ? e.message
-        : 'Unknown error';
+    const msg = e instanceof Error ? e.message : 'Unknown error';
     return { overall: errResult(msg), components: componentErrResult(msg) };
   }
+}
+
+/**
+ * Convenience wrapper around `fetchStatuspageOverallAndComponents` that
+ * returns only the component-level result — used by the
+ * `check*ComponentHealth` exports below.
+ */
+async function fetchStatuspageSummaryComponents(
+  url: string,
+  timeoutMs = 5000,
+): Promise<ComponentHealthResult> {
+  const combined = await fetchStatuspageOverallAndComponents(url, timeoutMs);
+  return combined.components;
 }
 
 // ---------------------------------------------------------------------------
@@ -237,7 +233,7 @@ export const checkAmplitudeOverallHealth = (): Promise<BaseHealthResult> =>
 
 export const checkAmplitudeComponentHealth =
   (): Promise<ComponentHealthResult> =>
-    fetchStatuspageSummary(URLS.amplitudeSummary);
+    fetchStatuspageSummaryComponents(URLS.amplitudeSummary);
 
 export const checkGithubHealth = (): Promise<BaseHealthResult> =>
   fetchStatuspageIndicator(URLS.githubStatus);
@@ -246,14 +242,14 @@ export const checkNpmOverallHealth = (): Promise<BaseHealthResult> =>
   fetchStatuspageIndicator(URLS.npmStatus);
 
 export const checkNpmComponentHealth = (): Promise<ComponentHealthResult> =>
-  fetchStatuspageSummary(URLS.npmSummary);
+  fetchStatuspageSummaryComponents(URLS.npmSummary);
 
 export const checkCloudflareOverallHealth = (): Promise<BaseHealthResult> =>
   fetchStatuspageIndicator(URLS.cloudflareStatus);
 
 export const checkCloudflareComponentHealth =
   (): Promise<ComponentHealthResult> =>
-    fetchStatuspageSummary(URLS.cloudflareSummary);
+    fetchStatuspageSummaryComponents(URLS.cloudflareSummary);
 
 // ---------------------------------------------------------------------------
 // Combined (single-fetch) statuspage checks

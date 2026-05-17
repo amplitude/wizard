@@ -1,3 +1,4 @@
+import { fetchWithTimeout } from './_fetch';
 import { ServiceHealthStatus, type BaseHealthResult } from './types';
 
 // ---------------------------------------------------------------------------
@@ -24,32 +25,17 @@ async function fetchEndpointHealth(
   timeoutMs = 5000,
   expectedStatus = 200,
 ): Promise<BaseHealthResult> {
-  try {
-    const controller = new AbortController();
-    const tid = setTimeout(() => controller.abort(), timeoutMs);
-    // Node 20+'s built-in fetch (powered by undici) maintains an internal
-    // connection pool keyed by origin and reuses TLS sockets across
-    // requests automatically — no flag required. We deliberately do NOT
-    // pass `keepalive: true`: that's the WHATWG service-worker "outlive
-    // the page" semantic, not a connection-reuse hint
-    // (https://github.com/nodejs/undici/issues/2169).
-    const res = await fetch(url, {
-      signal: controller.signal,
-    });
-    clearTimeout(tid);
+  const result = await fetchWithTimeout(url, timeoutMs);
+  if (!result.ok) return downResult(result.error);
 
-    if (res.status === expectedStatus) {
-      return {
-        status: ServiceHealthStatus.Healthy,
-        rawIndicator: `HTTP ${res.status}`,
-      };
-    }
-    return downResult(`HTTP ${res.status}`);
-  } catch (e) {
-    if (e instanceof Error && e.name === 'AbortError')
-      return downResult('Request timed out');
-    return downResult(e instanceof Error ? e.message : 'Unknown error');
+  const { status } = result.response;
+  if (status === expectedStatus) {
+    return {
+      status: ServiceHealthStatus.Healthy,
+      rawIndicator: `HTTP ${status}`,
+    };
   }
+  return downResult(`HTTP ${status}`);
 }
 
 export const checkLlmGatewayHealth = (): Promise<BaseHealthResult> =>

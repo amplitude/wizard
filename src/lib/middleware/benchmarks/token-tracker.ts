@@ -16,6 +16,7 @@ import type {
 } from '../types';
 import type { TurnData } from './turn-counter';
 import { setSpanMeasurement } from '../../observability/index';
+import { inputTokensWithCache } from './_usage';
 
 export interface TokenData {
   phaseInput: number;
@@ -63,10 +64,7 @@ export class TokenTrackerPlugin implements Middleware {
 
     const usage = message.message?.usage;
     if (usage) {
-      const input =
-        Number(usage.input_tokens ?? 0) +
-        Number(usage.cache_read_input_tokens ?? 0) +
-        Number(usage.cache_creation_input_tokens ?? 0);
+      const input = inputTokensWithCache(usage);
       const output = Number(usage.output_tokens ?? 0);
       this.phaseInput += input;
       this.phaseOutput += output;
