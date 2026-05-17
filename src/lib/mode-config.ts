@@ -88,29 +88,55 @@ export interface ResolveModeOpts {
  * `--json` produces machine-readable output WITHOUT any capability grants.
  * Use `--agent` when you also want auto-approval of prompts.
  */
+// Capability tier each explicit flag grants. Higher tiers are supersets of
+// lower ones, so we reduce by taking the strongest flag the caller passed
+// instead of branching on each one individually. Order matters — adjacent
+// entries must subset.
+const FLAG_TIERS: ReadonlyArray<{
+  key: 'autoApprove' | 'yes' | 'ci' | 'force';
+  caps: CapabilityFlags;
+}> = [
+  {
+    key: 'autoApprove',
+    caps: { autoApprove: true, allowWrites: false, allowDestructive: false },
+  },
+  {
+    key: 'yes',
+    caps: { autoApprove: true, allowWrites: true, allowDestructive: false },
+  },
+  {
+    key: 'ci',
+    caps: { autoApprove: true, allowWrites: true, allowDestructive: false },
+  },
+  {
+    key: 'force',
+    caps: { autoApprove: true, allowWrites: true, allowDestructive: true },
+  },
+];
+
 export function resolveMode(opts: ResolveModeOpts): ModeConfig {
   const isAgent = Boolean(opts.agent);
   const requireExplicitWrites = Boolean(opts.requireExplicitWrites);
 
-  // Build capability grants additively from each flag.
-  let autoApprove = false;
-  let allowWrites = false;
-  let allowDestructive = false;
+  // Reduce explicit capability flags to the strongest grant requested. The
+  // additive semantics from the prior (four-if-block) shape are preserved:
+  // higher-tier flags overwrite lower ones (allowDestructive ⊃ allowWrites
+  // ⊃ autoApprove). Keeping a lookup table lets the back-compat / strict
+  // branches below ask a single yes/no question — "did the caller pass an
+  // explicit capability flag?" — instead of re-listing the flag names.
+  let caps: CapabilityFlags = {
+    autoApprove: false,
+    allowWrites: false,
+    allowDestructive: false,
+  };
+  let hasExplicitCapabilityFlag = false;
+  for (const tier of FLAG_TIERS) {
+    if (opts[tier.key]) {
+      caps = tier.caps;
+      hasExplicitCapabilityFlag = true;
+    }
+  }
 
-  if (opts.autoApprove) autoApprove = true;
-  if (opts.yes) {
-    autoApprove = true;
-    allowWrites = true;
-  }
-  if (opts.ci) {
-    autoApprove = true;
-    allowWrites = true;
-  }
-  if (opts.force) {
-    autoApprove = true;
-    allowWrites = true;
-    allowDestructive = true;
-  }
   // Back-compat: today's `--agent` (with no other capability flags) implies
   // auto-approve and writes. New scoped commands (`apply`, `verify`) opt
   // out via `requireExplicitWrites: true`.
@@ -120,17 +146,15 @@ export function resolveMode(opts: ResolveModeOpts): ModeConfig {
   // grant writes despite `--auto-approve`'s documented "no writes"
   // contract — a real risk because bin.ts auto-detects `--agent` in
   // non-TTY contexts. (Bugbot finding.)
-  const hasExplicitCapabilityFlag =
-    Boolean(opts.autoApprove) ||
-    Boolean(opts.yes) ||
-    Boolean(opts.ci) ||
-    Boolean(opts.force);
   if (isAgent && !requireExplicitWrites && !hasExplicitCapabilityFlag) {
-    autoApprove = true;
-    allowWrites = true;
+    caps = {
+      autoApprove: true,
+      allowWrites: true,
+      allowDestructive: false,
+    };
   }
 
-  const isInteractive = !autoApprove && opts.isTTY;
+  const isInteractive = !caps.autoApprove && opts.isTTY;
 
   const jsonOutput = opts.human
     ? false
@@ -138,9 +162,7 @@ export function resolveMode(opts: ResolveModeOpts): ModeConfig {
 
   return {
     mode: isAgent ? 'agent' : isInteractive ? 'interactive' : 'ci',
-    autoApprove,
-    allowWrites,
-    allowDestructive,
+    ...caps,
     jsonOutput,
     quiet: !opts.isTTY,
   };

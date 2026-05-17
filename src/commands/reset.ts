@@ -1,5 +1,5 @@
 import type { CommandModule } from 'yargs';
-import { getUI } from './helpers';
+import { getUI, getInstallDirFromArgv, resolveJsonOutput } from './helpers';
 
 export const resetCommand: CommandModule = {
   command: 'reset',
@@ -14,20 +14,13 @@ export const resetCommand: CommandModule = {
     }),
   handler: (argv) => {
     void (async () => {
-      const installDir =
-        (argv['install-dir'] as string | undefined) ?? process.cwd();
+      const installDir = getInstallDirFromArgv(argv);
       const fs = await import('node:fs');
       const path = await import('node:path');
       const { clearAuthFieldsInAmpliConfig } = await import(
         '../lib/ampli-config.js'
       );
-      const { resolveMode } = await import('../lib/mode-config.js');
-      const { jsonOutput } = resolveMode({
-        json: argv.json as boolean | undefined,
-        human: argv.human as boolean | undefined,
-        requireExplicitWrites: false,
-        isTTY: Boolean(process.stdout.isTTY),
-      });
+      const jsonOutput = await resolveJsonOutput(argv);
       // Targets to remove:
       //   - `.amplitude/` directory (canonical: events.json, dashboard.json,
       //      project-binding.json, etc. — all metadata produced by past runs)

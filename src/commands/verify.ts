@@ -1,5 +1,10 @@
 import type { CommandModule } from 'yargs';
-import { getUI, ExitCode } from './helpers';
+import {
+  getUI,
+  ExitCode,
+  getInstallDirFromArgv,
+  resolveJsonOutput,
+} from './helpers';
 
 export const verifyCommand: CommandModule = {
   command: 'verify',
@@ -14,14 +19,9 @@ export const verifyCommand: CommandModule = {
     }),
   handler: (argv) => {
     void (async () => {
-      const installDir =
-        (argv['install-dir'] as string | undefined) ?? process.cwd();
-      const { resolveMode } = await import('../lib/mode-config.js');
-      const { jsonOutput } = resolveMode({
-        json: argv.json as boolean | undefined,
-        human: argv.human as boolean | undefined,
+      const installDir = getInstallDirFromArgv(argv);
+      const jsonOutput = await resolveJsonOutput(argv, {
         requireExplicitWrites: true,
-        isTTY: Boolean(process.stdout.isTTY),
       });
       try {
         const { runVerify } = await import('../lib/agent-ops.js');
