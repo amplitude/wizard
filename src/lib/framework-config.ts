@@ -141,11 +141,10 @@ export interface FrameworkDetection {
   /**
    * Extract version from package.json. Optional — frameworks that don't
    * surface a meaningful version (mobile, native, game-engine, generic
-   * fallback) leave this unset and the runner uses `DEFAULT_GET_VERSION`
-   * which returns `undefined`. 15 of 18 configs were declaring the
-   * `() => undefined` no-op explicitly before this default was added;
-   * use it only when you actually need to read a version from a
-   * `package.json`-shaped manifest.
+   * fallback) leave this unset and the runner uses optional chaining
+   * (`getVersion?.()`) which returns `undefined`. Only define this when
+   * you actually need to read a version from a `package.json`-shaped
+   * manifest.
    */
   getVersion?: (packageJson: unknown) => string | undefined;
 
@@ -315,16 +314,6 @@ export const SPINNER_MESSAGE = 'Writing your Amplitude setup...';
  * sites that read `config.ui.successMessage` should fall back to this.
  */
 export const DEFAULT_SUCCESS_MESSAGE = 'Amplitude integration complete';
-
-/**
- * Default `FrameworkDetection.getVersion` implementation used when a
- * framework doesn't override it. Returns `undefined` (i.e. "no version
- * surface" — appropriate for Python / Go / Swift / native / generic
- * fallback frameworks where the runner can't sensibly read a version
- * out of a `package.json`-shaped manifest). Hoisted out of the per-
- * framework configs so 15 of 18 don't have to declare the same no-op.
- */
-export const DEFAULT_GET_VERSION = (): string | undefined => undefined;
 
 /**
  * Default `EnvironmentConfig.uploadToHosting` value. Most frameworks
