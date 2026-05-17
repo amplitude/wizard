@@ -1,5 +1,5 @@
 import type { CommandModule } from 'yargs';
-import { getUI, ExitCode } from './helpers';
+import { getUI, ExitCode, emitCliEnvelope } from './helpers';
 
 export const verifyCommand: CommandModule = {
   command: 'verify',
@@ -28,9 +28,7 @@ export const verifyCommand: CommandModule = {
         const result = await runVerify(installDir);
         if (jsonOutput) {
           process.stdout.write(
-            JSON.stringify({
-              v: 1,
-              '@timestamp': new Date().toISOString(),
+            emitCliEnvelope({
               type: 'result',
               message:
                 result.outcome === 'pass'
@@ -39,7 +37,7 @@ export const verifyCommand: CommandModule = {
                       result.failures.length === 1 ? '' : 's'
                     })`,
               data: { event: 'verification_result', ...result },
-            }) + '\n',
+            }),
           );
         } else {
           const ui = getUI();
@@ -57,13 +55,11 @@ export const verifyCommand: CommandModule = {
         const message = e instanceof Error ? e.message : String(e);
         if (jsonOutput) {
           process.stdout.write(
-            JSON.stringify({
-              v: 1,
-              '@timestamp': new Date().toISOString(),
+            emitCliEnvelope({
               type: 'error',
               message: `verify failed: ${message}`,
               data: { event: 'verification_failed' },
-            }) + '\n',
+            }),
           );
         } else {
           getUI().log.error(`Verification failed: ${message}`);
