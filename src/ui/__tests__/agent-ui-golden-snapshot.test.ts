@@ -945,3 +945,55 @@ describe('AgentUI golden snapshot — NDJSON wire shape', () => {
     `);
   });
 });
+
+/**
+ * Raw-bytes snapshot — captures the literal NDJSON line strings (after
+ * stripping `@timestamp`/`session_id`/`run_id`) for a few representative
+ * events. Vitest's `toMatchInlineSnapshot` pretty-prints object diffs,
+ * which alphabetizes keys and would mask a JSON.stringify field-order
+ * regression. This complementary test asserts on the raw line text so
+ * any reorder inside `data` (e.g. moving `event` from first to last)
+ * surfaces immediately.
+ */
+describe('AgentUI golden snapshot — raw line bytes (field order)', () => {
+  let rawWrites: string[];
+  let restore: () => void;
+  let ui: AgentUI;
+
+  beforeEach(() => {
+    rawWrites = [];
+    const spy = vi
+      .spyOn(process.stdout, 'write')
+      .mockImplementation((chunk: string | Uint8Array): boolean => {
+        const s = typeof chunk === 'string' ? chunk : chunk.toString();
+        for (const line of s.split('\n')) {
+          if (!line) continue;
+          // Strip nondeterministic fields by parse-then-restringify so we
+          // still snapshot the order of the deterministic keys.
+          const parsed = JSON.parse(line) as Record<string, unknown>;
+          delete parsed['@timestamp'];
+          delete parsed.session_id;
+          delete parsed.run_id;
+          rawWrites.push(JSON.stringify(parsed));
+        }
+        return true;
+      });
+    restore = () => spy.mockRestore();
+    __resetDecisionIdCounterForTests();
+    ui = new AgentUI();
+  });
+  afterEach(() => restore());
+
+  it('emit field order — envelope keys + data.event-first invariant', () => {
+    ui.emitFileChangePlanned({ path: '/x.ts', operation: 'modify' });
+    ui.emitEventPlanProposed({ events: [{ name: 'e', description: 'd' }] });
+    ui.emitRunPhase('cold_start');
+    expect(rawWrites).toMatchInlineSnapshot(`
+      [
+        "{"v":1,"type":"progress","message":"file_change_planned: modify /x.ts","data":{"event":"file_change_planned","path":"/x.ts","operation":"modify"},"data_version":1}",
+        "{"v":1,"type":"progress","message":"event_plan_proposed: 1 events","data":{"event":"event_plan_proposed","events":[{"name":"e","description":"d"}]},"data_version":1}",
+        "{"v":1,"type":"lifecycle","message":"run_phase: cold_start","data":{"event":"run_phase","phase":"cold_start"},"data_version":1}",
+      ]
+    `);
+  });
+});

@@ -41,10 +41,12 @@ import {
   buildColdStartBreakdown,
   buildProgressEstimate,
   classifyRunError,
+  dropEmptyFields,
   nextDecisionId,
   ToolCallStats,
   truncateLogMessage,
   truncateToBytes,
+  type AgentEventName,
   type RecoverableHint,
   type SuggestedAction,
   type ToolCallOutcome,
@@ -251,6 +253,13 @@ function getCorrelationIds(): { session_id: string; run_id: string } {
  * events whose `data` shape isn't part of the orchestrator-facing
  * contract (free-form `log`, `status`, `progress` payloads). Caller
  * can override by passing `dataVersion` explicitly via `extra`.
+ *
+ * Registry type widened to `Record<string, number>` because the
+ * runtime `eventKey` is a free-form string (some emitters ship
+ * discriminators that are intentionally NOT in the registry — e.g.
+ * `journey_transition`); the registry-keyed `AgentEventName` would
+ * reject those lookups at compile time. See the `validateEnvelopeOrLog`
+ * coherence check below for the registered-events invariant.
  */
 function lookupDataVersion(
   data: unknown,
@@ -260,7 +269,9 @@ function lookupDataVersion(
   if (typeof data !== 'object' || data === null) return undefined;
   const eventKey = (data as { event?: unknown }).event;
   if (typeof eventKey !== 'string') return undefined;
-  const registry = EVENT_DATA_VERSIONS as Readonly<Record<string, number>>;
+  const registry = EVENT_DATA_VERSIONS as Readonly<
+    Record<AgentEventName, number>
+  > as Readonly<Record<string, number>>;
   return registry[eventKey];
 }
 
@@ -2358,31 +2369,30 @@ export class AgentUI implements WizardUI {
     requiresConfirmation?: boolean;
     resumeFlags?: SetupContextData['resumeFlags'];
   }): void {
-    // Build the scope object dropping any undefined fields. JSON.stringify
-    // would already omit them, but keeping the wire object lean makes
-    // schema tests + orchestrator parsers easier to reason about.
-    const amplitude: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(data.amplitude)) {
-      if (v !== undefined && v !== null && v !== '') {
-        amplitude[k] = v;
-      }
-    }
+    // Build the scope object dropping any undefined/null/empty fields.
+    // JSON.stringify already omits `undefined`, but `null` / `""` would
+    // otherwise ride to orchestrators that have to branch on every key.
+    // `dropEmptyFields` is the single source of truth shared with
+    // `emitSetupComplete` below.
+    const amplitude = dropEmptyFields(
+      data.amplitude,
+    ) as SetupContextData['amplitude'];
     const wire: SetupContextData = {
       event: 'setup_context',
       phase: data.phase,
-      amplitude: amplitude as SetupContextData['amplitude'],
+      amplitude,
       ...(data.sources ? { sources: data.sources } : {}),
       ...(data.requiresConfirmation !== undefined
         ? { requiresConfirmation: data.requiresConfirmation }
         : {}),
       ...(data.resumeFlags ? { resumeFlags: data.resumeFlags } : {}),
     };
-    // Re-narrow for the summary builder so optional-property reads land
-    // on the typed surface (the loop above used a string-keyed record
-    // to silence the dynamic-assignment warning). Pure cast — no
-    // runtime cost.
-    const a = amplitude as SetupContextData['amplitude'];
-    const summary = [a.orgName, a.projectName, a.appName ?? a.appId, a.envName]
+    const summary = [
+      amplitude.orgName,
+      amplitude.projectName,
+      amplitude.appName ?? amplitude.appId,
+      amplitude.envName,
+    ]
       .filter(Boolean)
       .join(' / ');
     emit(
@@ -2403,15 +2413,11 @@ export class AgentUI implements WizardUI {
    * naturally.
    */
   emitSetupComplete(data: Omit<SetupCompleteData, 'event'>): void {
-    // Drop empty optional sub-objects to keep the wire shape tight.
-    const cleanAmplitudeRecord: Record<string, unknown> = {};
-    for (const [k, v] of Object.entries(data.amplitude)) {
-      if (v !== undefined && v !== null && v !== '') {
-        cleanAmplitudeRecord[k] = v;
-      }
-    }
-    const cleanAmplitude =
-      cleanAmplitudeRecord as SetupCompleteData['amplitude'];
+    // Drop empty-y fields to keep the wire shape tight — shared helper
+    // with `emitSetupContext` above so the two stay in lockstep.
+    const cleanAmplitude = dropEmptyFields(
+      data.amplitude,
+    ) as SetupCompleteData['amplitude'];
     const wire: SetupCompleteData = {
       event: 'setup_complete',
       amplitude: cleanAmplitude,

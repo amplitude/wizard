@@ -519,6 +519,18 @@ export const EVENT_DATA_VERSIONS = {
   mcp_status: 1,
 } as const;
 
+/**
+ * Type of every registered `data.event` discriminator. Derived from
+ * `EVENT_DATA_VERSIONS` so the registry is the single source of truth
+ * for event names — adding a new event in the registry automatically
+ * widens this type. Note: a small set of emitter-only events
+ * (`outro_data`, `signup_input_required`, `post_agent_step`,
+ * `post_agent_seeded`, `journey_transition`) intentionally ride the
+ * wire without a registry entry — their `data` shape is free-form and
+ * not part of the orchestrator-facing `data_version` contract.
+ */
+export type AgentEventName = keyof typeof EVENT_DATA_VERSIONS;
+
 /** All NDJSON event-level types. */
 export type AgentEventType =
   | 'lifecycle'
@@ -2077,6 +2089,28 @@ export interface SetupCompleteEvent {
   description?: string;
   /** Source file the track() call landed in (relative to installDir). */
   file?: string;
+}
+
+/**
+ * Strip empty-y fields (`undefined`, `null`, empty string) from a flat
+ * record. Used by `setup_context` / `setup_complete` emitters to keep
+ * the wire payload tight — JSON.stringify already drops `undefined`,
+ * but leaving `null` / `""` on the wire forces orchestrator parsers to
+ * branch on every optional scope key separately.
+ *
+ * Pure — returns a fresh object; the input is not mutated. Generic
+ * over the input type so callers can keep their typed inference at the
+ * call site (the wider `Record<string, unknown>` cast lives here, not
+ * in user code).
+ */
+export function dropEmptyFields<T extends object>(input: T): Partial<T> {
+  const out: Record<string, unknown> = {};
+  for (const [k, v] of Object.entries(input)) {
+    if (v !== undefined && v !== null && v !== '') {
+      out[k] = v;
+    }
+  }
+  return out as Partial<T>;
 }
 
 /** Wire shape of `setup_complete.data`. */
