@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'node:fs';
-import * as os from 'node:os';
 import * as path from 'node:path';
+import { createTempDir } from '../../../utils/__tests__/helpers/temp-dir.js';
 import {
   getDjangoProjectTypeName,
   getDjangoVersion,
@@ -40,13 +40,14 @@ describe('getDjangoProjectTypeName', () => {
 
 describe('getDjangoVersion', () => {
   let tmpDir: string;
+  let cleanup: () => void;
 
   beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'django-utils-test-'));
+    ({ dir: tmpDir, cleanup } = createTempDir('django-utils-test-'));
   });
 
   afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    cleanup();
   });
 
   it('extracts version from requirements.txt (==)', async () => {
