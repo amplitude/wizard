@@ -537,6 +537,7 @@ pnpm fix              # auto-fix lint issues
 | [Dual-mode architecture](./docs/dual-mode-architecture.md) | TUI, agent, and CI mode |
 | [External services](./docs/external-services.md) | Runtime dependencies and APIs |
 | [Engineering patterns](./docs/engineering-patterns.md) | Async safety, retry, error classification |
+| [CI authentication](./docs/ci-auth.md) | OAuth token refresh workflow + `ci-bootstrap` setup |
 
 ### Natively open source
 Hat tip to [PostHog's CLI](https://github.com/PostHog/wizard) for early inspiration. Amplitude's Wizard is an independent project, licensed under MIT. We welcome contributions from anyone.
