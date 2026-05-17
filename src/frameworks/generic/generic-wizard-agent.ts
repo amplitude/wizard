@@ -17,13 +17,11 @@ export const GENERIC_AGENT_CONFIG: FrameworkConfig = {
     packageName: '',
     packageDisplayName: 'Generic',
     usesPackageJson: false,
-    getVersion: () => undefined,
     detectPackageManager: detectNodePackageManagers,
     detect: () => Promise.resolve(false),
   },
 
   environment: {
-    uploadToHosting: false,
     getEnvVars: (apiKey, host) => ({
       AMPLITUDE_API_KEY: apiKey,
       AMPLITUDE_SERVER_URL: host,
@@ -211,7 +209,6 @@ Important: You must read a file immediately before writing it. Always use enviro
   },
 
   ui: {
-    successMessage: 'Amplitude integration complete',
     estimatedDurationMinutes: 5,
     getOutroChanges: () => ['Amplitude SDK installed and initialized'],
     getOutroNextSteps: () => [

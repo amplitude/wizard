@@ -24,6 +24,8 @@
  * stay in sync.
  */
 
+import type { RunOutcome } from './types';
+
 /**
  * Envelope (top-level) wire-format version. Bump on any breaking change
  * to the FRAME shape — i.e. the keys directly on the JSON line itself
@@ -1022,7 +1024,7 @@ export interface RunCompletedData {
    * INTERNAL_ERROR are both `error`), and orchestrators frequently
    * just want a tri-state for log-line color / dashboard rollups.
    */
-  outcome: 'success' | 'error' | 'cancelled';
+  outcome: RunOutcome;
   /** Numeric exit code the process is about to return. */
   exitCode: number;
   /** Wall-clock duration of the run, in milliseconds. */

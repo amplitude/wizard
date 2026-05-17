@@ -30,14 +30,12 @@ export const ANDROID_AGENT_CONFIG: FrameworkConfig<AndroidContext> = {
     packageName: 'com.amplitude:analytics-android',
     packageDisplayName: 'Android',
     usesPackageJson: false,
-    getVersion: () => undefined,
     detect: detectAndroidProject,
     detectPackageManager: gradlePackageManager,
   },
 
   environment: {
     // Android apps don't use .env files — the agent stores the key in gradle.properties or BuildConfig
-    uploadToHosting: false,
     getEnvVars: () => ({}),
   },
 
@@ -68,7 +66,6 @@ export const ANDROID_AGENT_CONFIG: FrameworkConfig<AndroidContext> = {
   },
 
   ui: {
-    successMessage: 'Amplitude integration complete',
     estimatedDurationMinutes: 8,
     getOutroChanges: (context) => {
       const lang = context.language === 'java' ? 'Java' : 'Kotlin';

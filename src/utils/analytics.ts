@@ -13,6 +13,7 @@ import {
   isFlagEnabled,
   FLAG_AGENT_ANALYTICS,
 } from '../lib/feature-flags';
+import type { RunOutcome } from '../lib/types';
 
 // Telemetry keys mirror Lightning's ampli config in amplitude/javascript
 // (packages/instrumentation/src/lightning/{agents,wormhole}/src/ampli/index.ts).
@@ -333,7 +334,7 @@ export class Analytics {
     }
   }
 
-  async shutdown(status: 'success' | 'error' | 'cancelled') {
+  async shutdown(status: RunOutcome) {
     this.wizardCapture('session ended', {
       status,
       'session duration ms': Date.now() - this.startedAt,

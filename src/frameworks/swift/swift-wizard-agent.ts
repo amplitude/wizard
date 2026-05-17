@@ -32,14 +32,12 @@ export const SWIFT_AGENT_CONFIG: FrameworkConfig<SwiftContext> = {
     packageName: 'AmplitudeUnified',
     packageDisplayName: 'Swift',
     usesPackageJson: false,
-    getVersion: () => undefined,
     detect: detectSwiftProject,
     detectPackageManager: swiftPackageManager,
   },
 
   environment: {
     // iOS/macOS apps don't use .env files — the agent stores the key in the project
-    uploadToHosting: false,
     getEnvVars: () => ({}),
   },
 
@@ -68,7 +66,6 @@ export const SWIFT_AGENT_CONFIG: FrameworkConfig<SwiftContext> = {
   },
 
   ui: {
-    successMessage: 'Amplitude integration complete',
     estimatedDurationMinutes: 8,
     getOutroChanges: (context) => {
       const pmLabel =

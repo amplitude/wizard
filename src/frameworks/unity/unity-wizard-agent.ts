@@ -30,7 +30,6 @@ export const UNITY_AGENT_CONFIG: FrameworkConfig<UnityContext> = {
     packageName: 'com.amplitude.unity-plugin',
     packageDisplayName: 'Unity',
     usesPackageJson: false,
-    getVersion: () => undefined,
     detect: detectUnityProject,
     detectPackageManager: unityPackageManager,
   },
@@ -38,7 +37,6 @@ export const UNITY_AGENT_CONFIG: FrameworkConfig<UnityContext> = {
   environment: {
     // Unity C# doesn't read from .env files — API key is stored in a
     // ScriptableObject, Resources asset, or directly in initialization code
-    uploadToHosting: false,
     getEnvVars: () => ({}),
   },
 
@@ -79,7 +77,6 @@ export const UNITY_AGENT_CONFIG: FrameworkConfig<UnityContext> = {
   },
 
   ui: {
-    successMessage: 'Amplitude integration complete',
     estimatedDurationMinutes: 8,
     getOutroChanges: (context) => [
       context.pluginAlreadyPresent

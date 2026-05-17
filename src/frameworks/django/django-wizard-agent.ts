@@ -45,7 +45,6 @@ export const DJANGO_AGENT_CONFIG: FrameworkConfig<DjangoContext> = {
     packageName: 'django',
     packageDisplayName: 'Django',
     usesPackageJson: false,
-    getVersion: () => undefined,
     getVersionBucket: getDjangoVersionBucket,
     minimumVersion: '3.0.0',
     getInstalledVersion: (options: WizardOptions) => getDjangoVersion(options),
@@ -119,7 +118,6 @@ export const DJANGO_AGENT_CONFIG: FrameworkConfig<DjangoContext> = {
   },
 
   environment: {
-    uploadToHosting: false,
     getEnvVars: (apiKey: string, _host: string) => ({
       AMPLITUDE_API_KEY: apiKey,
     }),
@@ -166,7 +164,6 @@ export const DJANGO_AGENT_CONFIG: FrameworkConfig<DjangoContext> = {
   },
 
   ui: {
-    successMessage: 'Amplitude integration complete',
     estimatedDurationMinutes: 5,
     getOutroChanges: (context) => {
       const projectTypeName = context.projectType

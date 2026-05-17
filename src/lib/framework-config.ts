@@ -138,8 +138,16 @@ export interface FrameworkDetection {
   /** Human-readable name for error messages (e.g., "Next.js") */
   packageDisplayName: string;
 
-  /** Extract version from package.json */
-  getVersion: (packageJson: unknown) => string | undefined;
+  /**
+   * Extract version from package.json. Optional — frameworks that don't
+   * surface a meaningful version (mobile, native, game-engine, generic
+   * fallback) leave this unset and the runner uses `DEFAULT_GET_VERSION`
+   * which returns `undefined`. 15 of 18 configs were declaring the
+   * `() => undefined` no-op explicitly before this default was added;
+   * use it only when you actually need to read a version from a
+   * `package.json`-shaped manifest.
+   */
+  getVersion?: (packageJson: unknown) => string | undefined;
 
   /** Optional: Convert version to analytics bucket (e.g., "15.x") */
   getVersionBucket?: (version: string) => string;
@@ -178,8 +186,15 @@ export interface FrameworkDetection {
  * Environment variable configuration
  */
 export interface EnvironmentConfig {
-  /** Whether to upload env vars to hosting providers post-agent */
-  uploadToHosting: boolean;
+  /**
+   * Whether to upload env vars to hosting providers post-agent.
+   * Optional — defaults to `false`. Only Next.js and Vue opt in; 16 of
+   * 18 configs were declaring `uploadToHosting: false` explicitly before
+   * the default was added. Set `true` only for frameworks where the
+   * runner should attempt a Vercel / Netlify-style env push after the
+   * agent finishes.
+   */
+  uploadToHosting?: boolean;
 
   /**
    * Build the environment variables object for this framework.
@@ -261,8 +276,14 @@ export interface PromptConfig<
 export interface UIConfig<
   TContext extends Record<string, unknown> = Record<string, unknown>,
 > {
-  /** Success message when agent completes */
-  successMessage: string;
+  /**
+   * Success message when agent completes. Optional — defaults to
+   * `DEFAULT_SUCCESS_MESSAGE`. Every one of the 18 framework configs
+   * was declaring the same literal `'Amplitude integration complete'`
+   * before this default was added. Override only when a framework
+   * wants a more specific wording (none do today).
+   */
+  successMessage?: string;
 
   /** Estimated time for agent to complete (in minutes) */
   estimatedDurationMinutes: number;
@@ -285,3 +306,31 @@ export function getWelcomeMessage(frameworkName: string): string {
  * Shared spinner message for all frameworks
  */
 export const SPINNER_MESSAGE = 'Writing your Amplitude setup...';
+
+/**
+ * Default success message used when a framework config doesn't override
+ * `UIConfig.successMessage`. The previous code shape — every framework
+ * declaring the same literal verbatim — was both noisy and a drift hazard
+ * (one PR could silently change copy for a single framework). All call
+ * sites that read `config.ui.successMessage` should fall back to this.
+ */
+export const DEFAULT_SUCCESS_MESSAGE = 'Amplitude integration complete';
+
+/**
+ * Default `FrameworkDetection.getVersion` implementation used when a
+ * framework doesn't override it. Returns `undefined` (i.e. "no version
+ * surface" — appropriate for Python / Go / Swift / native / generic
+ * fallback frameworks where the runner can't sensibly read a version
+ * out of a `package.json`-shaped manifest). Hoisted out of the per-
+ * framework configs so 15 of 18 don't have to declare the same no-op.
+ */
+export const DEFAULT_GET_VERSION = (): string | undefined => undefined;
+
+/**
+ * Default `EnvironmentConfig.uploadToHosting` value. Most frameworks
+ * don't push env vars to a hosting provider after the agent runs — only
+ * the Vercel/Netlify-shaped JavaScript web frameworks (Next.js, Vue)
+ * do — so the safe default is `false`. Call sites read
+ * `config.environment.uploadToHosting ?? DEFAULT_UPLOAD_TO_HOSTING`.
+ */
+export const DEFAULT_UPLOAD_TO_HOSTING = false;

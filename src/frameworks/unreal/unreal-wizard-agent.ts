@@ -30,14 +30,12 @@ export const UNREAL_AGENT_CONFIG: FrameworkConfig<UnrealContext> = {
     packageName: 'AmplitudeUnreal',
     packageDisplayName: 'Unreal Engine',
     usesPackageJson: false,
-    getVersion: () => undefined,
     detect: detectUnrealProject,
     detectPackageManager: unrealPackageManager,
   },
 
   environment: {
     // API key goes in Config/DefaultEngine.ini — no .env files in Unreal projects
-    uploadToHosting: false,
     getEnvVars: () => ({}),
   },
 
@@ -77,7 +75,6 @@ export const UNREAL_AGENT_CONFIG: FrameworkConfig<UnrealContext> = {
   },
 
   ui: {
-    successMessage: 'Amplitude integration complete',
     estimatedDurationMinutes: 10,
     getOutroChanges: (context) => [
       context.pluginAlreadyPresent

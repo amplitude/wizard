@@ -46,7 +46,6 @@ export const FLASK_AGENT_CONFIG: FrameworkConfig<FlaskContext> = {
     packageName: 'flask',
     packageDisplayName: 'Flask',
     usesPackageJson: false,
-    getVersion: () => undefined,
     getVersionBucket: getFlaskVersionBucket,
     minimumVersion: '2.0.0',
     getInstalledVersion: (options: WizardOptions) => getFlaskVersion(options),
@@ -119,7 +118,6 @@ export const FLASK_AGENT_CONFIG: FrameworkConfig<FlaskContext> = {
   },
 
   environment: {
-    uploadToHosting: false,
     getEnvVars: (apiKey: string, _host: string) => ({
       AMPLITUDE_API_KEY: apiKey,
     }),
@@ -167,7 +165,6 @@ export const FLASK_AGENT_CONFIG: FrameworkConfig<FlaskContext> = {
   },
 
   ui: {
-    successMessage: 'Amplitude integration complete',
     estimatedDurationMinutes: 5,
     getOutroChanges: (context) => {
       const projectTypeName = context.projectType

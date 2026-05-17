@@ -25,7 +25,6 @@ export const JAVASCRIPT_NODE_AGENT_CONFIG: FrameworkConfig<JavaScriptNodeContext
       packageName: '@amplitude/analytics-node',
       packageDisplayName: 'Node.js',
       usesPackageJson: false,
-      getVersion: () => undefined,
       detectPackageManager: detectNodePackageManagers,
       detect: async (options) => {
         const packageJson = await tryGetPackageJson(options);
@@ -41,7 +40,6 @@ export const JAVASCRIPT_NODE_AGENT_CONFIG: FrameworkConfig<JavaScriptNodeContext
     },
 
     environment: {
-      uploadToHosting: false,
       getEnvVars: (apiKey: string, _host: string) => ({
         AMPLITUDE_API_KEY: apiKey,
       }),
@@ -62,7 +60,6 @@ export const JAVASCRIPT_NODE_AGENT_CONFIG: FrameworkConfig<JavaScriptNodeContext
     },
 
     ui: {
-      successMessage: 'Amplitude integration complete',
       estimatedDurationMinutes: 5,
       getOutroChanges: () => [
         `Analyzed your Node.js project structure`,
