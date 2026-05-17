@@ -1,6 +1,6 @@
 import type { CommandModule } from 'yargs';
 import chalk from 'chalk';
-import { getUI } from './helpers';
+import { getUI, getInstallDirFromArgv } from './helpers';
 import { CLI_INVOCATION } from './context';
 
 export const whoamiCommand: CommandModule = {
@@ -56,8 +56,7 @@ export const whoamiCommand: CommandModule = {
           // projectScope from cwd instead of the explicit dir — the
           // same "scanned the wrong project" failure mode this PR is
           // supposed to fix.
-          const installDir =
-            (argv['install-dir'] as string | undefined) ?? process.cwd();
+          const installDir = getInstallDirFromArgv(argv);
           const cfg = readAmpliConfig(installDir);
           if (cfg.ok) {
             const next: NonNullable<typeof projectScope> = {};

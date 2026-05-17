@@ -1,6 +1,12 @@
 import type { CommandModule } from 'yargs';
 import chalk from 'chalk';
-import { getUI, ExitCode } from './helpers';
+import {
+  getUI,
+  ExitCode,
+  getInstallDirFromArgv,
+  resolveJsonOutput,
+  extractErrorMessage,
+} from './helpers';
 import { CLI_INVOCATION } from './context';
 
 export const planCommand: CommandModule = {
@@ -16,15 +22,10 @@ export const planCommand: CommandModule = {
     }),
   handler: (argv) => {
     void (async () => {
-      const installDir =
-        (argv['install-dir'] as string | undefined) ?? process.cwd();
-      const { resolveMode } = await import('../lib/mode-config.js');
-      const { jsonOutput } = resolveMode({
-        json: argv.json as boolean | undefined,
-        human: argv.human as boolean | undefined,
-        // `plan` never writes — opt out of the agent-implies-writes back-compat.
+      const installDir = getInstallDirFromArgv(argv);
+      // `plan` never writes — opt out of the agent-implies-writes back-compat.
+      const jsonOutput = await resolveJsonOutput(argv, {
         requireExplicitWrites: true,
-        isTTY: Boolean(process.stdout.isTTY),
       });
       // Refuse to plan from $HOME, the filesystem root, or a directory
       // with no project marker. Without this guard, the wizard runs
@@ -166,7 +167,7 @@ export const planCommand: CommandModule = {
         }
         process.exit(ExitCode.SUCCESS);
       } catch (e) {
-        const message = e instanceof Error ? e.message : String(e);
+        const message = extractErrorMessage(e);
         if (jsonOutput) {
           process.stdout.write(
             JSON.stringify({

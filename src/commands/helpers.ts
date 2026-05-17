@@ -900,6 +900,80 @@ export const runDirectSignupIfRequested = async (
 };
 
 /**
+ * Read `--install-dir` from yargs argv, falling back to `process.cwd()`.
+ *
+ * Replicates the literal `(argv['install-dir'] as string | undefined) ?? process.cwd()`
+ * dance that appeared verbatim across detect / plan / verify / status /
+ * reset / whoami / logout. Intentionally does NOT expand `~` — every
+ * call site that needs tilde-expansion already routes through
+ * `resolveInstallDir` (see `src/utils/install-dir.ts`); this helper
+ * preserves the existing behavior of the bare callers byte-for-byte.
+ *
+ * Accepts both kebab-case (`install-dir`) and camelCase (`installDir`)
+ * because yargs normalizes flag names depending on whether the caller
+ * defined the option with hyphens or camelCase; the `logout` handler
+ * historically read `argv.installDir` directly.
+ */
+export function getInstallDirFromArgv(argv: Record<string, unknown>): string {
+  const fromKebab = argv['install-dir'];
+  const fromCamel = argv.installDir;
+  const raw =
+    typeof fromKebab === 'string'
+      ? fromKebab
+      : typeof fromCamel === 'string'
+      ? fromCamel
+      : undefined;
+  return raw ?? process.cwd();
+}
+
+/**
+ * Coerce a thrown value (`unknown`, since TS catch clauses surface it as
+ * `unknown`) into a string for logging / error envelopes. Mirrors the
+ * `err instanceof Error ? err.message : String(err)` ternary that
+ * appears in every handler's `try / catch` — same shape, single source.
+ *
+ * Intentionally returns `err.message` (not `err.stack`) to match the
+ * existing surface area; stack traces are routed through the structured
+ * logger (`observability/logger.ts`) not through this string.
+ */
+export function extractErrorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
+/**
+ * Resolve `jsonOutput` from the standard set of yargs flags every
+ * read-only subcommand consumes. Wraps `resolveMode` so per-handler
+ * call sites don't repeat the same six-property object literal.
+ *
+ * `forwardAgent` — when true, passes `argv.agent` to `resolveMode` so
+ * that `--agent` forces JSON output even in a TTY. Only `projects`
+ * historically forwarded `agent`; other subcommands intentionally
+ * omitted it so `--agent` alone didn't flip their output format. The
+ * default (`false`) preserves the byte-identical pre-refactor behavior
+ * of detect / status / auth / plan / reset / verify / whoami.
+ *
+ * `requireExplicitWrites` is forwarded as-is. Read-only subcommands
+ * (detect, plan, verify, status, whoami) pass `true` to opt out of the
+ * "agent implies writes" back-compat path; the default (`undefined`)
+ * preserves the resolveMode default for callers that don't need to
+ * override it.
+ */
+export async function resolveJsonOutput(
+  argv: Record<string, unknown>,
+  opts: { requireExplicitWrites?: boolean; forwardAgent?: boolean } = {},
+): Promise<boolean> {
+  const { resolveMode } = await import('../lib/mode-config.js');
+  const { jsonOutput } = resolveMode({
+    json: argv.json as boolean | undefined,
+    human: argv.human as boolean | undefined,
+    agent: opts.forwardAgent ? (argv.agent as boolean | undefined) : undefined,
+    requireExplicitWrites: opts.requireExplicitWrites,
+    isTTY: Boolean(process.stdout.isTTY),
+  });
+  return jsonOutput;
+}
+
+/**
  * Re-export shared UI bootstrap helpers so command modules don't need to
  * re-import them from disparate paths.
  */

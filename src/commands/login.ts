@@ -1,5 +1,5 @@
 import type { CommandModule } from 'yargs';
-import { getUI, setUI, LoggingUI } from './helpers';
+import { getUI, setUI, LoggingUI, extractErrorMessage } from './helpers';
 
 export const loginCommand: CommandModule = {
   command: 'login',
@@ -80,9 +80,7 @@ export const loginCommand: CommandModule = {
         }
         process.exit(0);
       } catch (e) {
-        getUI().log.error(
-          `Login failed: ${e instanceof Error ? e.message : String(e)}`,
-        );
+        getUI().log.error(`Login failed: ${extractErrorMessage(e)}`);
         process.exit(1);
       }
     })();

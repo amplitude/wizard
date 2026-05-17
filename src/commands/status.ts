@@ -1,6 +1,12 @@
 import type { CommandModule } from 'yargs';
 import chalk from 'chalk';
-import { getUI, ExitCode } from './helpers';
+import {
+  getUI,
+  ExitCode,
+  getInstallDirFromArgv,
+  resolveJsonOutput,
+  extractErrorMessage,
+} from './helpers';
 import { CLI_INVOCATION } from './context';
 
 export const statusCommand: CommandModule = {
@@ -16,14 +22,8 @@ export const statusCommand: CommandModule = {
     }),
   handler: (argv) => {
     void (async () => {
-      const installDir =
-        (argv['install-dir'] as string | undefined) ?? process.cwd();
-      const { resolveMode } = await import('../lib/mode-config.js');
-      const { jsonOutput } = resolveMode({
-        json: argv.json as boolean | undefined,
-        human: argv.human as boolean | undefined,
-        isTTY: Boolean(process.stdout.isTTY),
-      });
+      const installDir = getInstallDirFromArgv(argv);
+      const jsonOutput = await resolveJsonOutput(argv);
       try {
         const { runStatus } = await import('../lib/agent-ops.js');
         const result = await runStatus(installDir);
@@ -62,7 +62,7 @@ export const statusCommand: CommandModule = {
         }
         process.exit(0);
       } catch (e) {
-        const message = e instanceof Error ? e.message : String(e);
+        const message = extractErrorMessage(e);
         if (jsonOutput) {
           process.stdout.write(JSON.stringify({ error: message }) + '\n');
         } else {
