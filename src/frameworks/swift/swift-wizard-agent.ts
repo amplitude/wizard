@@ -4,6 +4,13 @@ import { swiftPackageManager } from '../../lib/package-manager-detection';
 import { Integration } from '../../lib/constants';
 import { detectSwiftProject, detectSwiftPackageManager } from './utils';
 import type { SwiftPackageManager } from './utils';
+import {
+  SUCCESS_MESSAGE_INTEGRATION_COMPLETE,
+  OUTRO_DASHBOARD_LINE,
+  emptyEnv,
+  frameworkDocsIdLine,
+  noVersionFromPackageJson,
+} from '../../lib/framework-shared';
 
 type SwiftContext = {
   packageManager?: SwiftPackageManager;
@@ -32,7 +39,7 @@ export const SWIFT_AGENT_CONFIG: FrameworkConfig<SwiftContext> = {
     packageName: 'AmplitudeUnified',
     packageDisplayName: 'Swift',
     usesPackageJson: false,
-    getVersion: () => undefined,
+    getVersion: noVersionFromPackageJson,
     detect: detectSwiftProject,
     detectPackageManager: swiftPackageManager,
   },
@@ -40,7 +47,7 @@ export const SWIFT_AGENT_CONFIG: FrameworkConfig<SwiftContext> = {
   environment: {
     // iOS/macOS apps don't use .env files — the agent stores the key in the project
     uploadToHosting: false,
-    getEnvVars: () => ({}),
+    getEnvVars: emptyEnv,
   },
 
   analytics: {
@@ -59,7 +66,7 @@ export const SWIFT_AGENT_CONFIG: FrameworkConfig<SwiftContext> = {
         `Package manager: ${
           pm === 'cocoapods' ? 'CocoaPods' : 'Swift Package Manager'
         }`,
-        `Framework docs ID: swift (use amplitude://docs/frameworks/swift for documentation)`,
+        frameworkDocsIdLine('swift'),
         `SDK: AmplitudeUnified — Swift package URL: https://github.com/amplitude/AmplitudeUnified-Swift`,
         `Initialization: let amplitude = Amplitude(apiKey: "YOUR_API_KEY", analyticsConfig: AnalyticsConfig(autocapture: [.sessions, .appLifecycles, .screenViews]))`,
         `Never hardcode the API key in source files — store it in a .xcconfig file or Info.plist and read it at runtime`,
@@ -68,7 +75,7 @@ export const SWIFT_AGENT_CONFIG: FrameworkConfig<SwiftContext> = {
   },
 
   ui: {
-    successMessage: 'Amplitude integration complete',
+    successMessage: SUCCESS_MESSAGE_INTEGRATION_COMPLETE,
     estimatedDurationMinutes: 8,
     getOutroChanges: (context) => {
       const pmLabel =
@@ -83,7 +90,7 @@ export const SWIFT_AGENT_CONFIG: FrameworkConfig<SwiftContext> = {
     },
     getOutroNextSteps: () => [
       'Build and run your app in the simulator to verify the integration',
-      'Visit your Amplitude dashboard to see incoming events',
+      OUTRO_DASHBOARD_LINE,
       'Use amplitude.track(eventType:eventProperties:) for custom events',
       'Use amplitude.setUserId(userId:) to associate events with users',
     ],

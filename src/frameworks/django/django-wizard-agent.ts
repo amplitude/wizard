@@ -17,6 +17,13 @@ import {
   IGNORE_PATTERNS,
 } from './utils';
 import { hasPythonProjectMarkers } from '../python/preflight';
+import {
+  SUCCESS_MESSAGE_INTEGRATION_COMPLETE,
+  OUTRO_DASHBOARD_LINE,
+  apiKeyOnlyEnv,
+  frameworkDocsIdLine,
+  noVersionFromPackageJson,
+} from '../../lib/framework-shared';
 
 type DjangoContext = {
   projectType?: DjangoProjectType;
@@ -45,7 +52,7 @@ export const DJANGO_AGENT_CONFIG: FrameworkConfig<DjangoContext> = {
     packageName: 'django',
     packageDisplayName: 'Django',
     usesPackageJson: false,
-    getVersion: () => undefined,
+    getVersion: noVersionFromPackageJson,
     getVersionBucket: getDjangoVersionBucket,
     minimumVersion: '3.0.0',
     getInstalledVersion: (options: WizardOptions) => getDjangoVersion(options),
@@ -120,9 +127,7 @@ export const DJANGO_AGENT_CONFIG: FrameworkConfig<DjangoContext> = {
 
   environment: {
     uploadToHosting: false,
-    getEnvVars: (apiKey: string, _host: string) => ({
-      AMPLITUDE_API_KEY: apiKey,
-    }),
+    getEnvVars: apiKeyOnlyEnv,
   },
 
   analytics: {
@@ -154,7 +159,7 @@ export const DJANGO_AGENT_CONFIG: FrameworkConfig<DjangoContext> = {
 
       const lines = [
         `Project type: ${projectTypeName}`,
-        `Framework docs ID: ${frameworkId} (use amplitude://docs/frameworks/${frameworkId} for documentation)`,
+        frameworkDocsIdLine(frameworkId),
       ];
 
       if (context.settingsFile) {
@@ -166,7 +171,7 @@ export const DJANGO_AGENT_CONFIG: FrameworkConfig<DjangoContext> = {
   },
 
   ui: {
-    successMessage: 'Amplitude integration complete',
+    successMessage: SUCCESS_MESSAGE_INTEGRATION_COMPLETE,
     estimatedDurationMinutes: 5,
     getOutroChanges: (context) => {
       const projectTypeName = context.projectType
@@ -181,7 +186,7 @@ export const DJANGO_AGENT_CONFIG: FrameworkConfig<DjangoContext> = {
     },
     getOutroNextSteps: () => [
       'Start your Django development server to see Amplitude in action',
-      'Visit your Amplitude dashboard to see incoming events',
+      OUTRO_DASHBOARD_LINE,
       'Use amplitude.track() to capture events and amplitude.identify() for users',
     ],
   },

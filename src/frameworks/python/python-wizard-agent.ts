@@ -15,6 +15,13 @@ import {
   PythonPackageManager,
 } from './utils';
 import { hasPythonProjectMarkers } from './preflight';
+import {
+  SUCCESS_MESSAGE_INTEGRATION_COMPLETE,
+  OUTRO_DASHBOARD_LINE,
+  apiKeyOnlyEnv,
+  frameworkDocsIdLine,
+  noVersionFromPackageJson,
+} from '../../lib/framework-shared';
 
 type PythonContext = {
   packageManager?: PythonPackageManager;
@@ -55,7 +62,7 @@ export const PYTHON_AGENT_CONFIG: FrameworkConfig<PythonContext> = {
     packageName: 'python',
     packageDisplayName: 'Python',
     usesPackageJson: false,
-    getVersion: () => undefined,
+    getVersion: noVersionFromPackageJson,
     getVersionBucket: getPythonVersionBucket,
     minimumVersion: '3.8.0',
     getInstalledVersion: (options: WizardOptions) =>
@@ -161,9 +168,7 @@ export const PYTHON_AGENT_CONFIG: FrameworkConfig<PythonContext> = {
 
   environment: {
     uploadToHosting: false,
-    getEnvVars: (apiKey: string, _host: string) => ({
-      AMPLITUDE_API_KEY: apiKey,
-    }),
+    getEnvVars: apiKeyOnlyEnv,
   },
 
   analytics: {
@@ -188,14 +193,14 @@ export const PYTHON_AGENT_CONFIG: FrameworkConfig<PythonContext> = {
 
       return [
         `Package manager: ${packageManagerName}`,
-        `Framework docs ID: python (use amplitude://docs/frameworks/python for documentation)`,
+        frameworkDocsIdLine('python'),
         `Project type: Generic Python application (CLI, script, worker, data pipeline, etc.)`,
       ];
     },
   },
 
   ui: {
-    successMessage: 'Amplitude integration complete',
+    successMessage: SUCCESS_MESSAGE_INTEGRATION_COMPLETE,
     estimatedDurationMinutes: 5,
     getOutroChanges: (context) => {
       const packageManagerName = context.packageManager
@@ -214,7 +219,7 @@ export const PYTHON_AGENT_CONFIG: FrameworkConfig<PythonContext> = {
       'Call amplitude_client.shutdown() on application exit (use atexit.register)',
       'NEVER send PII in event properties (no emails, names, or user content)',
       'Use amplitude_client.track() for events and amplitude_client.identify() for users',
-      'Visit your Amplitude dashboard to see incoming events',
+      OUTRO_DASHBOARD_LINE,
     ],
   },
 };

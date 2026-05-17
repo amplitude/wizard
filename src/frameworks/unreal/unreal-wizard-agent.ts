@@ -5,6 +5,13 @@ import { unrealPackageManager } from '../../lib/package-manager-detection';
 import { Integration } from '../../lib/constants';
 import { BrandColors } from '../../lib/brand-colors';
 import { detectUnrealProject, isAmplitudePluginPresent } from './utils';
+import {
+  SUCCESS_MESSAGE_INTEGRATION_COMPLETE,
+  OUTRO_DASHBOARD_LINE,
+  emptyEnv,
+  frameworkDocsIdLine,
+  noVersionFromPackageJson,
+} from '../../lib/framework-shared';
 
 type UnrealContext = {
   pluginAlreadyPresent?: boolean;
@@ -30,7 +37,7 @@ export const UNREAL_AGENT_CONFIG: FrameworkConfig<UnrealContext> = {
     packageName: 'AmplitudeUnreal',
     packageDisplayName: 'Unreal Engine',
     usesPackageJson: false,
-    getVersion: () => undefined,
+    getVersion: noVersionFromPackageJson,
     detect: detectUnrealProject,
     detectPackageManager: unrealPackageManager,
   },
@@ -38,7 +45,7 @@ export const UNREAL_AGENT_CONFIG: FrameworkConfig<UnrealContext> = {
   environment: {
     // API key goes in Config/DefaultEngine.ini — no .env files in Unreal projects
     uploadToHosting: false,
-    getEnvVars: () => ({}),
+    getEnvVars: emptyEnv,
   },
 
   analytics: {
@@ -54,7 +61,7 @@ export const UNREAL_AGENT_CONFIG: FrameworkConfig<UnrealContext> = {
       'There is no package manager for Unreal Engine plugins. Download AmplitudeUnreal.zip from https://github.com/amplitude/Amplitude-Unreal/releases/latest, then extract it into Plugins/AmplitudeUnreal/ inside the project directory. Use Bash to run: mkdir -p Plugins/AmplitudeUnreal && curl -L <release-url> -o /tmp/AmplitudeUnreal.zip && unzip -o /tmp/AmplitudeUnreal.zip -d Plugins/AmplitudeUnreal/',
     getAdditionalContextLines: (context) => {
       const lines = [
-        `Framework docs ID: unreal (use amplitude://docs/frameworks/unreal for documentation)`,
+        frameworkDocsIdLine('unreal'),
         `Plugin: AmplitudeUnreal — manual install into Plugins/AmplitudeUnreal/`,
         `API key storage: Config/DefaultEngine.ini under [Analytics] section`,
         `Required INI settings:`,
@@ -77,7 +84,7 @@ export const UNREAL_AGENT_CONFIG: FrameworkConfig<UnrealContext> = {
   },
 
   ui: {
-    successMessage: 'Amplitude integration complete',
+    successMessage: SUCCESS_MESSAGE_INTEGRATION_COMPLETE,
     estimatedDurationMinutes: 10,
     getOutroChanges: (context) => [
       context.pluginAlreadyPresent
@@ -90,7 +97,7 @@ export const UNREAL_AGENT_CONFIG: FrameworkConfig<UnrealContext> = {
       'Open the Unreal Editor and enable the plugin: Settings > Plugins > Analytics > AmplitudeUnreal',
       'Rebuild your project from source',
       'Call FAnalytics::Get().GetDefaultConfiguredProvider()->StartSession() on game start',
-      'Visit your Amplitude dashboard to see incoming events',
+      OUTRO_DASHBOARD_LINE,
       'Note: events are only sent on iOS, macOS, and tvOS — other platforms are no-ops',
     ],
   },
