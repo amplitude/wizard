@@ -50,6 +50,20 @@ const STEP_SCREENS: Record<string, Screen[]> = {
 
 type StepState = 'completed' | 'active' | 'future' | 'failed';
 
+/** Glyph and tint for each step state. Resolved via lookup, not ternary chain. */
+const STATE_GLYPH: Record<StepState, string> = {
+  completed: Icons.checkmark,
+  active: Icons.bullet,
+  failed: Icons.cross,
+  future: Icons.bulletOpen,
+};
+const STATE_COLOR: Record<StepState, string> = {
+  completed: Brand.lilac,
+  active: Colors.accent,
+  failed: Colors.error,
+  future: Colors.muted,
+};
+
 function getStepState(
   stepLabel: string,
   currentScreen: string,
@@ -211,24 +225,8 @@ export const JourneyStepper = ({ store, width }: JourneyStepperProps) => {
         // can locate themselves in the stepper, but the glyph reads as
         // "completed" rather than "still working".
         const doneSuccess = isDoneSuccessActive(step.label, step.state, store);
-        const icon =
-          step.state === 'completed' || doneSuccess
-            ? Icons.checkmark
-            : step.state === 'active'
-            ? Icons.bullet
-            : step.state === 'failed'
-            ? Icons.cross
-            : Icons.bulletOpen;
-
-        const color = doneSuccess
-          ? Colors.success
-          : step.state === 'completed'
-          ? Brand.lilac
-          : step.state === 'active'
-          ? Colors.accent
-          : step.state === 'failed'
-          ? Colors.error
-          : Colors.muted;
+        const icon = doneSuccess ? Icons.checkmark : STATE_GLYPH[step.state];
+        const color = doneSuccess ? Colors.success : STATE_COLOR[step.state];
 
         return (
           <Box key={step.label}>
