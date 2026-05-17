@@ -92,7 +92,7 @@ async function submitFeedbackWithConsent(
   }
 }
 
-function executeCommand(raw: string, store: WizardStore): string | void {
+function executeCommand(raw: string, store: WizardStore): void {
   const [cmd] = raw.trim().split(/\s+/);
 
   // Guard: commands flagged `requiresIdle` would mutate session credentials,
@@ -577,10 +577,11 @@ export const ConsoleView = ({
         store.setCommandFeedback('Conversation cleared.');
         return;
       }
-      const query = executeCommand(value, store);
-      if (query) {
-        handleSubmit(query);
-      }
+      // executeCommand handles all dispatch via the store (setting
+      // commandFeedback or pushing overlays); nothing flows back through
+      // a return value. The previous `string | void` signature suggested
+      // a queued follow-up submission, but no case ever produced one.
+      executeCommand(value, store);
       return;
     }
 
