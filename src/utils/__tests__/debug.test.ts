@@ -2,6 +2,7 @@ import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { createTempDir } from './helpers/temp-dir.js';
 
 // Mock getUI to prevent real UI calls in debug() tests
 vi.mock('../ui/index.js', () => ({
@@ -27,16 +28,17 @@ import {
 // ── helpers ───────────────────────────────────────────────────────────────────
 
 let tmpDir: string;
+let cleanup: () => void;
 const DEFAULT_LOG_PATH = path.join(os.tmpdir(), 'amplitude-wizard.log');
 
 beforeEach(() => {
-  tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'debug-test-'));
+  ({ dir: tmpDir, cleanup } = createTempDir('debug-test-'));
   // Reset module state: restore default path, disable logging
   configureLogFile({ path: DEFAULT_LOG_PATH, enabled: false });
 });
 
 afterEach(() => {
-  fs.rmSync(tmpDir, { recursive: true, force: true });
+  cleanup();
   // Ensure logging is off again after each test
   configureLogFile({ path: DEFAULT_LOG_PATH, enabled: false });
 });

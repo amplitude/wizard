@@ -5,24 +5,25 @@
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'node:fs';
-import * as os from 'node:os';
 import * as path from 'node:path';
 import { getOrCreateInstallId } from '../install-id.js';
+import { createTempDir } from './helpers/temp-dir.js';
 
 const UUID_V4 =
   /^[0-9a-f]{8}-[0-9a-f]{4}-4[0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i;
 
 describe('install-id', () => {
   let tmpRoot: string;
+  let cleanup: () => void;
   let filePath: string;
 
   beforeEach(() => {
-    tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'wizard-install-id-'));
+    ({ dir: tmpRoot, cleanup } = createTempDir('wizard-install-id-'));
     filePath = path.join(tmpRoot, 'nested', 'install.json');
   });
 
   afterEach(() => {
-    fs.rmSync(tmpRoot, { recursive: true, force: true });
+    cleanup();
   });
 
   it('creates a new UUID and persists it when the file is missing', () => {

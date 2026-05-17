@@ -1,6 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'node:fs';
-import * as os from 'node:os';
 import * as path from 'node:path';
 
 import {
@@ -10,6 +9,7 @@ import {
   clearApiKey,
 } from '../api-key-store.js';
 import { CACHE_ROOT_OVERRIDE_ENV } from '../storage-paths.js';
+import { createTempDir } from './helpers/temp-dir.js';
 
 /**
  * The api-key-store module now reads/writes a per-user JSON file at
@@ -21,16 +21,20 @@ const originalCacheOverride = process.env[CACHE_ROOT_OVERRIDE_ENV];
 
 let tmpDir: string;
 let cacheDir: string;
+let cleanupTmp: () => void;
+let cleanupCache: () => void;
 
 beforeEach(() => {
-  tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'api-key-store-test-'));
-  cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), 'api-key-store-cache-'));
+  ({ dir: tmpDir, cleanup: cleanupTmp } = createTempDir('api-key-store-test-'));
+  ({ dir: cacheDir, cleanup: cleanupCache } = createTempDir(
+    'api-key-store-cache-',
+  ));
   process.env[CACHE_ROOT_OVERRIDE_ENV] = cacheDir;
 });
 
 afterEach(() => {
-  fs.rmSync(tmpDir, { recursive: true, force: true });
-  fs.rmSync(cacheDir, { recursive: true, force: true });
+  cleanupTmp();
+  cleanupCache();
   if (originalCacheOverride === undefined) {
     delete process.env[CACHE_ROOT_OVERRIDE_ENV];
   } else {
@@ -54,7 +58,7 @@ describe('persistApiKey', () => {
   });
 
   it('keeps separate keys for different install dirs in the same cache file', () => {
-    const otherDir = fs.mkdtempSync(path.join(os.tmpdir(), 'api-key-other-'));
+    const { dir: otherDir, cleanup } = createTempDir('api-key-other-');
     try {
       persistApiKey('key-a', tmpDir);
       persistApiKey('key-b', otherDir);
@@ -62,7 +66,7 @@ describe('persistApiKey', () => {
       expect(readApiKey(tmpDir)).toBe('key-a');
       expect(readApiKey(otherDir)).toBe('key-b');
     } finally {
-      fs.rmSync(otherDir, { recursive: true, force: true });
+      cleanup();
     }
   });
 
@@ -259,7 +263,7 @@ describe('readApiKey', () => {
 
 describe('clearApiKey', () => {
   it('removes the cache entry for this install dir but leaves others alone', () => {
-    const otherDir = fs.mkdtempSync(path.join(os.tmpdir(), 'api-key-other-'));
+    const { dir: otherDir, cleanup } = createTempDir('api-key-other-');
     try {
       persistApiKey('key-a', tmpDir);
       persistApiKey('key-b', otherDir);
@@ -269,7 +273,7 @@ describe('clearApiKey', () => {
       expect(readApiKey(tmpDir)).toBeNull();
       expect(readApiKey(otherDir)).toBe('key-b');
     } finally {
-      fs.rmSync(otherDir, { recursive: true, force: true });
+      cleanup();
     }
   });
 
