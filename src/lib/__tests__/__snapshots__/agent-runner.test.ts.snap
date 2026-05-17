@@ -1,0 +1,282 @@
+// Vitest Snapshot v1, https://vitest.dev/guide/snapshot.html
+
+exports[`buildIntegrationPrompt — golden output (byte-identical contract) > snapshot: Flask (appId=0, defaultAppId fallback branch, EU, no additional lines) 1`] = `
+"You are setting up Amplitude analytics in this Flask project. The wizard has pre-staged supporting skills into \`.claude/skills/\` and pinned one integration skill id for this run — load them with the Skill tool. Do NOT call load_skill_menu or install_skill (disabled).
+
+Early in the run (before env wiring and again before confirm_event_plan), load \`.claude/skills/wizard-prompt-supplement/SKILL.md\` via the Skill tool and \`Read\` the reference files it lists for your phase — they hold long-form contracts intentionally kept out of the static commandments (API keys, event-plan shape, setup report, lint scoping rationale, and browser SDK init tables when applicable).
+
+Project context:
+- Amplitude App ID: not set by the wizard (0). If you need the appId for any read-only Amplitude MCP probe or for the deferred-dashboard hand-off, get it from \`get_context().defaultAppId\` — that's the project tied to the API key above. NEVER pick a different appId from \`appsByCategory\` or any other listing in the get_context response. If \`defaultAppId\` is missing or null, halt with report_status kind="error", code="RESOURCE_MISSING", detail="Could not resolve project from API key" — do not guess. (Note: do not create charts or dashboards in this run — those are owned by the deferred \`amplitude-wizard dashboard\` command.)
+- Framework: Flask 3.0.0
+- TypeScript: No
+- Amplitude public token: test-api-key-flask
+- Amplitude Host: api.eu.amplitude.com
+- Data region: EU — every Amplitude UI link you write into the setup report (dashboard URL, chart URLs, project settings) MUST use \`https://app.eu.amplitude.com\` as the host. Do NOT use \`https://app.amplitude.com\` for an EU run, or vice versa; mismatched hosts redirect to the wrong data center and the user sees an empty project.
+- Project type: This is a Python/Flask project. Look for requirements.txt, pyproject.toml.
+- Package installation: Use the detect_package_manager tool. If using pip, also add to requirements.txt.
+
+Instructions (follow in order — your **system prompt commandments** carry the cross-cutting rules: TodoWrite checklist labels, Bash/env policy, parallel discovery, \`confirm_event_plan\` + \`.amplitude/events.json\`, setup report + \`<wizard-report>\`, MCP \`reason\` on every wizard-tools call, and package-install background tasks. Do not contradict them):
+
+STEP 1: Load \`.claude/skills/integration-flask/SKILL.md\` via the Skill tool. The wizard already resolved a single integration skill id (\`integration-flask\`) for this Flask run (bundled pre-stage when possible, otherwise a deterministic on-disk resolver — not Glob-based disambiguation). Do NOT call load_skill_menu or install_skill (they are not available on the wizard-tools server).
+
+STEP 2: Run the integration skill's numbered workflow reference files in order (e.g. \`1.0-*\`, \`1.1-*\`, …). Never paste secrets into source — use env vars; details live in commandments + \`wizard-prompt-supplement/references/api-keys-and-env.md\`.
+
+STEP 3–4 (env + instrumentation): After STEP 1–2, execute the phased work those skills describe. Load pre-staged skills by filesystem path with the Skill tool — \`.claude/skills/amplitude-quickstart-taxonomy-agent/SKILL.md\` and \`.claude/skills/add-analytics-instrumentation/SKILL.md\` — and follow each skill's workflow. Do **not** call \`load_skill_menu\` / \`install_skill\` for these IDs. Autocapture overlap and \`confirm_event_plan\` timing are specified in \`wizard-prompt-supplement/references/\` (see the supplement SKILL index).
+
+Chart + dashboard creation are NOT part of this run — they happen in a separate \`amplitude-wizard dashboard\` command after event ingestion catches up. Do not load \`amplitude-chart-dashboard-plan\`, do not call \`record_dashboard\` / \`create_chart\` / \`create_dashboard\` / \`query_dataset\` / \`save_chart_edits\` / any Amplitude MCP chart or dashboard tool. If your taxonomy work surfaces a clear chart strategy, you MAY (optionally) call the wizard-tools \`record_dashboard_plan\` tool ONCE at the very end of the run to hand the plan off to the deferred command — but do not block instrumentation on it. STOP after the setup report is written; \`wire\` is the terminal step.
+
+"
+`;
+
+exports[`buildIntegrationPrompt — golden output (byte-identical contract) > snapshot: Generic skipAmplitudeMcp short-circuit (GENERIC_AGENT_CONFIG.buildPrompt) 1`] = `
+"You are integrating Amplitude analytics into a project.
+
+Project context:
+- Amplitude public API key: test-api-key-generic
+- Amplitude server-side host (Node.js / Python / server SDKs): api2.amplitude.com
+- Amplitude browser API URL (Browser SDK / CDN snippet): https://api2.amplitude.com/2/httpapi
+- TypeScript: No
+
+Use [STATUS] <message> at the start of any line to report progress (e.g. "[STATUS] Reading project structure"). These are shown to the user in the terminal.
+
+Instructions (follow IN ORDER):
+
+STEP 1: Check if Amplitude is already integrated.
+Search the project for existing Amplitude references (e.g. "amplitude" in source files or templates).
+- If Amplitude code is already present: skip to STEP 6 (build verification) and diagnose any issues.
+- If not: continue to STEP 2.
+
+STEP 2: Understand the project.
+[STATUS] Analysing project structure
+Use Glob to list key manifest files (package.json, requirements.txt, Gemfile, go.mod, netlify.toml, config.toml, etc.) and read the main entry point to determine the language and framework.
+
+STEP 3: Choose the SDK and fetch documentation.
+[STATUS] Fetching Amplitude documentation
+Choose the correct SDK based on the project type, then fetch its docs:
+
+SDK selection (choose the FIRST match):
+- Browser / SPA / SSG (JS running in a browser):
+    Recommended: @amplitude/unified (bundles browser SDK + Session Replay + Guides & Surveys)
+      npm install @amplitude/unified
+      import { initAll } from '@amplitude/unified';
+      // Every option line must have an inline // comment — users tune
+      // behavior by commenting out lines, not via a wizard prompt.
+      initAll(API_KEY, {
+        analytics: {
+          remoteConfig: { fetchRemoteConfig: true }, // remote SDK config from Amplitude
+          autocapture: {
+            attribution: true,             // UTM / referrer attribution events
+            pageViews: true,               // SPA route changes + initial load
+            sessions: true,                // Session start / end events
+            formInteractions: true,        // Form starts + submits
+            fileDownloads: true,           // Downloads of common file types
+            elementInteractions: true,     // Click + change on instrumented els
+            frustrationInteractions: true, // Rage clicks, dead clicks
+            pageUrlEnrichment: true,       // Adds path / search to event props
+            networkTracking: true,         // XHR + fetch request events
+            webVitals: true,               // CWV (LCP, INP, CLS) on page hide
+          },
+        },
+        sessionReplay: { sampleRate: 1 }, // Record sessions; comment out to disable
+        engagement: {},                   // In-product Guides & Surveys; comment out to disable
+      });
+    Alternative: @amplitude/analytics-browser (flat options; SR + G&S not bundled, install separately if wanted)
+      npm install @amplitude/analytics-browser
+      amplitude.init(API_KEY, {
+        remoteConfig: { fetchRemoteConfig: true }, // remote SDK config from Amplitude
+        autocapture: {
+          attribution: true,             // UTM / referrer attribution events
+          pageViews: true,               // SPA route changes + initial load
+          sessions: true,                // Session start / end events
+          formInteractions: true,        // Form starts + submits
+          fileDownloads: true,           // Downloads of common file types
+          elementInteractions: true,     // Click + change on instrumented els
+          frustrationInteractions: true, // Rage clicks, dead clicks
+          pageUrlEnrichment: true,       // Adds path / search to event props
+          networkTracking: true,         // XHR + fetch request events
+          webVitals: true,               // CWV (LCP, INP, CLS) on page hide
+        },
+      });
+    Static site (no build pipeline): CDN snippet — see https://amplitude.com/docs/sdks/analytics/browser/browser-sdk-2
+- Node.js server:
+    npm install @amplitude/analytics-node
+    import { init, track, flush } from '@amplitude/analytics-node';
+    init(API_KEY); ... await flush().promise;
+- Python:
+    pip install amplitude-analytics
+    from amplitude import Amplitude, BaseEvent
+    client = Amplitude(API_KEY)
+    client.track(BaseEvent(event_type="Event", user_id="user"))
+- EU data residency: pass serverZone: 'EU' (JS) or client.configuration.server_zone = 'EU' (Python)
+- Angular: initialize OUTSIDE Angular's zone: ngZone.runOutsideAngular(() => amplitude.init(API_KEY, options))
+- SvelteKit/Astro: env var prefix is PUBLIC_ (e.g. PUBLIC_AMPLITUDE_API_KEY)
+
+Env var naming by framework:
+- Next.js: NEXT_PUBLIC_AMPLITUDE_API_KEY (browser), AMPLITUDE_API_KEY (server)
+- Vite / Vue: VITE_AMPLITUDE_API_KEY
+- SvelteKit / Astro: PUBLIC_AMPLITUDE_API_KEY
+- Create React App: REACT_APP_AMPLITUDE_API_KEY
+- Node.js / Python / generic server: AMPLITUDE_API_KEY
+
+Use WebFetch to load the specific SDK docs if needed for exact API details.
+
+STEP 4: Install and initialise the Amplitude SDK.
+[STATUS] Installing Amplitude SDK
+If the project uses a package manager: use the detect_package_manager tool to find it, then install the appropriate SDK package as a background task and proceed immediately.
+If the project is a static site with no server-side build pipeline (e.g. Zola, Hugo, Jekyll, Eleventy): use the CDN script tag approach instead, and store the API key in the site's config file (e.g. config.toml, config.yaml, _config.yml) — that is the correct pattern for static sites, not a .env file.
+For all other projects: reference env vars for the API key — never hardcode them in source files.
+
+Add a sample tracking call demonstrating the integration.
+
+BROWSER SDK / CDN SNIPPET — SERVER URL AND CORS:
+When using the Amplitude Browser SDK (whether via CDN <script> tag or npm package in a browser context), you MUST:
+1. Set serverUrl to the browser API URL: https://api2.amplitude.com/2/httpapi
+   This is NOT the same as the server-side host. Using the wrong URL will cause CORS errors or silent failures.
+   Example initialisation:
+     amplitude.init('test-api-key-generic', { serverUrl: 'https://api2.amplitude.com/2/httpapi' });
+2. If the project is deployed on Netlify (netlify.toml present), add a reverse proxy redirect AND
+   CORS headers so events go through the site's own domain (bypasses ad blockers):
+   In netlify.toml:
+     [[redirects]]
+       from = "/amplitude-api/*"
+       to = "https://api2.amplitude.com/:splat"
+       status = 200
+       force = true
+     [[headers]]
+       for = "/amplitude-api/*"
+       [headers.values]
+         Access-Control-Allow-Origin = "*"
+         Access-Control-Allow-Methods = "GET, POST, OPTIONS"
+         Access-Control-Allow-Headers = "Content-Type"
+   Then set serverUrl to '/amplitude-api/2/httpapi' in the SDK init (or site config file).
+3. If the project has a local dev server with a proxy config (Vite, webpack-dev-server, Next.js, etc.),
+   add a proxy rule so that requests to /amplitude-api are forwarded to https://api2.amplitude.com/2/httpapi.
+   Then set serverUrl to '/amplitude-api/2/httpapi' in the SDK init.
+   Only do this if the framework has a built-in proxy mechanism.
+4. If there is no proxy mechanism (plain static site, no dev server, no Netlify), use the direct browserApiUrl.
+   CORS is supported by Amplitude's API, so it will work in production. In local development,
+   ad blockers or browser extensions may block requests — this is expected and not a code issue.
+
+STEP 4b: Update Content Security Policy (CSP).
+[STATUS] Checking Content Security Policy
+This is MANDATORY — do not skip it even if the SDK was already present.
+Search the entire project for any CSP definitions using Grep:
+- Grep for "Content-Security-Policy" across all files
+- Also check: netlify.toml, _headers, vercel.json, next.config.*, nginx.conf, .htaccess, any HTML <meta http-equiv="Content-Security-Policy"> tags
+If any CSP is found, read the file and add the following to the relevant directives:
+- script-src: https://*.amplitude.com
+- connect-src: https://*.amplitude.com
+Update ALL locations where a CSP is defined (there may be more than one).
+If no CSP is found, skip to STEP 5.
+
+STEP 5: Set environment variables (skip for static sites that store config in a site config file).
+[STATUS] Writing environment variables
+For projects that use env vars: use the wizard-tools MCP server.
+- Use check_env_keys to see what already exists.
+- Use set_env_values to write the API key and server URL.
+  The tool ensures .gitignore coverage automatically.
+  Use the naming convention for the framework (e.g. NEXT_PUBLIC_AMPLITUDE_API_KEY for Next.js, VITE_AMPLITUDE_API_KEY for Vite, AMPLITUDE_API_KEY for Node.js/Python/etc.).
+  For browser SDK projects, store AMPLITUDE_SERVER_URL=https://api2.amplitude.com/2/httpapi.
+  For server-side SDK projects, store AMPLITUDE_SERVER_URL=api2.amplitude.com.
+
+STEP 6: Verify the build.
+[STATUS] Verifying build
+Run the project's build command and check it exits cleanly:
+- Package manager projects: use the detected package manager (e.g. npm run build, pnpm build, cargo build, go build, ./gradlew build)
+- Static site generators: run the site's build command (e.g. zola build, hugo, jekyll build, mkdocs build, eleventy)
+If the build fails, read the error output, fix the issue, and run it again. Repeat until the build passes or you have exhausted reasonable fixes.
+
+Important: You must read a file immediately before writing it. Always use environment variables — never hardcode the public token."
+`;
+
+exports[`buildIntegrationPrompt — golden output (byte-identical contract) > snapshot: Next.js (appId set, skill pinned, US region, additional lines) 1`] = `
+"You are setting up Amplitude analytics in this Next.js project. The wizard has pre-staged supporting skills into \`.claude/skills/\` and pinned one integration skill id for this run — load them with the Skill tool. Do NOT call load_skill_menu or install_skill (disabled).
+
+Early in the run (before env wiring and again before confirm_event_plan), load \`.claude/skills/wizard-prompt-supplement/SKILL.md\` via the Skill tool and \`Read\` the reference files it lists for your phase — they hold long-form contracts intentionally kept out of the static commandments (API keys, event-plan shape, setup report, lint scoping rationale, and browser SDK init tables when applicable).
+
+Project context:
+- Amplitude App ID (shown in Amplitude UI as "Project ID"): 12345. Use this appId for any deferred-dashboard plan hand-off you persist. Do NOT call \`get_context\` to pick a different one — the wizard already resolved it and the API key above belongs to this project. (Note: do not create charts or dashboards in this run — those are owned by the deferred \`amplitude-wizard dashboard\` command.)
+- Framework: Next.js 15.0.0
+- TypeScript: Yes
+- Amplitude public token: test-api-key-nextjs
+- Amplitude Host: api2.amplitude.com
+- Data region: US — every Amplitude UI link you write into the setup report (dashboard URL, chart URLs, project settings) MUST use \`https://app.amplitude.com\` as the host. Do NOT use \`https://app.amplitude.com\` for an EU run, or vice versa; mismatched hosts redirect to the wrong data center and the user sees an empty project.
+- Project type: This is a JavaScript/TypeScript project. Look for package.json and lockfiles.
+- Package installation: Use the detect_package_manager tool to determine the package manager. Do not manually edit package.json; the package manager handles it automatically.
+- Router: app
+- Uses src/ layout: false
+
+Instructions (follow in order — your **system prompt commandments** carry the cross-cutting rules: TodoWrite checklist labels, Bash/env policy, parallel discovery, \`confirm_event_plan\` + \`.amplitude/events.json\`, setup report + \`<wizard-report>\`, MCP \`reason\` on every wizard-tools call, and package-install background tasks. Do not contradict them):
+
+STEP 1: Load \`.claude/skills/integration-nextjs-app-router/SKILL.md\` via the Skill tool. The wizard already resolved a single integration skill id (\`integration-nextjs-app-router\`) for this Next.js run (bundled pre-stage when possible, otherwise a deterministic on-disk resolver — not Glob-based disambiguation). Do NOT call load_skill_menu or install_skill (they are not available on the wizard-tools server).
+
+STEP 2: Run the integration skill's numbered workflow reference files in order (e.g. \`1.0-*\`, \`1.1-*\`, …). Never paste secrets into source — use env vars; details live in commandments + \`wizard-prompt-supplement/references/api-keys-and-env.md\`.
+
+STEP 3–4 (env + instrumentation): After STEP 1–2, execute the phased work those skills describe. Load pre-staged skills by filesystem path with the Skill tool — \`.claude/skills/amplitude-quickstart-taxonomy-agent/SKILL.md\` and \`.claude/skills/add-analytics-instrumentation/SKILL.md\` — and follow each skill's workflow. Do **not** call \`load_skill_menu\` / \`install_skill\` for these IDs. Autocapture overlap and \`confirm_event_plan\` timing are specified in \`wizard-prompt-supplement/references/\` (see the supplement SKILL index).
+
+Chart + dashboard creation are NOT part of this run — they happen in a separate \`amplitude-wizard dashboard\` command after event ingestion catches up. Do not load \`amplitude-chart-dashboard-plan\`, do not call \`record_dashboard\` / \`create_chart\` / \`create_dashboard\` / \`query_dataset\` / \`save_chart_edits\` / any Amplitude MCP chart or dashboard tool. If your taxonomy work surfaces a clear chart strategy, you MAY (optionally) call the wizard-tools \`record_dashboard_plan\` tool ONCE at the very end of the run to hand the plan off to the deferred command — but do not block instrumentation on it. STOP after the setup report is written; \`wire\` is the terminal step.
+
+"
+`;
+
+exports[`buildIntegrationPrompt — golden output (byte-identical contract) > snapshot: React Native (preStagedIntegrationSkillId=null halt branch, US) 1`] = `
+"You are setting up Amplitude analytics in this React Native project. The wizard has pre-staged taxonomy and instrumentation skills into \`.claude/skills/\` (load with the Skill tool). STEP 1 explains the integration workflow — do NOT call load_skill_menu or install_skill (disabled).
+
+Early in the run (before env wiring and again before confirm_event_plan), load \`.claude/skills/wizard-prompt-supplement/SKILL.md\` via the Skill tool and \`Read\` the reference files it lists for your phase — they hold long-form contracts intentionally kept out of the static commandments (API keys, event-plan shape, setup report, lint scoping rationale, and browser SDK init tables when applicable).
+
+Project context:
+- Amplitude App ID (shown in Amplitude UI as "Project ID"): 54321. Use this appId for any deferred-dashboard plan hand-off you persist. Do NOT call \`get_context\` to pick a different one — the wizard already resolved it and the API key above belongs to this project. (Note: do not create charts or dashboards in this run — those are owned by the deferred \`amplitude-wizard dashboard\` command.)
+- Framework: React Native 0.74.0
+- TypeScript: Yes
+- Amplitude public token: test-api-key-rn
+- Amplitude Host: api2.amplitude.com
+- Data region: US — every Amplitude UI link you write into the setup report (dashboard URL, chart URLs, project settings) MUST use \`https://app.amplitude.com\` as the host. Do NOT use \`https://app.amplitude.com\` for an EU run, or vice versa; mismatched hosts redirect to the wrong data center and the user sees an empty project.
+- Project type: This is a React Native project. Look for package.json with react-native.
+- Package installation: Use the detect_package_manager tool to determine the package manager. Do not manually edit package.json; the package manager handles it automatically.
+
+Instructions (follow in order — your **system prompt commandments** carry the cross-cutting rules: TodoWrite checklist labels, Bash/env policy, parallel discovery, \`confirm_event_plan\` + \`.amplitude/events.json\`, setup report + \`<wizard-report>\`, MCP \`reason\` on every wizard-tools call, and package-install background tasks. Do not contradict them):
+
+STEP 1: Integration workflow — wizard-tools \`load_skill_menu\` / \`install_skill\` are **not registered** in this CLI; do not call them (they will fail or be absent from the tool list).
+
+   The taxonomy and instrumentation skills are already under \`.claude/skills/\` for this run, but the runner could not resolve any \`integration-*\` skill id for React Native (nothing bundled/pre-staged and no matching \`.claude/skills/integration-*/SKILL.md\` on disk).
+
+   Call \`report_status\` with kind="error", code="RESOURCE_MISSING", detail="No integration skill could be resolved for this framework." and halt.
+
+STEP 2: Run the integration skill's numbered workflow reference files in order (e.g. \`1.0-*\`, \`1.1-*\`, …). Never paste secrets into source — use env vars; details live in commandments + \`wizard-prompt-supplement/references/api-keys-and-env.md\`.
+
+STEP 3–4 (env + instrumentation): After STEP 1–2, execute the phased work those skills describe. Load pre-staged skills by filesystem path with the Skill tool — \`.claude/skills/amplitude-quickstart-taxonomy-agent/SKILL.md\` and \`.claude/skills/add-analytics-instrumentation/SKILL.md\` — and follow each skill's workflow. Do **not** call \`load_skill_menu\` / \`install_skill\` for these IDs. Autocapture overlap and \`confirm_event_plan\` timing are specified in \`wizard-prompt-supplement/references/\` (see the supplement SKILL index).
+
+Chart + dashboard creation are NOT part of this run — they happen in a separate \`amplitude-wizard dashboard\` command after event ingestion catches up. Do not load \`amplitude-chart-dashboard-plan\`, do not call \`record_dashboard\` / \`create_chart\` / \`create_dashboard\` / \`query_dataset\` / \`save_chart_edits\` / any Amplitude MCP chart or dashboard tool. If your taxonomy work surfaces a clear chart strategy, you MAY (optionally) call the wizard-tools \`record_dashboard_plan\` tool ONCE at the very end of the run to hand the plan off to the deferred command — but do not block instrumentation on it. STOP after the setup report is written; \`wire\` is the terminal step.
+
+"
+`;
+
+exports[`buildIntegrationPrompt — golden output (byte-identical contract) > snapshot: Swift (appId set, skill pinned, EU region, custom package install) 1`] = `
+"You are setting up Amplitude analytics in this Swift project. The wizard has pre-staged supporting skills into \`.claude/skills/\` and pinned one integration skill id for this run — load them with the Skill tool. Do NOT call load_skill_menu or install_skill (disabled).
+
+Early in the run (before env wiring and again before confirm_event_plan), load \`.claude/skills/wizard-prompt-supplement/SKILL.md\` via the Skill tool and \`Read\` the reference files it lists for your phase — they hold long-form contracts intentionally kept out of the static commandments (API keys, event-plan shape, setup report, lint scoping rationale, and browser SDK init tables when applicable).
+
+Project context:
+- Amplitude App ID (shown in Amplitude UI as "Project ID"): 67890. Use this appId for any deferred-dashboard plan hand-off you persist. Do NOT call \`get_context\` to pick a different one — the wizard already resolved it and the API key above belongs to this project. (Note: do not create charts or dashboards in this run — those are owned by the deferred \`amplitude-wizard dashboard\` command.)
+- Framework: Swift 5.9
+- TypeScript: No
+- Amplitude public token: test-api-key-swift
+- Amplitude Host: api.eu.amplitude.com
+- Data region: EU — every Amplitude UI link you write into the setup report (dashboard URL, chart URLs, project settings) MUST use \`https://app.eu.amplitude.com\` as the host. Do NOT use \`https://app.amplitude.com\` for an EU run, or vice versa; mismatched hosts redirect to the wrong data center and the user sees an empty project.
+- Project type: This is a Swift project. Look for Package.swift or .xcodeproj.
+- Package installation: Use Swift Package Manager. Edit Package.swift to add the Amplitude-Swift dependency.
+- Platform: iOS
+- Min deployment target: 13.0
+
+Instructions (follow in order — your **system prompt commandments** carry the cross-cutting rules: TodoWrite checklist labels, Bash/env policy, parallel discovery, \`confirm_event_plan\` + \`.amplitude/events.json\`, setup report + \`<wizard-report>\`, MCP \`reason\` on every wizard-tools call, and package-install background tasks. Do not contradict them):
+
+STEP 1: Load \`.claude/skills/integration-swift/SKILL.md\` via the Skill tool. The wizard already resolved a single integration skill id (\`integration-swift\`) for this Swift run (bundled pre-stage when possible, otherwise a deterministic on-disk resolver — not Glob-based disambiguation). Do NOT call load_skill_menu or install_skill (they are not available on the wizard-tools server).
+
+STEP 2: Run the integration skill's numbered workflow reference files in order (e.g. \`1.0-*\`, \`1.1-*\`, …). Never paste secrets into source — use env vars; details live in commandments + \`wizard-prompt-supplement/references/api-keys-and-env.md\`.
+
+STEP 3–4 (env + instrumentation): After STEP 1–2, execute the phased work those skills describe. Load pre-staged skills by filesystem path with the Skill tool — \`.claude/skills/amplitude-quickstart-taxonomy-agent/SKILL.md\` and \`.claude/skills/add-analytics-instrumentation/SKILL.md\` — and follow each skill's workflow. Do **not** call \`load_skill_menu\` / \`install_skill\` for these IDs. Autocapture overlap and \`confirm_event_plan\` timing are specified in \`wizard-prompt-supplement/references/\` (see the supplement SKILL index).
+
+Chart + dashboard creation are NOT part of this run — they happen in a separate \`amplitude-wizard dashboard\` command after event ingestion catches up. Do not load \`amplitude-chart-dashboard-plan\`, do not call \`record_dashboard\` / \`create_chart\` / \`create_dashboard\` / \`query_dataset\` / \`save_chart_edits\` / any Amplitude MCP chart or dashboard tool. If your taxonomy work surfaces a clear chart strategy, you MAY (optionally) call the wizard-tools \`record_dashboard_plan\` tool ONCE at the very end of the run to hand the plan off to the deferred command — but do not block instrumentation on it. STOP after the setup report is written; \`wire\` is the terminal step.
+
+"
+`;
