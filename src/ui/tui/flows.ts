@@ -19,6 +19,40 @@ import type { WizardStore } from './store.js';
 import { RunPhase } from './session-constants.js';
 import { tryResolveZone } from '../../lib/zone-resolution.js';
 import { assertNever } from '../../utils/assert-never.js';
+import type { RequiredKey } from '../../utils/direct-signup.js';
+
+/**
+ * Typed alias for the signup `required` field keys (currently
+ * `'full_name' | 'terms_acceptance'`). Wraps the canonical `RequiredKey`
+ * type from `utils/direct-signup` so signup-flow predicates here read
+ * naturally and a future addition to `KNOWN_REQUIRED_KEYS` is caught at
+ * compile time at every call site below.
+ */
+export type SignupField = RequiredKey;
+
+/**
+ * Predicate factory: returns `(s) => session.signupRequiredFields?.includes(field) ?? false`.
+ *
+ * Encapsulates the duplicate `signupRequiredFields !== null &&
+ * signupRequiredFields.includes(<field>)` shape that previously appeared
+ * five times across the signup-ceremony entries' `show` / `isComplete` /
+ * `revert` callbacks. Used directly for `show` predicates, negated for
+ * `isComplete`, and called inline inside `revert` guards. The `field`
+ * parameter is typed as `SignupField` so a typo (`'fullName'` instead of
+ * `'full_name'`) is a TypeScript error rather than a silently-always-false
+ * predicate.
+ *
+ * Semantics preserved exactly:
+ *   - `signupRequiredFields === null` → returns `false` (no requirements
+ *     known yet, so no specific field is required).
+ *   - `signupRequiredFields.includes(field)` → returns `true`.
+ *   - Otherwise → returns `false`.
+ */
+export function requiresSignupField(
+  field: SignupField,
+): (session: WizardSession) => boolean {
+  return (session) => session.signupRequiredFields?.includes(field) ?? false;
+}
 
 // ── Screen + Flow enums ──────────────────────────────────────────────
 
@@ -362,13 +396,11 @@ export const FLOWS: Record<Flow, FlowEntry[]> = {
       screen: Screen.ToS,
       show: (s) =>
         isCreateAccountOnboarding(s) &&
-        s.signupRequiredFields !== null &&
-        s.signupRequiredFields.includes('terms_acceptance') &&
+        requiresSignupField('terms_acceptance')(s) &&
         s.tosAccepted !== true,
       isComplete: (s) =>
         !isCreateAccountOnboarding(s) ||
-        s.signupRequiredFields === null ||
-        !s.signupRequiredFields.includes('terms_acceptance') ||
+        !requiresSignupField('terms_acceptance')(s) ||
         s.tosAccepted === true,
       // Returning false when the screen was *skipped* (server never asked,
       // or ToS was never accepted) is critical: `isComplete` returns true
@@ -402,13 +434,11 @@ export const FLOWS: Record<Flow, FlowEntry[]> = {
       screen: Screen.SignupFullName,
       show: (s) =>
         isCreateAccountOnboarding(s) &&
-        s.signupRequiredFields !== null &&
-        s.signupRequiredFields.includes('full_name') &&
+        requiresSignupField('full_name')(s) &&
         s.signupFullName === null,
       isComplete: (s) =>
         !isCreateAccountOnboarding(s) ||
-        s.signupRequiredFields === null ||
-        !s.signupRequiredFields.includes('full_name') ||
+        !requiresSignupField('full_name')(s) ||
         s.signupFullName !== null,
       // Same reasoning as ToS above: `isComplete` returns true via "I was
       // skipped" arms (no needs_information, server didn't ask for
@@ -418,9 +448,7 @@ export const FLOWS: Record<Flow, FlowEntry[]> = {
       // actually do something.
       revert: (store) => {
         if (!isCreateAccountOnboarding(store.session)) return false;
-        if (store.session.signupRequiredFields === null) return false;
-        if (!store.session.signupRequiredFields.includes('full_name'))
-          return false;
+        if (!requiresSignupField('full_name')(store.session)) return false;
         if (store.session.signupFullName === null) return false;
         // Walk past on abandonment: clearing signupFullName alone
         // leaves signupAbandoned=true, so the next forward pass

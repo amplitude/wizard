@@ -22,13 +22,14 @@ vi.mock('../../../lib/ampli-config.js', () => ({
 }));
 
 import { WizardRouter, Screen, Overlay, Flow } from '../router.js';
-import { FLOWS } from '../flows.js';
+import { FLOWS, requiresSignupField, type SignupField } from '../flows.js';
 import {
   buildSession,
   RunPhase,
   OutroKind,
   type WizardSession,
 } from '../../../lib/wizard-session.js';
+import { KNOWN_REQUIRED_KEYS } from '../../../utils/direct-signup.js';
 
 // ── Helpers ──────────────────────────────────────────────────────────
 
@@ -1542,6 +1543,103 @@ describe('overlay stack invalidation on hard reset (audit #5)', () => {
         },
       ),
       { numRuns: 500 },
+    );
+  });
+});
+
+// ── requiresSignupField helper regression ───────────────────────────
+//
+// Locks in the semantics of `flows.ts#requiresSignupField`, which
+// replaced five duplicated `signupRequiredFields !== null &&
+// signupRequiredFields.includes(<field>)` predicates across the
+// signup-ceremony entries. The helper is load-bearing for back-nav
+// `isWall` evaluation order (the wall fires BEFORE `revert`, and the
+// `revert` guards now route through this helper) — so a regression
+// here would silently re-introduce the bug PR #809's report flagged.
+
+describe('requiresSignupField helper (predicate dedup)', () => {
+  it('returns false when signupRequiredFields is null', () => {
+    const session = buildSession({});
+    session.signupRequiredFields = null;
+    expect(requiresSignupField('full_name')(session)).toBe(false);
+    expect(requiresSignupField('terms_acceptance')(session)).toBe(false);
+  });
+
+  it('returns false when the array does not include the field', () => {
+    const session = buildSession({});
+    session.signupRequiredFields = ['full_name'];
+    expect(requiresSignupField('terms_acceptance')(session)).toBe(false);
+
+    session.signupRequiredFields = ['terms_acceptance'];
+    expect(requiresSignupField('full_name')(session)).toBe(false);
+
+    session.signupRequiredFields = [];
+    expect(requiresSignupField('full_name')(session)).toBe(false);
+    expect(requiresSignupField('terms_acceptance')(session)).toBe(false);
+  });
+
+  it('returns true when the array includes the field', () => {
+    const session = buildSession({});
+    session.signupRequiredFields = ['full_name'];
+    expect(requiresSignupField('full_name')(session)).toBe(true);
+
+    session.signupRequiredFields = ['terms_acceptance'];
+    expect(requiresSignupField('terms_acceptance')(session)).toBe(true);
+
+    session.signupRequiredFields = ['full_name', 'terms_acceptance'];
+    expect(requiresSignupField('full_name')(session)).toBe(true);
+    expect(requiresSignupField('terms_acceptance')(session)).toBe(true);
+  });
+
+  it('matches the original `s.signupRequiredFields !== null && s.signupRequiredFields.includes(field)` shape across all RequiredKey values', () => {
+    // For every known required key, verify the helper agrees with the
+    // pre-refactor expression for the four signup-array states the flow
+    // can ever observe (null, empty, includes, excludes).
+    for (const field of KNOWN_REQUIRED_KEYS) {
+      const states: ReadonlyArray<
+        readonly [
+          'null' | 'empty' | 'includes' | 'excludes',
+          (typeof KNOWN_REQUIRED_KEYS)[number][] | null,
+        ]
+      > = [
+        ['null', null],
+        ['empty', []],
+        ['includes', [field]],
+        [
+          'excludes',
+          KNOWN_REQUIRED_KEYS.filter((k) => k !== field) as (
+            | 'full_name'
+            | 'terms_acceptance'
+          )[],
+        ],
+      ];
+      for (const [label, value] of states) {
+        const session = buildSession({});
+        session.signupRequiredFields = value as
+          | (typeof KNOWN_REQUIRED_KEYS)[number][]
+          | null;
+        const expected =
+          value !== null && (value as readonly string[]).includes(field);
+        expect(
+          requiresSignupField(field)(session),
+          `field=${field} state=${label}`,
+        ).toBe(expected);
+      }
+    }
+  });
+
+  it('SignupField type union matches the canonical RequiredKey field names used by direct-signup', () => {
+    // Compile-time + runtime check: every key in KNOWN_REQUIRED_KEYS is
+    // a valid SignupField, and the union covers the full set. If
+    // KNOWN_REQUIRED_KEYS gains a new entry, this assignment forces an
+    // update here AND at every requiresSignupField call site (so the
+    // 5-way dedup stays exhaustive across signup ceremony entries).
+    const allFields: readonly SignupField[] = KNOWN_REQUIRED_KEYS;
+    expect(allFields.length).toBe(KNOWN_REQUIRED_KEYS.length);
+    expect(new Set(allFields)).toEqual(new Set(KNOWN_REQUIRED_KEYS));
+    // Sanity: the two known field names today.
+    expect(new Set(allFields)).toEqual(
+      new Set(['full_name', 'terms_acceptance']),
     );
   });
 });
