@@ -1,7 +1,11 @@
 import chalk from 'chalk';
 import type { Integration } from '../lib/constants';
 import { traceStep } from '../telemetry';
-import { analytics, captureWizardError } from '../utils/analytics';
+import {
+  analytics,
+  captureWizardError,
+  errorMessage,
+} from '../utils/analytics';
 import { getUI } from '../ui';
 import { getDotGitignore } from '../utils/file-utils';
 import * as fs from 'fs';
@@ -89,7 +93,7 @@ export async function addOrUpdateEnvironmentVariablesStep({
 
         captureWizardError(
           'Environment Variables',
-          error instanceof Error ? error.message : 'Unknown error',
+          errorMessage(error),
           'add-or-update-env:update-existing',
           { integration },
         );
@@ -122,7 +126,7 @@ export async function addOrUpdateEnvironmentVariablesStep({
 
         captureWizardError(
           'Environment Variables',
-          error instanceof Error ? error.message : 'Unknown error',
+          errorMessage(error),
           'add-or-update-env:create-new',
           { integration },
         );
@@ -171,7 +175,7 @@ export async function addOrUpdateEnvironmentVariablesStep({
 
           captureWizardError(
             'Environment Variables',
-            error instanceof Error ? error.message : 'Unknown error',
+            errorMessage(error),
             'add-or-update-env:gitignore-update',
             { integration },
           );
@@ -207,7 +211,7 @@ export async function addOrUpdateEnvironmentVariablesStep({
 
         captureWizardError(
           'Environment Variables',
-          error instanceof Error ? error.message : 'Unknown error',
+          errorMessage(error),
           'add-or-update-env:gitignore-create',
           { integration },
         );
