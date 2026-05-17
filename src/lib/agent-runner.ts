@@ -1,5 +1,7 @@
 import {
   DEFAULT_PACKAGE_INSTALLATION,
+  DEFAULT_SUCCESS_MESSAGE,
+  DEFAULT_UPLOAD_TO_HOSTING,
   SPINNER_MESSAGE,
   type FrameworkConfig,
 } from './framework-config';
@@ -918,7 +920,7 @@ async function runAgentWizardBody(
   if (usesPackageJson) {
     packageJson = await tryGetPackageJson({ installDir: session.installDir });
     if (packageJson) {
-      frameworkVersion = config.detection.getVersion(packageJson);
+      frameworkVersion = config.detection.getVersion?.(packageJson);
       // Log warning if package not found, but continue (agent handles it).
       // Uses getVersion() rather than checking packageName directly so
       // frameworks that match multiple packages (e.g. React Router +
@@ -934,7 +936,7 @@ async function runAgentWizardBody(
       );
     }
   } else {
-    frameworkVersion = config.detection.getVersion(null);
+    frameworkVersion = config.detection.getVersion?.(null);
   }
 
   // Refine the framework chip with the resolved version once known.
@@ -1412,7 +1414,7 @@ async function runAgentWizardBody(
     {
       estimatedDurationMinutes: config.ui.estimatedDurationMinutes,
       spinnerMessage: SPINNER_MESSAGE,
-      successMessage: config.ui.successMessage,
+      successMessage: config.ui.successMessage ?? DEFAULT_SUCCESS_MESSAGE,
       errorMessage: 'Integration failed',
       additionalFeatureQueue:
         getAdditionalFeatureQueue ?? (() => session.additionalFeatureQueue),
@@ -1858,7 +1860,7 @@ async function runAgentWizardBody(
 
   // Upload environment variables to hosting providers (auto-accept)
   let uploadedEnvVars: string[] = [];
-  if (config.environment.uploadToHosting) {
+  if (config.environment.uploadToHosting ?? DEFAULT_UPLOAD_TO_HOSTING) {
     const { uploadEnvironmentVariablesStep } = await import(
       '../steps/index.js'
     );

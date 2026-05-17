@@ -47,7 +47,6 @@ export const JAVASCRIPT_WEB_AGENT_CONFIG: FrameworkConfig<JavaScriptContext> = {
     packageName: '@amplitude/analytics-browser',
     packageDisplayName: 'JavaScript (Web)',
     usesPackageJson: false,
-    getVersion: () => undefined,
     detectPackageManager: detectNodePackageManagers,
     detect: async (options) => {
       const packageJson = await tryGetPackageJson(options);
@@ -94,7 +93,6 @@ export const JAVASCRIPT_WEB_AGENT_CONFIG: FrameworkConfig<JavaScriptContext> = {
   },
 
   environment: {
-    uploadToHosting: false,
     getEnvVars: (apiKey: string, _host: string) => ({
       AMPLITUDE_API_KEY: apiKey,
     }),
@@ -139,7 +137,6 @@ export const JAVASCRIPT_WEB_AGENT_CONFIG: FrameworkConfig<JavaScriptContext> = {
   },
 
   ui: {
-    successMessage: 'Amplitude integration complete',
     estimatedDurationMinutes: 5,
     getOutroChanges: (context) => {
       const packageManagerName =

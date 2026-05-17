@@ -15,6 +15,8 @@ import type {
   WizardActivity,
   DiscoveryFact,
 } from '../lib/wizard-session';
+import type { RunOutcome } from '../lib/types';
+import type { ToolCallOutcome } from '../lib/agent-events';
 
 /** Result returned by the confirm_event_plan tool to the agent. */
 export type EventPlanDecision =
@@ -357,7 +359,7 @@ export interface WizardUI {
    * `outcome: "success"` is the only signal of a clean run.
    */
   emitRunCompleted?(data: {
-    outcome: 'success' | 'error' | 'cancelled';
+    outcome: RunOutcome;
     exitCode: number;
     durationMs: number;
     reason?: string;
@@ -867,7 +869,7 @@ export interface WizardUI {
   emitToolResponse?(data: {
     tool: string;
     id?: string;
-    outcome: 'success' | 'error' | 'denied';
+    outcome: ToolCallOutcome;
     durationMs: number;
     exitCode?: number;
     contentHead?: string;

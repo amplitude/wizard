@@ -55,7 +55,6 @@ export const PYTHON_AGENT_CONFIG: FrameworkConfig<PythonContext> = {
     packageName: 'python',
     packageDisplayName: 'Python',
     usesPackageJson: false,
-    getVersion: () => undefined,
     getVersionBucket: getPythonVersionBucket,
     minimumVersion: '3.8.0',
     getInstalledVersion: (options: WizardOptions) =>
@@ -160,7 +159,6 @@ export const PYTHON_AGENT_CONFIG: FrameworkConfig<PythonContext> = {
   },
 
   environment: {
-    uploadToHosting: false,
     getEnvVars: (apiKey: string, _host: string) => ({
       AMPLITUDE_API_KEY: apiKey,
     }),
@@ -195,7 +193,6 @@ export const PYTHON_AGENT_CONFIG: FrameworkConfig<PythonContext> = {
   },
 
   ui: {
-    successMessage: 'Amplitude integration complete',
     estimatedDurationMinutes: 5,
     getOutroChanges: (context) => {
       const packageManagerName = context.packageManager

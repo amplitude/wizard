@@ -21,13 +21,11 @@ export const GO_AGENT_CONFIG: FrameworkConfig<GoContext> = {
     packageName: 'github.com/amplitude/analytics-go',
     packageDisplayName: 'Go',
     usesPackageJson: false,
-    getVersion: () => undefined,
     detect: detectGoProject,
     detectPackageManager: goPackageManager,
   },
 
   environment: {
-    uploadToHosting: false,
     getEnvVars: (apiKey, host) => ({
       AMPLITUDE_API_KEY: apiKey,
       AMPLITUDE_SERVER_URL: host,
@@ -52,7 +50,6 @@ export const GO_AGENT_CONFIG: FrameworkConfig<GoContext> = {
   },
 
   ui: {
-    successMessage: 'Amplitude integration complete',
     estimatedDurationMinutes: 5,
     getOutroChanges: () => [
       'Analyzed your Go project structure',

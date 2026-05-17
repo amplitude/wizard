@@ -20,7 +20,6 @@ export const FLUTTER_AGENT_CONFIG: FrameworkConfig<FlutterContext> = {
     packageName: 'amplitude_flutter',
     packageDisplayName: 'Flutter',
     usesPackageJson: false,
-    getVersion: () => undefined,
     detect: detectFlutterProject,
     detectPackageManager: flutterPackageManager,
   },
@@ -28,7 +27,6 @@ export const FLUTTER_AGENT_CONFIG: FrameworkConfig<FlutterContext> = {
   environment: {
     // Flutter apps don't use .env files — API keys are passed via --dart-define
     // or stored in a constants file; the agent handles key storage
-    uploadToHosting: false,
     getEnvVars: () => ({}),
   },
 
@@ -51,7 +49,6 @@ export const FLUTTER_AGENT_CONFIG: FrameworkConfig<FlutterContext> = {
   },
 
   ui: {
-    successMessage: 'Amplitude integration complete',
     estimatedDurationMinutes: 8,
     getOutroChanges: () => [
       'Analyzed your Flutter project structure',

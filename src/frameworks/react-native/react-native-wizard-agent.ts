@@ -28,13 +28,11 @@ export const REACT_NATIVE_AGENT_CONFIG: FrameworkConfig<ReactNativeContext> = {
     packageName: 'react-native',
     packageDisplayName: 'React Native',
     usesPackageJson: true,
-    getVersion: () => undefined,
     detect: detectReactNativeProject,
     detectPackageManager: detectNodePackageManagers,
   },
 
   environment: {
-    uploadToHosting: false,
     // Expo uses EXPO_PUBLIC_ prefix; bare RN uses plain env vars via react-native-config.
     // The agent handles the correct naming based on context — we write a neutral key
     // here as a placeholder and the agent will rename as appropriate.
@@ -77,7 +75,6 @@ export const REACT_NATIVE_AGENT_CONFIG: FrameworkConfig<ReactNativeContext> = {
   },
 
   ui: {
-    successMessage: 'Amplitude integration complete',
     estimatedDurationMinutes: 8,
     getOutroChanges: (context) => {
       const variant = context.isExpo ? 'Expo' : 'Bare React Native';

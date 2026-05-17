@@ -131,7 +131,6 @@ export const FASTAPI_AGENT_CONFIG: FrameworkConfig<FastAPIContext> = {
   },
 
   environment: {
-    uploadToHosting: false,
     getEnvVars: (apiKey: string, _host: string) => ({
       AMPLITUDE_API_KEY: apiKey,
     }),
@@ -179,7 +178,6 @@ export const FASTAPI_AGENT_CONFIG: FrameworkConfig<FastAPIContext> = {
   },
 
   ui: {
-    successMessage: 'Amplitude integration complete',
     estimatedDurationMinutes: 5,
     getOutroChanges: (context: FastAPIContext) => {
       const projectType = context.projectType;

@@ -32,6 +32,7 @@ import type {
   MCPStatusServer,
   MCPStatusState,
 } from '../lib/agent-events';
+import type { RunOutcome } from '../lib/types';
 import {
   EVENT_DATA_VERSIONS,
   TOOL_RESPONSE_CONTENT_HEAD_MAX_BYTES,
@@ -1543,7 +1544,7 @@ export class AgentUI implements WizardUI {
    * See `RunCompletedData` in `agent-events.ts` for the contract.
    */
   emitRunCompleted(data: {
-    outcome: 'success' | 'error' | 'cancelled';
+    outcome: RunOutcome;
     exitCode: number;
     durationMs: number;
     reason?: string;

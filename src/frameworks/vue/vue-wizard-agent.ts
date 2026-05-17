@@ -111,7 +111,6 @@ export const VUE_AGENT_CONFIG: FrameworkConfig<VueContext> = {
   },
 
   ui: {
-    successMessage: 'Amplitude integration complete',
     estimatedDurationMinutes: 5,
     getOutroChanges: () => [
       'Analyzed your Vue project structure',

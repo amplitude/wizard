@@ -28,13 +28,11 @@ export const JAVA_AGENT_CONFIG: FrameworkConfig<JavaContext> = {
     packageName: 'com.amplitude:java-sdk',
     packageDisplayName: 'Java',
     usesPackageJson: false,
-    getVersion: () => undefined,
     detect: detectJavaProject,
     detectPackageManager: detectJavaPackageManagers,
   },
 
   environment: {
-    uploadToHosting: false,
     getEnvVars: (apiKey, host) => ({
       AMPLITUDE_API_KEY: apiKey,
       AMPLITUDE_SERVER_URL: host,
@@ -70,7 +68,6 @@ export const JAVA_AGENT_CONFIG: FrameworkConfig<JavaContext> = {
   },
 
   ui: {
-    successMessage: 'Amplitude integration complete',
     estimatedDurationMinutes: 5,
     getOutroChanges: (context) => {
       const tool = context.buildTool === 'gradle' ? 'Gradle' : 'Maven';

@@ -172,7 +172,6 @@ export const NEXTJS_AGENT_CONFIG: FrameworkConfig<NextjsContext> = {
   },
 
   ui: {
-    successMessage: 'Amplitude integration complete',
     estimatedDurationMinutes: 8,
     getOutroChanges: (context) => {
       const router = context.router ?? NextJsRouter.APP_ROUTER;
