@@ -455,25 +455,6 @@ export function isStallNonProgressMessage(rawMessage: unknown): boolean {
 }
 
 /**
- * Build the `systemPrompt.append` string the inner-agent SDK passes to
- * Claude every turn. Concatenates wizard-wide commandments with the
- * optional orchestrator-supplied context block, in that order:
- *
- *   1. `commandments` — hard safety rules (no secrets, no shell-eval,
- *      mandatory `confirm_event_plan` before track() writes, etc.).
- *      First-position so the model treats them as load-bearing.
- *   2. `orchestratorContext` — soft, project-specific guidance the
- *      caller injected via `--context-file` /
- *      `AMPLITUDE_WIZARD_CONTEXT`. Wrapped in a labeled `## ...` block
- *      so the model can distinguish wizard-managed instructions from
- *      caller-supplied ones, and explicitly told NOT to override the
- *      safety rules above.
- *
- * Extracted from the inline ternary inside `runAgent` so unit tests
- * can lock the prompt-shape contract (whitespace, header, ordering)
- * without spinning up the full agent pipeline.
- */
-/**
  * Render the optional orchestrator-injected context block that the
  * wizard appends after its commandments. Returns the empty string when
  * `orchestratorContext` is missing / blank, so callers can concatenate
@@ -495,6 +476,25 @@ export function buildOrchestratorContextBlock(
   );
 }
 
+/**
+ * Build the `systemPrompt.append` string the inner-agent SDK passes to
+ * Claude every turn. Concatenates wizard-wide commandments with the
+ * optional orchestrator-supplied context block, in that order:
+ *
+ *   1. `commandments` — hard safety rules (no secrets, no shell-eval,
+ *      mandatory `confirm_event_plan` before track() writes, etc.).
+ *      First-position so the model treats them as load-bearing.
+ *   2. `orchestratorContext` — soft, project-specific guidance the
+ *      caller injected via `--context-file` /
+ *      `AMPLITUDE_WIZARD_CONTEXT`. Wrapped in a labeled `## ...` block
+ *      so the model can distinguish wizard-managed instructions from
+ *      caller-supplied ones, and explicitly told NOT to override the
+ *      safety rules above.
+ *
+ * Extracted from the inline ternary inside `runAgent` so unit tests
+ * can lock the prompt-shape contract (whitespace, header, ordering)
+ * without spinning up the full agent pipeline.
+ */
 export function buildSystemPromptAppend(args: {
   commandments: string;
   orchestratorContext?: string | null;
