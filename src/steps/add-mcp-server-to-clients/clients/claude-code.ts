@@ -8,9 +8,7 @@ import { z } from 'zod';
 import { spawnSync } from '../../../utils/cross-platform-spawn.js';
 import { analytics } from '../../../utils/analytics';
 import { debug } from '../../../utils/debug';
-import * as os from 'os';
-import * as path from 'path';
-import * as fs from 'fs';
+import { findClaudeBinary } from './_claude-binary';
 
 export const ClaudeCodeMCPConfig = DefaultMCPClientConfig;
 
@@ -28,37 +26,11 @@ export class ClaudeCodeMCPClient extends DefaultMCPClient {
     if (this.claudeBinaryPath) {
       return this.claudeBinaryPath;
     }
-
-    // Common installation paths for Claude Code CLI
-    const possiblePaths = [
-      path.join(os.homedir(), '.local', 'bin', 'claude'),
-      path.join(os.homedir(), '.claude', 'local', 'claude'),
-      '/usr/local/bin/claude',
-      '/opt/homebrew/bin/claude',
-    ];
-
-    for (const claudePath of possiblePaths) {
-      if (fs.existsSync(claudePath)) {
-        debug(`  Found claude binary at: ${claudePath}`);
-        this.claudeBinaryPath = claudePath;
-        return claudePath;
-      }
+    const resolved = findClaudeBinary({ debugLog: true });
+    if (resolved) {
+      this.claudeBinaryPath = resolved;
     }
-
-    // Search PATH directories manually — no exec, no tainted strings passed
-    // to child_process.
-    const pathDirs = (process.env.PATH ?? '').split(path.delimiter);
-    for (const dir of pathDirs) {
-      if (!dir) continue;
-      const candidate = path.join(dir, 'claude');
-      if (fs.existsSync(candidate)) {
-        debug(`  Found claude in PATH: ${candidate}`);
-        this.claudeBinaryPath = candidate;
-        return candidate;
-      }
-    }
-
-    return null;
+    return resolved;
   }
 
   isClientSupported(): Promise<boolean> {
@@ -67,12 +39,7 @@ export class ClaudeCodeMCPClient extends DefaultMCPClient {
       const claudeBinary = this.findClaudeBinary();
 
       if (!claudeBinary) {
-        debug('  Claude Code not found. Installation paths checked:');
-        debug(`    - ${path.join(os.homedir(), '.local', 'bin', 'claude')}`);
-        debug(`    - ${path.join(os.homedir(), '.claude', 'local', 'claude')}`);
-        debug(`    - /usr/local/bin/claude`);
-        debug(`    - /opt/homebrew/bin/claude`);
-        debug(`    - PATH`);
+        debug('  Claude Code not found. Searched standard paths and $PATH.');
         return Promise.resolve(false);
       }
 

@@ -7,6 +7,42 @@ import { getDotGitignore } from '../utils/file-utils';
 import * as fs from 'fs';
 import path from 'path';
 
+/**
+ * Wrap a filesystem mutation with a uniform error path: on failure, the
+ * caller's warning is logged, the error is captured to analytics, and the
+ * caller can decide whether to keep going by inspecting the return value.
+ *
+ * This collapses four near-identical `try { writeFile } catch { warn +
+ * captureWizardError + return }` blocks that previously inlined the same
+ * shape with different message strings.
+ */
+async function runFsStep(
+  perform: () => Promise<void>,
+  {
+    warnMessage,
+    captureLocation,
+    integration,
+  }: {
+    warnMessage: string;
+    captureLocation: string;
+    integration: Integration;
+  },
+): Promise<boolean> {
+  try {
+    await perform();
+    return true;
+  } catch (error) {
+    getUI().log.warn(warnMessage);
+    captureWizardError(
+      'Environment Variables',
+      error instanceof Error ? error.message : 'Unknown error',
+      captureLocation,
+      { integration },
+    );
+    return false;
+  }
+}
+
 export async function addOrUpdateEnvironmentVariablesStep({
   installDir,
   variables,
@@ -39,100 +75,91 @@ export async function addOrUpdateEnvironmentVariablesStep({
     let addedEnvVariables = false;
 
     if (dotEnvFileExists) {
-      try {
-        let dotEnvFileContent = fs.readFileSync(targetEnvFilePath, 'utf8');
-        let updated = false;
+      let updated = false;
+      const ok = await runFsStep(
+        async () => {
+          let dotEnvFileContent = fs.readFileSync(targetEnvFilePath, 'utf8');
 
-        for (const [key, value] of Object.entries(variables)) {
-          const regex = new RegExp(`^${key}=.*$`, 'm');
+          for (const [key, value] of Object.entries(variables)) {
+            const regex = new RegExp(`^${key}=.*$`, 'm');
 
-          if (dotEnvFileContent.match(regex)) {
-            dotEnvFileContent = dotEnvFileContent.replace(
-              regex,
-              `${key}=${value}`,
-            );
-            updated = true;
-          } else {
-            if (!dotEnvFileContent.endsWith('\n')) {
-              dotEnvFileContent += '\n';
+            if (dotEnvFileContent.match(regex)) {
+              dotEnvFileContent = dotEnvFileContent.replace(
+                regex,
+                `${key}=${value}`,
+              );
+              updated = true;
+            } else {
+              if (!dotEnvFileContent.endsWith('\n')) {
+                dotEnvFileContent += '\n';
+              }
+              dotEnvFileContent += `${key}=${value}\n`;
+              updated = true;
             }
-            dotEnvFileContent += `${key}=${value}\n`;
-            updated = true;
           }
-        }
 
-        if (updated) {
-          await fs.promises.writeFile(targetEnvFilePath, dotEnvFileContent, {
+          if (updated) {
+            await fs.promises.writeFile(targetEnvFilePath, dotEnvFileContent, {
+              encoding: 'utf8',
+              flag: 'w',
+            });
+          }
+        },
+        {
+          warnMessage: `Failed to update environment variables in ${chalk.bold.cyan(
+            relativeEnvFilePath,
+          )}. Please update them manually.`,
+          captureLocation: 'add-or-update-env:update-existing',
+          integration,
+        },
+      );
+
+      if (!ok) {
+        return { relativeEnvFilePath, addedEnvVariables, addedGitignore };
+      }
+
+      if (updated) {
+        getUI().log.success(
+          `Updated environment variables in ${chalk.bold.cyan(
+            relativeEnvFilePath,
+          )}`,
+        );
+      } else {
+        getUI().log.success(
+          `${chalk.bold.cyan(
+            relativeEnvFilePath,
+          )} already has the necessary environment variables.`,
+        );
+      }
+
+      addedEnvVariables = true;
+    } else {
+      const ok = await runFsStep(
+        async () => {
+          await fs.promises.writeFile(targetEnvFilePath, envVarContent, {
             encoding: 'utf8',
             flag: 'w',
           });
-          getUI().log.success(
-            `Updated environment variables in ${chalk.bold.cyan(
-              relativeEnvFilePath,
-            )}`,
-          );
-        } else {
-          getUI().log.success(
-            `${chalk.bold.cyan(
-              relativeEnvFilePath,
-            )} already has the necessary environment variables.`,
-          );
-        }
-
-        addedEnvVariables = true;
-      } catch (error) {
-        getUI().log.warn(
-          `Failed to update environment variables in ${chalk.bold.cyan(
-            relativeEnvFilePath,
-          )}. Please update them manually.`,
-        );
-
-        captureWizardError(
-          'Environment Variables',
-          error instanceof Error ? error.message : 'Unknown error',
-          'add-or-update-env:update-existing',
-          { integration },
-        );
-
-        return {
-          relativeEnvFilePath,
-          addedEnvVariables,
-          addedGitignore,
-        };
-      }
-    } else {
-      try {
-        await fs.promises.writeFile(targetEnvFilePath, envVarContent, {
-          encoding: 'utf8',
-          flag: 'w',
-        });
-        getUI().log.success(
-          `Created ${chalk.bold.cyan(
-            relativeEnvFilePath,
-          )} with environment variables.`,
-        );
-
-        addedEnvVariables = true;
-      } catch (error) {
-        getUI().log.warn(
-          `Failed to create ${chalk.bold.cyan(
+        },
+        {
+          warnMessage: `Failed to create ${chalk.bold.cyan(
             relativeEnvFilePath,
           )} with environment variables. Please add them manually.`,
-        );
+          captureLocation: 'add-or-update-env:create-new',
+          integration,
+        },
+      );
 
-        captureWizardError(
-          'Environment Variables',
-          error instanceof Error ? error.message : 'Unknown error',
-          'add-or-update-env:create-new',
-          { integration },
-        );
-
-        return {
-          relativeEnvFilePath,
-          addedEnvVariables,
-          addedGitignore,
-        };
+      if (!ok) {
+        return { relativeEnvFilePath, addedEnvVariables, addedGitignore };
       }
+
+      getUI().log.success(
+        `Created ${chalk.bold.cyan(
+          relativeEnvFilePath,
+        )} with environment variables.`,
+      );
+      addedEnvVariables = true;
     }
 
     const gitignorePath = getDotGitignore({ installDir });
@@ -148,76 +175,66 @@ export async function addOrUpdateEnvironmentVariablesStep({
       );
 
       if (missingEnvFiles.length > 0) {
-        try {
-          const newGitignoreContent = `${gitignoreContent}\n${missingEnvFiles.join(
-            '\n',
-          )}`;
-          await fs.promises.writeFile(gitignorePath, newGitignoreContent, {
-            encoding: 'utf8',
-            flag: 'w',
-          });
-          getUI().log.success(
-            `Updated ${chalk.bold.cyan(
-              '.gitignore',
-            )} to include ${chalk.bold.cyan(envFileName)}.`,
-          );
-          addedGitignore = true;
-        } catch (error) {
-          getUI().log.warn(
-            `Failed to update ${chalk.bold.cyan(
-              '.gitignore',
-            )} to include ${chalk.bold.cyan(envFileName)}.`,
-          );
-
-          captureWizardError(
-            'Environment Variables',
-            error instanceof Error ? error.message : 'Unknown error',
-            'add-or-update-env:gitignore-update',
-            { integration },
-          );
-
-          return {
-            relativeEnvFilePath,
-            addedEnvVariables,
-            addedGitignore,
-          };
-        }
-      }
-    } else {
-      try {
-        const newGitignoreContent = `${envFiles.join('\n')}\n`;
-        await fs.promises.writeFile(
-          path.join(installDir, '.gitignore'),
-          newGitignoreContent,
+        const ok = await runFsStep(
+          async () => {
+            const newGitignoreContent = `${gitignoreContent}\n${missingEnvFiles.join(
+              '\n',
+            )}`;
+            await fs.promises.writeFile(gitignorePath, newGitignoreContent, {
+              encoding: 'utf8',
+              flag: 'w',
+            });
+          },
           {
-            encoding: 'utf8',
-            flag: 'w',
+            warnMessage: `Failed to update ${chalk.bold.cyan(
+              '.gitignore',
+            )} to include ${chalk.bold.cyan(envFileName)}.`,
+            captureLocation: 'add-or-update-env:gitignore-update',
+            integration,
           },
         );
+
+        if (!ok) {
+          return { relativeEnvFilePath, addedEnvVariables, addedGitignore };
+        }
+
         getUI().log.success(
-          `Created ${chalk.bold.cyan('.gitignore')} with environment files.`,
+          `Updated ${chalk.bold.cyan(
+            '.gitignore',
+          )} to include ${chalk.bold.cyan(envFileName)}.`,
         );
         addedGitignore = true;
-      } catch (error) {
-        getUI().log.warn(
-          `Failed to create ${chalk.bold.cyan(
+      }
+    } else {
+      const ok = await runFsStep(
+        async () => {
+          const newGitignoreContent = `${envFiles.join('\n')}\n`;
+          await fs.promises.writeFile(
+            path.join(installDir, '.gitignore'),
+            newGitignoreContent,
+            {
+              encoding: 'utf8',
+              flag: 'w',
+            },
+          );
+        },
+        {
+          warnMessage: `Failed to create ${chalk.bold.cyan(
             '.gitignore',
           )} with environment files.`,
-        );
+          captureLocation: 'add-or-update-env:gitignore-create',
+          integration,
+        },
+      );
 
-        captureWizardError(
-          'Environment Variables',
-          error instanceof Error ? error.message : 'Unknown error',
-          'add-or-update-env:gitignore-create',
-          { integration },
-        );
-
-        return {
-          relativeEnvFilePath,
-          addedEnvVariables,
-          addedGitignore,
-        };
+      if (!ok) {
+        return { relativeEnvFilePath, addedEnvVariables, addedGitignore };
       }
+
+      getUI().log.success(
+        `Created ${chalk.bold.cyan('.gitignore')} with environment files.`,
+      );
+      addedGitignore = true;
     }
 
     analytics.wizardCapture('environment variables added', {
