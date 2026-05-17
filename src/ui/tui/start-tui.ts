@@ -135,28 +135,17 @@ export function startTUI(
   const cleanup = () => {
     if (cleanedUp) return;
     cleanedUp = true;
-    if (themed) {
-      try {
-        process.stdout.write(
-          OSC_FG_RESET +
-            OSC_BG_RESET +
-            RESET_ATTRS +
-            CLEAR_SCREEN +
-            CURSOR_HOME,
-        );
-      } catch {
-        // EPIPE / closed stdout during shutdown — best-effort cleanup
-        // can't surface errors here, the process is on its way down.
-      }
-    } else {
-      // Even when we never applied OSC theming, drop a RESET_ATTRS so
-      // any chalk-styled stderr the user saw mid-run doesn't bleed
-      // colors into the post-exit shell prompt.
-      try {
-        process.stdout.write(RESET_ATTRS);
-      } catch {
-        // Same: best-effort.
-      }
+    // When themed: undo OSC fg/bg + reset attrs + clear screen.
+    // When not themed: still drop a RESET_ATTRS so any chalk-styled stderr
+    // the user saw mid-run doesn't bleed colors into the post-exit shell.
+    const payload = themed
+      ? OSC_FG_RESET + OSC_BG_RESET + RESET_ATTRS + CLEAR_SCREEN + CURSOR_HOME
+      : RESET_ATTRS;
+    try {
+      process.stdout.write(payload);
+    } catch {
+      // EPIPE / closed stdout during shutdown — best-effort cleanup can't
+      // surface errors here, the process is on its way down.
     }
   };
   process.on('exit', cleanup);
