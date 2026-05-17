@@ -160,6 +160,24 @@ export function saveStore(store: OrchestrationStoreFile): void {
   atomicWriteJSON(path, next, { mode: 0o600 });
 }
 
+// ── Terminal-state → outcome lookup ──────────────────────────────────
+//
+// The lifecycle enum and `TaskResult.outcome` overlap by design for the four
+// terminal values (`completed`, `failed`, `cancelled`, `superseded`). We
+// keep them as separate string unions so a future PR can add result-only
+// fields without expanding the lifecycle enum; the static map below is the
+// one place the two surfaces meet.
+const TERMINAL_OUTCOMES: Record<TaskLifecycle, TaskResult['outcome'] | null> = {
+  [TaskLifecycle.Completed]: 'completed',
+  [TaskLifecycle.Failed]: 'failed',
+  [TaskLifecycle.Cancelled]: 'cancelled',
+  [TaskLifecycle.Superseded]: 'superseded',
+  [TaskLifecycle.Queued]: null,
+  [TaskLifecycle.Running]: null,
+  [TaskLifecycle.WaitingForUser]: null,
+  [TaskLifecycle.Blocked]: null,
+};
+
 // ── Mutator API ───────────────────────────────────────────────────────
 
 /**
@@ -196,6 +214,28 @@ export class OrchestrationStore {
     return existsSync(this.path);
   }
 
+  /**
+   * Read-mutate-write helper. Every mutator follows this pattern; centralizing
+   * it cuts the boilerplate at each call site and gives us a single place to
+   * layer the eventual in-memory cache (PR 2/3) without touching every mutator.
+   *
+   * The callback may return a value (typically the mutated record) which is
+   * passed straight through to the caller. Returning `undefined` is fine for
+   * mutators with no useful return value.
+   *
+   * **Note:** `saveStore` always runs after `mutate` completes — there is no
+   * conditional-save short-circuit here. Mutators that genuinely want to skip
+   * the write (e.g. idempotent `addOwnership` when the entry already exists)
+   * must handle that branching themselves and call `this.read()` directly
+   * rather than going through `withMutation`.
+   */
+  private withMutation<T>(mutate: (store: OrchestrationStoreFile) => T): T {
+    const store = this.read();
+    const result = mutate(store);
+    saveStore(store);
+    return result;
+  }
+
   // ── Sessions ──────────────────────────────────────────────────────
 
   createSession(input: {
@@ -214,10 +254,10 @@ export class OrchestrationStore {
       worktree: input.worktree,
       status: 'active',
     };
-    const store = this.read();
-    store.sessions.push(session);
-    saveStore(store);
-    return session;
+    return this.withMutation((store) => {
+      store.sessions.push(session);
+      return session;
+    });
   }
 
   setSessionStatus(
@@ -225,21 +265,24 @@ export class OrchestrationStore {
     status: Session['status'],
     options?: { branch?: string; worktree?: string; goal?: string },
   ): Session {
-    const store = this.read();
-    const session = store.sessions.find((s) => s.id === id);
-    if (!session) {
-      throw new Error(`Session ${id} not found`);
-    }
-    session.status = status;
-    session.updatedAt = Date.now();
-    if (status !== 'active' && session.finishedAt === undefined) {
-      session.finishedAt = Date.now();
-    }
-    if (options?.branch !== undefined) session.branch = options.branch;
-    if (options?.worktree !== undefined) session.worktree = options.worktree;
-    if (options?.goal !== undefined) session.goal = options.goal;
-    saveStore(store);
-    return session;
+    return this.withMutation((store) => {
+      const session = findOrThrow(
+        store.sessions,
+        (s) => s.id === id,
+        'Session',
+        id,
+      );
+      const now = Date.now();
+      session.status = status;
+      session.updatedAt = now;
+      if (status !== 'active' && session.finishedAt === undefined) {
+        session.finishedAt = now;
+      }
+      if (options?.branch !== undefined) session.branch = options.branch;
+      if (options?.worktree !== undefined) session.worktree = options.worktree;
+      if (options?.goal !== undefined) session.goal = options.goal;
+      return session;
+    });
   }
 
   getSession(id: SessionId): Session | undefined {
@@ -287,10 +330,10 @@ export class OrchestrationStore {
       updatedAt: now,
       startedAt: initialState === TaskLifecycle.Running ? now : null,
     };
-    const store = this.read();
-    store.tasks.push(task);
-    saveStore(store);
-    return task;
+    return this.withMutation((store) => {
+      store.tasks.push(task);
+      return task;
+    });
   }
 
   getTask(id: TaskId): Task | undefined {
@@ -329,61 +372,57 @@ export class OrchestrationStore {
       supersededBy?: TaskId;
     },
   ): Task {
-    const store = this.read();
-    const task = store.tasks.find((t) => t.id === id);
-    if (!task) throw new Error(`Task ${id} not found`);
-    assertTransition(task.id, task.state, to);
-    const now = Date.now();
-    task.state = to;
-    task.updatedAt = now;
-    if (to === TaskLifecycle.Running && task.startedAt === null) {
-      task.startedAt = now;
-    }
-    // Clear waiting/blocked context when leaving those states so the LSP
-    // snapshot doesn't render stale "waiting for X" rows on a running task.
-    if (to !== TaskLifecycle.WaitingForUser) {
-      task.waitingFor = undefined;
-    }
-    if (to !== TaskLifecycle.Blocked) {
-      task.blockedReason = undefined;
-    }
-    if (options?.waitingFor && to === TaskLifecycle.WaitingForUser) {
-      task.waitingFor = options.waitingFor;
-    }
-    if (options?.blockedReason && to === TaskLifecycle.Blocked) {
-      task.blockedReason = options.blockedReason;
-    }
-    if (isTerminal(to)) {
-      // Map the terminal lifecycle to the narrower `TaskResult.outcome`.
-      // The two surfaces overlap by design (completed/failed/cancelled/
-      // superseded) but stay separate so a future PR can add result-only
-      // fields (duration, retry count, etc.) without expanding the
-      // lifecycle enum.
-      const outcome: TaskResult['outcome'] =
-        to === TaskLifecycle.Completed
-          ? 'completed'
-          : to === TaskLifecycle.Failed
-          ? 'failed'
-          : to === TaskLifecycle.Cancelled
-          ? 'cancelled'
-          : 'superseded';
-      task.result = options?.result ?? {
-        outcome,
-        finishedAt: now,
-      };
-      if (to === TaskLifecycle.Superseded && options?.supersededBy) {
-        task.supersededBy = options.supersededBy;
+    return this.withMutation((store) => {
+      const task = findOrThrow(store.tasks, (t) => t.id === id, 'Task', id);
+      assertTransition(task.id, task.state, to);
+      const now = Date.now();
+      task.state = to;
+      task.updatedAt = now;
+      if (to === TaskLifecycle.Running && task.startedAt === null) {
+        task.startedAt = now;
       }
-    }
-    saveStore(store);
-    return task;
+      // Clear waiting/blocked context when leaving those states so the LSP
+      // snapshot doesn't render stale "waiting for X" rows on a running task.
+      if (to !== TaskLifecycle.WaitingForUser) {
+        task.waitingFor = undefined;
+      }
+      if (to !== TaskLifecycle.Blocked) {
+        task.blockedReason = undefined;
+      }
+      if (options?.waitingFor && to === TaskLifecycle.WaitingForUser) {
+        task.waitingFor = options.waitingFor;
+      }
+      if (options?.blockedReason && to === TaskLifecycle.Blocked) {
+        task.blockedReason = options.blockedReason;
+      }
+      if (isTerminal(to)) {
+        const outcome = TERMINAL_OUTCOMES[to];
+        // `isTerminal(to)` and the TERMINAL_OUTCOMES map are kept in sync —
+        // the non-null assertion documents that invariant.
+        task.result = options?.result ?? {
+          outcome: outcome!,
+          finishedAt: now,
+        };
+        if (to === TaskLifecycle.Superseded && options?.supersededBy) {
+          task.supersededBy = options.supersededBy;
+        }
+      }
+      return task;
+    });
   }
 
   /** Add an ownership record to a task. Idempotent for identical entries. */
   addOwnership(taskId: TaskId, ownership: Ownership): Task {
+    // Idempotent fast-path: if the record already exists we skip the write
+    // entirely. That makes this the one mutator that doesn't go through
+    // `withMutation` — it conditionally calls `saveStore`.
     const store = this.read();
-    const task = store.tasks.find((t) => t.id === taskId);
-    if (!task) throw new Error(`Task ${taskId} not found`);
+    const task = findOrThrow(
+      store.tasks,
+      (t) => t.id === taskId,
+      'Task',
+      taskId,
+    );
     const exists = task.ownership.some(
       (o) => JSON.stringify(o) === JSON.stringify(ownership),
     );
@@ -411,19 +450,23 @@ export class OrchestrationStore {
       createdAt: now,
       finishedAt: null,
     };
-    const store = this.read();
-    store.subagents.push(subagent);
-    saveStore(store);
-    return subagent;
+    return this.withMutation((store) => {
+      store.subagents.push(subagent);
+      return subagent;
+    });
   }
 
   finishSubagent(id: SubagentId): Subagent {
-    const store = this.read();
-    const subagent = store.subagents.find((s) => s.id === id);
-    if (!subagent) throw new Error(`Subagent ${id} not found`);
-    subagent.finishedAt = Date.now();
-    saveStore(store);
-    return subagent;
+    return this.withMutation((store) => {
+      const subagent = findOrThrow(
+        store.subagents,
+        (s) => s.id === id,
+        'Subagent',
+        id,
+      );
+      subagent.finishedAt = Date.now();
+      return subagent;
+    });
   }
 
   listSubagents(filter?: { sessionId?: SessionId }): Subagent[] {
@@ -433,6 +476,26 @@ export class OrchestrationStore {
     }
     return subagents;
   }
+}
+
+// ── Internal helpers ─────────────────────────────────────────────────
+
+/**
+ * `Array.prototype.find` that throws a `<Label> <id> not found` error when
+ * no entry matches. Replaces a repeated `find(...); if (!x) throw ...`
+ * pattern across the mutators; the thrown error message is identical to
+ * the previous inline strings so external callers that key off the
+ * exception text are unaffected.
+ */
+function findOrThrow<T>(
+  items: T[],
+  predicate: (item: T) => boolean,
+  label: string,
+  id: string,
+): T {
+  const found = items.find(predicate);
+  if (!found) throw new Error(`${label} ${id} not found`);
+  return found;
 }
 
 // ── Singleton accessor ───────────────────────────────────────────────
