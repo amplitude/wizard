@@ -70,6 +70,11 @@ __pycache__/
 # Quality A/B harness — operator-run, results are local only.
 /evals/model-quality/results/
 
+# Offline bench harness — `pnpm bench` writes this on every run and
+# CI uploads it as an artifact. The on-disk file is never read back,
+# so it never needs to be committed.
+/benchmarks/results.json
+
 # ──────────────────────────────────────────────────────────────
 # Claude Code local state
 # ──────────────────────────────────────────────────────────────
