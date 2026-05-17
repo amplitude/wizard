@@ -1,5 +1,11 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { promises as fs, existsSync, mkdtempSync, rmSync } from 'fs';
+import {
+  promises as fs,
+  existsSync,
+  mkdtempSync,
+  readFileSync,
+  rmSync,
+} from 'fs';
 import { tmpdir } from 'os';
 import { join } from 'path';
 import {
@@ -191,5 +197,36 @@ describe('agent-plans persistence', () => {
     // override + /plans. Ensures we're not accidentally writing to the
     // repo or to the user's real home dir.
     expect(getPlansDir()).toBe(join(cacheRoot, 'plans'));
+  });
+
+  // Byte-shape regression test. Outer-agent contracts depend on the exact
+  // wire format of the plan JSON — adding, renaming, or reordering a field
+  // is a breaking change. This snapshot pins the persisted shape against
+  // an input we control; planId + createdAt are stripped so the snapshot
+  // is stable across runs.
+  it('persists a stable, byte-identical on-disk shape (snapshot)', () => {
+    const plan = createAndPersistPlan({
+      installDir: '/tmp/example',
+      framework: 'nextjs',
+      frameworkName: 'Next.js',
+      sdk: '@amplitude/analytics-browser',
+      events: [{ name: 'user signed up', description: 'First signup' }],
+      fileChanges: [{ path: 'src/lib/amplitude.ts', operation: 'create' }],
+    });
+    const raw = JSON.parse(
+      readFileSync(join(getPlansDir(), `${plan.planId}.json`), 'utf8'),
+    );
+    delete raw.planId;
+    delete raw.createdAt;
+    expect(raw).toEqual({
+      v: 1,
+      installDir: '/tmp/example',
+      framework: 'nextjs',
+      frameworkName: 'Next.js',
+      sdk: '@amplitude/analytics-browser',
+      events: [{ name: 'user signed up', description: 'First signup' }],
+      fileChanges: [{ path: 'src/lib/amplitude.ts', operation: 'create' }],
+      requiresApproval: true,
+    });
   });
 });

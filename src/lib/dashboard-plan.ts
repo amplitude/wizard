@@ -31,6 +31,7 @@ import {
   getProjectMetaDir,
 } from '../utils/storage-paths.js';
 import { logToFile } from '../utils/debug.js';
+import { readJsonWithSchema } from './plan-io.js';
 
 // Re-export so callers that already have a `dashboard-plan` import don't
 // also need to reach into storage-paths for the path helper.
@@ -218,40 +219,10 @@ export function writeDashboardPlan(
  * fall through to "no plan, run wizard run again."
  */
 export function readDashboardPlan(installDir: string): DashboardPlan | null {
-  const filePath = getDashboardPlanFile(installDir);
-  let raw: string;
-  try {
-    raw = fs.readFileSync(filePath, 'utf8');
-  } catch (err) {
-    const code = (err as NodeJS.ErrnoException).code;
-    if (code !== 'ENOENT') {
-      logToFile(
-        `readDashboardPlan: read failed for ${filePath}: ${
-          err instanceof Error ? err.message : String(err)
-        }`,
-      );
-    }
-    return null;
-  }
-
-  let parsedJson: unknown;
-  try {
-    parsedJson = JSON.parse(raw);
-  } catch (err) {
-    logToFile(
-      `readDashboardPlan: invalid JSON in ${filePath}: ${
-        err instanceof Error ? err.message : String(err)
-      }`,
-    );
-    return null;
-  }
-
-  const result = DashboardPlanSchema.safeParse(parsedJson);
-  if (!result.success) {
-    logToFile(
-      `readDashboardPlan: schema validation failed for ${filePath}: ${result.error.message}`,
-    );
-    return null;
-  }
-  return result.data;
+  const result = readJsonWithSchema(
+    getDashboardPlanFile(installDir),
+    DashboardPlanSchema,
+    'readDashboardPlan',
+  );
+  return result.kind === 'ok' ? result.data : null;
 }

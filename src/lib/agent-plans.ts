@@ -28,10 +28,14 @@ import { join, basename } from 'path';
 import { randomUUID } from 'crypto';
 import { z } from 'zod';
 import { atomicWriteJSON } from '../utils/atomic-write.js';
-import {
-  getPlansDir as getPlansDirFromStorage,
-  getPlanFile,
-} from '../utils/storage-paths.js';
+import { getPlansDir, getPlanFile } from '../utils/storage-paths.js';
+import { readJsonWithSchema } from './plan-io.js';
+
+// Re-export so the per-call import surface stays the same after we
+// dropped the local wrapper that used to live here. `getPlansDir` is
+// owned by `storage-paths`; this re-export just keeps existing
+// callers (notably the tests) from having to dual-import.
+export { getPlansDir };
 // ── Plan shape ──────────────────────────────────────────────────────
 
 /** A single file the inner agent intends to create or modify. */
@@ -81,24 +85,12 @@ export type WizardPlan = z.infer<typeof WizardPlanSchema>;
 // ── Storage location ────────────────────────────────────────────────
 
 /**
- * Plans live under `<cacheRoot>/plans/`. The directory is created lazily on
- * first write.
+ * Resolve a per-plan file path. Plan IDs are UUIDs we generated, but we
+ * still pin to the `basename` so a path-like input can't traverse outside
+ * the plans dir (defense-in-depth — `loadPlan` is the only callsite that
+ * takes an externally-supplied ID).
  */
-export function getPlansDir(): string {
-  return getPlansDirFromStorage();
-}
-
-function ensurePlansDir(): string {
-  const dir = getPlansDir();
-  if (!existsSync(dir)) {
-    mkdirSync(dir, { recursive: true, mode: 0o700 });
-  }
-  return dir;
-}
-
 function planPath(planId: string): string {
-  // Plan IDs are UUIDs we generated. Defensive: use only the basename so a
-  // path-like input can't traverse outside the plans dir.
   return getPlanFile(basename(planId));
 }
 
@@ -125,7 +117,13 @@ export interface CreatePlanInput {
 }
 
 export function createAndPersistPlan(input: CreatePlanInput): WizardPlan {
-  ensurePlansDir();
+  // Create the plans dir lazily on first write — readers tolerate its
+  // absence (ENOENT → not_found). 0o700 because per-user state should
+  // not be readable by other accounts on shared machines.
+  const dir = getPlansDir();
+  if (!existsSync(dir)) {
+    mkdirSync(dir, { recursive: true, mode: 0o700 });
+  }
   const plan: WizardPlan = {
     v: 1,
     planId: randomUUID(),
@@ -148,41 +146,26 @@ export type LoadPlanResult =
   | { kind: 'invalid'; reason: string }
   | { kind: 'expired'; createdAt: string };
 
+// Async signature is preserved so existing callers (CLI commands +
+// outer agents) don't break, even though the underlying read is sync.
+// Plans are tiny — switching to async fs would just add an event-loop
+// hop without any real concurrency benefit.
+// eslint-disable-next-line @typescript-eslint/require-await
 export async function loadPlan(planId: string): Promise<LoadPlanResult> {
-  const path = planPath(planId);
-  let raw: string;
-  try {
-    raw = await fs.readFile(path, 'utf8');
-  } catch (e) {
-    const err = e as NodeJS.ErrnoException;
-    if (err.code === 'ENOENT') return { kind: 'not_found' };
-    return { kind: 'invalid', reason: err.message };
+  // Use the shared sync reader (read+JSON+Zod) and layer the `expired`
+  // check on top.
+  const result = readJsonWithSchema(
+    planPath(planId),
+    WizardPlanSchema,
+    'loadPlan',
+  );
+  if (result.kind === 'not_found') return { kind: 'not_found' };
+  if (result.kind === 'invalid') {
+    return { kind: 'invalid', reason: result.reason };
   }
-
-  let parsed: unknown;
-  try {
-    parsed = JSON.parse(raw);
-  } catch (e) {
-    return {
-      kind: 'invalid',
-      reason: `Plan file is not valid JSON: ${(e as Error).message}`,
-    };
-  }
-
-  const result = WizardPlanSchema.safeParse(parsed);
-  if (!result.success) {
-    return {
-      kind: 'invalid',
-      reason: `Plan failed schema validation: ${result.error.issues
-        .map((i) => `${i.path.join('.')}: ${i.message}`)
-        .join('; ')}`,
-    };
-  }
-
   if (!isPlanFresh(result.data)) {
     return { kind: 'expired', createdAt: result.data.createdAt };
   }
-
   return { kind: 'ok', plan: result.data };
 }
 
