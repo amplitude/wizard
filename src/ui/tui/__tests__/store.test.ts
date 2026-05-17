@@ -17,8 +17,8 @@ import {
   afterAll,
 } from 'vitest';
 import * as fs from 'node:fs';
-import * as os from 'node:os';
 import * as path from 'node:path';
+import { createTempDir } from '../../../utils/__tests__/helpers/temp-dir.js';
 import {
   AuthOnboardingPath,
   OutroKind,
@@ -104,7 +104,7 @@ vi.mock('../../../utils/ampli-settings.js', async (importOriginal) => {
 const createdDirs: string[] = [];
 function createStore(flow?: Flow): WizardStore {
   const store = new WizardStore(flow);
-  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wizard-store-test-'));
+  const { dir } = createTempDir('wizard-store-test-');
   createdDirs.push(dir);
   store.session.installDir = dir;
   return store;

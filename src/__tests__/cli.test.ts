@@ -1,8 +1,8 @@
 import { describe, test, expect, beforeEach, afterEach, vi } from 'vitest';
 import { type Mock } from 'vitest';
 import * as fs from 'node:fs';
-import * as os from 'node:os';
 import * as path from 'node:path';
+import { createTempDir } from '../utils/__tests__/helpers/temp-dir.js';
 
 // Skip the per-project storage bootstrap (migration shim + project log
 // file routing) for the entire suite. vitest module mocks don't always
@@ -734,11 +734,12 @@ describe('Feature discovery', () => {
   const originalArgv = process.argv;
   const originalExit = process.exit;
   let tmpDir: string;
+  let cleanup: () => void;
 
   beforeEach(() => {
     vi.clearAllMocks();
     process.exit = vi.fn() as unknown as typeof process.exit;
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'amp-wizard-feat-test-'));
+    ({ dir: tmpDir, cleanup } = createTempDir('amp-wizard-feat-test-'));
     mockIsNonInteractiveEnvironment.mockReturnValue(false);
     defaultAuthMocks();
     simulateRegionSelect('us');
@@ -747,7 +748,7 @@ describe('Feature discovery', () => {
   afterEach(() => {
     process.argv = originalArgv;
     process.exit = originalExit;
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    cleanup();
     vi.resetModules();
   });
 
@@ -933,19 +934,22 @@ describe('logout command', () => {
     .spyOn(console, 'log')
     .mockImplementation(() => undefined);
   let tmpHome: string;
+  let cleanupHome: () => void;
 
   beforeEach(() => {
     vi.clearAllMocks();
     consoleSpy.mockClear();
     process.exit = vi.fn() as unknown as typeof process.exit;
-    tmpHome = fs.mkdtempSync(path.join(os.tmpdir(), 'amp-wizard-home-test-'));
+    ({ dir: tmpHome, cleanup: cleanupHome } = createTempDir(
+      'amp-wizard-home-test-',
+    ));
     mockHomedir.mockReturnValue(tmpHome);
   });
 
   afterEach(() => {
     process.argv = originalArgv;
     process.exit = originalExit;
-    fs.rmSync(tmpHome, { recursive: true, force: true });
+    cleanupHome();
     vi.resetModules();
   });
 
@@ -982,8 +986,8 @@ describe('logout command', () => {
   // separation: a debug-time logout should NEVER nuke the user's
   // setup report.
   test('default logout preserves wizard artifacts', async () => {
-    const projectDir = fs.mkdtempSync(
-      path.join(os.tmpdir(), 'amp-wizard-keep-test-'),
+    const { dir: projectDir, cleanup: cleanupProject } = createTempDir(
+      'amp-wizard-keep-test-',
     );
     fs.writeFileSync(path.join(projectDir, '.amplitude-events.json'), '[]');
     fs.writeFileSync(path.join(projectDir, 'amplitude-setup-report.md'), 'r');
@@ -1002,7 +1006,7 @@ describe('logout command', () => {
       fs.existsSync(path.join(projectDir, 'amplitude-setup-report.md')),
     ).toBe(true);
 
-    fs.rmSync(projectDir, { recursive: true, force: true });
+    cleanupProject();
   });
 });
 
@@ -1032,8 +1036,8 @@ describe('reset command', () => {
   });
 
   test('removes all wizard artifacts and emits a JSON result', async () => {
-    const projectDir = fs.mkdtempSync(
-      path.join(os.tmpdir(), 'amp-wizard-reset-test-'),
+    const { dir: projectDir, cleanup: cleanupProject } = createTempDir(
+      'amp-wizard-reset-test-',
     );
     fs.mkdirSync(path.join(projectDir, '.amplitude'), { recursive: true });
     fs.writeFileSync(path.join(projectDir, '.amplitude', 'events.json'), '[]');
@@ -1088,12 +1092,12 @@ describe('reset command', () => {
       expect(parsed.data.removed.length).toBe(3);
     }
 
-    fs.rmSync(projectDir, { recursive: true, force: true });
+    cleanupProject();
   });
 
   test('is a no-op (with friendly note) when there are no artifacts', async () => {
-    const projectDir = fs.mkdtempSync(
-      path.join(os.tmpdir(), 'amp-wizard-reset-empty-'),
+    const { dir: projectDir, cleanup: cleanupProject } = createTempDir(
+      'amp-wizard-reset-empty-',
     );
 
     await runCLI(['reset', '--install-dir', projectDir, '--json']);
@@ -1112,7 +1116,7 @@ describe('reset command', () => {
       expect(parsed.data.skipped.length).toBe(4);
     }
 
-    fs.rmSync(projectDir, { recursive: true, force: true });
+    cleanupProject();
   });
 });
 

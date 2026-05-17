@@ -9,8 +9,8 @@
  * and `applyCompletion` string substitution.
  */
 
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir, homedir } from 'node:os';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { join, isAbsolute } from 'node:path';
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
@@ -24,16 +24,18 @@ import {
   longestCommonPrefix,
   applyCompletion,
 } from '../PathInput.js';
+import { createTempDir } from '../../../../utils/__tests__/helpers/temp-dir.js';
 
 let dir: string;
+let cleanup: () => void;
 
 beforeEach(() => {
-  dir = mkdtempSync(join(tmpdir(), 'wizard-path-input-'));
+  ({ dir, cleanup } = createTempDir('wizard-path-input-'));
 });
 
 afterEach(() => {
   try {
-    rmSync(dir, { recursive: true, force: true });
+    cleanup();
   } catch {
     /* best effort */
   }
