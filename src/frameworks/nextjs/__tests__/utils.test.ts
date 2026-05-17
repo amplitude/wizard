@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'node:fs';
-import * as os from 'node:os';
 import * as path from 'node:path';
+import { createTempDir } from '../../../utils/__tests__/helpers/temp-dir.js';
 import {
   detectNextJsSurfaces,
   getNextJsRouter,
@@ -25,13 +25,14 @@ describe('getNextJsRouterName', () => {
 
 describe('getNextJsRouter', () => {
   let tmpDir: string;
+  let cleanup: () => void;
 
   beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nextjs-utils-test-'));
+    ({ dir: tmpDir, cleanup } = createTempDir('nextjs-utils-test-'));
   });
 
   afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    cleanup();
   });
 
   it('returns PAGES_ROUTER when only pages/_app.tsx exists', async () => {
@@ -105,13 +106,14 @@ describe('getNextJsRouter', () => {
 
 describe('detectNextJsSurfaces', () => {
   let tmpDir: string;
+  let cleanup: () => void;
 
   beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'nextjs-surfaces-test-'));
+    ({ dir: tmpDir, cleanup } = createTempDir('nextjs-surfaces-test-'));
   });
 
   afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    cleanup();
   });
 
   // Regression for the "API-only" misclassification: a Pages Router app with

@@ -1,19 +1,20 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'node:fs';
-import * as os from 'node:os';
 import * as path from 'node:path';
 import { detectBundler, hasIndexHtml } from '../utils.js';
+import { createTempDir } from '../../../utils/__tests__/helpers/temp-dir.js';
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
 let tmpDir: string;
+let cleanup: () => void;
 
 beforeEach(() => {
-  tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'js-web-utils-test-'));
+  ({ dir: tmpDir, cleanup } = createTempDir('js-web-utils-test-'));
 });
 
 afterEach(() => {
-  fs.rmSync(tmpDir, { recursive: true, force: true });
+  cleanup();
 });
 
 function writePackageJson(
