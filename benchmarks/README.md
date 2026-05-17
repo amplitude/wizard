@@ -33,8 +33,9 @@ pnpm bench --json    # emit results.json contents on stdout instead of
 Output:
 
 - Console: a markdown table.
-- `benchmarks/results.json`: machine-readable run record (overwritten on
-  every run).
+- `benchmarks/results.json`: machine-readable run record, overwritten
+  on every run and **gitignored** — CI uploads it as an artifact via
+  `actions/upload-artifact` (see `.github/workflows/bench.yml`).
 - `benchmarks/baseline.json`: snapshot for trend tracking. Refresh after
   a known-good run with `cp benchmarks/results.json benchmarks/baseline.json`.
 
