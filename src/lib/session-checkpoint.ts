@@ -288,11 +288,9 @@ export async function loadCheckpoint(
     // `selectedProjectId/Name` fields. Coerce empty / whitespace-only IDs
     // (which older checkpoints could carry) to null so callers can rely
     // on truthy checks.
-    selectedProjectId:
-      checkpoint.selectedProjectId &&
-      checkpoint.selectedProjectId.trim().length > 0
-        ? checkpoint.selectedProjectId
-        : null,
+    selectedProjectId: isNonEmpty(checkpoint.selectedProjectId)
+      ? checkpoint.selectedProjectId
+      : null,
     selectedProjectName: checkpoint.selectedProjectName ?? null,
     selectedEnvName: checkpoint.selectedEnvName,
     integration,
@@ -364,17 +362,20 @@ function isNonEmpty(value: unknown): boolean {
  * to silently wipe state.
  */
 function hasProjectBinding(installDir: string): boolean {
-  const canonical = getProjectBindingFile(installDir);
-  const legacy = path.join(installDir, AMPLI_CONFIG_FILENAME);
-  try {
-    if (existsSync(canonical)) return true;
-  } catch {
-    return true;
-  }
-  try {
-    if (existsSync(legacy)) return true;
-  } catch {
-    return true;
+  const candidates = [
+    getProjectBindingFile(installDir),
+    path.join(installDir, AMPLI_CONFIG_FILENAME),
+  ];
+  for (const candidate of candidates) {
+    try {
+      if (existsSync(candidate)) return true;
+    } catch {
+      // `existsSync` failure (EACCES / EIO) → treat as "present" so we
+      // don't aggressively invalidate a checkpoint when the filesystem
+      // is temporarily misbehaving. Better to surface a downstream
+      // error than to silently wipe state.
+      return true;
+    }
   }
   return false;
 }
