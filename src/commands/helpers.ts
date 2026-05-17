@@ -922,16 +922,21 @@ export function getInstallDirFromArgv(argv: Record<string, unknown>): string {
  *
  * `requireExplicitWrites` is forwarded so commands that opt into the
  * strict-grants mode (e.g. `verify`) keep their existing behavior.
+ *
+ * `forwardAgent` — when true, passes `argv.agent` to `resolveMode` so
+ * that `--agent` forces JSON output even in a TTY. Only `projects`
+ * historically forwarded `agent`; other subcommands intentionally
+ * omitted it so `--agent` alone didn't flip their output format.
  */
 export async function resolveJsonOutput(
   argv: Record<string, unknown>,
-  opts: { requireExplicitWrites?: boolean } = {},
+  opts: { requireExplicitWrites?: boolean; forwardAgent?: boolean } = {},
 ): Promise<boolean> {
   const { resolveMode } = await import('../lib/mode-config.js');
   const { jsonOutput } = resolveMode({
     json: argv.json as boolean | undefined,
     human: argv.human as boolean | undefined,
-    agent: argv.agent as boolean | undefined,
+    agent: opts.forwardAgent ? (argv.agent as boolean | undefined) : undefined,
     requireExplicitWrites: opts.requireExplicitWrites,
     isTTY: Boolean(process.stdout.isTTY),
   });

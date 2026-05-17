@@ -37,6 +37,7 @@ export const projectsCommand: CommandModule = {
           void (async () => {
             const jsonOutput = await resolveJsonOutput(argv, {
               requireExplicitWrites: true,
+              forwardAgent: true,
             });
             try {
               const { runProjectsList } = await import('../lib/agent-ops.js');
