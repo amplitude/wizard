@@ -1,6 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
-import { promises as fs, existsSync, mkdtempSync, rmSync } from 'fs';
-import { tmpdir } from 'os';
+import { promises as fs, existsSync } from 'fs';
 import { join } from 'path';
 import {
   createAndPersistPlan,
@@ -12,21 +11,23 @@ import {
   getPlansDir,
 } from '../agent-plans.js';
 import { CACHE_ROOT_OVERRIDE_ENV } from '../../utils/storage-paths.js';
+import { createTempDir } from '../../utils/__tests__/helpers/temp-dir.js';
 
 describe('agent-plans persistence', () => {
   let cacheRoot: string;
+  let cleanup: () => void;
   let originalCacheOverride: string | undefined;
 
   beforeEach(() => {
     // Redirect the cache root to an isolated tempdir so each test starts
     // with an empty plans dir and tests can't see each other's plans.
-    cacheRoot = mkdtempSync(join(tmpdir(), 'wiz-plans-cache-'));
+    ({ dir: cacheRoot, cleanup } = createTempDir('wiz-plans-cache-'));
     originalCacheOverride = process.env[CACHE_ROOT_OVERRIDE_ENV];
     process.env[CACHE_ROOT_OVERRIDE_ENV] = cacheRoot;
   });
 
   afterEach(() => {
-    rmSync(cacheRoot, { recursive: true, force: true });
+    cleanup();
     if (originalCacheOverride === undefined) {
       delete process.env[CACHE_ROOT_OVERRIDE_ENV];
     } else {

@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
-import * as os from 'os';
+import { createTempDir } from '../../utils/__tests__/helpers/temp-dir.js';
 
 // Mock agent-ops so we can assert the MCP tool handlers forward correctly.
 vi.mock('../agent-ops.js', () => ({
@@ -330,11 +330,12 @@ describe('registerWizardTools', () => {
 
   describe('record_dashboard_plan / get_dashboard_plan', () => {
     let tmpDir: string;
+    let cleanup: () => void;
     beforeEach(() => {
-      tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'wizard-mcp-plan-'));
+      ({ dir: tmpDir, cleanup } = createTempDir('wizard-mcp-plan-'));
     });
     afterEach(() => {
-      fs.rmSync(tmpDir, { recursive: true, force: true });
+      cleanup();
     });
 
     function validPlanInput() {
