@@ -386,6 +386,9 @@ export function captureWizardError(
  * error'` matches the historical string used at the existing call sites —
  * do not change it without auditing every consumer.
  */
-export function errorMessage(err: unknown, fallback = 'Unknown error'): string {
+export function extractErrorMessage(
+  err: unknown,
+  fallback = 'Unknown error',
+): string {
   return err instanceof Error ? err.message : fallback;
 }

@@ -59,7 +59,7 @@ import { v4 as uuidv4 } from 'uuid';
 import {
   Analytics,
   resolveTelemetryApiKey,
-  errorMessage,
+  extractErrorMessage,
   captureWizardError,
   analytics as analyticsSingleton,
 } from '../analytics.js';
@@ -146,20 +146,20 @@ describe('Analytics', () => {
     });
   });
 
-  describe('errorMessage', () => {
+  describe('extractErrorMessage', () => {
     it('returns Error.message for Error instances', () => {
-      expect(errorMessage(new Error('boom'))).toBe('boom');
+      expect(extractErrorMessage(new Error('boom'))).toBe('boom');
     });
 
     it('returns the default fallback for non-Error throwables', () => {
-      expect(errorMessage('plain string')).toBe('Unknown error');
-      expect(errorMessage({ foo: 'bar' })).toBe('Unknown error');
-      expect(errorMessage(null)).toBe('Unknown error');
-      expect(errorMessage(undefined)).toBe('Unknown error');
+      expect(extractErrorMessage('plain string')).toBe('Unknown error');
+      expect(extractErrorMessage({ foo: 'bar' })).toBe('Unknown error');
+      expect(extractErrorMessage(null)).toBe('Unknown error');
+      expect(extractErrorMessage(undefined)).toBe('Unknown error');
     });
 
     it('honours a custom fallback', () => {
-      expect(errorMessage(42, 'unknown')).toBe('unknown');
+      expect(extractErrorMessage(42, 'unknown')).toBe('unknown');
     });
 
     it('preserves the pre-refactor output verbatim', () => {
@@ -176,7 +176,7 @@ describe('Analytics', () => {
         undefined,
         42,
       ];
-      expect(cases.map((c) => errorMessage(c))).toMatchInlineSnapshot(`
+      expect(cases.map((c) => extractErrorMessage(c))).toMatchInlineSnapshot(`
         [
           "write failed",
           "Unknown error",
@@ -257,7 +257,7 @@ describe('Analytics', () => {
     it('produces the same payload as the pre-refactor inline ternary', () => {
       // Regression guard for the `add-or-update-environment-variables.ts`
       // refactor: replacing `error instanceof Error ? error.message :
-      // 'Unknown error'` with `errorMessage(error)` must emit identical
+      // 'Unknown error'` with `extractErrorMessage(error)` must emit identical
       // event properties.
       const client = getSingletonClient();
 
@@ -276,7 +276,7 @@ describe('Analytics', () => {
       client.track.mockClear();
       captureWizardError(
         'Environment Variables',
-        errorMessage(sampleError),
+        extractErrorMessage(sampleError),
         'add-or-update-env:create-new',
         { integration: 'nextjs' },
       );

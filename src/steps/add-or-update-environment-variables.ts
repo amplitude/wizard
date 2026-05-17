@@ -4,7 +4,7 @@ import { traceStep } from '../telemetry';
 import {
   analytics,
   captureWizardError,
-  errorMessage,
+  extractErrorMessage,
 } from '../utils/analytics';
 import { getUI } from '../ui';
 import { getDotGitignore } from '../utils/file-utils';
@@ -93,7 +93,7 @@ export async function addOrUpdateEnvironmentVariablesStep({
 
         captureWizardError(
           'Environment Variables',
-          errorMessage(error),
+          extractErrorMessage(error),
           'add-or-update-env:update-existing',
           { integration },
         );
@@ -126,7 +126,7 @@ export async function addOrUpdateEnvironmentVariablesStep({
 
         captureWizardError(
           'Environment Variables',
-          errorMessage(error),
+          extractErrorMessage(error),
           'add-or-update-env:create-new',
           { integration },
         );
@@ -175,7 +175,7 @@ export async function addOrUpdateEnvironmentVariablesStep({
 
           captureWizardError(
             'Environment Variables',
-            errorMessage(error),
+            extractErrorMessage(error),
             'add-or-update-env:gitignore-update',
             { integration },
           );
@@ -211,7 +211,7 @@ export async function addOrUpdateEnvironmentVariablesStep({
 
         captureWizardError(
           'Environment Variables',
-          errorMessage(error),
+          extractErrorMessage(error),
           'add-or-update-env:gitignore-create',
           { integration },
         );
