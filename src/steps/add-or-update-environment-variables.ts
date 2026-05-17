@@ -3,7 +3,6 @@ import type { Integration } from '../lib/constants';
 import { traceStep } from '../telemetry';
 import { analytics, captureWizardError } from '../utils/analytics';
 import { getUI } from '../ui';
-import { getDotGitignore } from '../utils/file-utils';
 import * as fs from 'fs';
 import path from 'path';
 
@@ -135,7 +134,11 @@ export async function addOrUpdateEnvironmentVariablesStep({
       }
     }
 
-    const gitignorePath = getDotGitignore({ installDir });
+    // Inlined from previous `getDotGitignore` helper — single callsite.
+    const gitignoreCandidate = path.join(installDir, '.gitignore');
+    const gitignorePath = fs.existsSync(gitignoreCandidate)
+      ? gitignoreCandidate
+      : undefined;
 
     const envFileName = path.basename(targetEnvFilePath);
 
