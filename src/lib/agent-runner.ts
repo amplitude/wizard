@@ -439,6 +439,117 @@ async function abortOnApiError(
 }
 
 /**
+ * Build the user-facing copy and orchestrator envelope for a gateway-class
+ * failure. Pure transformation — no side effects, exported so we can
+ * lock down the per-variant copy in unit tests.
+ *
+ * GATEWAY_DOWN  — retry: every retry attempt failed with the same upstream
+ *                 5xx/terminated signature; orchestrators should re-launch.
+ * GATEWAY_INVALID_REQUEST — fatal: the wizard build is sending a payload
+ *                 Vertex/Anthropic rejects; only an upgrade unblocks.
+ *
+ * Returns the strings/codes the caller writes into the UI emit + wizardAbort
+ * envelope. The caller still owns the actual `getUI().emitRunError` /
+ * `wizardAbort` invocation so this helper stays side-effect free for tests.
+ */
+export type GatewayErrorKind =
+  | AgentErrorType.GATEWAY_DOWN
+  | AgentErrorType.GATEWAY_INVALID_REQUEST;
+
+export interface GatewayAbortSpec {
+  /** Sentry-side fallback summary when the upstream message was empty. */
+  sentrySummary: string;
+  /** NDJSON `code` discriminator for orchestrator routing. */
+  code: 'GATEWAY_DOWN' | 'GATEWAY_INVALID_REQUEST';
+  /** Whether the orchestrator should retry or treat as fatal. */
+  recoverable: 'retry' | 'fatal';
+  /** NDJSON `emitRunError` message line. */
+  emitMessage: string;
+  /** Multi-line user-facing copy for the Outro / abort screen. */
+  userMessage: string;
+  /** WizardError summary (also goes to Sentry). */
+  errorSummary: string;
+  /** Optional remediation command (only for `fatal` variants). */
+  suggestedCommand?: readonly string[];
+}
+
+export function buildGatewayAbortSpec(input: {
+  kind: GatewayErrorKind;
+  rawMessage: string;
+}): GatewayAbortSpec {
+  const safeAgentMessage = sanitizeErrorMessageForLog(input.rawMessage ?? '');
+  if (input.kind === AgentErrorType.GATEWAY_DOWN) {
+    return {
+      sentrySummary: safeAgentMessage || 'LLM gateway unavailable',
+      code: 'GATEWAY_DOWN',
+      recoverable: 'retry',
+      emitMessage: `LLM gateway unavailable: ${safeAgentMessage || 'unknown'}`,
+      userMessage: `Amplitude LLM gateway unavailable\n\nEvery retry attempt failed with the same upstream error (${
+        safeAgentMessage || 'API Error: 400 terminated'
+      }). This is an issue with the Amplitude LLM gateway, not your project.\n\n${buildGatewayBypassHint()}\n\nIf this persists, please report it (with the log file at ${getLogFilePath()}) to: ${SUPPORT_EMAIL}`,
+      errorSummary: `LLM gateway unavailable: ${safeAgentMessage || 'unknown'}`,
+    };
+  }
+  return {
+    sentrySummary: safeAgentMessage || 'Wizard request rejected by gateway',
+    code: 'GATEWAY_INVALID_REQUEST',
+    recoverable: 'fatal',
+    emitMessage: `Wizard request rejected by gateway: ${
+      safeAgentMessage || 'unknown'
+    }`,
+    userMessage: `Wizard request rejected by Amplitude gateway\n\nThe gateway returned "Invalid request sent to model provider" — this build of the wizard is sending a request shape (e.g. an \`anthropic-beta\` header or tool schema field) that the upstream model provider does not accept. Retrying will not help because the next request will be identically rejected.\n\nFix: upgrade to the latest \`@amplitude/wizard\` (npm i -g @amplitude/wizard@latest) — this build addresses known schema/beta rejection cases.\n\n${buildGatewayBypassHint()}\n\nIf you are already on the latest build, please report it (with the log file at ${getLogFilePath()}) to: ${SUPPORT_EMAIL}`,
+    errorSummary: `Wizard request rejected by gateway: ${
+      safeAgentMessage || 'unknown'
+    }`,
+    suggestedCommand: ['npm', 'install', '-g', '@amplitude/wizard@latest'],
+  };
+}
+
+/**
+ * Hard-error abort for `GATEWAY_DOWN` / `GATEWAY_INVALID_REQUEST` agent
+ * failures. Extracted from runAgentWizardBody so both branches share a
+ * single Sentry-tag + emit + wizardAbort sequence — the only per-variant
+ * differences (copy, code, recoverability, suggestedAction) live in
+ * {@link buildGatewayAbortSpec}.
+ */
+async function abortOnGatewayError(
+  kind: GatewayErrorKind,
+  rawMessage: string,
+  config: FrameworkConfig,
+): Promise<never> {
+  const spec = buildGatewayAbortSpec({ kind, rawMessage });
+  captureWizardError('Agent API', spec.sentrySummary, 'agent-runner', {
+    integration: config.metadata.integration,
+    'error type': kind,
+  });
+
+  const usingDirectKey = !!process.env.ANTHROPIC_API_KEY;
+  try {
+    getUI().emitRunError?.({
+      message: spec.emitMessage,
+      code: spec.code,
+      recoverable: spec.recoverable,
+      ...(spec.suggestedCommand
+        ? { suggestedAction: { command: [...spec.suggestedCommand] } }
+        : {}),
+    });
+  } catch (err) {
+    logToFile(`[agent-runner] emitRunError (${spec.code}) threw`, err);
+  }
+  await wizardAbort({
+    message: spec.userMessage,
+    error: new WizardError(spec.errorSummary, {
+      integration: config.metadata.integration,
+      'error type': kind,
+      'using direct key': usingDirectKey,
+      'agent error detail': sanitizeErrorMessageForLog(rawMessage) || null,
+    }),
+    exitCode: ExitCode.NETWORK_ERROR,
+  });
+  throw new Error('unreachable');
+}
+
+/**
  * Build a WizardOptions bag from a WizardSession (for code that still expects WizardOptions).
  */
 function sessionToOptions(session: WizardSession): WizardOptions {
@@ -1699,102 +1810,26 @@ async function runAgentWizardBody(
     }
   }
 
-  if (agentResult.error === AgentErrorType.GATEWAY_DOWN) {
-    // Same SSE-suppression rationale as `abortOnApiError` below: the
-    // raw gateway error string can include the entire failing SSE body.
-    const safeAgentMessage = sanitizeErrorMessageForLog(
+  if (
+    agentResult.error === AgentErrorType.GATEWAY_DOWN ||
+    agentResult.error === AgentErrorType.GATEWAY_INVALID_REQUEST
+  ) {
+    // Both gateway-class failures share a Sentry-tag + emitRunError +
+    // wizardAbort sequence; the per-variant differences (copy, code,
+    // recoverability, suggestedAction) live in `buildGatewayAbortSpec`.
+    //
+    // GATEWAY_DOWN  — retry: every retry attempt failed with the same
+    //                 upstream signature; this is an Amplitude LLM
+    //                 gateway / Vertex backend issue, not a wizard bug.
+    // GATEWAY_INVALID_REQUEST — fatal: the wizard build is sending a
+    //                 request shape (e.g. anthropic-beta header or tool
+    //                 schema field) Vertex/Anthropic rejects. Only an
+    //                 upgrade unblocks; orchestrators must not retry.
+    await abortOnGatewayError(
+      agentResult.error,
       agentResult.message ?? '',
+      config,
     );
-    captureWizardError(
-      'Agent API',
-      safeAgentMessage || 'LLM gateway unavailable',
-      'agent-runner',
-      {
-        integration: config.metadata.integration,
-        'error type': agentResult.error,
-      },
-    );
-
-    const usingDirectKey = !!process.env.ANTHROPIC_API_KEY;
-    // Tag the orchestrator-facing envelope with `code: 'GATEWAY_DOWN'`
-    // so a consumer can distinguish "retry your launch" (5xx blip)
-    // from "upgrade wizard" / "back off" without parsing the
-    // human-readable message.
-    try {
-      getUI().emitRunError?.({
-        message: `LLM gateway unavailable: ${safeAgentMessage || 'unknown'}`,
-        code: 'GATEWAY_DOWN',
-        recoverable: 'retry',
-      });
-    } catch (err) {
-      logToFile('[agent-runner] emitRunError (GATEWAY_DOWN) threw', err);
-    }
-    await wizardAbort({
-      message: `Amplitude LLM gateway unavailable\n\nEvery retry attempt failed with the same upstream error (${
-        safeAgentMessage || 'API Error: 400 terminated'
-      }). This is an issue with the Amplitude LLM gateway, not your project.\n\n${buildGatewayBypassHint()}\n\nIf this persists, please report it (with the log file at ${getLogFilePath()}) to: ${SUPPORT_EMAIL}`,
-      error: new WizardError(
-        `LLM gateway unavailable: ${safeAgentMessage || 'unknown'}`,
-        {
-          integration: config.metadata.integration,
-          'error type': agentResult.error,
-          'using direct key': usingDirectKey,
-          'agent error detail': safeAgentMessage || null,
-        },
-      ),
-      exitCode: ExitCode.NETWORK_ERROR,
-    });
-  }
-
-  if (agentResult.error === AgentErrorType.GATEWAY_INVALID_REQUEST) {
-    const safeAgentMessage = sanitizeErrorMessageForLog(
-      agentResult.message ?? '',
-    );
-    captureWizardError(
-      'Agent API',
-      safeAgentMessage || 'Wizard request rejected by gateway',
-      'agent-runner',
-      {
-        integration: config.metadata.integration,
-        'error type': agentResult.error,
-      },
-    );
-
-    const usingDirectKey = !!process.env.ANTHROPIC_API_KEY;
-    // GATEWAY_INVALID_REQUEST is non-recoverable in the current
-    // session — retrying sends the same payload back through the
-    // same broken pipe. Tag as `fatal` so orchestrators don't burn
-    // retry budget; the suggestedAction points at `npm i` to upgrade.
-    try {
-      getUI().emitRunError?.({
-        message: `Wizard request rejected by gateway: ${
-          safeAgentMessage || 'unknown'
-        }`,
-        code: 'GATEWAY_INVALID_REQUEST',
-        recoverable: 'fatal',
-        suggestedAction: {
-          command: ['npm', 'install', '-g', '@amplitude/wizard@latest'],
-        },
-      });
-    } catch (err) {
-      logToFile(
-        '[agent-runner] emitRunError (GATEWAY_INVALID_REQUEST) threw',
-        err,
-      );
-    }
-    await wizardAbort({
-      message: `Wizard request rejected by Amplitude gateway\n\nThe gateway returned "Invalid request sent to model provider" — this build of the wizard is sending a request shape (e.g. an \`anthropic-beta\` header or tool schema field) that the upstream model provider does not accept. Retrying will not help because the next request will be identically rejected.\n\nFix: upgrade to the latest \`@amplitude/wizard\` (npm i -g @amplitude/wizard@latest) — this build addresses known schema/beta rejection cases.\n\n${buildGatewayBypassHint()}\n\nIf you are already on the latest build, please report it (with the log file at ${getLogFilePath()}) to: ${SUPPORT_EMAIL}`,
-      error: new WizardError(
-        `Wizard request rejected by gateway: ${safeAgentMessage || 'unknown'}`,
-        {
-          integration: config.metadata.integration,
-          'error type': agentResult.error,
-          'using direct key': usingDirectKey,
-          'agent error detail': safeAgentMessage || null,
-        },
-      ),
-      exitCode: ExitCode.NETWORK_ERROR,
-    });
   }
 
   if (
