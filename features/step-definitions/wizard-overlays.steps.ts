@@ -110,20 +110,6 @@ Then('I should be taken back to region selection', function () {
   );
 });
 
-When('the overlay is dismissed', function () {
-  router(this).popOverlay();
-});
-
-Then('the data check should re-run for the new region', function () {
-  // regionForced cleared + region set → DataSetup should be next (projectHasData is null)
-  const screen = router(this).resolve(session(this));
-  assert.strictEqual(
-    screen,
-    Screen.DataSetup,
-    `Expected DataSetup to re-run but got ${screen}`,
-  );
-});
-
 // ── /whoami ───────────────────────────────────────────────────────────────────
 
 Given(

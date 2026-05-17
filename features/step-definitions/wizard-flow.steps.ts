@@ -3,17 +3,21 @@ import assert from 'node:assert';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { WizardRouter } from '../../src/ui/tui/router.js';
-import { Screen, Flow } from '../../src/ui/tui/flows.js';
+import type { WizardRouter } from '../../src/ui/tui/router.js';
+import { Screen } from '../../src/ui/tui/flows.js';
 import {
   AuthOnboardingPath,
-  buildSession,
   RunPhase,
   OutroKind,
   DiscoveredFeature,
   type CloudRegion,
   type WizardSession,
 } from '../../src/lib/wizard-session.js';
+import {
+  mockCredentials,
+  ensureIdentityNames,
+  newRouterAndSession,
+} from '../support/helpers.js';
 import { ctx } from './wizard-flow-context.js';
 
 // ── Shared state ──────────────────────────────────────────────────────────────
@@ -26,28 +30,10 @@ let tempDir: string;
 let router: WizardRouter;
 let session: WizardSession;
 
-// ── Helpers ───────────────────────────────────────────────────────────────────
-
-function mockCredentials(): WizardSession['credentials'] {
-  return {
-    accessToken: 'access-abc',
-    projectApiKey: 'api-key-xyz',
-    host: 'https://api.amplitude.com',
-    appId: 123456,
-  };
-}
-
-function ensureIdentityNames(s: WizardSession): void {
-  s.selectedOrgName = s.selectedOrgName ?? 'Test Org';
-  s.selectedProjectName = s.selectedProjectName ?? 'Default';
-  s.selectedEnvName = s.selectedEnvName ?? 'Default';
-}
-
 // ── Lifecycle ─────────────────────────────────────────────────────────────────
 
 Before(function () {
   tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ampli-wizard-flow-test-'));
-  router = new WizardRouter(Flow.Wizard);
   // Pin installDir to a fresh temp dir so `tryResolveZone` doesn't pick
   // up the wizard repo's own `ampli.json` (which carries `Zone: "us"`)
   // when BDD runs from the repo root. Without this, the RegionSelect
@@ -55,7 +41,7 @@ Before(function () {
   // 2 zone signal and silently skips the picker — breaking flow
   // assertions that expect new / returning users to land on
   // RegionSelect.
-  session = buildSession({ installDir: tempDir });
+  ({ router, session } = newRouterAndSession({ installDir: tempDir }));
   // Expose via World so wizard-overlays.steps.ts can access the same instances
   (this as Record<string, unknown>).wizardRouter = router;
   (this as Record<string, unknown>).wizardSession = session;
@@ -142,23 +128,6 @@ Given('the wizard is active', function () {
   session.region = 'us';
   session.projectHasData = false;
   session.setupConfirmed = true;
-});
-
-Given('the wizard is active at any screen', function () {
-  session.introConcluded = true;
-  session.credentials = mockCredentials();
-  ensureIdentityNames(session);
-  session.region = 'us';
-  session.projectHasData = false;
-  session.setupConfirmed = true;
-});
-
-Given('I am on the options menu for an existing project', function () {
-  session.introConcluded = true;
-  session.credentials = mockCredentials();
-  ensureIdentityNames(session);
-  session.region = 'us';
-  session.projectHasData = true;
 });
 
 Given('the current project has existing data', function () {
@@ -362,31 +331,6 @@ Then('I should go through the SUSI flow', function () {
   );
 });
 
-Then('I should go through the Activation Check flow', function () {
-  // Returning users with credentials have already selected a region.
-  // Activation Check routes to DataSetup.
-  session.region = 'us';
-  const screen = router.resolve(session);
-  assert.strictEqual(
-    screen,
-    Screen.DataSetup,
-    `Expected DataSetup/Activation Check screen but got ${screen}`,
-  );
-});
-
-Then('I should go through the Data Setup flow', function () {
-  // Simulate SUSI + region selection completing
-  session.credentials = mockCredentials();
-  ensureIdentityNames(session);
-  session.region = 'us';
-  const screen = router.resolve(session);
-  assert.strictEqual(
-    screen,
-    Screen.DataSetup,
-    `Expected DataSetup screen but got ${screen}`,
-  );
-});
-
 When('the Data Setup check runs', function () {
   // Simulate SUSI completing so the router advances to DataSetup
   session.credentials = mockCredentials();
@@ -396,18 +340,6 @@ When('the Data Setup check runs', function () {
 Then('the project should have no existing data', function () {
   session.projectHasData = false;
 });
-
-Then(
-  'I should see options to open overview, chart, dashboard, taxonomy agent, or switch org or project',
-  function () {
-    const screen = router.resolve(session);
-    assert.strictEqual(
-      screen,
-      Screen.Options,
-      `Expected Options screen but got ${screen}`,
-    );
-  },
-);
 
 // ── Agent run ─────────────────────────────────────────────────────────────────
 
@@ -548,15 +480,6 @@ Then('I should still be on the DataIngestionCheck screen', function () {
   );
 });
 
-Then('I should be on the Checklist screen', function () {
-  const screen = router.resolve(session);
-  assert.strictEqual(
-    screen,
-    Screen.Checklist,
-    `Expected Checklist but got ${screen}`,
-  );
-});
-
 Given('I am on the DataIngestionCheck screen', function () {
   session.introConcluded = true;
   session.credentials = mockCredentials();
@@ -570,20 +493,6 @@ Given('I am on the DataIngestionCheck screen', function () {
   session.mcpComplete = true;
 });
 
-Given('I am on the Checklist screen', function () {
-  session.introConcluded = true;
-  session.credentials = mockCredentials();
-  ensureIdentityNames(session);
-  session.region = 'us';
-  session.activationLevel = 'none';
-  session.projectHasData = false;
-  session.setupConfirmed = true;
-  session.runPhase = RunPhase.Completed;
-  session.outroData = { kind: OutroKind.Success };
-  session.mcpComplete = true;
-  session.dataIngestionConfirmed = true;
-});
-
 Given('I have completed MCP setup on a fully-activated project', function () {
   session.introConcluded = true;
   session.credentials = mockCredentials();
@@ -592,26 +501,6 @@ Given('I have completed MCP setup on a fully-activated project', function () {
   session.projectHasData = true;
   session.activationLevel = 'full';
   session.mcpComplete = true;
-});
-
-Given('the chart is not yet complete', function () {
-  session.checklistChartComplete = false;
-});
-
-Given('the chart is complete', function () {
-  session.checklistChartComplete = true;
-});
-
-Given('the dashboard is complete', function () {
-  session.checklistDashboardComplete = true;
-});
-
-Given('the user already has charts in their Amplitude org', function () {
-  session.checklistChartComplete = true;
-});
-
-Given('the user already has dashboards in their Amplitude org', function () {
-  session.checklistDashboardComplete = true;
 });
 
 Then('I should be taken to the Outro with a cancel state', function () {
@@ -626,87 +515,6 @@ When('I press {string} to exit', function (_key: string) {
     kind: OutroKind.Cancel,
     message: 'Come back once your app is running and sending events.',
   };
-});
-
-Then('the chart creation page should open in my browser', function () {
-  // Browser open is a side-effect; we verify the session state after selection
-  session.checklistChartComplete = true;
-});
-
-Then('the chart should be marked as complete', function () {
-  assert.ok(
-    session.checklistChartComplete,
-    'Expected checklistChartComplete to be true',
-  );
-});
-
-Then('"Create your first dashboard" should be disabled', function () {
-  // Dashboard is disabled when chart is not complete — validated by the
-  // ChecklistScreen's picker options logic (disabled: !checklistChartComplete)
-  assert.ok(
-    !session.checklistChartComplete,
-    'Chart should not be complete when dashboard is locked',
-  );
-});
-
-Given('a chart has already been created', function () {
-  session.checklistChartComplete = true;
-});
-
-Given('no dashboard has been created yet', function () {
-  session.checklistDashboardComplete = false;
-});
-
-Then('"Create your first chart" should be shown as complete', function () {
-  assert.ok(
-    session.checklistChartComplete,
-    'Expected checklistChartComplete to be true',
-  );
-});
-
-Then('the dashboard item should be unlocked', function () {
-  assert.ok(
-    session.checklistChartComplete,
-    'Dashboard should be unlocked once chart is complete',
-  );
-});
-
-Then('a chart should be created via the Amplitude API', function () {
-  assert.ok(
-    session.checklistChartComplete,
-    'Expected checklistChartComplete to be true after chart creation',
-  );
-});
-
-Then('a dashboard should be created via the Amplitude API', function () {
-  assert.ok(
-    session.checklistDashboardComplete,
-    'Expected checklistDashboardComplete to be true after dashboard creation',
-  );
-});
-
-Then('the dashboard creation page should open in my browser', function () {
-  session.checklistDashboardComplete = true;
-});
-
-Then('the dashboard should be marked as complete', function () {
-  assert.ok(
-    session.checklistDashboardComplete,
-    'Expected checklistDashboardComplete to be true',
-  );
-});
-
-When('I select {string}', function (option: string) {
-  if (
-    option === 'Skip remaining and continue' ||
-    option === 'Done — continue'
-  ) {
-    session.checklistComplete = true;
-  } else if (option === 'Create your first chart') {
-    session.checklistChartComplete = true;
-  } else if (option === 'Create your first dashboard') {
-    session.checklistDashboardComplete = true;
-  }
 });
 
 When('I enter an email that belongs to an existing customer', function () {
