@@ -137,6 +137,64 @@ export async function runColdStartParallel<TPm, TAgent>(
 }
 
 /**
+ * Coarse run-phase boundary emit, wrapped in a try/catch so a UI hiccup
+ * never breaks the agent run flow.
+ *
+ * Pairs with the matching `cold_start` / `agent_running` / `finalizing` /
+ * `completed` / `error` phases an orchestrator parses out of the NDJSON
+ * stream. Idempotent — the AgentUI emitter dedupes repeated phases.
+ *
+ * Extracted from `runAgentWizardBody` to dedupe the
+ * `try { getUI().emitRunPhase?.(phase) } catch { logToFile(...) }`
+ * pattern at the `cold_start` (pre-agent) and `finalizing` (post-agent)
+ * boundaries. Log message shape is preserved byte-identical
+ * (`[agent-runner] emitRunPhase(${phase}) threw`) so the log diff is a
+ * pure no-op.
+ */
+export function emitRunPhaseSafely(
+  phase: 'cold_start' | 'agent_running' | 'finalizing' | 'completed' | 'error',
+): void {
+  try {
+    getUI().emitRunPhase?.(phase);
+  } catch (err) {
+    logToFile(`[agent-runner] emitRunPhase(${phase}) threw`, err);
+  }
+}
+
+/**
+ * Surface a cold-start activity line on the TUI's activity feed, wrapped
+ * in a try/catch so a UI hiccup never blocks the agent from starting.
+ *
+ * The wizard splits its 30-60s cold-start into labeled phases (skills →
+ * project read → agent init) so the user sees a status change every
+ * 5-15s instead of one long silent block. All three call sites share the
+ * same `kind: 'cold-start'` shape and only differ in the displayed
+ * message + the log tag used when the UI call throws.
+ *
+ * Extracted from `runAgentWizardBody` to dedupe the per-phase
+ * try/catch boilerplate. Log message shape is preserved byte-identical
+ * (`cold-start: setCurrentActivity (${logTag}) failed`) so the on-error
+ * log diff is a pure no-op.
+ */
+export function setColdStartActivitySafely(args: {
+  message: string;
+  startedAt: number;
+  estimatedDurationSec: number;
+  logTag: string;
+}): void {
+  try {
+    getUI().setCurrentActivity({
+      kind: 'cold-start',
+      message: args.message,
+      startedAt: args.startedAt,
+      estimatedDurationSec: args.estimatedDurationSec,
+    });
+  } catch (err) {
+    logToFile(`cold-start: setCurrentActivity (${args.logTag}) failed`, err);
+  }
+}
+
+/**
  * Build the "you can bypass the Amplitude gateway with a direct Anthropic
  * key" hint shown in upstream-failure error messages. Shared by the
  * GATEWAY_DOWN, terminated-400, rate-limit, and generic API_ERROR branches —
@@ -1443,11 +1501,7 @@ async function runAgentWizardBody(
   // observing the NDJSON stream. Pairs with `agent_running` (first
   // tool call), `finalizing` (seedPostAgentSteps), and a terminal
   // `completed` / `error`. Idempotent; the AgentUI emitter dedups.
-  try {
-    getUI().emitRunPhase?.('cold_start');
-  } catch (err) {
-    logToFile('[agent-runner] emitRunPhase(cold_start) threw', err);
-  }
+  emitRunPhaseSafely('cold_start');
 
   // Cold-start phase 1: skill staging. The next few seconds is bundled-skill
   // copy + on-disk resolution; surface it on the activity line so the user
@@ -1458,16 +1512,12 @@ async function runAgentWizardBody(
   // 30-60s silent block. The total cold-start window stays the same; only
   // the perceived progress changes.
   const coldStartStartedAt = Date.now();
-  try {
-    getUI().setCurrentActivity({
-      kind: 'cold-start',
-      message: 'Loading skills...',
-      startedAt: coldStartStartedAt,
-      estimatedDurationSec: 45,
-    });
-  } catch (err) {
-    logToFile('cold-start: setCurrentActivity (skills) failed', err);
-  }
+  setColdStartActivitySafely({
+    message: 'Loading skills...',
+    startedAt: coldStartStartedAt,
+    estimatedDurationSec: 45,
+    logTag: 'skills',
+  });
 
   // PR B5: per-phase cold-start timing breakdown. Each of the five phases
   // below is wrapped in a `try/finally` so the breakdown event always
@@ -1544,16 +1594,12 @@ async function runAgentWizardBody(
   // line so the user sees a fresh status before the silence resumes —
   // without this, "Loading skills..." sits stale through this whole
   // window even though we've moved on.
-  try {
-    getUI().setCurrentActivity({
-      kind: 'cold-start',
-      message: 'Reading your project...',
-      startedAt: coldStartStartedAt,
-      estimatedDurationSec: 45,
-    });
-  } catch (err) {
-    logToFile('cold-start: setCurrentActivity (project read) failed', err);
-  }
+  setColdStartActivitySafely({
+    message: 'Reading your project...',
+    startedAt: coldStartStartedAt,
+    estimatedDurationSec: 45,
+    logTag: 'project read',
+  });
 
   if (session.selectedProjectName) {
     publishDiscoveryFact('project', {
@@ -1618,16 +1664,12 @@ async function runAgentWizardBody(
   // climbs continuously across all three cold-start phases — the user sees
   // one continuous "we're working on it" timer instead of three separate
   // counters that each reset to 0s.
-  try {
-    getUI().setCurrentActivity({
-      kind: 'cold-start',
-      message: 'Starting the agent...',
-      startedAt: coldStartStartedAt,
-      estimatedDurationSec: 45,
-    });
-  } catch (err) {
-    logToFile('cold-start: setCurrentActivity (init) failed', err);
-  }
+  setColdStartActivitySafely({
+    message: 'Starting the agent...',
+    startedAt: coldStartStartedAt,
+    estimatedDurationSec: 45,
+    logTag: 'init',
+  });
 
   // Cold-start parallelization (perf): the package-manager scan, the AI-SDK
   // gateway probe, and the agent SDK MCP-server bootstrap are all independent
@@ -2122,11 +2164,7 @@ async function runAgentWizardBody(
   // (commit events, env upload, MCP install, etc.). Pairs with the
   // terminal `completed` / `error` emitted from wizardSuccessExit /
   // wizardAbort below.
-  try {
-    getUI().emitRunPhase?.('finalizing');
-  } catch (err) {
-    logToFile('[agent-runner] emitRunPhase(finalizing) threw', err);
-  }
+  emitRunPhaseSafely('finalizing');
 
   getUI().seedPostAgentSteps([
     {
