@@ -196,6 +196,29 @@ function extractDisplayName(
 }
 
 /**
+ * Best-effort directory listing. Returns an empty array for any I/O
+ * failure (missing dir, permission denied, transient FS error). Used by
+ * the index builder, where each `readdirSync` would otherwise need its
+ * own try/catch wrapper.
+ */
+function safeReaddir(dir: string): string[] {
+  try {
+    return fs.readdirSync(dir);
+  } catch {
+    return [];
+  }
+}
+
+/** Best-effort directory check. Returns false on any I/O error. */
+function isDirectorySafe(p: string): boolean {
+  try {
+    return fs.statSync(p).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Build (or return the memoized) bundled-skills index. Walks
  * `<skillsRoot>/<category>/<id>/SKILL.md` exactly once per process.
  *
@@ -214,41 +237,23 @@ function getBundledSkillsIndex(): BundledSkillsIndex {
   const categories: string[] = [];
 
   try {
-    for (const category of fs.readdirSync(skillsRoot)) {
+    for (const category of safeReaddir(skillsRoot)) {
       const categoryPath = path.join(skillsRoot, category);
-      let categoryStat;
-      try {
-        categoryStat = fs.statSync(categoryPath);
-      } catch {
-        continue;
-      }
-      if (!categoryStat.isDirectory()) continue;
+      if (!isDirectorySafe(categoryPath)) continue;
       categories.push(category);
 
-      let names: string[];
-      try {
-        names = fs.readdirSync(categoryPath);
-      } catch {
-        continue;
-      }
-
-      for (const name of names) {
-        const skillDir = path.join(categoryPath, name);
-        const skillMdPath = path.join(skillDir, 'SKILL.md');
-        let skillStat;
-        try {
-          skillStat = fs.statSync(skillDir);
-        } catch {
-          continue;
-        }
-        if (!skillStat.isDirectory()) continue;
-        if (!fs.existsSync(skillMdPath)) continue;
-
+      for (const name of safeReaddir(categoryPath)) {
         // First-write-wins: preserve the legacy behaviour where iteration
         // order in `installBundledSkill` etc. picks the first category to
         // contain the id. In practice ids are unique across categories,
         // so the guard is purely defensive.
         if (skills.has(name)) continue;
+
+        const skillDir = path.join(categoryPath, name);
+        if (!isDirectorySafe(skillDir)) continue;
+
+        const skillMdPath = path.join(skillDir, 'SKILL.md');
+        if (!fs.existsSync(skillMdPath)) continue;
 
         let body: string;
         try {
@@ -256,13 +261,12 @@ function getBundledSkillsIndex(): BundledSkillsIndex {
         } catch {
           continue;
         }
-        const displayName = extractDisplayName(body, name, category);
         skills.set(name, {
           category,
           skillDir,
           skillMdPath,
           body,
-          displayName,
+          displayName: extractDisplayName(body, name, category),
         });
       }
     }
@@ -279,6 +283,26 @@ function getBundledSkillsIndex(): BundledSkillsIndex {
     `getBundledSkillsIndex: indexed ${skills.size} skills across ${categories.length} categories`,
   );
   return cachedSkillsIndex;
+}
+
+/**
+ * Resolve a skill id to its index entry, applying the same safety checks
+ * every public helper performs:
+ *  1. The id passes {@link isSafeSkillId} (rejects traversal / malformed input).
+ *  2. The id is present in the in-memory index.
+ *  3. The category recorded on the entry is itself a safe basename
+ *     (defense-in-depth — categories come off disk, so a hostile filesystem
+ *     could in theory present a traversal-shaped category name).
+ *
+ * Returns null for any failure so callers can route to their own
+ * fast-fail / null-result path without duplicating the gate.
+ */
+function lookupSafeSkillEntry(skillId: string): SkillIndexEntry | null {
+  if (!isSafeSkillId(skillId)) return null;
+  const entry = getBundledSkillsIndex().skills.get(skillId);
+  if (!entry) return null;
+  if (!isSafeSkillId(entry.category)) return null;
+  return entry;
 }
 
 /**
@@ -381,15 +405,7 @@ export function bundledSkillExists(skillId: string): boolean {
   // The index is keyed by names that came off disk, so a malformed id
   // can never produce a hit, but we keep the explicit check so callers
   // get the same fast-fail semantics as before.
-  if (!isSafeSkillId(skillId)) return false;
-  const index = getBundledSkillsIndex();
-  const entry = index.skills.get(skillId);
-  if (!entry) return false;
-  // Defense in depth: ensure the category recorded in the index is also
-  // a safe basename, matching the original `isSafeSkillId(category)`
-  // gate inside the per-category loop.
-  if (!isSafeSkillId(entry.category)) return false;
-  return true;
+  return lookupSafeSkillEntry(skillId) !== null;
 }
 
 /**
@@ -401,12 +417,7 @@ export function bundledSkillExists(skillId: string): boolean {
  * `load_skill` requests it.
  */
 export function readBundledSkillBody(skillId: string): string | null {
-  if (!isSafeSkillId(skillId)) return null;
-  const index = getBundledSkillsIndex();
-  const entry = index.skills.get(skillId);
-  if (!entry) return null;
-  if (!isSafeSkillId(entry.category)) return null;
-  return entry.body;
+  return lookupSafeSkillEntry(skillId)?.body ?? null;
 }
 
 /**
@@ -422,12 +433,9 @@ export function readBundledSkillReference(
   skillId: string,
   refPath: string,
 ): string | null {
-  if (!isSafeSkillId(skillId)) return null;
   if (!SKILL_REFERENCE_REL_PATH.test(refPath)) return null;
-  const index = getBundledSkillsIndex();
-  const entry = index.skills.get(skillId);
+  const entry = lookupSafeSkillEntry(skillId);
   if (!entry) return null;
-  if (!isSafeSkillId(entry.category)) return null;
   // entry.skillDir is built from validated category + skillId during the
   // index walk. refPath is constrained by SKILL_REFERENCE_REL_PATH above.
   // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal
@@ -594,12 +602,14 @@ export function installBundledSkill(
   skillId: string,
   installDir: string,
 ): { success: boolean; error?: string } {
-  const dest = path.join(installDir, '.claude', 'skills', skillId);
-  const index = getBundledSkillsIndex();
-  const entry = index.skills.get(skillId);
+  const entry = lookupSafeSkillEntry(skillId);
   if (!entry) {
     return { success: false, error: `Bundled skill "${skillId}" not found` };
   }
+  // dest is built only after the skillId has been validated by
+  // lookupSafeSkillEntry — that prevents a hostile `..`-shaped id from
+  // landing the copy outside `<installDir>/.claude/skills/`.
+  const dest = path.join(installDir, '.claude', 'skills', skillId);
 
   try {
     fs.cpSync(entry.skillDir, dest, { recursive: true });
