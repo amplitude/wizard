@@ -20,7 +20,7 @@ import { useEffect, useSyncExternalStore } from 'react';
 import type { KeyHint } from '../components/KeyHintBar.js';
 
 /** Empty array literal reused so identity stays stable when no hints. */
-const EMPTY_HINTS: readonly KeyHint[] = Object.freeze([]);
+export const EMPTY_HINTS: readonly KeyHint[] = Object.freeze([]);
 
 const $screenHints = atom<readonly KeyHint[]>(EMPTY_HINTS);
 

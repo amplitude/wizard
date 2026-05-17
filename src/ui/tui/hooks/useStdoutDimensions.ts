@@ -18,12 +18,18 @@ export function useStdoutDimensions(): [number, number] {
   ]);
 
   useEffect(() => {
-    setSize([stdout.columns, stdout.rows]);
-
     const stream = stdout as NodeJS.WriteStream & {
       on?(event: string, fn: () => void): void;
     };
     if (typeof stream.on !== 'function') return;
+
+    // Re-read after subscribe in case the terminal resized between our
+    // lazy `useState` initializer and now. Only commit when the value
+    // actually changed — avoids an extra render on every mount.
+    setSize((prev) => {
+      const next: [number, number] = [stdout.columns, stdout.rows];
+      return prev[0] === next[0] && prev[1] === next[1] ? prev : next;
+    });
 
     const onResize = () => setSize([stdout.columns, stdout.rows]);
     stream.on('resize', onResize);
