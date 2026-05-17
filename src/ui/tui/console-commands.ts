@@ -67,10 +67,6 @@ export const COMMANDS: CommandDef[] = [
     cmd: '/diff',
     desc: 'Show files changed by the agent (or a single file with /diff <path>)',
   },
-  {
-    cmd: '/help',
-    desc: 'List available slash commands',
-  },
   { cmd: '/debug', desc: 'Print a diagnostic snapshot (safe to share)' },
   {
     cmd: '/diagnostics',
@@ -89,17 +85,26 @@ export const COMMANDS: CommandDef[] = [
  * command so the user knows exactly what they tried to do and why it
  * didn't happen, rather than reading a generic "command unavailable"
  * message that gives them no path forward.
+ *
+ * Each entry contributes a `<subject> is paused` line; the shared trailer
+ * ("Cancel the run with Ctrl+C…") is appended by `formatRunBlockMessage`
+ * so the four messages can't drift out of sync.
  */
-const RUN_ACTIVE_BLOCK_MESSAGES: Record<string, string> = {
-  '/region':
-    'Region change is paused while a setup run is active. Cancel the run with Ctrl+C or wait for it to finish, then try again.',
-  '/login':
-    'Login is paused while a setup run is active. Cancel the run with Ctrl+C or wait for it to finish, then try again.',
-  '/logout':
-    'Logout is paused while a setup run is active. Cancel the run with Ctrl+C or wait for it to finish, then try again.',
-  '/create-project':
-    'Creating a new project is paused while a setup run is active. Cancel the run with Ctrl+C or wait for it to finish, then try again.',
+const RUN_ACTIVE_BLOCK_SUBJECTS: Record<string, string> = {
+  '/region': 'Region change',
+  '/login': 'Login',
+  '/logout': 'Logout',
+  '/create-project': 'Creating a new project',
 };
+
+const RUN_ACTIVE_BLOCK_TRAILER =
+  'while a setup run is active. Cancel the run with Ctrl+C or wait for it to finish, then try again.';
+
+function formatRunBlockMessage(subject: string): string {
+  return `${subject} is paused ${RUN_ACTIVE_BLOCK_TRAILER}`;
+}
+
+const GENERIC_RUN_BLOCK_MESSAGE = formatRunBlockMessage('This action');
 
 /**
  * Returns true when the first whitespace-delimited token of `input` exactly
@@ -126,10 +131,29 @@ export function checkCommandBlockedByRun(
   if (runPhase !== RunPhase.Running) return null;
   const def = COMMANDS.find((c) => c.cmd === cmd);
   if (!def?.requiresIdle) return null;
-  return (
-    RUN_ACTIVE_BLOCK_MESSAGES[cmd] ??
-    'This action is paused while a setup run is active. Cancel the run with Ctrl+C or wait for it to finish, then try again.'
-  );
+  const subject = RUN_ACTIVE_BLOCK_SUBJECTS[cmd];
+  return subject ? formatRunBlockMessage(subject) : GENERIC_RUN_BLOCK_MESSAGE;
+}
+
+/**
+ * Generic slash-arg parser. Returns the trimmed argument string after
+ * `cmd` when `raw` starts with that command (case-insensitive), an empty
+ * string when the command was typed with no argument, and `undefined`
+ * when `raw` is some other command entirely.
+ *
+ * The individual `parseFooSlashInput` helpers below are thin wrappers so
+ * callers can keep using the named functions (and so this stays easy to
+ * mock per-command in tests if needed). Before consolidation each parser
+ * hand-rolled the same `^\s*\/cmd(?:\s+(.*))?\s*$` regex.
+ */
+export function parseSlashArg(cmd: string, raw: string): string | undefined {
+  // Escape regex metacharacters in `cmd` so callers can't accidentally
+  // inject a pattern by passing e.g. `/foo.bar`.
+  const escaped = cmd.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  const re = new RegExp(`^\\s*${escaped}(?:\\s+(.*))?\\s*$`, 'i');
+  const m = re.exec(raw);
+  if (!m) return undefined;
+  return (m[1] ?? '').trim();
 }
 
 /**
@@ -138,9 +162,7 @@ export function checkCommandBlockedByRun(
  * Returns `undefined` if the line isn't a `/create-project` command.
  */
 export function parseCreateProjectSlashInput(raw: string): string | undefined {
-  const m = /^\s*\/create-project(?:\s+(.*))?\s*$/i.exec(raw);
-  if (!m) return undefined;
-  return (m[1] ?? '').trim();
+  return parseSlashArg('/create-project', raw);
 }
 
 /** Returns the feedback text for the /whoami command. */
@@ -214,22 +236,14 @@ export function getWhoamiText(
 }
 
 /**
- * Build the human-readable text for the `/diagnostics` slash command.
- *
- * Shows where every wizard-managed file lives for the current project so a
- * user filing a bug report knows exactly which log to attach. Pure (no I/O)
- * so it can be unit-tested without filesystem mocks.
- */
-export function getDiagnosticsText(installDir: string): string {
-  return getDiagnosticsLines(installDir).join('\n');
-}
-
-/**
- * Multi-line version of {@link getDiagnosticsText} for the in-TUI feedback
+ * Multi-line version of the `/diagnostics` output, for the in-TUI feedback
  * panel. Each entry renders as its own row so long absolute paths
  * (`/Users/…/.amplitude/wizard/runs/<sha>/log.txt`) are never hard-truncated
  * by a single overflow-hidden Text element — the original bug behind
  * "log file: /Users/…" in the screenshot.
+ *
+ * {@link getDiagnosticsText} is the joined-string flavour for callers that
+ * need a single blob (e.g. writing the bug-report attachment to disk).
  */
 export function getDiagnosticsLines(installDir: string): string[] {
   return [
@@ -256,14 +270,32 @@ export function getDiagnosticsLines(installDir: string): string[] {
 }
 
 /**
+ * Build the human-readable text for the `/diagnostics` slash command.
+ *
+ * Shows where every wizard-managed file lives for the current project so a
+ * user filing a bug report knows exactly which log to attach. Pure (no I/O)
+ * so it can be unit-tested without filesystem mocks.
+ *
+ * Defined in terms of {@link getDiagnosticsLines} so the two stay in sync —
+ * an earlier hand-rolled version maintained its own list and silently drifted
+ * (Bugbot 3221826573 caught the duplicated walk).
+ */
+export function getDiagnosticsText(installDir: string): string {
+  return getDiagnosticsLines(installDir).join('\n');
+}
+
+/**
  * Parses `/feedback <message>` from a slash command line.
  * Returns `undefined` if the line is not a feedback command or the message is empty.
+ *
+ * Unlike most slash parsers, `/feedback` collapses the "command with no
+ * arg" case to `undefined` (treated as a usage error in the dispatcher)
+ * rather than the empty string.
  */
 export function parseFeedbackSlashInput(raw: string): string | undefined {
-  const m = /^\s*\/feedback(?:\s+(.*))?\s*$/i.exec(raw);
-  if (!m) return undefined;
-  const body = m[1]?.trim();
-  return body || undefined;
+  const arg = parseSlashArg('/feedback', raw);
+  if (arg === undefined) return undefined;
+  return arg || undefined;
 }
 
 /**
@@ -273,9 +305,7 @@ export function parseFeedbackSlashInput(raw: string): string | undefined {
  *   - trimmed path string when a path argument was provided
  */
 export function parseDiffSlashInput(raw: string): string | undefined {
-  const m = /^\s*\/diff(?:\s+(.*))?\s*$/i.exec(raw);
-  if (!m) return undefined;
-  return (m[1] ?? '').trim();
+  return parseSlashArg('/diff', raw);
 }
 
 /**
