@@ -1,14 +1,10 @@
 {
   "extends": "./tsconfig.json",
   "include": [
-    "__tests__",
     "__mocks__/**/*",
-    "index.ts",
     "bin.ts",
     "vitest.config*.ts",
     "src/**/*",
-    "spec/**/*",
-    "test/**/*",
     "e2e-tests/**/*",
     "features/**/*",
     "types/**/*",

@@ -16,7 +16,6 @@
   },
   "include": [
     "__mocks__/**/*",
-    "index.ts",
     "bin.ts",
     "src/**/*",
     "types/**/*"
