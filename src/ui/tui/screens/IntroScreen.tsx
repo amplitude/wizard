@@ -63,12 +63,14 @@ const INTRO_HINTS: readonly KeyHint[] = Object.freeze([
  * effect + onSelect path would do two separate `then`s for the same
  * module.
  */
-let registryPromise:
-  | Promise<typeof import('../../../lib/registry.js')>
-  | null = null;
+let registryPromise: Promise<typeof import('../../../lib/registry.js')> | null =
+  null;
 function loadRegistry(): Promise<typeof import('../../../lib/registry.js')> {
   if (!registryPromise) {
-    registryPromise = import('../../../lib/registry.js');
+    registryPromise = import('../../../lib/registry.js').catch((err) => {
+      registryPromise = null;
+      throw err;
+    });
   }
   return registryPromise;
 }
