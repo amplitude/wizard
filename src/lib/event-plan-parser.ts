@@ -19,7 +19,7 @@
 import * as fs from 'node:fs';
 import * as path from 'node:path';
 import { z } from 'zod';
-import { getEventsFile } from '../utils/storage-paths.js';
+import { getEventsFile, pickFreshestExisting } from '../utils/storage-paths.js';
 import { logToFile } from '../utils/debug.js';
 
 // The agent doesn't always use the same field casing in .amplitude-events.json
@@ -112,33 +112,14 @@ export function parseEventPlanContent(
 export function readLocalEventPlan(
   installDir: string,
 ): Array<{ name: string; description: string }> {
-  const candidates = [
+  // Canonical first, legacy fallback. `pickFreshestExisting` returns the
+  // file with the most recent mtime so a stale canonical from a prior
+  // run can't shadow a fresh legacy write — the same selection
+  // `agent-interface.ts` uses for its dual-path watcher.
+  const winner = pickFreshestExisting([
     getEventsFile(installDir),
     path.join(installDir, '.amplitude-events.json'),
-  ];
-
-  let winner: string | null = null;
-  let winnerMtime = -Infinity;
-  for (const candidate of candidates) {
-    try {
-      const stat = fs.statSync(candidate);
-      const mtime = stat.mtimeMs;
-      if (mtime > winnerMtime) {
-        winner = candidate;
-        winnerMtime = mtime;
-      }
-    } catch (e) {
-      const err = e as NodeJS.ErrnoException;
-      if (err.code !== 'ENOENT') {
-        logToFile(
-          `[readLocalEventPlan] stat ${candidate} failed: ${
-            err.message ?? err
-          }`,
-        );
-      }
-    }
-  }
-
+  ]);
   if (!winner) return [];
 
   let raw: string;

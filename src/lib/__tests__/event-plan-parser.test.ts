@@ -185,4 +185,37 @@ describe('readLocalEventPlan', () => {
       { name: 'Modal Opened', description: 'opened the modal' },
     ]);
   });
+
+  // Byte-shape regression test. The Event Verification screen and the
+  // outer agent's plan emission both rely on the normalized
+  // `{ name, description }` shape — any drift here would silently
+  // change event names users see in their dashboards. Snapshot pins
+  // the normalization output across the full variant matrix.
+  it('normalizes wild agent-emitted shapes to a stable {name,description} array (snapshot)', () => {
+    const dir = path.join(installDir, '.amplitude');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.writeFileSync(
+      path.join(dir, 'events.json'),
+      JSON.stringify({
+        events: [
+          {
+            event_name: 'Sign In',
+            eventDescriptionAndReasoning: 'User signed in',
+          },
+          { eventName: 'Modal Opened', eventDescription: 'opened the modal' },
+          {
+            name: 'Page Viewed',
+            description: 'short',
+            eventDescriptionAndReasoning: 'verbose fallback',
+          },
+        ],
+      }),
+    );
+
+    expect(readLocalEventPlan(installDir)).toEqual([
+      { name: 'Sign In', description: 'User signed in' },
+      { name: 'Modal Opened', description: 'opened the modal' },
+      { name: 'Page Viewed', description: 'short' },
+    ]);
+  });
 });

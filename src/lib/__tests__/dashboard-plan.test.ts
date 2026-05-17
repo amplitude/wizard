@@ -228,6 +228,43 @@ describe('writeDashboardPlan', () => {
     expect(entries).toEqual(['dashboard-plan.json']);
   });
 
+  // Byte-shape regression test. The plan modules feed user-visible event
+  // names + chart titles into Amplitude, so any drift in field ordering,
+  // field naming, or null-vs-omitted handling could mis-track events
+  // downstream. This snapshot pins the persisted shape against an input
+  // we control; planId + createdAt are stripped so the snapshot is stable.
+  it('persists a stable, byte-identical on-disk shape (snapshot)', () => {
+    writeDashboardPlan(tmpDir, validInput());
+    const raw = fs.readFileSync(getDashboardPlanFile(tmpDir), 'utf8');
+    const parsed = JSON.parse(raw);
+    delete parsed.planId;
+    delete parsed.createdAt;
+    expect(parsed).toEqual({
+      version: 1,
+      orgId: '12345',
+      projectId: '67890',
+      events: [
+        { name: 'User Signed Up' },
+        { name: 'Product Added To Cart', properties: ['product id', 'price'] },
+      ],
+      charts: [
+        {
+          title: 'Signup Funnel',
+          eventName: 'User Signed Up',
+          chartType: 'funnel',
+        },
+        {
+          title: 'Daily Cart Adds',
+          eventName: 'Product Added To Cart',
+          chartType: 'line',
+          grouping: 'product id',
+          metadata: { window: '7d' },
+        },
+      ],
+      dashboard: { title: 'Onboarding', layout: 'grid' },
+    });
+  });
+
   it('a prior good plan survives a subsequent failed write (atomic-rename semantics)', () => {
     const first = writeDashboardPlan(tmpDir, validInput());
     expect(first).not.toBeNull();
