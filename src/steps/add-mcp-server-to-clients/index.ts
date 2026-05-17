@@ -10,11 +10,13 @@ import { ClaudeCodeMCPClient } from './clients/claude-code';
 import { VisualStudioCodeClient } from './clients/visual-studio-code';
 import { ZedClient } from './clients/zed';
 import { CodexMCPClient } from './clients/codex';
-import { ClineMCPClient } from './clients/cline';
-import { WindsurfMCPClient } from './clients/windsurf';
-import { GeminiCLIMCPClient } from './clients/gemini-cli';
-import { AmpMCPClient } from './clients/amp';
-import { OpenCodeMCPClient } from './clients/opencode';
+import {
+  AmpMCPClient,
+  ClineMCPClient,
+  GeminiCLIMCPClient,
+  OpenCodeMCPClient,
+  WindsurfMCPClient,
+} from './clients/deprecated';
 import { ClaudeCodePluginClient } from './clients/claude-code-plugin';
 import { ALL_FEATURE_VALUES } from './defaults';
 import { debug } from '../../utils/debug';

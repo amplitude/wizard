@@ -16,37 +16,16 @@
 // stock `spawn`/`spawnSync` do not consult PATHEXT and ENOENT on the
 // bare name. Route through the cross-platform wrapper.
 import { spawn, spawnSync } from '../../../utils/cross-platform-spawn.js';
-import * as fs from 'fs';
-import * as os from 'os';
-import * as path from 'path';
 import { MCPClient } from '../MCPClient';
 import { analytics } from '../../../utils/analytics';
 import { debug } from '../../../utils/debug';
+import { findClaudeBinary } from './_claude-binary';
 import {
   CLAUDE_PLUGIN_ID,
   CLAUDE_PLUGIN_MARKETPLACE_NAME,
 } from '../../../lib/constants';
 
 const PLUGIN_REF = `${CLAUDE_PLUGIN_ID}@${CLAUDE_PLUGIN_MARKETPLACE_NAME}`;
-
-function findClaudeBinary(): string | null {
-  const possiblePaths = [
-    path.join(os.homedir(), '.local', 'bin', 'claude'),
-    path.join(os.homedir(), '.claude', 'local', 'claude'),
-    '/usr/local/bin/claude',
-    '/opt/homebrew/bin/claude',
-  ];
-  for (const p of possiblePaths) {
-    if (fs.existsSync(p)) return p;
-  }
-  const pathDirs = (process.env.PATH ?? '').split(path.delimiter);
-  for (const dir of pathDirs) {
-    if (!dir) continue;
-    const candidate = path.join(dir, 'claude');
-    if (fs.existsSync(candidate)) return candidate;
-  }
-  return null;
-}
 
 /** Async wrapper around spawn that captures stdout/stderr. */
 function runCli(
