@@ -21,9 +21,9 @@ import {
   TYPEWRITER_INTERVAL_MS,
 } from '../TypewriterFilename.js';
 
-// eslint-disable-next-line no-control-regex
-const ANSI_CSI_REGEX = /\x1b\[[0-9;]*[A-Za-z]/g;
-const strip = (s: string | undefined) => (s ?? '').replace(ANSI_CSI_REGEX, '');
+import { stripAnsi } from '../../__tests__/helpers/strip-ansi.js';
+
+const strip = (s: string | undefined) => stripAnsi(s ?? '');
 
 describe('TypewriterFilename', () => {
   beforeEach(() => {

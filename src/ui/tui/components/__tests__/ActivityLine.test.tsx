@@ -14,15 +14,13 @@ import { render } from 'ink-testing-library';
 import { ActivityLine } from '../ActivityLine.js';
 import { WizardStore } from '../../store.js';
 import type { WizardActivity } from '../../store.js';
-
-// eslint-disable-next-line no-control-regex
-const ANSI_CSI = /\x1b\[[0-9;]*[A-Za-z]/g;
+import { stripAnsi } from '../../__tests__/helpers/strip-ansi.js';
 
 function frameOf(store: WizardStore, now: () => number = () => 0): string {
   const { lastFrame, unmount } = render(
     <ActivityLine store={store} now={now} />,
   );
-  const out = (lastFrame() ?? '').replace(ANSI_CSI, '');
+  const out = stripAnsi(lastFrame() ?? '');
   unmount();
   return out;
 }

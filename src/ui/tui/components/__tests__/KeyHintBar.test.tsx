@@ -12,15 +12,7 @@ import React from 'react';
 import { describe, it, expect, vi } from 'vitest';
 import { render } from 'ink-testing-library';
 import { KeyHintBar } from '../KeyHintBar.js';
-
-// eslint-disable-next-line no-control-regex
-const ANSI = /\x1b\[[0-9;]*[A-Za-z]/g;
-const frameOf = (node: React.ReactElement): string => {
-  const { lastFrame, unmount } = render(node);
-  const out = (lastFrame() ?? '').replace(ANSI, '');
-  unmount();
-  return out;
-};
+import { frameOf } from '../../__tests__/helpers/render-frame.js';
 
 describe('KeyHintBar', () => {
   it('renders the default Commands + Ask hints when no per-screen hints are given', () => {

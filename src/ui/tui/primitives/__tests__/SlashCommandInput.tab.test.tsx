@@ -31,15 +31,10 @@ const commands = COMMANDS.map((c) => ({ cmd: c.cmd, desc: c.desc }));
 const TAB = '\t';
 const DOWN = '[B';
 
-// eslint-disable-next-line no-control-regex
-const ANSI_REGEX = /\x1b\[[0-9;]*[A-Za-z]/g;
-// eslint-disable-next-line no-control-regex
-const ANSI_OSC_REGEX = /\x1b\][^\x07]*\x07/g;
+import { stripAnsi } from '../../__tests__/helpers/strip-ansi.js';
 
 const sanitize = (frame: string | undefined): string =>
-  (frame ?? '')
-    .replace(ANSI_REGEX, '')
-    .replace(ANSI_OSC_REGEX, '')
+  stripAnsi(frame ?? '')
     .split('\n')
     .map((line) => line.replace(/[ \t]+$/, ''))
     .join('\n');

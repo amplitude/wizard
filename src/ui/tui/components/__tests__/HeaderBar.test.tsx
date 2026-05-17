@@ -9,19 +9,8 @@
 
 import React from 'react';
 import { describe, it, expect } from 'vitest';
-import { render } from 'ink-testing-library';
 import { HeaderBar } from '../HeaderBar.js';
-
-// eslint-disable-next-line no-control-regex
-const ANSI_CSI = /\x1b\[[0-9;]*[A-Za-z]/g;
-// eslint-disable-next-line no-control-regex
-const ANSI_OSC = /\x1b\][^\x07]*\x07/g;
-const frameOf = (node: React.ReactElement): string => {
-  const { lastFrame, unmount } = render(node);
-  const out = (lastFrame() ?? '').replace(ANSI_CSI, '').replace(ANSI_OSC, '');
-  unmount();
-  return out;
-};
+import { frameOf } from '../../__tests__/helpers/render-frame.js';
 
 describe('HeaderBar', () => {
   it('renders the wizard title with no breadcrumb when no context is provided', () => {

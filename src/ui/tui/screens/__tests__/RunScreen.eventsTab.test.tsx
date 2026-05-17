@@ -42,12 +42,7 @@ import {
   resetFileChangeLedger,
 } from '../../../../lib/file-change-ledger.js';
 
-// eslint-disable-next-line no-control-regex
-const ANSI_CSI_REGEX = /\x1b\[[0-9;]*[A-Za-z]/g;
-// eslint-disable-next-line no-control-regex
-const ANSI_OSC_REGEX = /\x1b\][^\x07]*\x07/g;
-const stripAnsi = (s: string): string =>
-  s.replace(ANSI_CSI_REGEX, '').replace(ANSI_OSC_REGEX, '');
+import { stripAnsi } from '../../__tests__/helpers/strip-ansi.js';
 
 function seedLedgerWith(
   installDir: string,

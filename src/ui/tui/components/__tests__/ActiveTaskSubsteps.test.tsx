@@ -20,17 +20,8 @@ import {
 } from '../ActiveTaskSubsteps.js';
 import { WizardStore } from '../../store.js';
 import type { ToolActivity } from '../../store.js';
-
-// eslint-disable-next-line no-control-regex
-const ANSI_CSI = /\x1b\[[0-9;]*[A-Za-z]/g;
-const stripAnsi = (s: string) => s.replace(ANSI_CSI, '');
-
-function frameOf(node: React.ReactElement): string {
-  const { lastFrame, unmount } = render(node);
-  const out = stripAnsi(lastFrame() ?? '');
-  unmount();
-  return out;
-}
+import { stripAnsi } from '../../__tests__/helpers/strip-ansi.js';
+import { frameOf } from '../../__tests__/helpers/render-frame.js';
 
 function activity(label: string, status: ToolActivity['status']): ToolActivity {
   return { label, startedAt: Date.now(), status };
