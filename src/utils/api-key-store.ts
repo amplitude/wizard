@@ -66,6 +66,18 @@ function tightenEnvMode(envPath: string): void {
 
 const ENV_KEY_NAME = 'AMPLITUDE_API_KEY';
 
+/**
+ * Standard write options for `.env.local`. Always UTF-8 + `0o600` on creation;
+ * a follow-up `tightenEnvMode` still chmods existing files because the
+ * `mode` option only applies to the initial inode (see `ENV_FILE_MODE`).
+ */
+const ENV_WRITE_OPTS = { encoding: 'utf8', mode: ENV_FILE_MODE } as const;
+
+/** Regex matching the AMPLITUDE_API_KEY line in `.env.local`. */
+const ENV_KEY_LINE_RE = new RegExp(`^${ENV_KEY_NAME}=(.+)$`, 'm');
+const ENV_KEY_REPLACE_RE = new RegExp(`^${ENV_KEY_NAME}=.*$`, 'm');
+const ENV_KEY_STRIP_RE = new RegExp(`^${ENV_KEY_NAME}=.*\\r?\\n?`, 'm');
+
 // ── Test-only helpers ─────────────────────────────────────────────────
 //
 // These were used by the old keychain implementation to fake out binary
@@ -93,7 +105,7 @@ function envRead(installDir: string): string | null {
   const envPath = join(installDir, '.env.local');
   if (!existsSync(envPath)) return null;
   const contents = readFileSync(envPath, 'utf8');
-  const match = contents.match(/^AMPLITUDE_API_KEY=(.+)$/m);
+  const match = contents.match(ENV_KEY_LINE_RE);
   if (!match) return null;
   // Strip surrounding single/double quotes — dotenv-style files commonly
   // wrap values in quotes (`AMPLITUDE_API_KEY="abc"`), and submitting the
@@ -103,6 +115,7 @@ function envRead(installDir: string): string | null {
 
 function envWrite(installDir: string, key: string): void {
   const envPath = join(installDir, '.env.local');
+  const keyLine = `${ENV_KEY_NAME}=${key}`;
 
   if (existsSync(envPath)) {
     const contents = readFileSync(envPath, 'utf8');
@@ -110,22 +123,14 @@ function envWrite(installDir: string, key: string): void {
       // Replace existing entry. `mode` here only matters on the first
       // write; existing files keep their pre-existing mode unless we
       // chmod afterwards (which we do, below).
-      writeFileSync(
-        envPath,
-        contents.replace(/^AMPLITUDE_API_KEY=.*$/m, `${ENV_KEY_NAME}=${key}`),
-        { encoding: 'utf8', mode: ENV_FILE_MODE },
-      );
-    } else {
-      appendFileSync(envPath, `\n${ENV_KEY_NAME}=${key}\n`, {
-        encoding: 'utf8',
-        mode: ENV_FILE_MODE,
+      writeFileSync(envPath, contents.replace(ENV_KEY_REPLACE_RE, keyLine), {
+        ...ENV_WRITE_OPTS,
       });
+    } else {
+      appendFileSync(envPath, `\n${keyLine}\n`, { ...ENV_WRITE_OPTS });
     }
   } else {
-    writeFileSync(envPath, `${ENV_KEY_NAME}=${key}\n`, {
-      encoding: 'utf8',
-      mode: ENV_FILE_MODE,
-    });
+    writeFileSync(envPath, `${keyLine}\n`, { ...ENV_WRITE_OPTS });
   }
 
   // Always re-assert 0o600 — see ENV_FILE_MODE comment for why this is
@@ -144,9 +149,9 @@ function envClear(installDir: string): void {
   // Strip the key from .env.local without deleting the file — users may
   // have other env vars there.
   const stripped = contents
-    .replace(new RegExp(`^${ENV_KEY_NAME}=.*\\r?\\n?`, 'm'), '')
+    .replace(ENV_KEY_STRIP_RE, '')
     .replace(/\n{3,}/g, '\n\n');
-  writeFileSync(envPath, stripped, { encoding: 'utf8', mode: ENV_FILE_MODE });
+  writeFileSync(envPath, stripped, { ...ENV_WRITE_OPTS });
   tightenEnvMode(envPath);
 }
 

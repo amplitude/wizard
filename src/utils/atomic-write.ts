@@ -59,14 +59,14 @@ export function atomicWriteJSON(
       ? { mode: modeOrOptions }
       : modeOrOptions ?? {};
   const tmp = `${filePath}.${process.pid}.tmp`;
+  const payload = JSON.stringify(data, null, 2) + '\n';
+  // Build write options conditionally so callers without a `mode` still hit
+  // the OS umask default (matches the pre-options behaviour relied on by
+  // callers that don't pass a mode).
+  const writeOpts =
+    options.mode !== undefined ? { mode: options.mode } : undefined;
   try {
-    if (options.mode !== undefined) {
-      writeFileSync(tmp, JSON.stringify(data, null, 2) + '\n', {
-        mode: options.mode,
-      });
-    } else {
-      writeFileSync(tmp, JSON.stringify(data, null, 2) + '\n');
-    }
+    writeFileSync(tmp, payload, writeOpts);
     renameSync(tmp, filePath);
     if (options.mode !== undefined) {
       // Re-assert the mode on the destination — covers the case where the
