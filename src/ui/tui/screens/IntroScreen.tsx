@@ -48,6 +48,31 @@ const INTRO_HINTS: readonly KeyHint[] = Object.freeze([
   { key: 'Enter', label: 'Select' },
 ]);
 
+/**
+ * Lazy-loaded framework registry.
+ *
+ * Kept as a dynamic import (rather than a top-level static import) so that
+ * unit tests of IntroScreen can render the first frame without dragging the
+ * entire framework-config graph into the module load. Same testability
+ * rationale as `framework-detection.ts`.
+ *
+ * Memoized at module scope so the three callsites below (auto-Generic
+ * fallback effect, FrameworkPicker effect, FrameworkPicker onSelect) share
+ * a single in-flight promise and a single resolved module. Without this
+ * cache each action would re-enter the loader microtask, and the picker
+ * effect + onSelect path would do two separate `then`s for the same
+ * module.
+ */
+let registryPromise:
+  | Promise<typeof import('../../../lib/registry.js')>
+  | null = null;
+function loadRegistry(): Promise<typeof import('../../../lib/registry.js')> {
+  if (!registryPromise) {
+    registryPromise = import('../../../lib/registry.js');
+  }
+  return registryPromise;
+}
+
 interface IntroScreenProps {
   store: WizardStore;
 }
@@ -160,7 +185,7 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
   // fallback, not a detection. The render derives its label from the config.
   useEffect(() => {
     if (needsFrameworkPick && !session.menu && !showResume) {
-      void import('../../../lib/registry.js').then(({ FRAMEWORK_REGISTRY }) => {
+      void loadRegistry().then(({ FRAMEWORK_REGISTRY }) => {
         const genericConfig = FRAMEWORK_REGISTRY[Integration.generic];
         store.setFrameworkConfig(Integration.generic, genericConfig);
         logToFile('[intro] no framework matched — falling back to Generic');
@@ -908,7 +933,7 @@ const FrameworkPicker = ({
   });
 
   useEffect(() => {
-    void import('../../../lib/registry.js').then(({ FRAMEWORK_REGISTRY }) => {
+    void loadRegistry().then(({ FRAMEWORK_REGISTRY }) => {
       setOptions(
         PICKER_ORDER.map((integration) => {
           const { glyph, name } = FRAMEWORK_REGISTRY[integration].metadata;
@@ -931,14 +956,12 @@ const FrameworkPicker = ({
       onSelect={(value) => {
         const integration = Array.isArray(value) ? value[0] : value;
         analytics.wizardCapture('framework manually selected', { integration });
-        void import('../../../lib/registry.js').then(
-          ({ FRAMEWORK_REGISTRY }) => {
-            const config = FRAMEWORK_REGISTRY[integration];
-            store.setFrameworkConfig(integration, config);
-            store.setDetectedFramework(config.metadata.name);
-            onComplete?.(true);
-          },
-        );
+        void loadRegistry().then(({ FRAMEWORK_REGISTRY }) => {
+          const config = FRAMEWORK_REGISTRY[integration];
+          store.setFrameworkConfig(integration, config);
+          store.setDetectedFramework(config.metadata.name);
+          onComplete?.(true);
+        });
       }}
     />
   );
