@@ -2329,15 +2329,14 @@ export function buildIntegrationPrompt(
   skipAmplitudeMcp: boolean,
   preStagedIntegrationSkillId: string | null,
 ): string {
+  // Framework can fully replace the prompt (e.g. generic fallback).
   if (config.prompts.buildPrompt) {
-    return config.prompts.buildPrompt({
-      ...context,
-      frameworkContext,
-    });
+    return config.prompts.buildPrompt({ ...context, frameworkContext });
   }
 
-  // No valid auth token → MCP will be skipped. Fall back to the generic direct prompt
-  // so the agent has actionable instructions instead of getting stuck on ListMcpResourcesTool.
+  // No valid auth token → MCP will be skipped. Fall back to the generic
+  // direct prompt so the agent has actionable instructions instead of
+  // getting stuck on ListMcpResourcesTool.
   if (skipAmplitudeMcp) {
     const genericBuildPrompt = GENERIC_AGENT_CONFIG.prompts.buildPrompt;
     if (!genericBuildPrompt) {
@@ -2346,6 +2345,7 @@ export function buildIntegrationPrompt(
     return genericBuildPrompt({ ...context, frameworkContext });
   }
 
+  const frameworkName = config.metadata.name;
   // Region-aware app URL — the dashboard / chart links the agent surfaces in
   // the setup report MUST use the user's data-center hostname. Without this,
   // EU users got dashboard URLs at `app.amplitude.com/...` (US) because the
@@ -2356,56 +2356,27 @@ export function buildIntegrationPrompt(
       ? 'https://app.eu.amplitude.com'
       : 'https://app.amplitude.com';
 
-  // The wizard's appId is 0 when the env picker couldn't match an app to the
-  // chosen API key (manual API-key entry, or backend_fetch returning a key
-  // that's not in the picker's environments). When that happens, the agent
-  // should look up the canonical project for the API key via the Amplitude
-  // MCP's `get_context` and use ITS `defaultAppId` — never browse the
-  // `appsByCategory` list and pick a different project. Pre-PR the agent
-  // routinely picked the wizard team's own dev project (802868) and created
-  // dashboards there; the user's setup report linked to a project they
-  // don't own.
-  // Note: this run no longer creates charts or dashboards — DEFER_DASHBOARD_PLAN
-  // PR 4 moved that work to the deferred `amplitude-wizard dashboard` command.
-  // The appId guidance is still load-bearing for the wizard's `record_dashboard_plan`
-  // hand-off (which writes the orgId/projectId pair into the persisted plan) and
-  // for any read-only Amplitude MCP probes the integration skill might do.
-  const appIdGuidance =
-    context.appId === 0
-      ? `- Amplitude App ID: not set by the wizard (0). If you need the appId for any read-only Amplitude MCP probe or for the deferred-dashboard hand-off, get it from \`get_context().defaultAppId\` — that's the project tied to the API key above. NEVER pick a different appId from \`appsByCategory\` or any other listing in the get_context response. If \`defaultAppId\` is missing or null, halt with report_status kind="error", code="RESOURCE_MISSING", detail="Could not resolve project from API key" — do not guess. (Note: do not create charts or dashboards in this run — those are owned by the deferred \`amplitude-wizard dashboard\` command.)`
-      : `- Amplitude App ID (shown in Amplitude UI as "Project ID"): ${context.appId}. Use this appId for any deferred-dashboard plan hand-off you persist. Do NOT call \`get_context\` to pick a different one — the wizard already resolved it and the API key above belongs to this project. (Note: do not create charts or dashboards in this run — those are owned by the deferred \`amplitude-wizard dashboard\` command.)`;
+  const appIdGuidance = buildAppIdGuidance(context.appId);
+  const skillsIntro = buildSkillsIntro(preStagedIntegrationSkillId);
+  const integrationSkillStep = buildIntegrationSkillStep(
+    preStagedIntegrationSkillId,
+    frameworkName,
+  );
 
-  const additionalLines = config.prompts.getAdditionalContextLines
-    ? config.prompts.getAdditionalContextLines(frameworkContext)
-    : [];
-
+  const additionalLines =
+    config.prompts.getAdditionalContextLines?.(frameworkContext) ?? [];
   const additionalContext =
     additionalLines.length > 0
       ? '\n' + additionalLines.map((line) => `- ${line}`).join('\n')
       : '';
 
-  // Integration-skill block: single pinned id from staging + resolver, or halt.
-  const integrationSkillStep = preStagedIntegrationSkillId
-    ? `STEP 1: Load \`.claude/skills/${preStagedIntegrationSkillId}/SKILL.md\` via the Skill tool. The wizard already resolved a single integration skill id (\`${preStagedIntegrationSkillId}\`) for this ${config.metadata.name} run (bundled pre-stage when possible, otherwise a deterministic on-disk resolver — not Glob-based disambiguation). Do NOT call load_skill_menu or install_skill (they are not available on the wizard-tools server).`
-    : `STEP 1: Integration workflow — wizard-tools \`load_skill_menu\` / \`install_skill\` are **not registered** in this CLI; do not call them (they will fail or be absent from the tool list).
-
-   The taxonomy and instrumentation skills are already under \`.claude/skills/\` for this run, but the runner could not resolve any \`integration-*\` skill id for ${config.metadata.name} (nothing bundled/pre-staged and no matching \`.claude/skills/integration-*/SKILL.md\` on disk).
-
-   Call \`report_status\` with kind="error", code="RESOURCE_MISSING", detail="No integration skill could be resolved for this framework." and halt.`;
-
-  const skillsIntro = preStagedIntegrationSkillId
-    ? `The wizard has pre-staged supporting skills into \`.claude/skills/\` and pinned one integration skill id for this run — load them with the Skill tool. Do NOT call load_skill_menu or install_skill (disabled).`
-    : `The wizard has pre-staged taxonomy and instrumentation skills into \`.claude/skills/\` (load with the Skill tool). STEP 1 explains the integration workflow — do NOT call load_skill_menu or install_skill (disabled).`;
-
-  return `You are setting up Amplitude analytics in this ${
-    config.metadata.name
-  } project. ${skillsIntro}
+  return `You are setting up Amplitude analytics in this ${frameworkName} project. ${skillsIntro}
 
 Early in the run (before env wiring and again before confirm_event_plan), load \`.claude/skills/wizard-prompt-supplement/SKILL.md\` via the Skill tool and \`Read\` the reference files it lists for your phase — they hold long-form contracts intentionally kept out of the static commandments (API keys, event-plan shape, setup report, lint scoping rationale, and browser SDK init tables when applicable).
 
 Project context:
 ${appIdGuidance}
-- Framework: ${config.metadata.name} ${context.frameworkVersion}
+- Framework: ${frameworkName} ${context.frameworkVersion}
 - TypeScript: ${context.typescript ? 'Yes' : 'No'}
 - Amplitude public token: ${context.projectApiKey}
 - Amplitude Host: ${context.host}
@@ -2426,6 +2397,52 @@ STEP 3–4 (env + instrumentation): After STEP 1–2, execute the phased work th
 Chart + dashboard creation are NOT part of this run — they happen in a separate \`amplitude-wizard dashboard\` command after event ingestion catches up. Do not load \`amplitude-chart-dashboard-plan\`, do not call \`record_dashboard\` / \`create_chart\` / \`create_dashboard\` / \`query_dataset\` / \`save_chart_edits\` / any Amplitude MCP chart or dashboard tool. If your taxonomy work surfaces a clear chart strategy, you MAY (optionally) call the wizard-tools \`record_dashboard_plan\` tool ONCE at the very end of the run to hand the plan off to the deferred command — but do not block instrumentation on it. STOP after the setup report is written; \`wire\` is the terminal step.
 
 `;
+}
+
+/**
+ * "Project context" appId line. The wizard's appId is 0 when the env picker
+ * couldn't match an app to the chosen API key (manual entry, or
+ * `backend_fetch` returning a key outside the picker's environments). In
+ * that case the agent must look up the canonical project via the Amplitude
+ * MCP's `get_context().defaultAppId` — never browse `appsByCategory` and
+ * pick a different project. Pre-PR the agent routinely picked the wizard
+ * team's own dev project (802868) and created dashboards there; the user's
+ * setup report linked to a project they didn't own.
+ *
+ * Note: this run no longer creates charts or dashboards — DEFER_DASHBOARD_PLAN
+ * PR 4 moved that work to the deferred `amplitude-wizard dashboard` command.
+ * The appId guidance is still load-bearing for the `record_dashboard_plan`
+ * hand-off (orgId/projectId pair written into the persisted plan) and for
+ * any read-only Amplitude MCP probes the integration skill might do.
+ */
+function buildAppIdGuidance(appId: number): string {
+  return appId === 0
+    ? `- Amplitude App ID: not set by the wizard (0). If you need the appId for any read-only Amplitude MCP probe or for the deferred-dashboard hand-off, get it from \`get_context().defaultAppId\` — that's the project tied to the API key above. NEVER pick a different appId from \`appsByCategory\` or any other listing in the get_context response. If \`defaultAppId\` is missing or null, halt with report_status kind="error", code="RESOURCE_MISSING", detail="Could not resolve project from API key" — do not guess. (Note: do not create charts or dashboards in this run — those are owned by the deferred \`amplitude-wizard dashboard\` command.)`
+    : `- Amplitude App ID (shown in Amplitude UI as "Project ID"): ${appId}. Use this appId for any deferred-dashboard plan hand-off you persist. Do NOT call \`get_context\` to pick a different one — the wizard already resolved it and the API key above belongs to this project. (Note: do not create charts or dashboards in this run — those are owned by the deferred \`amplitude-wizard dashboard\` command.)`;
+}
+
+/** Opening-paragraph reference to the pre-staged skills. */
+function buildSkillsIntro(preStagedIntegrationSkillId: string | null): string {
+  return preStagedIntegrationSkillId
+    ? `The wizard has pre-staged supporting skills into \`.claude/skills/\` and pinned one integration skill id for this run — load them with the Skill tool. Do NOT call load_skill_menu or install_skill (disabled).`
+    : `The wizard has pre-staged taxonomy and instrumentation skills into \`.claude/skills/\` (load with the Skill tool). STEP 1 explains the integration workflow — do NOT call load_skill_menu or install_skill (disabled).`;
+}
+
+/**
+ * STEP 1 block: either load the single pinned integration skill, or halt
+ * because no `integration-*` skill could be resolved for this framework.
+ */
+function buildIntegrationSkillStep(
+  preStagedIntegrationSkillId: string | null,
+  frameworkName: string,
+): string {
+  return preStagedIntegrationSkillId
+    ? `STEP 1: Load \`.claude/skills/${preStagedIntegrationSkillId}/SKILL.md\` via the Skill tool. The wizard already resolved a single integration skill id (\`${preStagedIntegrationSkillId}\`) for this ${frameworkName} run (bundled pre-stage when possible, otherwise a deterministic on-disk resolver — not Glob-based disambiguation). Do NOT call load_skill_menu or install_skill (they are not available on the wizard-tools server).`
+    : `STEP 1: Integration workflow — wizard-tools \`load_skill_menu\` / \`install_skill\` are **not registered** in this CLI; do not call them (they will fail or be absent from the tool list).
+
+   The taxonomy and instrumentation skills are already under \`.claude/skills/\` for this run, but the runner could not resolve any \`integration-*\` skill id for ${frameworkName} (nothing bundled/pre-staged and no matching \`.claude/skills/integration-*/SKILL.md\` on disk).
+
+   Call \`report_status\` with kind="error", code="RESOURCE_MISSING", detail="No integration skill could be resolved for this framework." and halt.`;
 }
 
 /**
