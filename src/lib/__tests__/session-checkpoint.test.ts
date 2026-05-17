@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as fs from 'node:fs';
-import * as os from 'node:os';
 import * as path from 'node:path';
 import { loadCheckpoint } from '../session-checkpoint';
+import { createTempDir } from '../../utils/__tests__/helpers/temp-dir.js';
 import { Integration } from '../constants';
 import {
   CACHE_ROOT_OVERRIDE_ENV,
@@ -58,13 +58,17 @@ describe(
     let installDir: string;
     let filePath: string;
     let cacheRoot: string;
+    let cleanupInstall: () => void;
+    let cleanupCache: () => void;
     let originalOverride: string | undefined;
 
     beforeEach(() => {
-      installDir = fs.mkdtempSync(path.join(os.tmpdir(), 'wiz-ckpt-'));
+      ({ dir: installDir, cleanup: cleanupInstall } =
+        createTempDir('wiz-ckpt-'));
       // Redirect the cache root so the checkpoint file lands in a temp dir we
       // can clean up, instead of polluting `~/.amplitude/wizard/`.
-      cacheRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'wiz-ckpt-cache-'));
+      ({ dir: cacheRoot, cleanup: cleanupCache } =
+        createTempDir('wiz-ckpt-cache-'));
       originalOverride = process.env[CACHE_ROOT_OVERRIDE_ENV];
       process.env[CACHE_ROOT_OVERRIDE_ENV] = cacheRoot;
       // Default companion state: write a project-binding.json so the
@@ -80,8 +84,8 @@ describe(
 
     afterEach(() => {
       if (filePath && fs.existsSync(filePath)) fs.unlinkSync(filePath);
-      fs.rmSync(installDir, { recursive: true, force: true });
-      fs.rmSync(cacheRoot, { recursive: true, force: true });
+      cleanupInstall();
+      cleanupCache();
       if (originalOverride === undefined) {
         delete process.env[CACHE_ROOT_OVERRIDE_ENV];
       } else {
