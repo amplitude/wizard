@@ -528,8 +528,8 @@ export function ensureWizardArtifactsIgnored(installDir: string): void {
       existing.length === 0 || existing.endsWith('\n\n')
         ? ''
         : existing.endsWith('\n')
-        ? '\n'
-        : '\n\n';
+          ? '\n'
+          : '\n\n';
     fs.writeFileSync(
       gitignorePath,
       `${existing}${separator}${block}\n`,
@@ -707,9 +707,8 @@ interface ClaudeAgentSDK {
 let _sdkModule: ClaudeAgentSDK | null = null;
 async function getSDKModule(): Promise<ClaudeAgentSDK> {
   if (!_sdkModule) {
-    _sdkModule = (await import(
-      '@anthropic-ai/claude-agent-sdk'
-    )) as unknown as ClaudeAgentSDK;
+    _sdkModule =
+      (await import('@anthropic-ai/claude-agent-sdk')) as unknown as ClaudeAgentSDK;
   }
   return _sdkModule;
 }
@@ -992,24 +991,6 @@ export function normalizeEventName(raw: string): string {
 // ---------------------------------------------------------------------------
 
 /**
- * Write the canonical event plan to `<workingDirectory>/.amplitude/events.json`
- * using the shape the wizard UI expects: `[{name, description}]`.
- *
- * Does not write the legacy root `.amplitude-events.json` — readers use
- * {@link readLocalEventPlan} which prefers the canonical file and still
- * honors a pre-existing legacy dotfile from older runs.
- *
- * The agent is instructed (via commandments + integration skills) not to
- * write the canonical file itself — the wizard tool is the single writer so
- * the shape cannot drift. Exported for testing.
- *
- * The `.amplitude/` directory is created lazily on first write and is
- * gitignored as a single line.
- *
- * Returns true on success, false on any filesystem error (the caller logs
- * but doesn't fail the tool call over persistence issues).
- */
-/**
  * Shared writer for any `<workingDirectory>/.amplitude/*.json` artifact.
  *
  * Performs the three steps every `persistX` helper repeated by hand:
@@ -1046,6 +1027,24 @@ function persistProjectMetaFile(
   }
 }
 
+/**
+ * Write the canonical event plan to `<workingDirectory>/.amplitude/events.json`
+ * using the shape the wizard UI expects: `[{name, description}]`.
+ *
+ * Does not write the legacy root `.amplitude-events.json` — readers use
+ * {@link readLocalEventPlan} which prefers the canonical file and still
+ * honors a pre-existing legacy dotfile from older runs.
+ *
+ * The agent is instructed (via commandments + integration skills) not to
+ * write the canonical file itself — the wizard tool is the single writer so
+ * the shape cannot drift. Exported for testing.
+ *
+ * The `.amplitude/` directory is created lazily on first write and is
+ * gitignored as a single line.
+ *
+ * Returns true on success, false on any filesystem error (the caller logs
+ * but doesn't fail the tool call over persistence issues).
+ */
 export function persistEventPlan(
   workingDirectory: string,
   events: Array<{ name: string; description: string }>,
