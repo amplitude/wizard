@@ -1,6 +1,6 @@
 import type { CommandModule } from 'yargs';
 import chalk from 'chalk';
-import { getUI, ExitCode } from './helpers';
+import { getUI, ExitCode, resolveJsonOutput } from './helpers';
 import {
   EVENT_DATA_VERSIONS,
   appIdResponseSchema,
@@ -35,13 +35,8 @@ export const projectsCommand: CommandModule = {
           }),
         (argv) => {
           void (async () => {
-            const { resolveMode } = await import('../lib/mode-config.js');
-            const { jsonOutput } = resolveMode({
-              json: argv.json as boolean | undefined,
-              human: argv.human as boolean | undefined,
-              agent: argv.agent as boolean | undefined,
+            const jsonOutput = await resolveJsonOutput(argv, {
               requireExplicitWrites: true,
-              isTTY: Boolean(process.stdout.isTTY),
             });
             try {
               const { runProjectsList } = await import('../lib/agent-ops.js');
