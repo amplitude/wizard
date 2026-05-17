@@ -3,6 +3,11 @@
  *
  * Each screen declares its available keys; the bar renders them.
  * Always shows / and Tab hints so users discover commands and questions.
+ *
+ * The `KeyHintInline` helper renders a single `[K] label` element in the
+ * same style for use within screen content (e.g. the OAuth-wait hints,
+ * timeout confirmations) where embedding the full KeyHintBar would be
+ * out of place.
  */
 
 import { Box, Text } from 'ink';
@@ -24,6 +29,21 @@ interface KeyHintBarProps {
 const COMMANDS_HINT: KeyHint = { key: '/', label: 'Commands' };
 const ASK_HINT: KeyHint = { key: 'Tab', label: 'Ask a question' };
 
+/**
+ * Render one `[K] label` hint inline. Use within screen content for
+ * one-off hotkey advertisements; the persistent footer bar at the
+ * bottom of the layout is `KeyHintBar` itself.
+ */
+export const KeyHintInline = ({ hint, label }: { hint: string; label: string }) => (
+  <Box>
+    <Text color={Colors.muted}>[</Text>
+    <Text color={Colors.body} bold>
+      {hint}
+    </Text>
+    <Text color={Colors.muted}>] {label}</Text>
+  </Box>
+);
+
 export const KeyHintBar = ({
   hints = [],
   width,
@@ -40,13 +60,11 @@ export const KeyHintBar = ({
   return (
     <Box width={width} paddingX={1} gap={2}>
       {allHints.map((hint, index) => (
-        <Box key={`${index}:${hint.key}:${hint.label}`}>
-          <Text color={Colors.muted}>[</Text>
-          <Text color={Colors.body} bold>
-            {hint.key}
-          </Text>
-          <Text color={Colors.muted}>] {hint.label}</Text>
-        </Box>
+        <KeyHintInline
+          key={`${index}:${hint.key}:${hint.label}`}
+          hint={hint.key}
+          label={hint.label}
+        />
       ))}
     </Box>
   );

@@ -18,6 +18,7 @@ import { useEscapeBack } from '../hooks/useEscapeBack.js';
 import { useScreenInput } from '../hooks/useScreenInput.js';
 import { Colors, Icons } from '../styles.js';
 import { BrailleSpinner } from '../components/BrailleSpinner.js';
+import { KeyHintInline } from '../components/KeyHintBar.js';
 import { fetchProjectActivationStatus } from '../../../lib/api.js';
 import { DEFAULT_AMPLITUDE_ZONE } from '../../../lib/constants.js';
 import {
@@ -218,20 +219,8 @@ export const DataSetupScreen = ({ store }: DataSetupScreenProps) => {
             </Text>
           </Box>
           <Box marginTop={1} gap={2}>
-            <Box>
-              <Text color={Colors.muted}>[</Text>
-              <Text bold color={Colors.body}>
-                Y
-              </Text>
-              <Text color={Colors.muted}>] Yes, continue</Text>
-            </Box>
-            <Box>
-              <Text color={Colors.muted}>[</Text>
-              <Text bold color={Colors.body}>
-                Esc
-              </Text>
-              <Text color={Colors.muted}>] Cancel and go back</Text>
-            </Box>
+            <KeyHintInline hint="Y" label="Yes, continue" />
+            <KeyHintInline hint="Esc" label="Cancel and go back" />
           </Box>
         </Box>
       </Box>

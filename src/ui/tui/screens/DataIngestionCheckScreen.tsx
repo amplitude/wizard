@@ -50,6 +50,7 @@ import { logToFile } from '../../../utils/debug.js';
 import { detectBoundPort } from '../../../utils/port-detection.js';
 import { makeLink } from '../utils/terminal-rendering.js';
 import type { KeyHint } from '../components/KeyHintBar.js';
+import { KeyHintInline } from '../components/KeyHintBar.js';
 import { Sparkline, SPARKLINE_DEFAULT_WIDTH } from '../components/Sparkline.js';
 
 const POLL_INTERVAL_MS = 30_000;
@@ -947,13 +948,7 @@ export const DataIngestionCheckScreen = ({
 
         <Box marginTop={1}>
           {celebrationReady ? (
-            <Box gap={1}>
-              <Text color={Colors.muted}>[</Text>
-              <Text color={Colors.body} bold>
-                Enter
-              </Text>
-              <Text color={Colors.muted}>] Continue</Text>
-            </Box>
+            <KeyHintInline hint="Enter" label="Continue" />
           ) : (
             <Text color={Colors.body}>Verifying{Icons.ellipsis}</Text>
           )}
@@ -1153,20 +1148,8 @@ export const DataIngestionCheckScreen = ({
             verifying?
           </Text>
           <Box marginTop={1} gap={2}>
-            <Box>
-              <Text color={Colors.muted}>[</Text>
-              <Text color={Colors.body} bold>
-                y
-              </Text>
-              <Text color={Colors.muted}>] Yes, skip verification</Text>
-            </Box>
-            <Box>
-              <Text color={Colors.muted}>[</Text>
-              <Text color={Colors.body} bold>
-                Esc
-              </Text>
-              <Text color={Colors.muted}>] Keep waiting</Text>
-            </Box>
+            <KeyHintInline hint="y" label="Yes, skip verification" />
+            <KeyHintInline hint="Esc" label="Keep waiting" />
           </Box>
         </Box>
       )}
@@ -1187,13 +1170,7 @@ export const DataIngestionCheckScreen = ({
             </Text>
             <Text color={Colors.muted}>] Skip verification</Text>
           </Box>
-          <Box gap={0}>
-            <Text color={Colors.muted}>[</Text>
-            <Text color={Colors.body} bold>
-              x
-            </Text>
-            <Text color={Colors.muted}>] Exit and resume later</Text>
-          </Box>
+          <KeyHintInline hint="x" label="Exit and resume later" />
         </Box>
       )}
     </Box>

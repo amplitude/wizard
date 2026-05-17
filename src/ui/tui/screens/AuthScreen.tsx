@@ -24,6 +24,7 @@ import { useTimedCoaching } from '../hooks/useTimedCoaching.js';
 import { PickerMenu, TerminalLink } from '../primitives/index.js';
 import { Colors, Icons } from '../styles.js';
 import { BrailleSpinner } from '../components/BrailleSpinner.js';
+import { KeyHintInline } from '../components/KeyHintBar.js';
 import { DEFAULT_AMPLITUDE_ZONE } from '../../../lib/constants.js';
 import { isCreateAccountOnboarding } from '../../../lib/wizard-session.js';
 import { resolveZone } from '../../../lib/zone-resolution.js';
@@ -699,34 +700,10 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
           )}
         </Box>
         <Box gap={2}>
-          <Box>
-            <Text color={Colors.muted}>[</Text>
-            <Text bold color={Colors.body}>
-              Enter
-            </Text>
-            <Text color={Colors.muted}>] Continue</Text>
-          </Box>
-          <Box>
-            <Text color={Colors.muted}>[</Text>
-            <Text bold color={Colors.body}>
-              C
-            </Text>
-            <Text color={Colors.muted}>] Change project</Text>
-          </Box>
-          <Box>
-            <Text color={Colors.muted}>[</Text>
-            <Text bold color={Colors.body}>
-              N
-            </Text>
-            <Text color={Colors.muted}>] New project</Text>
-          </Box>
-          <Box>
-            <Text color={Colors.muted}>[</Text>
-            <Text bold color={Colors.body}>
-              Esc
-            </Text>
-            <Text color={Colors.muted}>] Cancel</Text>
-          </Box>
+          <KeyHintInline hint="Enter" label="Continue" />
+          <KeyHintInline hint="C" label="Change project" />
+          <KeyHintInline hint="N" label="New project" />
+          <KeyHintInline hint="Esc" label="Cancel" />
         </Box>
       </Box>
     );
@@ -783,29 +760,9 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
               [R] only renders once we have a URL to retry. Single muted line
               so the happy path stays uncluttered. */}
           <Box marginTop={1} gap={2}>
-            {session.loginUrl && (
-              <Box>
-                <Text color={Colors.muted}>[</Text>
-                <Text bold color={Colors.body}>
-                  R
-                </Text>
-                <Text color={Colors.muted}>] Retry browser</Text>
-              </Box>
-            )}
-            <Box>
-              <Text color={Colors.muted}>[</Text>
-              <Text bold color={Colors.body}>
-                M
-              </Text>
-              <Text color={Colors.muted}>] Enter API key manually</Text>
-            </Box>
-            <Box>
-              <Text color={Colors.muted}>[</Text>
-              <Text bold color={Colors.body}>
-                Esc
-              </Text>
-              <Text color={Colors.muted}>] Cancel</Text>
-            </Box>
+            {session.loginUrl && <KeyHintInline hint="R" label="Retry browser" />}
+            <KeyHintInline hint="M" label="Enter API key manually" />
+            <KeyHintInline hint="Esc" label="Cancel" />
           </Box>
           {/* Tier-1 coaching at 15s: the wizard is taking longer than expected.
               Surface an explicit "Still waiting…" line above the always-on
