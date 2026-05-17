@@ -112,7 +112,7 @@ export function shouldCheckForUpdates(): boolean {
   return true;
 }
 
-export interface UpdateCheckResult {
+interface UpdateCheckResult {
   current: string;
   latest: string;
   available: boolean;
@@ -124,7 +124,7 @@ export interface UpdateCheckResult {
  *
  * @returns The detected result (for tests), or null if skipped.
  */
-export async function checkForUpdate(
+async function checkForUpdate(
   pkgName: string,
   currentVersion: string,
   options: { timeoutMs?: number; force?: boolean } = {},
