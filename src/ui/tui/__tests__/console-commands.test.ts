@@ -3,6 +3,7 @@ import {
   parseFeedbackSlashInput,
   parseCreateProjectSlashInput,
   parseDiffSlashInput,
+  parseSlashArg,
   getHelpText,
   getWhoamiText,
   getDiagnosticsLines,
@@ -16,6 +17,36 @@ import { AGENT_EVENT_WIRE_VERSION } from '../../../lib/agent-events.js';
 import { WIZARD_VERSION } from '../../../lib/constants.js';
 import { RunPhase } from '../../../lib/wizard-session.js';
 import { CACHE_ROOT_OVERRIDE_ENV } from '../../../utils/storage-paths.js';
+
+describe('parseSlashArg (generic helper)', () => {
+  it('returns the trimmed argument when the command matches', () => {
+    expect(parseSlashArg('/foo', '/foo hello world')).toBe('hello world');
+    expect(parseSlashArg('/foo', '  /foo   hi  ')).toBe('hi');
+  });
+
+  it('returns the empty string when the command is typed with no argument', () => {
+    expect(parseSlashArg('/foo', '/foo')).toBe('');
+    expect(parseSlashArg('/foo', '/foo   ')).toBe('');
+  });
+
+  it('returns undefined for a different command', () => {
+    expect(parseSlashArg('/foo', '/bar hi')).toBeUndefined();
+    expect(parseSlashArg('/foo', '/foobar')).toBeUndefined();
+  });
+
+  it('is case-insensitive on the command prefix', () => {
+    expect(parseSlashArg('/foo', '/FOO bar')).toBe('bar');
+  });
+
+  it('escapes regex metacharacters in the command name so they match literally', () => {
+    // If `/foo.bar` were splatted into a RegExp without escaping, the `.`
+    // would match any single character and `/fooXbar arg` would parse the
+    // same as `/foo.bar arg`. The escape keeps slash commands matching
+    // literally regardless of punctuation choices in the registry.
+    expect(parseSlashArg('/foo.bar', '/foo.bar arg')).toBe('arg');
+    expect(parseSlashArg('/foo.bar', '/fooXbar arg')).toBeUndefined();
+  });
+});
 
 describe('parseCreateProjectSlashInput', () => {
   it('returns the trimmed name after /create-project', () => {
@@ -165,6 +196,24 @@ describe('getWhoamiText', () => {
 });
 
 describe('COMMANDS registry', () => {
+  it('does not register the same /command twice (regression — PR #769 added a duplicate /help)', () => {
+    // Regression guard: when a new slash command is wired up it's easy to
+    // append the entry to COMMANDS twice (e.g. two rebases re-applying the
+    // same patch, or a copy-paste that lands the same line in a different
+    // spot in the array). A duplicate is harmless at the dispatch layer —
+    // `executeCommand` is a switch — but it shows up TWICE in the help
+    // text and TWICE in the SlashCommandInput picker, which looks broken.
+    // PR #809's report flagged this for /help; lock down the invariant for
+    // every command at once so the next dup gets caught at test time.
+    const seen = new Set<string>();
+    const duplicates: string[] = [];
+    for (const c of COMMANDS) {
+      if (seen.has(c.cmd)) duplicates.push(c.cmd);
+      seen.add(c.cmd);
+    }
+    expect(duplicates).toEqual([]);
+  });
+
   it('exposes /diagnostics so the help UI surfaces it', () => {
     const cmds = COMMANDS.map((c) => c.cmd);
     expect(cmds).toContain('/diagnostics');
