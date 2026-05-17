@@ -1,5 +1,5 @@
 import type { CommandModule } from 'yargs';
-import { setUI, LoggingUI } from './helpers';
+import { setUI, LoggingUI, extractErrorMessage } from './helpers';
 import { CLI_INVOCATION, IS_WIZARD_DEV, WIZARD_VERSION } from './context';
 
 export const mcpCommand: CommandModule = {
@@ -122,7 +122,7 @@ export const mcpCommand: CommandModule = {
               );
               await startAgentMcpServer();
             } catch (err) {
-              const msg = err instanceof Error ? err.message : String(err);
+              const msg = extractErrorMessage(err);
               process.stderr.write(
                 `${CLI_INVOCATION} mcp serve: failed to start: ${msg}\n`,
               );

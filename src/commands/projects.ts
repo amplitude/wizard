@@ -1,6 +1,11 @@
 import type { CommandModule } from 'yargs';
 import chalk from 'chalk';
-import { getUI, ExitCode } from './helpers';
+import {
+  getUI,
+  ExitCode,
+  resolveJsonOutput,
+  extractErrorMessage,
+} from './helpers';
 import {
   EVENT_DATA_VERSIONS,
   appIdResponseSchema,
@@ -35,13 +40,11 @@ export const projectsCommand: CommandModule = {
           }),
         (argv) => {
           void (async () => {
-            const { resolveMode } = await import('../lib/mode-config.js');
-            const { jsonOutput } = resolveMode({
-              json: argv.json as boolean | undefined,
-              human: argv.human as boolean | undefined,
-              agent: argv.agent as boolean | undefined,
+            // `projects` historically forwarded --agent to jsonOutput so
+            // outer agents always get the structured `needs_input` shape.
+            const jsonOutput = await resolveJsonOutput(argv, {
               requireExplicitWrites: true,
-              isTTY: Boolean(process.stdout.isTTY),
+              forwardAgent: true,
             });
             try {
               const { runProjectsList } = await import('../lib/agent-ops.js');
@@ -192,7 +195,7 @@ export const projectsCommand: CommandModule = {
                 result.warning ? ExitCode.AUTH_REQUIRED : ExitCode.SUCCESS,
               );
             } catch (e) {
-              const message = e instanceof Error ? e.message : String(e);
+              const message = extractErrorMessage(e);
               if (jsonOutput) {
                 process.stdout.write(
                   JSON.stringify({

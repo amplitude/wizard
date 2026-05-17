@@ -1,5 +1,5 @@
 import type { CommandModule } from 'yargs';
-import { getUI, setUI, LoggingUI } from './helpers';
+import { getUI, setUI, LoggingUI, extractErrorMessage } from './helpers';
 import { CLI_INVOCATION } from './context';
 
 export const feedbackCommand: CommandModule = {
@@ -43,9 +43,7 @@ export const feedbackCommand: CommandModule = {
         getUI().log.success('Thanks — your feedback was sent.');
         process.exit(0);
       } catch (e) {
-        getUI().log.error(
-          `Feedback failed: ${e instanceof Error ? e.message : String(e)}`,
-        );
+        getUI().log.error(`Feedback failed: ${extractErrorMessage(e)}`);
         process.exit(1);
       }
     })();
