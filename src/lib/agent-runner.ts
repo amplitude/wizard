@@ -2315,7 +2315,7 @@ ${items}
  * Taxonomy + instrumentation + dashboard skills are always pre-staged when
  * bundled, so the prompt loads them by ID without menu/install steps.
  */
-function buildIntegrationPrompt(
+export function buildIntegrationPrompt(
   config: FrameworkConfig,
   context: {
     frameworkVersion: string;

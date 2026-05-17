@@ -19,12 +19,15 @@ import {
   agentArtifactsLookComplete,
   agentEventsInstrumented,
   buildDashboardDeferredMessage,
+  buildIntegrationPrompt,
   classifyAgentOutcome,
   classifyApiErrorSubtype,
   refreshTokenIfStale,
   runColdStartParallel,
   POST_AGENT_STEP_COMMIT_EVENTS,
 } from '../agent-runner.js';
+import type { FrameworkConfig } from '../framework-config.js';
+import { Integration } from '../constants.js';
 import { AgentErrorType } from '../agent-interface.js';
 import { buildSession } from '../wizard-session.js';
 
@@ -797,5 +800,193 @@ describe('runColdStartParallel (cold-start perf)', () => {
     // important contract is that the await above rejected with the
     // agent error, not the detector's null fallback.)
     expect(detectorResolved).toBeDefined();
+  });
+});
+
+// ── buildIntegrationPrompt — golden output snapshots ─────────────────
+//
+// The output of `buildIntegrationPrompt` is fed directly to the Claude
+// Agent SDK as part of the system prompt. Even a single-character
+// whitespace change can shift token boundaries → attention pattern →
+// agent behavior. These snapshot tests pin the byte-exact prompt
+// output for five representative inputs spanning every branch:
+//
+//   1. Next.js — appId set, preStagedIntegrationSkillId set, US,
+//      additional context lines populated
+//   2. Swift — appId set, preStagedIntegrationSkillId set, EU,
+//      custom packageInstallation, additional lines
+//   3. Flask — appId=0 (defaultAppId fallback branch), EU, no
+//      additional lines (returns empty array)
+//   4. React Native — preStagedIntegrationSkillId=null (halt branch),
+//      appId set, US, no additional lines
+//   5. Generic — skipAmplitudeMcp=true short-circuit to
+//      GENERIC_AGENT_CONFIG.buildPrompt
+//
+// These tests exist as a contract for refactors of buildIntegrationPrompt:
+// any change that touches the function MUST keep all five snapshots
+// byte-identical. If a snapshot diff appears, either revert the change
+// or — if the wording is being intentionally edited — update the
+// snapshot in a separate, copy-only PR that reviewers can scrutinize.
+
+describe('buildIntegrationPrompt — golden output (byte-identical contract)', () => {
+  // Minimal FrameworkConfig fixture builder. The function only reads
+  // `config.metadata.name`, `config.prompts.{projectTypeDetection,
+  // packageInstallation, getAdditionalContextLines, buildPrompt}` —
+  // every other field is unused in this codepath, so we stub them as
+  // empty objects to keep the test focused.
+  function makeConfig(overrides: {
+    name: string;
+    integration: Integration;
+    projectTypeDetection: string;
+    packageInstallation?: string;
+    additionalLines?: string[];
+  }): FrameworkConfig {
+    return {
+      metadata: {
+        name: overrides.name,
+        integration: overrides.integration,
+        docsUrl: 'https://example.test/docs',
+      },
+      // The detection/environment/analytics/ui blocks are not read by
+      // buildIntegrationPrompt; cast to keep the test fixture small.
+      detection: {} as FrameworkConfig['detection'],
+      environment: {} as FrameworkConfig['environment'],
+      analytics: {} as FrameworkConfig['analytics'],
+      ui: {} as FrameworkConfig['ui'],
+      prompts: {
+        projectTypeDetection: overrides.projectTypeDetection,
+        ...(overrides.packageInstallation !== undefined && {
+          packageInstallation: overrides.packageInstallation,
+        }),
+        ...(overrides.additionalLines !== undefined && {
+          getAdditionalContextLines: () => overrides.additionalLines!,
+        }),
+      },
+    };
+  }
+
+  it('snapshot: Next.js (appId set, skill pinned, US region, additional lines)', () => {
+    const config = makeConfig({
+      name: 'Next.js',
+      integration: Integration.nextjs,
+      projectTypeDetection:
+        'This is a JavaScript/TypeScript project. Look for package.json and lockfiles.',
+      additionalLines: ['Router: app', 'Uses src/ layout: false'],
+    });
+    const output = buildIntegrationPrompt(
+      config,
+      {
+        frameworkVersion: '15.0.0',
+        typescript: true,
+        projectApiKey: 'test-api-key-nextjs',
+        host: 'api2.amplitude.com',
+        appId: 12345,
+        cloudRegion: 'us',
+      },
+      { router: 'app' },
+      false,
+      'integration-nextjs-app-router',
+    );
+    expect(output).toMatchSnapshot();
+  });
+
+  it('snapshot: Swift (appId set, skill pinned, EU region, custom package install)', () => {
+    const config = makeConfig({
+      name: 'Swift',
+      integration: Integration.swift,
+      projectTypeDetection:
+        'This is a Swift project. Look for Package.swift or .xcodeproj.',
+      packageInstallation:
+        'Use Swift Package Manager. Edit Package.swift to add the Amplitude-Swift dependency.',
+      additionalLines: ['Platform: iOS', 'Min deployment target: 13.0'],
+    });
+    const output = buildIntegrationPrompt(
+      config,
+      {
+        frameworkVersion: '5.9',
+        typescript: false,
+        projectApiKey: 'test-api-key-swift',
+        host: 'api.eu.amplitude.com',
+        appId: 67890,
+        cloudRegion: 'eu',
+      },
+      { platform: 'ios' },
+      false,
+      'integration-swift',
+    );
+    expect(output).toMatchSnapshot();
+  });
+
+  it('snapshot: Flask (appId=0, defaultAppId fallback branch, EU, no additional lines)', () => {
+    const config = makeConfig({
+      name: 'Flask',
+      integration: Integration.flask,
+      projectTypeDetection:
+        'This is a Python/Flask project. Look for requirements.txt, pyproject.toml.',
+      packageInstallation:
+        'Use the detect_package_manager tool. If using pip, also add to requirements.txt.',
+    });
+    const output = buildIntegrationPrompt(
+      config,
+      {
+        frameworkVersion: '3.0.0',
+        typescript: false,
+        projectApiKey: 'test-api-key-flask',
+        host: 'api.eu.amplitude.com',
+        appId: 0,
+        cloudRegion: 'eu',
+      },
+      {},
+      false,
+      'integration-flask',
+    );
+    expect(output).toMatchSnapshot();
+  });
+
+  it('snapshot: React Native (preStagedIntegrationSkillId=null halt branch, US)', () => {
+    const config = makeConfig({
+      name: 'React Native',
+      integration: Integration.reactNative,
+      projectTypeDetection:
+        'This is a React Native project. Look for package.json with react-native.',
+    });
+    const output = buildIntegrationPrompt(
+      config,
+      {
+        frameworkVersion: '0.74.0',
+        typescript: true,
+        projectApiKey: 'test-api-key-rn',
+        host: 'api2.amplitude.com',
+        appId: 54321,
+        cloudRegion: 'us',
+      },
+      { platform: 'expo' },
+      false,
+      null,
+    );
+    expect(output).toMatchSnapshot();
+  });
+
+  it('snapshot: Generic skipAmplitudeMcp short-circuit (GENERIC_AGENT_CONFIG.buildPrompt)', () => {
+    const config = makeConfig({
+      name: 'Generic',
+      integration: Integration.generic,
+      projectTypeDetection: 'Unknown project type.',
+    });
+    const output = buildIntegrationPrompt(
+      config,
+      {
+        frameworkVersion: 'unknown',
+        typescript: false,
+        projectApiKey: 'test-api-key-generic',
+        host: 'api2.amplitude.com',
+        appId: 99999,
+        cloudRegion: 'us',
+      },
+      {},
+      true,
+      null,
+    );
+    expect(output).toMatchSnapshot();
   });
 });
