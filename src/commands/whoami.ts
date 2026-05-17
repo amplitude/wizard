@@ -1,6 +1,6 @@
 import type { CommandModule } from 'yargs';
 import chalk from 'chalk';
-import { getUI } from './helpers';
+import { getUI, emitCliEnvelope } from './helpers';
 import { CLI_INVOCATION } from './context';
 
 export const whoamiCommand: CommandModule = {
@@ -72,14 +72,12 @@ export const whoamiCommand: CommandModule = {
           /* ampli.json read is best-effort */
         }
         process.stdout.write(
-          JSON.stringify({
-            v: 1,
-            '@timestamp': new Date().toISOString(),
+          emitCliEnvelope({
             type: 'result',
             message: loggedIn
               ? `whoami: ${user!.email}`
               : 'whoami: not logged in',
-            data_version: 1,
+            dataVersion: 1,
             data: {
               event: 'whoami',
               loggedIn,
@@ -99,7 +97,7 @@ export const whoamiCommand: CommandModule = {
                     loginCommand: [...CLI_INVOCATION.split(' '), 'login'],
                   }),
             },
-          }) + '\n',
+          }),
         );
         process.exit(0);
         return;
