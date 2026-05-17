@@ -196,19 +196,22 @@ const DESTRUCTIVE_BASH_RULES: SafetyRule[] = [
 // ── Public API ────────────────────────────────────────────────────────────
 
 /**
- * Scan Write/Edit content for hardcoded secrets. Returns the first matched
- * rule, or `{ matched: false }` if no rule fires.
+ * Shared rule-runner. Validates the input is a non-empty string, then
+ * returns the first rule whose pattern matches. Returning the FIRST match
+ * (not all matches) keeps the model-facing message focused on one fix —
+ * telling the agent it has three problems at once tends to produce
+ * sprawling un-targeted edits.
  *
- * Returning the FIRST match (not all matches) keeps the model-facing
- * message focused on one fix — telling the agent it has three problems at
- * once tends to produce sprawling un-targeted edits.
+ * Used by both public scanners below; behaviour is identical (same
+ * non-string / empty-string guard, same first-match-wins ordering) and the
+ * tests in `safety-scanner.test.ts` exercise both paths exhaustively.
  */
-export function scanWriteContentForSecrets(content: string): ScanResult {
-  if (typeof content !== 'string' || content.length === 0) {
+function runRules(input: string, rules: readonly SafetyRule[]): ScanResult {
+  if (typeof input !== 'string' || input.length === 0) {
     return { matched: false };
   }
-  for (const rule of SECRET_RULES) {
-    if (rule.pattern.test(content)) {
+  for (const rule of rules) {
+    if (rule.pattern.test(input)) {
       return { matched: true, rule };
     }
   }
@@ -216,19 +219,19 @@ export function scanWriteContentForSecrets(content: string): ScanResult {
 }
 
 /**
+ * Scan Write/Edit content for hardcoded secrets. Returns the first matched
+ * rule, or `{ matched: false }` if no rule fires.
+ */
+export function scanWriteContentForSecrets(content: string): ScanResult {
+  return runRules(content, SECRET_RULES);
+}
+
+/**
  * Scan a Bash command for destructive patterns. Returns the first matched
  * rule, or `{ matched: false }` if no rule fires.
  */
 export function scanBashCommandForDestructive(command: string): ScanResult {
-  if (typeof command !== 'string' || command.length === 0) {
-    return { matched: false };
-  }
-  for (const rule of DESTRUCTIVE_BASH_RULES) {
-    if (rule.pattern.test(command)) {
-      return { matched: true, rule };
-    }
-  }
-  return { matched: false };
+  return runRules(command, DESTRUCTIVE_BASH_RULES);
 }
 
 // Exported for tests so the rule sets can be exercised exhaustively
