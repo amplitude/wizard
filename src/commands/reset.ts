@@ -1,5 +1,5 @@
 import type { CommandModule } from 'yargs';
-import { getUI } from './helpers';
+import { getUI, emitCliEnvelope } from './helpers';
 
 export const resetCommand: CommandModule = {
   command: 'reset',
@@ -68,15 +68,13 @@ export const resetCommand: CommandModule = {
           // block subsequent removals.
           if (jsonOutput) {
             process.stdout.write(
-              JSON.stringify({
-                v: 1,
-                '@timestamp': new Date().toISOString(),
+              emitCliEnvelope({
                 type: 'log',
                 level: 'warn',
                 message: `failed to remove ${target.path}: ${
                   err instanceof Error ? err.message : String(err)
                 }`,
-              }) + '\n',
+              }),
             );
           } else {
             getUI().log.warn(
@@ -100,19 +98,17 @@ export const resetCommand: CommandModule = {
 
       if (jsonOutput) {
         process.stdout.write(
-          JSON.stringify({
-            v: 1,
-            '@timestamp': new Date().toISOString(),
+          emitCliEnvelope({
             type: 'result',
             message: `wizard reset: removed ${removed.length}, skipped ${skipped.length}`,
-            data_version: 1,
+            dataVersion: 1,
             data: {
               event: 'reset',
               installDir,
               removed,
               skipped,
             },
-          }) + '\n',
+          }),
         );
       } else if (removed.length === 0) {
         getUI().note('Nothing to reset — no wizard artifacts found.');

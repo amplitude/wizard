@@ -19,6 +19,99 @@ import { runMigrationShim } from '../utils/storage-migration';
 import { assertNever } from '../utils/assert-never';
 import { CLI_INVOCATION } from './context';
 
+/**
+ * Options accepted by `emitCliEnvelope` — the unifier for the ~17 inline
+ * `process.stdout.write(JSON.stringify({ v: 1, '@timestamp': ... }) + '\n')`
+ * sites in `src/commands/*.ts`.
+ *
+ * **Wire contract.** External orchestrators (Claude Code, Cursor, parent
+ * agents) parse this NDJSON envelope. Field SHAPE *and* field ORDER are
+ * part of the contract — `JSON.stringify` preserves insertion order for
+ * plain object properties, so the helper builds the object in the exact
+ * canonical order observed across 15 of the 17 prior inline sites:
+ *
+ *     v, @timestamp, type, [level?], message, [data_version?], [data?]
+ *
+ * `projects.ts:64` (the only outlier — places `data_version` BEFORE
+ * `message`) and `orchestration.ts` (Zod-validated, totally different
+ * shape) deliberately remain inline. Migrating them through this helper
+ * would change their wire bytes, breaking orchestrators that key off the
+ * existing field order.
+ */
+export interface CliEnvelopeOpts {
+  /** Envelope kind (`error`, `lifecycle`, `result`, `log`, `plan`, …). Required. */
+  type: string;
+  /**
+   * Severity tag, emitted only when present. The canonical sites use this
+   * exclusively for `'error'` (apply/plan refusals) and `'warn'` (reset
+   * filesystem warnings); pass `undefined` for everything else and the
+   * field is omitted from the wire bytes entirely.
+   */
+  level?: 'info' | 'warn' | 'error';
+  /** Human-readable single-line message. Optional — log-only envelopes omit it. */
+  message?: string;
+  /**
+   * Schema version for `data` — only emitted when present. Migration sites
+   * that previously stamped `data_version: 1` (apply setup_context, plan
+   * setup_context, reset result, whoami) opt in by passing this; sites
+   * that never stamped it must pass `undefined` so the wire bytes stay
+   * byte-identical.
+   */
+  dataVersion?: number;
+  /**
+   * Structured payload. Optional — some sites (reset.ts:70 warn) omit `data`
+   * entirely. Passing `undefined` here skips the field so we don't emit
+   * `"data":null` into the wire stream.
+   */
+  data?: Record<string, unknown>;
+  /**
+   * Override the `@timestamp` field. Defaults to `new Date().toISOString()`.
+   * Exposed so tests can pin a deterministic timestamp without freezing the
+   * global `Date`. Real production callers should never pass this.
+   */
+  now?: string;
+}
+
+/**
+ * Serialize a CLI NDJSON envelope to its exact wire bytes (including the
+ * trailing newline). Returns the string rather than writing it directly so
+ * callers retain control over the sink — most sites pipe it straight to
+ * `process.stdout.write`, but tests can capture it without spying on the
+ * global `process.stdout`.
+ *
+ * The helper guarantees:
+ *
+ *   - Field order is fixed: `v`, `@timestamp`, `type`, `level?`,
+ *     `message?`, `data_version?`, `data?`.
+ *   - `v` is always literal `1`.
+ *   - Optional fields are **skipped entirely** when `undefined` — the
+ *     output never contains `"level":undefined` or `"data_version":null`.
+ *     This matches the inline-site behavior, which omits these keys
+ *     conditionally rather than emitting null sentinels.
+ *   - A trailing `\n` is always appended so the result is one complete
+ *     NDJSON line ready for stdout.
+ */
+export function emitCliEnvelope(opts: CliEnvelopeOpts): string {
+  const envelope: Record<string, unknown> = {
+    v: 1,
+    '@timestamp': opts.now ?? new Date().toISOString(),
+    type: opts.type,
+  };
+  // `level` slot: between `type` and `message` per the canonical order.
+  // Conditional assignment — never emit `level: undefined`.
+  if (opts.level !== undefined) envelope.level = opts.level;
+  if (opts.message !== undefined) envelope.message = opts.message;
+  // `data_version` lives BETWEEN `message` and `data` per the canonical
+  // order — matches apply/plan/reset/whoami's existing layout. Sites that
+  // currently put `data_version` before `message` (projects.ts:64) are
+  // deliberately NOT migrated through this helper; rerouting them would
+  // change their wire bytes and break orchestrators that key off field
+  // position.
+  if (opts.dataVersion !== undefined) envelope.data_version = opts.dataVersion;
+  if (opts.data !== undefined) envelope.data = opts.data;
+  return JSON.stringify(envelope) + '\n';
+}
+
 function authOnboardingPathFromArgv(
   options: Record<string, unknown>,
 ): AuthOnboardingPath | undefined {

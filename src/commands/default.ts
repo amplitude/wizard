@@ -12,6 +12,7 @@ import {
   gateAgentSignupArguments,
   isAuthTaskGateReady,
   applyEnvSelectionDeferral,
+  emitCliEnvelope,
 } from './helpers';
 import { WIZARD_VERSION } from './context';
 import { isNonInteractiveEnvironment } from '../utils/environment';
@@ -47,9 +48,7 @@ function applyOrchestratorContext(
   if (!result.ok) {
     if (emitJson) {
       process.stdout.write(
-        JSON.stringify({
-          v: 1,
-          '@timestamp': new Date().toISOString(),
+        emitCliEnvelope({
           type: 'error',
           message: result.message,
           data: {
@@ -57,7 +56,7 @@ function applyOrchestratorContext(
             reason: result.reason,
             sourcePath: result.sourcePath,
           },
-        }) + '\n',
+        }),
       );
     } else {
       process.stderr.write(

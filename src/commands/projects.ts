@@ -1,6 +1,6 @@
 import type { CommandModule } from 'yargs';
 import chalk from 'chalk';
-import { getUI, ExitCode } from './helpers';
+import { getUI, ExitCode, emitCliEnvelope } from './helpers';
 import {
   EVENT_DATA_VERSIONS,
   appIdResponseSchema,
@@ -61,6 +61,13 @@ export const projectsCommand: CommandModule = {
                 // an over-the-cap value (e.g. `--limit 9999` clamped to
                 // 200 internally) doesn't skip past unread items.
                 const nextOffset = offset + result.returned;
+                // NOT routed through `emitCliEnvelope`. This site is the
+                // sole outlier in the codebase where `data_version` is
+                // emitted BEFORE `message` (the canonical order is
+                // `message` then `data_version`). Orchestrators that
+                // parse the wire stream may key off field position, so
+                // re-ordering here would be a silent contract break.
+                // See ndjson-envelope-golden.test.ts for the byte pin.
                 process.stdout.write(
                   JSON.stringify({
                     v: 1,
@@ -195,13 +202,11 @@ export const projectsCommand: CommandModule = {
               const message = e instanceof Error ? e.message : String(e);
               if (jsonOutput) {
                 process.stdout.write(
-                  JSON.stringify({
-                    v: 1,
-                    '@timestamp': new Date().toISOString(),
+                  emitCliEnvelope({
                     type: 'error',
                     message: `projects list failed: ${message}`,
                     data: { event: 'projects_list_failed' },
-                  }) + '\n',
+                  }),
                 );
               } else {
                 getUI().log.error(`Projects list failed: ${message}`);
