@@ -14,7 +14,7 @@
  */
 
 import { Box, Text } from 'ink';
-import { useMemo, useState } from 'react';
+import { useState } from 'react';
 import { TextInput } from '@inkjs/ui';
 import type { WizardStore } from '../store.js';
 import { useWizardStore } from '../hooks/useWizardStore.js';
@@ -24,6 +24,18 @@ import { Colors, Icons } from '../styles.js';
 import type { KeyHint } from '../components/KeyHintBar.js';
 import { EMAIL_REGEX } from '../../../lib/constants.js';
 import { analytics } from '../../../utils/analytics.js';
+
+// Two stable identities so useScreenHints' effect doesn't re-fire every
+// render. The Esc label changes when there's a screen to back into; only
+// the literal differs, so pre-build both arrays once.
+const HINTS_BACK: readonly KeyHint[] = Object.freeze([
+  { key: 'Enter', label: 'Continue' },
+  { key: 'Esc', label: 'Back' },
+]);
+const HINTS_WELCOME: readonly KeyHint[] = Object.freeze([
+  { key: 'Enter', label: 'Continue' },
+  { key: 'Esc', label: 'Welcome' },
+]);
 
 interface SignupEmailScreenProps {
   store: WizardStore;
@@ -36,15 +48,7 @@ export const SignupEmailScreen = ({ store }: SignupEmailScreenProps) => {
   const [draft, setDraft] = useState(session.signupEmail ?? '');
   const [error, setError] = useState<string | null>(null);
 
-  const routerCanGoBack = store.canGoBack();
-  const hints = useMemo<readonly KeyHint[]>(
-    () => [
-      { key: 'Enter', label: 'Continue' },
-      { key: 'Esc', label: routerCanGoBack ? 'Back' : 'Welcome' },
-    ],
-    [routerCanGoBack],
-  );
-  useScreenHints(hints);
+  useScreenHints(store.canGoBack() ? HINTS_BACK : HINTS_WELCOME);
 
   // TextInput from @inkjs/ui swallows Esc — wire it explicitly so users
   // can step back to the Intro picker (or rewind to Welcome if no
