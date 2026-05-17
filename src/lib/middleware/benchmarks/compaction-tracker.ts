@@ -5,14 +5,10 @@
  * including pre-compaction token counts per phase.
  */
 
-import type {
-  Middleware,
-  MiddlewareContext,
-  MiddlewareStore,
-  SDKMessage,
-} from '../types';
+import type { MiddlewareContext, MiddlewareStore, SDKMessage } from '../types';
 import { logToFile } from '../../../utils/debug';
 import { AgentSignals } from '../../agent-interface';
+import { PhaseSnapshotPlugin } from './base';
 
 export interface CompactionData {
   phaseCompactions: number;
@@ -25,18 +21,21 @@ export interface CompactionData {
   }>;
 }
 
-export class CompactionTrackerPlugin implements Middleware {
+type CompactionSnapshot = {
+  phase: string;
+  compactions: number;
+  preTokens: number[];
+};
+
+export class CompactionTrackerPlugin extends PhaseSnapshotPlugin<
+  CompactionSnapshot,
+  CompactionData
+> {
   readonly name = 'compactions';
 
   private phaseCompactions = 0;
   private phasePreTokens: number[] = [];
   private totalCompactions = 0;
-  private phaseSnapshots: Array<{
-    phase: string;
-    compactions: number;
-    preTokens: number[];
-  }> = [];
-  private currentPhase = 'setup';
 
   onMessage(
     message: SDKMessage,
@@ -57,41 +56,23 @@ export class CompactionTrackerPlugin implements Middleware {
       `${AgentSignals.BENCHMARK} [COMPACTION] Context compacted during "${ctx.currentPhase}" (trigger: ${trigger}, pre_tokens: ${preTokens})`,
     );
 
-    store.set('compactions', this.getData());
+    this.publish(store);
   }
 
-  onPhaseTransition(
-    fromPhase: string,
-    toPhase: string,
-    _ctx: MiddlewareContext,
-    store: MiddlewareStore,
-  ): void {
-    this.phaseSnapshots.push({
-      phase: fromPhase,
+  protected buildPhaseSnapshot(phase: string): CompactionSnapshot {
+    return {
+      phase,
       compactions: this.phaseCompactions,
       preTokens: [...this.phasePreTokens],
-    });
-    this.currentPhase = toPhase;
+    };
+  }
+
+  protected resetPhaseState(): void {
     this.phaseCompactions = 0;
     this.phasePreTokens = [];
-    store.set('compactions', this.getData());
   }
 
-  onFinalize(
-    _resultMessage: SDKMessage,
-    _totalDurationMs: number,
-    _ctx: MiddlewareContext,
-    store: MiddlewareStore,
-  ): void {
-    this.phaseSnapshots.push({
-      phase: this.currentPhase,
-      compactions: this.phaseCompactions,
-      preTokens: [...this.phasePreTokens],
-    });
-    store.set('compactions', this.getData());
-  }
-
-  private getData(): CompactionData {
+  protected buildData(): CompactionData {
     return {
       phaseCompactions: this.phaseCompactions,
       phasePreTokens: [...this.phasePreTokens],

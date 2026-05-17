@@ -6,15 +6,10 @@
  * Context tokens in = previous phase's context tokens out.
  */
 
-import type {
-  Middleware,
-  MiddlewareContext,
-  MiddlewareStore,
-  SDKMessage,
-  SDKUsage,
-} from '../types';
+import type { MiddlewareContext, SDKUsage } from '../types';
 import type { TokenData } from './token-tracker';
 import { inputTokensWithCache } from './_usage';
+import { PhaseSnapshotPlugin } from './base';
 
 export interface ContextSizeData {
   /** Per-phase context size snapshots */
@@ -26,58 +21,57 @@ export interface ContextSizeData {
   }>;
 }
 
-export class ContextSizeTrackerPlugin implements Middleware {
+type ContextSizeSnapshot = {
+  phase: string;
+  contextTokensIn?: number;
+  contextTokensOut?: number;
+  freshContext: boolean;
+};
+
+export class ContextSizeTrackerPlugin extends PhaseSnapshotPlugin<
+  ContextSizeSnapshot,
+  ContextSizeData
+> {
   readonly name = 'contextSize';
 
-  private phaseSnapshots: Array<{
-    phase: string;
-    contextTokensIn?: number;
-    contextTokensOut?: number;
-    freshContext: boolean;
-  }> = [];
   private lastContextTokensOut?: number;
 
-  onPhaseTransition(
-    fromPhase: string,
-    _toPhase: string,
+  protected buildPhaseSnapshot(
+    phase: string,
     ctx: MiddlewareContext,
-    store: MiddlewareStore,
-  ): void {
+  ): ContextSizeSnapshot {
     const tokens = ctx.get<TokenData>('tokens');
     const contextTokensOut = this.computeContextTokensOut(tokens?.lastUsage);
 
-    this.phaseSnapshots.push({
-      phase: fromPhase,
+    const snapshot: ContextSizeSnapshot = {
+      phase,
       contextTokensIn: ctx.currentPhaseFreshContext
         ? undefined
         : this.lastContextTokensOut,
       contextTokensOut,
       freshContext: ctx.currentPhaseFreshContext,
-    });
+    };
 
+    // Roll the "previous out" forward so the next phase's `contextTokensIn`
+    // can read it. The base pushes the snapshot before this returns, so
+    // updating here matches the original ordering (push, then bump).
     this.lastContextTokensOut = contextTokensOut;
-    store.set('contextSize', this.getData());
+
+    return snapshot;
   }
 
-  onFinalize(
-    _resultMessage: SDKMessage,
-    _totalDurationMs: number,
-    ctx: MiddlewareContext,
-    store: MiddlewareStore,
-  ): void {
-    const tokens = ctx.get<TokenData>('tokens');
-    const contextTokensOut = this.computeContextTokensOut(tokens?.lastUsage);
+  protected buildData(): ContextSizeData {
+    return {
+      phaseSnapshots: [...this.phaseSnapshots],
+    };
+  }
 
-    this.phaseSnapshots.push({
-      phase: ctx.currentPhase,
-      contextTokensIn: ctx.currentPhaseFreshContext
-        ? undefined
-        : this.lastContextTokensOut,
-      contextTokensOut,
-      freshContext: ctx.currentPhaseFreshContext,
-    });
-
-    store.set('contextSize', this.getData());
+  protected getFinalizePhase(ctx: MiddlewareContext): string {
+    // Use the live middleware-context phase rather than the last `toPhase`.
+    // The original behaviour used `ctx.currentPhase` for the finalize
+    // snapshot — preserve it so downstream consumers (json-writer golden
+    // snapshot) see the same identity they always have.
+    return ctx.currentPhase;
   }
 
   private computeContextTokensOut(
@@ -85,11 +79,5 @@ export class ContextSizeTrackerPlugin implements Middleware {
   ): number | undefined {
     if (!usage) return undefined;
     return inputTokensWithCache(usage);
-  }
-
-  private getData(): ContextSizeData {
-    return {
-      phaseSnapshots: [...this.phaseSnapshots],
-    };
   }
 }
