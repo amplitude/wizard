@@ -554,24 +554,24 @@ export const HOOK_BRIDGE_RACE_RE =
   /^Error in hook callback hook_\d+: Error: Stream closed$/;
 
 /**
- * Splits a raw stderr chunk into the count of suppressed
- * hook-bridge-race lines and the remaining text that should still be
- * logged.
+ * Internal: split a raw stderr chunk on `\n`, drop lines matching `isNoise`,
+ * and reconstruct the remainder preserving the chunk's trailing-newline
+ * behavior.
  *
- * Why partition instead of `regex.test(data) → return`: the SDK's
- * stderr callback receives raw byte chunks from the subprocess pipe.
- * Multiple stderr writes can be batched into a single chunk, so a
- * chunk-level match would drop genuine errors riding alongside the
- * race-line noise. We split on `\n`, suppress only matching lines,
- * and reconstruct the rest preserving the original chunk's trailing
- * newline behavior.
+ * Why partition instead of `regex.test(data) → return`: the SDK's stderr
+ * callback receives raw byte chunks from the subprocess pipe. Multiple
+ * stderr writes can be batched into a single chunk, so a chunk-level
+ * match would drop genuine errors riding alongside the noise we want to
+ * suppress. We split per line, suppress only matching lines, and rebuild.
  *
- * Exported for unit tests.
+ * Shared by `partitionHookBridgeRace` and `stripStreamEventNoise` — both
+ * suppress different noise patterns but have identical chunk-handling
+ * mechanics (empty-input, trailing-newline, all-suppressed cases).
  */
-export function partitionHookBridgeRace(data: string): {
-  suppressed: number;
-  passthrough: string;
-} {
+function partitionLines(
+  data: string,
+  isNoise: (line: string) => boolean,
+): { suppressed: number; passthrough: string } {
   if (data.length === 0) return { suppressed: 0, passthrough: '' };
   const hadTrailingNewline = data.endsWith('\n');
   const lines = data.split('\n');
@@ -579,7 +579,7 @@ export function partitionHookBridgeRace(data: string): {
   let suppressed = 0;
   const kept: string[] = [];
   for (const line of lines) {
-    if (HOOK_BRIDGE_RACE_RE.test(line)) {
+    if (isNoise(line)) {
       suppressed++;
       continue;
     }
@@ -590,6 +590,20 @@ export function partitionHookBridgeRace(data: string): {
     suppressed,
     passthrough: kept.join('\n') + (hadTrailingNewline ? '\n' : ''),
   };
+}
+
+/**
+ * Splits a raw stderr chunk into the count of suppressed
+ * hook-bridge-race lines and the remaining text that should still be
+ * logged. See {@link partitionLines} for the chunk-handling rationale.
+ *
+ * Exported for unit tests.
+ */
+export function partitionHookBridgeRace(data: string): {
+  suppressed: number;
+  passthrough: string;
+} {
+  return partitionLines(data, (line) => HOOK_BRIDGE_RACE_RE.test(line));
 }
 
 /**
@@ -658,34 +672,15 @@ export function looksLikeStreamEventLine(line: string): boolean {
 
 /**
  * Strip stream-event protocol lines from a raw chunk while preserving
- * everything else (and the chunk's trailing-newline behavior). Mirrors
- * `partitionHookBridgeRace`: chunk-level filtering would drop genuine
- * errors that happened to ride alongside protocol noise in the same
- * batched stderr write, so we split on `\n`, drop only matching lines,
- * and reconstruct. Exported for unit tests.
+ * everything else (and the chunk's trailing-newline behavior). Shares
+ * its chunk-handling internals with {@link partitionHookBridgeRace} via
+ * {@link partitionLines}. Exported for unit tests.
  */
 export function stripStreamEventNoise(data: string): {
   suppressed: number;
   passthrough: string;
 } {
-  if (data.length === 0) return { suppressed: 0, passthrough: '' };
-  const hadTrailingNewline = data.endsWith('\n');
-  const lines = data.split('\n');
-  if (hadTrailingNewline) lines.pop();
-  let suppressed = 0;
-  const kept: string[] = [];
-  for (const line of lines) {
-    if (looksLikeStreamEventLine(line)) {
-      suppressed++;
-      continue;
-    }
-    kept.push(line);
-  }
-  if (kept.length === 0) return { suppressed, passthrough: '' };
-  return {
-    suppressed,
-    passthrough: kept.join('\n') + (hadTrailingNewline ? '\n' : ''),
-  };
+  return partitionLines(data, looksLikeStreamEventLine);
 }
 
 /**
@@ -1063,6 +1058,49 @@ export function createUserPromptSubmitHook(state: AgentState): HookCallback {
 }
 
 /**
+ * Defensively read a tool name from a hook-input record. The SDK has used
+ * both `tool_name` (snake_case, current) and `toolName` (camelCase, legacy
+ * / future) at different points; checking both keeps the wizard
+ * forward-/backward-compatible with SDK shape changes. Returns `''` when
+ * neither is a string.
+ *
+ * Shared by `maybeTruncateLargeRead`, `createPostToolUseHook`, and the
+ * PreToolUse path — every hook callback needs the tool name.
+ */
+function readToolNameFromHookInput(input: Record<string, unknown>): string {
+  if (typeof input.tool_name === 'string') return input.tool_name;
+  if (typeof input.toolName === 'string') return input.toolName;
+  return '';
+}
+
+/**
+ * Defensively read `tool_input` (or its camelCase twin) from a hook-input
+ * record. Returns the raw `unknown` payload — callers narrow further.
+ * Mirrors `readToolNameFromHookInput`'s shape-tolerance rationale.
+ */
+function readToolInputFromHookInput(input: Record<string, unknown>): unknown {
+  if (typeof input.tool_input !== 'undefined') return input.tool_input;
+  if (typeof (input as { toolInput?: unknown }).toolInput !== 'undefined') {
+    return (input as { toolInput: unknown }).toolInput;
+  }
+  return null;
+}
+
+/**
+ * Read the file path from a tool-input object, falling back across the
+ * two key spellings the SDK uses (`file_path` for Write/Edit/MultiEdit,
+ * `path` for some other write-shaped tools). Returns null when the
+ * payload isn't an object or neither key holds a string.
+ */
+function readFilePathFromToolInput(toolInput: unknown): string | null {
+  if (!toolInput || typeof toolInput !== 'object') return null;
+  const obj = toolInput as { file_path?: unknown; path?: unknown };
+  if (typeof obj.file_path === 'string') return obj.file_path;
+  if (typeof obj.path === 'string') return obj.path;
+  return null;
+}
+
+/**
  * Replace a large Read tool output with a head + tail snippet so the
  * model's history doesn't carry 30+ K tokens of file content forward
  * for the rest of the run. Returns null when the tool isn't Read or
@@ -1082,13 +1120,7 @@ function maybeTruncateLargeRead(input: Record<string, unknown>): {
   /** Bytes the model is no longer carrying for the rest of the run. */
   savedBytes: number;
 } | null {
-  const toolName =
-    typeof input.tool_name === 'string'
-      ? input.tool_name
-      : typeof input.toolName === 'string'
-      ? input.toolName
-      : '';
-  if (!READ_TOOL_NAMES.has(toolName)) return null;
+  if (!READ_TOOL_NAMES.has(readToolNameFromHookInput(input))) return null;
 
   // tool_response can be a string (legacy SDKs), an object with a
   // `content` string, or an array of content blocks. Unwrap defensively
@@ -1122,18 +1154,7 @@ function maybeTruncateLargeRead(input: Record<string, unknown>): {
   }
   if (text === null || text.length <= READ_TRUNCATE_THRESHOLD) return null;
 
-  const toolInput =
-    'tool_input' in input
-      ? input.tool_input
-      : (input as { toolInput?: unknown }).toolInput;
-  const filePath =
-    toolInput && typeof toolInput === 'object'
-      ? typeof (toolInput as { file_path?: unknown }).file_path === 'string'
-        ? (toolInput as { file_path: string }).file_path
-        : typeof (toolInput as { path?: unknown }).path === 'string'
-        ? (toolInput as { path: string }).path
-        : null
-      : null;
+  const filePath = readFilePathFromToolInput(readToolInputFromHookInput(input));
 
   const head = text.slice(0, READ_HEAD_BYTES);
   const tail = text.slice(text.length - READ_TAIL_BYTES);
@@ -1166,30 +1187,15 @@ export function createPostToolUseHook(state: AgentState): HookCallback {
   return (input: Record<string, unknown>): Promise<Record<string, unknown>> => {
     let secretWarning: string | null = null;
     try {
-      const toolName =
-        typeof input.tool_name === 'string'
-          ? input.tool_name
-          : typeof input.toolName === 'string'
-          ? input.toolName
-          : '';
+      const toolName = readToolNameFromHookInput(input);
       if (!classifyWriteOperation(toolName)) return Promise.resolve({});
 
-      const toolInput =
-        typeof input.tool_input !== 'undefined'
-          ? input.tool_input
-          : typeof input.toolInput !== 'undefined'
-          ? input.toolInput
-          : null;
+      const toolInput = readToolInputFromHookInput(input);
       const obj =
         toolInput && typeof toolInput === 'object'
           ? (toolInput as Record<string, unknown>)
           : {};
-      const path =
-        typeof obj.file_path === 'string'
-          ? obj.file_path
-          : typeof obj.path === 'string'
-          ? obj.path
-          : null;
+      const path = readFilePathFromToolInput(toolInput);
       if (path) {
         state.recordModifiedFile(path);
         logToFile(`PostToolUse: recorded modified file ${path} (${toolName})`);
