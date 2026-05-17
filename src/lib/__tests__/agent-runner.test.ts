@@ -18,8 +18,10 @@ import { vi } from 'vitest';
 import {
   agentArtifactsLookComplete,
   agentEventsInstrumented,
+  buildAuthErrorAbortSpec,
   buildDashboardDeferredMessage,
   buildGatewayAbortSpec,
+  buildMcpResourceAbortSpec,
   classifyAgentOutcome,
   classifyApiErrorSubtype,
   refreshTokenIfStale,
@@ -305,6 +307,169 @@ describe('buildGatewayAbortSpec — golden behavior pins', () => {
       expect(spec.emitMessage).toBe(
         'Wizard request rejected by gateway: unknown',
       );
+    });
+  });
+});
+
+describe('buildAuthErrorAbortSpec — golden behavior pins', () => {
+  // The two AUTH_ERROR variants reach the runner from very different
+  // failure modes — a brand-new account that isn't fully provisioned
+  // (Amplitude OAuth wall rejected the wizard) vs an existing user's
+  // bearer expiring mid-run (LLM gateway 401). The two need DIFFERENT
+  // copy, DIFFERENT credential cleanup, and DIFFERENT login prompts;
+  // mixing them up is the most enraging UX bug we've shipped here.
+  // (See AuthErrorSubkind for the source distinction.)
+
+  describe('llm-gateway subkind — bearer expired mid-run', () => {
+    it('pins all spec fields for a long-running-task gateway expiry', () => {
+      const spec = buildAuthErrorAbortSpec({
+        authSubkind: 'llm-gateway',
+        signupUrl: 'https://app.amplitude.com/signup',
+      });
+      expect(spec.isLlmGateway).toBe(true);
+      expect(spec.authSubkind).toBe('llm-gateway');
+      expect(spec.emitReason).toBe('gateway_token_expired');
+      // Existing session — don't wipe credentials, don't push /login.
+      expect(spec.clearCredentials).toBe(false);
+      expect(spec.promptLogin).toBe(false);
+      // Copy mentions the long-running-task framing (NOT signup).
+      expect(spec.authMessage).toContain('Authentication failed');
+      expect(spec.authMessage).toContain('session token expired');
+      expect(spec.authMessage).toContain('long-running task');
+      expect(spec.authMessage).toContain('in-progress files are preserved');
+      expect(spec.authMessage).not.toContain('Sign up manually');
+      expect(spec.authMessage).not.toContain('signup');
+    });
+  });
+
+  describe('amplitude subkind — OAuth wall rejected wizard', () => {
+    it('pins all spec fields for a fresh-account provisioning failure', () => {
+      const spec = buildAuthErrorAbortSpec({
+        authSubkind: 'amplitude',
+        signupUrl: 'https://app.amplitude.com/signup',
+      });
+      expect(spec.isLlmGateway).toBe(false);
+      expect(spec.authSubkind).toBe('amplitude');
+      expect(spec.emitReason).toBe('amplitude_token_expired');
+      // Fresh-account failure — wipe creds, steer back through /login.
+      expect(spec.clearCredentials).toBe(true);
+      expect(spec.promptLogin).toBe(true);
+      // Copy mentions the signup URL + retry steps explicitly.
+      expect(spec.authMessage).toContain('Authentication failed');
+      expect(spec.authMessage).toContain("isn't fully provisioned");
+      expect(spec.authMessage).toContain(
+        'Sign up manually at https://app.amplitude.com/signup',
+      );
+      expect(spec.authMessage).toContain('Re-run the wizard in a minute');
+    });
+
+    it('treats `undefined` subkind as amplitude (default for legacy callers)', () => {
+      // Callers that don't propagate AuthErrorSubkind from agent-interface
+      // (or where the subkind never got set because the failure mode was
+      // ambiguous) MUST default to the Amplitude path — that's the safer
+      // remediation: it tells the user to re-login + sign up, which works
+      // for both real causes. The reverse (assuming llm-gateway by default)
+      // would silently leave the user with stale OAuth credentials.
+      const spec = buildAuthErrorAbortSpec({
+        authSubkind: undefined,
+        signupUrl: 'https://app.amplitude.com/signup',
+      });
+      expect(spec.isLlmGateway).toBe(false);
+      expect(spec.authSubkind).toBe('amplitude');
+      expect(spec.emitReason).toBe('amplitude_token_expired');
+      expect(spec.clearCredentials).toBe(true);
+      expect(spec.promptLogin).toBe(true);
+    });
+
+    it('interpolates a different region-specific signup URL verbatim', () => {
+      // EU / staging zones produce different OUTBOUND_URLS.overview entries.
+      // The helper just stitches `<overview>/signup` into the copy — pin
+      // that the URL flows through unmodified so the cross-region path
+      // works without changes to this helper.
+      const spec = buildAuthErrorAbortSpec({
+        authSubkind: 'amplitude',
+        signupUrl: 'https://analytics.eu.amplitude.com/signup',
+      });
+      expect(spec.authMessage).toContain(
+        'Sign up manually at https://analytics.eu.amplitude.com/signup',
+      );
+    });
+  });
+});
+
+describe('buildMcpResourceAbortSpec — golden behavior pins', () => {
+  // The hard-abort path for MCP_MISSING / RESOURCE_MISSING produces the
+  // "Couldn't reach Amplitude's setup service" Outro a user sees when the
+  // agent failed before it could write any code. Both variants share the
+  // emit + wizardAbort scaffolding (extracted), but the user-facing copy
+  // and the `code` / `mcpServer` envelope fields differ — these tests
+  // pin the per-variant matrix byte-for-byte.
+
+  describe('MCP_MISSING', () => {
+    it('pins all spec fields for an Amplitude MCP failure with no detail', () => {
+      const spec = buildMcpResourceAbortSpec({
+        kind: AgentErrorType.MCP_MISSING,
+        detail: null,
+        frameworkName: 'Next.js',
+        docsUrl: 'https://example.com/nextjs',
+      });
+      expect(spec.isMcp).toBe(true);
+      expect(spec.code).toBe('MCP_MISSING');
+      expect(spec.emitMessage).toBe(
+        'Agent could not access Amplitude MCP server',
+      );
+      expect(spec.errorSummary).toBe(
+        'Agent could not access Amplitude MCP server',
+      );
+      // No detail string → defaults to remote `amplitude-wizard`.
+      expect(spec.mcpServer).toBe('amplitude-wizard');
+      // Copy mentions the framework name + docs URL verbatim.
+      expect(spec.userMessage).toContain(
+        "Couldn't reach Amplitude's setup service",
+      );
+      expect(spec.userMessage).toContain('set up Next.js manually');
+      expect(spec.userMessage).toContain('https://example.com/nextjs');
+    });
+
+    it('routes to `wizard-tools` mcpServer when detail mentions the in-process server', () => {
+      // The detail string is the free-form `report_status` payload from
+      // the inner agent. We substring-match on `wizard-tools` to tag the
+      // orchestrator envelope — this gives orchestrators enough hint to
+      // route a "skill load failed at startup" failure differently from
+      // a "remote MCP probe failed during dashboard creation" failure.
+      const spec = buildMcpResourceAbortSpec({
+        kind: AgentErrorType.MCP_MISSING,
+        detail: 'wizard-tools MCP failed to load: ENOENT skill manifest',
+        frameworkName: 'Vue',
+        docsUrl: 'https://example.com/vue',
+      });
+      expect(spec.mcpServer).toBe('wizard-tools');
+    });
+  });
+
+  describe('RESOURCE_MISSING', () => {
+    it('pins all spec fields for a missing setup resource', () => {
+      const spec = buildMcpResourceAbortSpec({
+        kind: AgentErrorType.RESOURCE_MISSING,
+        detail: 'No integration skill could be resolved',
+        frameworkName: 'Flask',
+        docsUrl: 'https://example.com/flask',
+      });
+      expect(spec.isMcp).toBe(false);
+      expect(spec.code).toBe('RESOURCE_MISSING');
+      expect(spec.emitMessage).toBe('Agent could not access setup resource');
+      expect(spec.errorSummary).toBe('Agent could not access setup resource');
+      // RESOURCE_MISSING never includes `wizard-tools` in detail by
+      // convention (resources are file paths, not server names), so the
+      // server hint defaults to `amplitude-wizard`.
+      expect(spec.mcpServer).toBe('amplitude-wizard');
+      expect(spec.userMessage).toContain(
+        "Couldn't load setup instructions for Flask",
+      );
+      expect(spec.userMessage).toContain(
+        'temporary service issue or a version mismatch',
+      );
+      expect(spec.userMessage).toContain('set up Flask manually');
     });
   });
 });

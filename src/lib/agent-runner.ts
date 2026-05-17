@@ -550,6 +550,284 @@ async function abortOnGatewayError(
 }
 
 /**
+ * Build the user-facing copy and orchestrator envelopes for an AUTH_ERROR
+ * agent failure. Pure transformation — no side effects, exported so the
+ * two distinct copy paths (Amplitude OAuth vs LLM-gateway bearer) can be
+ * locked down in unit tests without standing up the full wizard runtime.
+ *
+ * The two `AuthErrorSubkind` variants ('amplitude' / 'llm-gateway') exist
+ * because the same `AUTH_ERROR` outcome reaches the runner from two very
+ * different failure modes:
+ *
+ *   - 'amplitude'   — Amplitude OAuth wall rejected the wizard (most
+ *                     commonly a brand-new account that isn't fully
+ *                     provisioned). User has to retry login or sign up
+ *                     manually. We clear `session.credentials` so the
+ *                     next run goes through the OAuth flow again.
+ *   - 'llm-gateway' — Existing user's bearer token expired mid-run
+ *                     (mid-run 401 from `core.amplitude.com/wizard/v1/
+ *                     messages`). Simply re-running picks up a fresh
+ *                     token; we don't wipe credentials or steer the
+ *                     user back through /login.
+ *
+ * Returns the strings the caller writes into the UI surfaces. The caller
+ * still owns the actual `getUI().setOutroData` / `pushStatus` /
+ * `emitAuthRequired` / `wizardAbort` invocation so this helper stays
+ * side-effect free.
+ */
+export interface AuthErrorAbortSpec {
+  /** Whether the upstream failure was the LLM gateway (vs Amplitude OAuth). */
+  isLlmGateway: boolean;
+  /** Multi-line user-facing copy for the Outro / abort screen. */
+  authMessage: string;
+  /** Whether to wipe `session.credentials` (only on Amplitude-side failure). */
+  clearCredentials: boolean;
+  /** Whether the OutroScreen should surface a "log in again" prompt. */
+  promptLogin: boolean;
+  /** Subkind to tag on the NDJSON `auth_required` envelope. */
+  authSubkind: 'amplitude' | 'llm-gateway';
+  /** Reason discriminator for the NDJSON `auth_required` envelope. */
+  emitReason: 'amplitude_token_expired' | 'gateway_token_expired';
+}
+
+export function buildAuthErrorAbortSpec(input: {
+  authSubkind: 'amplitude' | 'llm-gateway' | undefined;
+  signupUrl: string;
+}): AuthErrorAbortSpec {
+  const isLlmGateway = input.authSubkind === 'llm-gateway';
+  const authMessage = isLlmGateway
+    ? `Authentication failed\n\n` +
+      `Your wizard session token expired during a long-running task.\n\n` +
+      `Re-run the wizard to refresh and resume — your in-progress files are preserved.`
+    : `Authentication failed\n\n` +
+      `We couldn't authenticate your Amplitude session with our service. ` +
+      `This can happen if your account was just created and isn't fully provisioned yet.\n\n` +
+      `Try one of the following:\n` +
+      `  • Re-run the wizard in a minute and log in again\n` +
+      `  • Sign up manually at ${input.signupUrl}, then re-run the wizard`;
+  return {
+    isLlmGateway,
+    authMessage,
+    // Only steer the user back through the OAuth login wall when the
+    // failure was on the Amplitude side. An LLM-gateway 401 is solved
+    // by simply re-running — forcing /login here would just add friction.
+    promptLogin: !isLlmGateway,
+    // Only clear credentials when Amplitude OAuth itself failed. LLM-gateway
+    // expiry doesn't invalidate the user's Amplitude session, so wiping
+    // credentials would force a needless re-login on the next run.
+    clearCredentials: !isLlmGateway,
+    authSubkind: isLlmGateway ? 'llm-gateway' : 'amplitude',
+    emitReason: isLlmGateway
+      ? 'gateway_token_expired'
+      : 'amplitude_token_expired',
+  };
+}
+
+/**
+ * Hard-error abort for `AUTH_ERROR` agent failures. Extracted from the
+ * runAgentWizardBody inline branch to share its sentry-tag + setOutroData
+ * + emitAuthRequired + wizardAbort sequence with the pure
+ * {@link buildAuthErrorAbortSpec} producer — copy and per-variant rules
+ * live in the spec builder; this function owns the side effects.
+ */
+async function abortOnAuthError(
+  authSubkind: 'amplitude' | 'llm-gateway' | undefined,
+  session: WizardSession,
+  config: FrameworkConfig,
+  cloudRegion: typeof DEFAULT_AMPLITUDE_ZONE,
+): Promise<never> {
+  captureWizardError(
+    'Agent Authentication',
+    'Session expired or invalid during agent run',
+    'agent-runner',
+    {
+      integration: config.metadata.integration,
+      'auth subkind': authSubkind ?? 'amplitude',
+    },
+  );
+  // Two distinct AUTH_ERROR sources need distinct copy. The original
+  // message ("account just created, isn't fully provisioned") was
+  // written for the new-user signup failure mode and was being shown
+  // verbatim when an existing user's LLM-gateway bearer expired mid-run
+  // — actively misleading and the most enraging copy for that specific
+  // failure. See AuthErrorSubkind for the source distinction.
+  const signupUrl = `${OUTBOUND_URLS.overview[cloudRegion]}/signup`;
+  const spec = buildAuthErrorAbortSpec({ authSubkind, signupUrl });
+
+  // Set outroData via the UI so the OutroScreen reliably re-renders before
+  // wizardAbort awaits user dismissal. Direct mutation of session.outroData
+  // doesn't notify nanostore subscribers and would make the outro miss the
+  // updated state — the user would not see the auth-failure confirmation
+  // before being routed back to login on the next run.
+  getUI().setOutroData({
+    kind: OutroKind.Error,
+    message: spec.authMessage,
+    promptLogin: spec.promptLogin,
+    canRestart: true,
+    // The bearer token expired on the very last gateway call. The
+    // event plan was approved, `track()` calls landed, validation
+    // passed — automatically reverting that work would penalise the
+    // user for what is fundamentally an internal token refresh bug.
+    // The OutroScreen surfaces a `[K] Keep / [R] Revert` prompt so
+    // the user owns the decision instead of the cleanup hook.
+    preserveFiles: true,
+  });
+  // Also push a status so the failure is visibly announced even if the
+  // OutroScreen hasn't taken focus yet (e.g. mid-Run-screen render).
+  getUI().pushStatus('Authentication failed — see details below.');
+  if (spec.clearCredentials) {
+    session.credentials = null;
+  }
+
+  // Emit the structured `auth_required` envelope BEFORE wizardAbort so
+  // an agent-mode orchestrator has the machine-readable payload (mid-run
+  // discriminator, partial-progress flags, resume command) before the
+  // terminal `run_completed` envelope lands. Previously only the TUI
+  // flow surfaced this via the keep/revert prompt; agent mode silently
+  // aborted with a generic error event.
+  try {
+    const { dashboardComplete, eventsInstrumented } =
+      classifyAgentOutcome(session);
+    getUI().emitAuthRequired?.({
+      reason: spec.emitReason,
+      instruction: spec.authMessage,
+      loginCommand: ['amplitude-wizard', 'login'],
+      resumeCommand: ['amplitude-wizard', '--agent'],
+      midRun: true,
+      preserveFiles: true,
+      partialProgress: { eventsInstrumented, dashboardComplete },
+      authSubkind: spec.authSubkind,
+    });
+  } catch (err) {
+    logToFile('[agent-runner] emitAuthRequired threw', err);
+  }
+
+  await wizardAbort({
+    message: spec.authMessage,
+    error: new WizardError('Authentication failed during agent run', {
+      integration: config.metadata.integration,
+      'error type': AgentErrorType.AUTH_ERROR,
+      'auth subkind': authSubkind ?? 'amplitude',
+    }),
+    exitCode: ExitCode.AUTH_REQUIRED,
+  });
+  // wizardAbort returns Promise<never>; explicit throw keeps TS narrowing
+  // happy across the async boundary.
+  throw new Error('unreachable');
+}
+
+/**
+ * Build the user-facing copy and orchestrator envelope for a hard-abort
+ * MCP_MISSING / RESOURCE_MISSING agent failure. Pure transformation — no
+ * side effects, exported for byte-for-byte copy locking in tests. Only
+ * the hard-abort case is covered here; the soft fall-through stays inline
+ * because it depends on live UI / analytics calls that aren't reasonable
+ * to virtualize.
+ *
+ * MCP_MISSING signals come from EITHER the in-process `wizard-tools`
+ * MCP (skill loading, env vars) OR the remote `amplitude-wizard` MCP
+ * (mcp.amplitude.com — event plans, dashboards). We disambiguate by
+ * substring-matching the agent-reported detail and surface the result
+ * as `mcpServer` on the orchestrator envelope.
+ */
+export type McpResourceErrorKind =
+  | AgentErrorType.MCP_MISSING
+  | AgentErrorType.RESOURCE_MISSING;
+
+export interface McpResourceAbortSpec {
+  /** Whether the failure was MCP_MISSING (vs RESOURCE_MISSING). */
+  isMcp: boolean;
+  /** NDJSON `code` discriminator for orchestrator routing. */
+  code: 'MCP_MISSING' | 'RESOURCE_MISSING';
+  /** NDJSON `emitRunError` summary line. */
+  emitMessage: string;
+  /** Hint for orchestrator routing — which MCP server failed. */
+  mcpServer: 'wizard-tools' | 'amplitude-wizard';
+  /** Multi-line user-facing copy for the Outro / abort screen. */
+  userMessage: string;
+  /** WizardError summary (also goes to Sentry). */
+  errorSummary: string;
+}
+
+export function buildMcpResourceAbortSpec(input: {
+  kind: McpResourceErrorKind;
+  detail: string | null;
+  frameworkName: string;
+  docsUrl: string;
+}): McpResourceAbortSpec {
+  const isMcp = input.kind === AgentErrorType.MCP_MISSING;
+  const summary = isMcp
+    ? 'Agent could not access Amplitude MCP server'
+    : 'Agent could not access setup resource';
+  return {
+    isMcp,
+    code: isMcp ? 'MCP_MISSING' : 'RESOURCE_MISSING',
+    emitMessage: summary,
+    // `wizard-tools` is the in-process MCP server bundled with the
+    // wizard (skill loading); `amplitude-wizard` is the remote
+    // `mcp.amplitude.com` server. The detail string is free-form (set
+    // by the inner agent via report_status), so we surface it as a
+    // hint for orchestrator routing without requiring exact-match
+    // parsing.
+    mcpServer:
+      input.detail && input.detail.includes('wizard-tools')
+        ? 'wizard-tools'
+        : 'amplitude-wizard',
+    userMessage: isMcp
+      ? `Couldn't reach Amplitude's setup service — this looks like a network or service issue.\n\nTry again in a moment, or set up ${input.frameworkName} manually:\n${input.docsUrl}`
+      : `Couldn't load setup instructions for ${input.frameworkName} — this may be a temporary service issue or a version mismatch.\n\nTry again in a moment, or set up ${input.frameworkName} manually:\n${input.docsUrl}`,
+    errorSummary: summary,
+  };
+}
+
+/**
+ * Hard-error abort for `MCP_MISSING` / `RESOURCE_MISSING` agent failures
+ * when the agent didn't get far enough to leave the project in a usable
+ * state. Extracted from runAgentWizardBody to share an emit + abort path
+ * between the two variants — the only per-variant differences (copy,
+ * code, mcpServer hint) live in {@link buildMcpResourceAbortSpec}.
+ */
+async function abortOnMcpResourceError(
+  kind: McpResourceErrorKind,
+  detail: string | null,
+  config: FrameworkConfig,
+): Promise<never> {
+  const spec = buildMcpResourceAbortSpec({
+    kind,
+    detail,
+    frameworkName: config.metadata.name,
+    docsUrl: config.metadata.docsUrl,
+  });
+  // Emit the structured error envelope with the typed `code`
+  // discriminator BEFORE wizardAbort so an orchestrator parsing
+  // the NDJSON stream can distinguish MCP / resource failures from
+  // generic AGENT_FAILED exits without parsing the message string.
+  try {
+    getUI().emitRunError?.({
+      message: spec.emitMessage,
+      code: spec.code,
+      mcpServer: spec.mcpServer,
+      recoverable: 'retry',
+      suggestedAction: {
+        docsUrl: config.metadata.docsUrl,
+      },
+    });
+  } catch (err) {
+    logToFile('[agent-runner] emitRunError (MCP/RESOURCE) threw', err);
+  }
+  await wizardAbort({
+    message: spec.userMessage,
+    error: new WizardError(spec.errorSummary, {
+      integration: config.metadata.integration,
+      'error type': kind,
+      'agent error detail': detail,
+    }),
+    exitCode: ExitCode.AGENT_FAILED,
+  });
+  throw new Error('unreachable');
+}
+
+/**
  * Build a WizardOptions bag from a WizardSession (for code that still expects WizardOptions).
  */
 function sessionToOptions(session: WizardSession): WizardOptions {
@@ -1606,98 +1884,16 @@ async function runAgentWizardBody(
 
   // Handle error cases detected in agent output
   if (agentResult.error === AgentErrorType.AUTH_ERROR) {
-    captureWizardError(
-      'Agent Authentication',
-      'Session expired or invalid during agent run',
-      'agent-runner',
-      {
-        integration: config.metadata.integration,
-        'auth subkind': agentResult.authSubkind ?? 'amplitude',
-      },
+    // Two AUTH_ERROR sources need distinct copy + behaviour — see
+    // {@link buildAuthErrorAbortSpec} for the variant matrix. The
+    // helper owns the Sentry tag + setOutroData + pushStatus +
+    // emitAuthRequired + wizardAbort sequence.
+    await abortOnAuthError(
+      agentResult.authSubkind,
+      session,
+      config,
+      cloudRegion,
     );
-    // Two distinct AUTH_ERROR sources need distinct copy. The original
-    // message ("account just created, isn't fully provisioned") was
-    // written for the new-user signup failure mode and was being shown
-    // verbatim when an existing user's LLM-gateway bearer expired mid-run
-    // — actively misleading and the most enraging copy for that specific
-    // failure. See AuthErrorSubkind for the source distinction.
-    const isLlmGateway = agentResult.authSubkind === 'llm-gateway';
-    const signupUrl = `${OUTBOUND_URLS.overview[cloudRegion]}/signup`;
-    const authMessage = isLlmGateway
-      ? `Authentication failed\n\n` +
-        `Your wizard session token expired during a long-running task.\n\n` +
-        `Re-run the wizard to refresh and resume — your in-progress files are preserved.`
-      : `Authentication failed\n\n` +
-        `We couldn't authenticate your Amplitude session with our service. ` +
-        `This can happen if your account was just created and isn't fully provisioned yet.\n\n` +
-        `Try one of the following:\n` +
-        `  • Re-run the wizard in a minute and log in again\n` +
-        `  • Sign up manually at ${signupUrl}, then re-run the wizard`;
-    // Set outroData via the UI so the OutroScreen reliably re-renders before
-    // wizardAbort awaits user dismissal. Direct mutation of session.outroData
-    // doesn't notify nanostore subscribers and would make the outro miss the
-    // updated state — the user would not see the auth-failure confirmation
-    // before being routed back to login on the next run.
-    getUI().setOutroData({
-      kind: OutroKind.Error,
-      message: authMessage,
-      // Only steer the user back through the OAuth login wall when the
-      // failure was on the Amplitude side. An LLM-gateway 401 is solved
-      // by simply re-running — forcing /login here would just add friction.
-      promptLogin: !isLlmGateway,
-      canRestart: true,
-      // The bearer token expired on the very last gateway call. The
-      // event plan was approved, `track()` calls landed, validation
-      // passed — automatically reverting that work would penalise the
-      // user for what is fundamentally an internal token refresh bug.
-      // The OutroScreen surfaces a `[K] Keep / [R] Revert` prompt so
-      // the user owns the decision instead of the cleanup hook.
-      preserveFiles: true,
-    });
-    // Also push a status so the failure is visibly announced even if the
-    // OutroScreen hasn't taken focus yet (e.g. mid-Run-screen render).
-    getUI().pushStatus('Authentication failed — see details below.');
-    // Only clear credentials when Amplitude OAuth itself failed. LLM-gateway
-    // expiry doesn't invalidate the user's Amplitude session, so wiping
-    // credentials would force a needless re-login on the next run.
-    if (!isLlmGateway) {
-      session.credentials = null;
-    }
-
-    // Emit the structured `auth_required` envelope BEFORE wizardAbort so
-    // an agent-mode orchestrator has the machine-readable payload (mid-run
-    // discriminator, partial-progress flags, resume command) before the
-    // terminal `run_completed` envelope lands. Previously only the TUI
-    // flow surfaced this via the keep/revert prompt; agent mode silently
-    // aborted with a generic error event.
-    try {
-      const { dashboardComplete, eventsInstrumented } =
-        classifyAgentOutcome(session);
-      getUI().emitAuthRequired?.({
-        reason: isLlmGateway
-          ? 'gateway_token_expired'
-          : 'amplitude_token_expired',
-        instruction: authMessage,
-        loginCommand: ['amplitude-wizard', 'login'],
-        resumeCommand: ['amplitude-wizard', '--agent'],
-        midRun: true,
-        preserveFiles: true,
-        partialProgress: { eventsInstrumented, dashboardComplete },
-        authSubkind: isLlmGateway ? 'llm-gateway' : 'amplitude',
-      });
-    } catch (err) {
-      logToFile('[agent-runner] emitAuthRequired threw', err);
-    }
-
-    await wizardAbort({
-      message: authMessage,
-      error: new WizardError('Authentication failed during agent run', {
-        integration: config.metadata.integration,
-        'error type': AgentErrorType.AUTH_ERROR,
-        'auth subkind': agentResult.authSubkind ?? 'amplitude',
-      }),
-      exitCode: ExitCode.AUTH_REQUIRED,
-    });
   }
 
   if (
@@ -1760,53 +1956,10 @@ async function runAgentWizardBody(
     } else {
       // Hard-error path: agent didn't get far enough to leave the
       // project usable. Could be the in-process wizard-tools MCP
-      // (skill loading) failing right at startup. Abort with the
-      // jargon-free copy from PR #336.
-      const isMcp = errorType === AgentErrorType.MCP_MISSING;
-      // Emit the structured error envelope with the typed `code`
-      // discriminator BEFORE wizardAbort so an orchestrator parsing
-      // the NDJSON stream can distinguish MCP / resource failures from
-      // generic AGENT_FAILED exits without parsing the message string.
-      try {
-        getUI().emitRunError?.({
-          message: isMcp
-            ? 'Agent could not access Amplitude MCP server'
-            : 'Agent could not access setup resource',
-          code: isMcp ? 'MCP_MISSING' : 'RESOURCE_MISSING',
-          // `wizard-tools` is the in-process MCP server bundled with
-          // the wizard (skill loading); `amplitude-wizard` is the
-          // remote `mcp.amplitude.com` server. The detail string is
-          // free-form (set by the inner agent via report_status), so
-          // we surface it as a hint for orchestrator routing without
-          // requiring exact-match parsing.
-          mcpServer:
-            detail && detail.includes('wizard-tools')
-              ? 'wizard-tools'
-              : 'amplitude-wizard',
-          recoverable: 'retry',
-          suggestedAction: {
-            docsUrl: config.metadata.docsUrl,
-          },
-        });
-      } catch (err) {
-        logToFile('[agent-runner] emitRunError (MCP/RESOURCE) threw', err);
-      }
-      await wizardAbort({
-        message: isMcp
-          ? `Couldn't reach Amplitude's setup service — this looks like a network or service issue.\n\nTry again in a moment, or set up ${config.metadata.name} manually:\n${config.metadata.docsUrl}`
-          : `Couldn't load setup instructions for ${config.metadata.name} — this may be a temporary service issue or a version mismatch.\n\nTry again in a moment, or set up ${config.metadata.name} manually:\n${config.metadata.docsUrl}`,
-        error: new WizardError(
-          isMcp
-            ? 'Agent could not access Amplitude MCP server'
-            : 'Agent could not access setup resource',
-          {
-            integration: config.metadata.integration,
-            'error type': errorType,
-            'agent error detail': detail,
-          },
-        ),
-        exitCode: ExitCode.AGENT_FAILED,
-      });
+      // (skill loading) failing right at startup. The helper owns the
+      // emit + wizardAbort sequence; copy / mcpServer detection live
+      // in {@link buildMcpResourceAbortSpec}.
+      await abortOnMcpResourceError(errorType, detail, config);
     }
   }
 
