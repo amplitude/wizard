@@ -12,6 +12,13 @@ import { tryGetPackageJson } from '../../utils/package-json-light';
 import { createVersionBucket } from '../../utils/semver';
 import { BROWSER_UNIFIED_SDK_PROMPT_LINE } from '../_shared/browser-sdk-prompt';
 import { isVuePoweredDocsSite } from '../_shared/vue-powered-docs-site';
+import {
+  SUCCESS_MESSAGE_INTEGRATION_COMPLETE,
+  OUTRO_DASHBOARD_LINE,
+  JS_TS_PROJECT_TYPE_DETECTION,
+  frameworkDocsIdLine,
+  nodeInstalledVersion,
+} from '../../lib/framework-shared';
 
 const FILE_SCAN_IGNORES = [
   '**/node_modules/**',
@@ -65,10 +72,7 @@ export const VUE_AGENT_CONFIG: FrameworkConfig<VueContext> = {
     getVersion: (packageJson: unknown) =>
       getPackageVersion('vue', packageJson as PackageDotJson),
     getVersionBucket: getVueVersionBucket,
-    getInstalledVersion: async (options) => {
-      const packageJson = await tryGetPackageJson(options);
-      return packageJson ? getPackageVersion('vue', packageJson) : undefined;
-    },
+    getInstalledVersion: nodeInstalledVersion('vue'),
     detect: async (options) => {
       const packageJson = await tryGetPackageJson(options);
       if (packageJson) {
@@ -88,7 +92,7 @@ export const VUE_AGENT_CONFIG: FrameworkConfig<VueContext> = {
 
   environment: {
     uploadToHosting: true,
-    getEnvVars: (apiKey: string, _host: string) => ({
+    getEnvVars: (apiKey: string) => ({
       VITE_AMPLITUDE_API_KEY: apiKey,
     }),
   },
@@ -98,20 +102,16 @@ export const VUE_AGENT_CONFIG: FrameworkConfig<VueContext> = {
   },
 
   prompts: {
-    projectTypeDetection:
-      'This is a JavaScript/TypeScript project. Look for package.json and lockfiles (package-lock.json, yarn.lock, pnpm-lock.yaml, bun.lockb) to confirm.',
-    getAdditionalContextLines: () => {
-      const frameworkId = 'vue';
-      return [
-        `Framework docs ID: ${frameworkId} (use amplitude://docs/frameworks/${frameworkId} for documentation)`,
-        BROWSER_UNIFIED_SDK_PROMPT_LINE,
-        `Initialize from the project's main entry point (typically src/main.ts or src/main.js) before app.mount() so the SDK loads alongside your Vue root.`,
-      ];
-    },
+    projectTypeDetection: JS_TS_PROJECT_TYPE_DETECTION,
+    getAdditionalContextLines: () => [
+      frameworkDocsIdLine('vue'),
+      BROWSER_UNIFIED_SDK_PROMPT_LINE,
+      `Initialize from the project's main entry point (typically src/main.ts or src/main.js) before app.mount() so the SDK loads alongside your Vue root.`,
+    ],
   },
 
   ui: {
-    successMessage: 'Amplitude integration complete',
+    successMessage: SUCCESS_MESSAGE_INTEGRATION_COMPLETE,
     estimatedDurationMinutes: 5,
     getOutroChanges: () => [
       'Analyzed your Vue project structure',
@@ -120,7 +120,7 @@ export const VUE_AGENT_CONFIG: FrameworkConfig<VueContext> = {
     ],
     getOutroNextSteps: () => [
       'Start your development server to see Amplitude in action',
-      'Visit your Amplitude dashboard to see incoming events',
+      OUTRO_DASHBOARD_LINE,
     ],
   },
 };

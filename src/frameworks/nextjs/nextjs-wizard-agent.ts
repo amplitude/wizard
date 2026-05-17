@@ -13,6 +13,12 @@ import { tryGetPackageJson } from '../../utils/package-json-light';
 import { getUI } from '../../ui';
 import { BROWSER_UNIFIED_SDK_PROMPT_LINE } from '../_shared/browser-sdk-prompt';
 import {
+  SUCCESS_MESSAGE_INTEGRATION_COMPLETE,
+  OUTRO_DASHBOARD_LINE,
+  JS_TS_PROJECT_TYPE_DETECTION,
+  nodeInstalledVersion,
+} from '../../lib/framework-shared';
+import {
   detectNextJsSurfaces,
   getNextJsRouter,
   getNextJsVersionBucket,
@@ -87,10 +93,7 @@ export const NEXTJS_AGENT_CONFIG: FrameworkConfig<NextjsContext> = {
     getVersion: (packageJson: unknown) =>
       getPackageVersion('next', packageJson as PackageDotJson),
     getVersionBucket: getNextJsVersionBucket,
-    getInstalledVersion: async (options: WizardOptions) => {
-      const packageJson = await tryGetPackageJson(options);
-      return packageJson ? getPackageVersion('next', packageJson) : undefined;
-    },
+    getInstalledVersion: nodeInstalledVersion('next'),
     detect: async (options) => {
       const packageJson = await tryGetPackageJson(options);
       return packageJson ? hasPackageInstalled('next', packageJson) : false;
@@ -100,7 +103,7 @@ export const NEXTJS_AGENT_CONFIG: FrameworkConfig<NextjsContext> = {
 
   environment: {
     uploadToHosting: true,
-    getEnvVars: (apiKey: string, _host: string) => ({
+    getEnvVars: (apiKey: string) => ({
       NEXT_PUBLIC_AMPLITUDE_API_KEY: apiKey,
     }),
   },
@@ -112,8 +115,7 @@ export const NEXTJS_AGENT_CONFIG: FrameworkConfig<NextjsContext> = {
   },
 
   prompts: {
-    projectTypeDetection:
-      'This is a JavaScript/TypeScript project. Look for package.json and lockfiles (package-lock.json, yarn.lock, pnpm-lock.yaml, bun.lockb) to confirm.',
+    projectTypeDetection: JS_TS_PROJECT_TYPE_DETECTION,
     getAdditionalContextLines: (context) => {
       const routerType =
         context.router === NextJsRouter.APP_ROUTER ? 'app' : 'pages';
@@ -172,7 +174,7 @@ export const NEXTJS_AGENT_CONFIG: FrameworkConfig<NextjsContext> = {
   },
 
   ui: {
-    successMessage: 'Amplitude integration complete',
+    successMessage: SUCCESS_MESSAGE_INTEGRATION_COMPLETE,
     estimatedDurationMinutes: 8,
     getOutroChanges: (context) => {
       const router = context.router ?? NextJsRouter.APP_ROUTER;
@@ -186,7 +188,7 @@ export const NEXTJS_AGENT_CONFIG: FrameworkConfig<NextjsContext> = {
     getOutroNextSteps: () => {
       return [
         'Start your development server to see Amplitude in action',
-        'Visit your Amplitude dashboard to see incoming events',
+        OUTRO_DASHBOARD_LINE,
       ];
     },
   },

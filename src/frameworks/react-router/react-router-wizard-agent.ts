@@ -12,6 +12,12 @@ import { tryGetPackageJson } from '../../utils/package-json-light';
 import { getUI } from '../../ui';
 import { BROWSER_UNIFIED_SDK_PROMPT_LINE } from '../_shared/browser-sdk-prompt';
 import {
+  SUCCESS_MESSAGE_INTEGRATION_COMPLETE,
+  OUTRO_DASHBOARD_LINE,
+  JS_TS_PROJECT_TYPE_DETECTION,
+  frameworkDocsIdLine,
+} from '../../lib/framework-shared';
+import {
   getReactRouterMode,
   getReactRouterModeName,
   getReactRouterVersionBucket,
@@ -163,7 +169,7 @@ export const REACT_ROUTER_AGENT_CONFIG: FrameworkConfig<ReactRouterContext> = {
 
   environment: {
     uploadToHosting: false,
-    getEnvVars: (apiKey: string, _host: string) => ({
+    getEnvVars: (apiKey: string) => ({
       REACT_APP_AMPLITUDE_API_KEY: apiKey,
     }),
   },
@@ -175,8 +181,7 @@ export const REACT_ROUTER_AGENT_CONFIG: FrameworkConfig<ReactRouterContext> = {
   },
 
   prompts: {
-    projectTypeDetection:
-      'This is a JavaScript/TypeScript project. Look for package.json and lockfiles (package-lock.json, yarn.lock, pnpm-lock.yaml, bun.lockb) to confirm.',
+    projectTypeDetection: JS_TS_PROJECT_TYPE_DETECTION,
     getAdditionalContextLines: (context) => {
       const routerMode = context.routerMode;
       const modeName = routerMode
@@ -197,7 +202,7 @@ export const REACT_ROUTER_AGENT_CONFIG: FrameworkConfig<ReactRouterContext> = {
 
       return [
         `Router mode: ${modeName}`,
-        `Framework docs ID: ${frameworkId} (use amplitude://docs/frameworks/${frameworkId} for documentation)`,
+        frameworkDocsIdLine(frameworkId),
         BROWSER_UNIFIED_SDK_PROMPT_LINE,
         `Initialize from the project's main entry point (typically src/main.tsx, src/index.tsx, or root.tsx for React Router 7 framework mode) before <RouterProvider /> mounts so the SDK is available on the first render.`,
       ];
@@ -205,7 +210,7 @@ export const REACT_ROUTER_AGENT_CONFIG: FrameworkConfig<ReactRouterContext> = {
   },
 
   ui: {
-    successMessage: 'Amplitude integration complete',
+    successMessage: SUCCESS_MESSAGE_INTEGRATION_COMPLETE,
     estimatedDurationMinutes: 8,
     getOutroChanges: (context) => {
       const modeName = context.routerMode
@@ -219,7 +224,7 @@ export const REACT_ROUTER_AGENT_CONFIG: FrameworkConfig<ReactRouterContext> = {
     },
     getOutroNextSteps: () => [
       'Start your development server to see Amplitude in action',
-      'Visit your Amplitude dashboard to see incoming events',
+      OUTRO_DASHBOARD_LINE,
     ],
   },
 };

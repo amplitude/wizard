@@ -5,6 +5,13 @@ import { unityPackageManager } from '../../lib/package-manager-detection';
 import { Integration } from '../../lib/constants';
 import { BrandColors } from '../../lib/brand-colors';
 import { detectUnityProject, isAmplitudePluginPresent } from './utils';
+import {
+  SUCCESS_MESSAGE_INTEGRATION_COMPLETE,
+  OUTRO_DASHBOARD_LINE,
+  emptyEnv,
+  frameworkDocsIdLine,
+  noVersionFromPackageJson,
+} from '../../lib/framework-shared';
 
 type UnityContext = {
   pluginAlreadyPresent?: boolean;
@@ -30,7 +37,7 @@ export const UNITY_AGENT_CONFIG: FrameworkConfig<UnityContext> = {
     packageName: 'com.amplitude.unity-plugin',
     packageDisplayName: 'Unity',
     usesPackageJson: false,
-    getVersion: () => undefined,
+    getVersion: noVersionFromPackageJson,
     detect: detectUnityProject,
     detectPackageManager: unityPackageManager,
   },
@@ -39,7 +46,7 @@ export const UNITY_AGENT_CONFIG: FrameworkConfig<UnityContext> = {
     // Unity C# doesn't read from .env files — API key is stored in a
     // ScriptableObject, Resources asset, or directly in initialization code
     uploadToHosting: false,
-    getEnvVars: () => ({}),
+    getEnvVars: emptyEnv,
   },
 
   analytics: {
@@ -55,7 +62,7 @@ export const UNITY_AGENT_CONFIG: FrameworkConfig<UnityContext> = {
       'Install via Unity Package Manager by editing Packages/manifest.json: add "com.amplitude.unity-plugin": "https://github.com/amplitude/unity-plugin.git?path=/Assets" to the dependencies object. Do not use npm or any other package manager.',
     getAdditionalContextLines: (context) => {
       const lines = [
-        `Framework docs ID: unity (use amplitude://docs/frameworks/unity for documentation)`,
+        frameworkDocsIdLine('unity'),
         `SDK: amplitude/unity-plugin — install via UPM git URL in Packages/manifest.json`,
         `Initialization (C#):`,
         `  Amplitude amplitude = Amplitude.getInstance();`,
@@ -79,7 +86,7 @@ export const UNITY_AGENT_CONFIG: FrameworkConfig<UnityContext> = {
   },
 
   ui: {
-    successMessage: 'Amplitude integration complete',
+    successMessage: SUCCESS_MESSAGE_INTEGRATION_COMPLETE,
     estimatedDurationMinutes: 8,
     getOutroChanges: (context) => [
       context.pluginAlreadyPresent
@@ -91,7 +98,7 @@ export const UNITY_AGENT_CONFIG: FrameworkConfig<UnityContext> = {
     getOutroNextSteps: () => [
       'Open the Unity Editor — it will automatically resolve and download the package',
       'Attach the Amplitude initialization script to a persistent GameObject (e.g. GameManager)',
-      'Visit your Amplitude dashboard to see incoming events',
+      OUTRO_DASHBOARD_LINE,
       'Use amplitude.logEvent("Event Name") for custom events',
       'Note: WebGL builds are not supported',
     ],

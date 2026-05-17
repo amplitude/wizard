@@ -4,6 +4,13 @@ import type { FrameworkConfig } from '../../lib/framework-config';
 import { detectNodePackageManagersLight as detectNodePackageManagers } from '../../lib/package-manager-detection-light';
 import { Integration } from '../../lib/constants';
 import { detectReactNativeProject, detectExpo } from './utils';
+import {
+  SUCCESS_MESSAGE_INTEGRATION_COMPLETE,
+  OUTRO_DASHBOARD_LINE,
+  apiKeyAndServerUrlEnv,
+  frameworkDocsIdLine,
+  noVersionFromPackageJson,
+} from '../../lib/framework-shared';
 
 type ReactNativeContext = {
   isExpo?: boolean;
@@ -28,7 +35,7 @@ export const REACT_NATIVE_AGENT_CONFIG: FrameworkConfig<ReactNativeContext> = {
     packageName: 'react-native',
     packageDisplayName: 'React Native',
     usesPackageJson: true,
-    getVersion: () => undefined,
+    getVersion: noVersionFromPackageJson,
     detect: detectReactNativeProject,
     detectPackageManager: detectNodePackageManagers,
   },
@@ -38,10 +45,7 @@ export const REACT_NATIVE_AGENT_CONFIG: FrameworkConfig<ReactNativeContext> = {
     // Expo uses EXPO_PUBLIC_ prefix; bare RN uses plain env vars via react-native-config.
     // The agent handles the correct naming based on context — we write a neutral key
     // here as a placeholder and the agent will rename as appropriate.
-    getEnvVars: (apiKey, host) => ({
-      AMPLITUDE_API_KEY: apiKey,
-      AMPLITUDE_SERVER_URL: host,
-    }),
+    getEnvVars: apiKeyAndServerUrlEnv,
   },
 
   analytics: {
@@ -64,7 +68,7 @@ export const REACT_NATIVE_AGENT_CONFIG: FrameworkConfig<ReactNativeContext> = {
         : 'npm install @amplitude/analytics-react-native @react-native-async-storage/async-storage';
       return [
         `Project type: ${context.isExpo ? 'Expo' : 'Bare React Native'}`,
-        `Framework docs ID: react-native (use amplitude://docs/frameworks/react-native for documentation)`,
+        frameworkDocsIdLine('react-native'),
         `SDK: @amplitude/analytics-react-native — do NOT use @amplitude/unified (not supported for React Native)`,
         `Install command: ${installCmd}`,
         `Environment variable name: ${envVarName}`,
@@ -77,7 +81,7 @@ export const REACT_NATIVE_AGENT_CONFIG: FrameworkConfig<ReactNativeContext> = {
   },
 
   ui: {
-    successMessage: 'Amplitude integration complete',
+    successMessage: SUCCESS_MESSAGE_INTEGRATION_COMPLETE,
     estimatedDurationMinutes: 8,
     getOutroChanges: (context) => {
       const variant = context.isExpo ? 'Expo' : 'Bare React Native';
@@ -91,7 +95,7 @@ export const REACT_NATIVE_AGENT_CONFIG: FrameworkConfig<ReactNativeContext> = {
       context.isExpo
         ? 'Run `expo start` to launch the app and verify events'
         : 'Run `npx react-native run-ios` or `run-android` to verify events',
-      'Visit your Amplitude dashboard to see incoming events',
+      OUTRO_DASHBOARD_LINE,
       "Use track('Event Name', { prop: value }) for custom events",
       'Use setUserId("user@example.com") to associate events with users',
     ],
