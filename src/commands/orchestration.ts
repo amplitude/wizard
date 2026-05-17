@@ -106,6 +106,51 @@ function emitJsonError(message: string): void {
   });
 }
 
+/**
+ * Centralized error reporter. Every handler does the same fork:
+ *   if (opts?.jsonOutput) emitJsonError(prefixed); else getUI().log.error(prefixed)
+ * The prefix is the operation name in human-readable form ("Tasks listing
+ * failed:" vs the JSON-side "tasks listing failed:"). The two prefixes differ
+ * only in leading-capital convention, so we accept both up front. An empty
+ * `message` (e.g. for plain "<noun> <id> not found" lookups) renders without
+ * a trailing space so the emitted text matches the prior inline string.
+ */
+function reportError(
+  opts: CommonOpts | undefined,
+  humanPrefix: string,
+  jsonPrefix: string,
+  message: string,
+): void {
+  const joined = (prefix: string): string =>
+    message.length === 0 ? prefix : `${prefix} ${message}`;
+  if (opts?.jsonOutput) emitJsonError(joined(jsonPrefix));
+  else getUI().log.error(joined(humanPrefix));
+}
+
+/**
+ * Parse `raw` with `parser` and `process.exit(INVALID_ARGS)` on failure. The
+ * id-validation try/catch around `asSessionId` / `asTaskId` repeats in every
+ * handler that takes a positional id — collapse it here.
+ *
+ * Returns the parsed value when valid. Returns `never` semantically when
+ * invalid (we call `process.exit`), but TypeScript's narrower view treats the
+ * call as returning T, which is what every caller needs.
+ */
+function parseIdOrExit<T>(
+  opts: CommonOpts | undefined,
+  raw: string,
+  parser: (raw: string) => T,
+): T {
+  try {
+    return parser(raw);
+  } catch (err) {
+    const m = err instanceof Error ? err.message : String(err);
+    if (opts?.jsonOutput) emitJsonError(m);
+    else getUI().log.error(m);
+    process.exit(ExitCode.INVALID_ARGS);
+  }
+}
+
 // ── wizard tasks ──────────────────────────────────────────────────────
 
 export const tasksCommand: CommandModule = {
@@ -160,18 +205,11 @@ export const tasksCommand: CommandModule = {
           }
           stateFilter = stateFilterRaw as TaskLifecycle;
         }
-        let sessionFilter: SessionId | undefined;
         const sessionFilterRaw = argv['session-id'] as string | undefined;
-        if (sessionFilterRaw !== undefined) {
-          try {
-            sessionFilter = asSessionId(sessionFilterRaw);
-          } catch (err) {
-            const m = err instanceof Error ? err.message : String(err);
-            if (opts?.jsonOutput) emitJsonError(m);
-            else getUI().log.error(m);
-            process.exit(ExitCode.INVALID_ARGS);
-          }
-        }
+        const sessionFilter: SessionId | undefined =
+          sessionFilterRaw !== undefined
+            ? parseIdOrExit(opts, sessionFilterRaw, asSessionId)
+            : undefined;
         const tasks = store.listTasks({
           state: stateFilter,
           sessionId: sessionFilter,
@@ -202,8 +240,12 @@ export const tasksCommand: CommandModule = {
         process.exit(ExitCode.SUCCESS);
       } catch (e) {
         const message = e instanceof Error ? e.message : String(e);
-        if (opts?.jsonOutput) emitJsonError(`tasks listing failed: ${message}`);
-        else getUI().log.error(`Tasks listing failed: ${message}`);
+        reportError(
+          opts,
+          'Tasks listing failed:',
+          'tasks listing failed:',
+          message,
+        );
         process.exit(ExitCode.GENERAL_ERROR);
       }
     })();
@@ -244,20 +286,16 @@ export const taskCommand: CommandModule = {
         const { TaskEnvelopeSchema } = await import(
           '../lib/orchestration/schemas.js'
         );
-        let id: TaskId;
-        try {
-          id = asTaskId(idRaw);
-        } catch (err) {
-          const m = err instanceof Error ? err.message : String(err);
-          if (opts?.jsonOutput) emitJsonError(m);
-          else getUI().log.error(m);
-          process.exit(ExitCode.INVALID_ARGS);
-        }
+        const id: TaskId = parseIdOrExit(opts, idRaw, asTaskId);
         const store = getOrchestrationStore(opts.installDir);
-        const task = store.getTask(id!);
+        const task = store.getTask(id);
         if (!task) {
-          if (opts.jsonOutput) emitJsonError(`Task ${idRaw} not found`);
-          else getUI().log.error(`Task ${idRaw} not found`);
+          reportError(
+            opts,
+            `Task ${idRaw} not found`,
+            `Task ${idRaw} not found`,
+            '',
+          );
           process.exit(ExitCode.INVALID_ARGS);
         }
         if (opts.jsonOutput) {
@@ -316,8 +354,12 @@ export const taskCommand: CommandModule = {
         process.exit(ExitCode.SUCCESS);
       } catch (e) {
         const message = e instanceof Error ? e.message : String(e);
-        if (opts?.jsonOutput) emitJsonError(`task lookup failed: ${message}`);
-        else getUI().log.error(`Task lookup failed: ${message}`);
+        reportError(
+          opts,
+          'Task lookup failed:',
+          'task lookup failed:',
+          message,
+        );
         process.exit(ExitCode.GENERAL_ERROR);
       }
     })();
@@ -400,9 +442,12 @@ export const sessionsCommand: CommandModule = {
         process.exit(ExitCode.SUCCESS);
       } catch (e) {
         const message = e instanceof Error ? e.message : String(e);
-        if (opts?.jsonOutput)
-          emitJsonError(`sessions listing failed: ${message}`);
-        else getUI().log.error(`Sessions listing failed: ${message}`);
+        reportError(
+          opts,
+          'Sessions listing failed:',
+          'sessions listing failed:',
+          message,
+        );
         process.exit(ExitCode.GENERAL_ERROR);
       }
     })();
@@ -443,20 +488,16 @@ export const sessionCommand: CommandModule = {
         const { SessionEnvelopeSchema } = await import(
           '../lib/orchestration/schemas.js'
         );
-        let id: SessionId;
-        try {
-          id = asSessionId(idRaw);
-        } catch (err) {
-          const m = err instanceof Error ? err.message : String(err);
-          if (opts?.jsonOutput) emitJsonError(m);
-          else getUI().log.error(m);
-          process.exit(ExitCode.INVALID_ARGS);
-        }
+        const id: SessionId = parseIdOrExit(opts, idRaw, asSessionId);
         const store = getOrchestrationStore(opts.installDir);
-        const session = store.getSession(id!);
+        const session = store.getSession(id);
         if (!session) {
-          if (opts.jsonOutput) emitJsonError(`Session ${idRaw} not found`);
-          else getUI().log.error(`Session ${idRaw} not found`);
+          reportError(
+            opts,
+            `Session ${idRaw} not found`,
+            `Session ${idRaw} not found`,
+            '',
+          );
           process.exit(ExitCode.INVALID_ARGS);
         }
         const tasks = store.listTasks({
@@ -494,9 +535,12 @@ export const sessionCommand: CommandModule = {
         process.exit(ExitCode.SUCCESS);
       } catch (e) {
         const message = e instanceof Error ? e.message : String(e);
-        if (opts?.jsonOutput)
-          emitJsonError(`session lookup failed: ${message}`);
-        else getUI().log.error(`Session lookup failed: ${message}`);
+        reportError(
+          opts,
+          'Session lookup failed:',
+          'session lookup failed:',
+          message,
+        );
         process.exit(ExitCode.GENERAL_ERROR);
       }
     })();
@@ -548,21 +592,20 @@ export const resumeCommand: CommandModule = {
         const { ResumeEnvelopeSchema } = await import(
           '../lib/orchestration/schemas.js'
         );
-        let sessionId: SessionId;
-        try {
-          sessionId = asSessionId(sessionIdRaw);
-        } catch (err) {
-          const m = err instanceof Error ? err.message : String(err);
-          if (opts?.jsonOutput) emitJsonError(m);
-          else getUI().log.error(m);
-          process.exit(ExitCode.INVALID_ARGS);
-        }
+        const sessionId: SessionId = parseIdOrExit(
+          opts,
+          sessionIdRaw,
+          asSessionId,
+        );
         const store = getOrchestrationStore(opts.installDir);
-        const session = store.getSession(sessionId!);
+        const session = store.getSession(sessionId);
         if (!session) {
-          if (opts.jsonOutput)
-            emitJsonError(`Session ${sessionIdRaw} not found`);
-          else getUI().log.error(`Session ${sessionIdRaw} not found`);
+          reportError(
+            opts,
+            `Session ${sessionIdRaw} not found`,
+            `Session ${sessionIdRaw} not found`,
+            '',
+          );
           process.exit(ExitCode.INVALID_ARGS);
         }
         // Scope LSP derivation to the resolved session so the resume command
@@ -609,12 +652,12 @@ export const resumeCommand: CommandModule = {
           const { spawn } = await import('../utils/cross-platform-spawn.js');
           const [cmd, ...rest] = command;
           if (!cmd) {
-            if (opts.jsonOutput)
-              emitJsonError('Resume command is empty — nothing to execute.');
-            else
-              getUI().log.error(
-                'Resume command is empty — nothing to execute.',
-              );
+            reportError(
+              opts,
+              'Resume command is empty — nothing to execute.',
+              'Resume command is empty — nothing to execute.',
+              '',
+            );
             process.exit(ExitCode.GENERAL_ERROR);
           }
           const child = spawn(cmd, rest, { stdio: 'inherit' });
@@ -625,10 +668,12 @@ export const resumeCommand: CommandModule = {
           // CLI failure.
           child.on('error', (err) => {
             const message = err instanceof Error ? err.message : String(err);
-            if (opts?.jsonOutput)
-              emitJsonError(`Failed to spawn resume command: ${message}`);
-            else
-              getUI().log.error(`Failed to spawn resume command: ${message}`);
+            reportError(
+              opts,
+              'Failed to spawn resume command:',
+              'Failed to spawn resume command:',
+              message,
+            );
             process.exit(ExitCode.GENERAL_ERROR);
           });
           child.on('exit', (code) => {
@@ -639,8 +684,7 @@ export const resumeCommand: CommandModule = {
         process.exit(ExitCode.SUCCESS);
       } catch (e) {
         const message = e instanceof Error ? e.message : String(e);
-        if (opts?.jsonOutput) emitJsonError(`resume failed: ${message}`);
-        else getUI().log.error(`Resume failed: ${message}`);
+        reportError(opts, 'Resume failed:', 'resume failed:', message);
         process.exit(ExitCode.GENERAL_ERROR);
       }
     })();
@@ -741,9 +785,12 @@ export const orchestrationCommand: CommandModule = {
               process.exit(ExitCode.SUCCESS);
             } catch (e) {
               const message = e instanceof Error ? e.message : String(e);
-              if (opts?.jsonOutput)
-                emitJsonError(`orchestration status failed: ${message}`);
-              else getUI().log.error(`Orchestration status failed: ${message}`);
+              reportError(
+                opts,
+                'Orchestration status failed:',
+                'orchestration status failed:',
+                message,
+              );
               process.exit(ExitCode.GENERAL_ERROR);
             }
           })();

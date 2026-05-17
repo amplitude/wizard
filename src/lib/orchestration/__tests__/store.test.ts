@@ -143,6 +143,52 @@ describe('OrchestrationStore — read / write', () => {
     const queued = store.listTasks({ state: TaskLifecycle.Queued });
     expect(queued).toHaveLength(1);
   });
+
+  it('transitionTask throws "Task <id> not found" for an unknown id', () => {
+    const store = new OrchestrationStore(installDir);
+    expect(() =>
+      store.transitionTask('task_unknown' as never, TaskLifecycle.Running),
+    ).toThrow(/^Task task_unknown not found$/);
+  });
+
+  it('setSessionStatus throws "Session <id> not found" for an unknown id', () => {
+    const store = new OrchestrationStore(installDir);
+    expect(() =>
+      store.setSessionStatus('session_unknown' as never, 'succeeded'),
+    ).toThrow(/^Session session_unknown not found$/);
+  });
+
+  it('setSessionStatus marks finishedAt and persists branch/worktree/goal', () => {
+    const store = new OrchestrationStore(installDir);
+    const session = store.createSession({});
+    const updated = store.setSessionStatus(session.id, 'succeeded', {
+      branch: 'feat/x',
+      worktree: '/tmp/wt',
+      goal: 'all done',
+    });
+    expect(updated.status).toBe('succeeded');
+    expect(updated.finishedAt).toBeGreaterThan(0);
+    expect(updated.branch).toBe('feat/x');
+    expect(updated.worktree).toBe('/tmp/wt');
+    expect(updated.goal).toBe('all done');
+  });
+
+  it('createSubagent + finishSubagent round-trip with not-found check', () => {
+    const store = new OrchestrationStore(installDir);
+    const session = store.createSession({});
+    const root = store.createTask({ sessionId: session.id, label: 'root' });
+    const sub = store.createSubagent({
+      sessionId: session.id,
+      kind: 'integration',
+      rootTaskId: root.id,
+    });
+    expect(sub.finishedAt).toBeNull();
+    const finished = store.finishSubagent(sub.id);
+    expect(finished.finishedAt).not.toBeNull();
+    expect(() => store.finishSubagent('subagent_unknown' as never)).toThrow(
+      /^Subagent subagent_unknown not found$/,
+    );
+  });
 });
 
 describe('OrchestrationStore — atomic write durability', () => {
