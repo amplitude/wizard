@@ -205,14 +205,27 @@ export const OrchestrationStoreFileSchema = z.object({
 // ── CLI envelope schemas ─────────────────────────────────────────────
 
 /**
+ * Shared header fields stamped onto every `--json` envelope: the schema
+ * version literal, the wall-clock generation timestamp, and the install
+ * dir the snapshot belongs to. Each envelope spreads these and adds its
+ * own `type` discriminant + payload. Defined as a plain object literal
+ * (not a Zod schema) so we can splat the fields into each `z.object`
+ * call — the wire shape and field order remain byte-identical to the
+ * prior inline definitions.
+ */
+const ENVELOPE_BASE_FIELDS = {
+  v: z.literal(1),
+  generatedAt: z.string(),
+  installDir: z.string(),
+} as const;
+
+/**
  * Envelope returned by `wizard orchestration status --json`. Wraps the LSP
  * with the schema version so consumers can branch on version.
  */
 export const StatusEnvelopeSchema = z.object({
-  v: z.literal(1),
+  ...ENVELOPE_BASE_FIELDS,
   type: z.literal('orchestration_status'),
-  generatedAt: z.string(),
-  installDir: z.string(),
   storePath: z.string(),
   storeExists: z.boolean(),
   lastStoppingPoint: LastStoppingPointSchema,
@@ -220,47 +233,37 @@ export const StatusEnvelopeSchema = z.object({
 
 /** Envelope returned by `wizard tasks --json`. */
 export const TasksEnvelopeSchema = z.object({
-  v: z.literal(1),
+  ...ENVELOPE_BASE_FIELDS,
   type: z.literal('orchestration_tasks'),
-  generatedAt: z.string(),
-  installDir: z.string(),
   tasks: z.array(TaskSchema),
 });
 
 /** Envelope returned by `wizard task <id> --json`. */
 export const TaskEnvelopeSchema = z.object({
-  v: z.literal(1),
+  ...ENVELOPE_BASE_FIELDS,
   type: z.literal('orchestration_task'),
-  generatedAt: z.string(),
-  installDir: z.string(),
   task: TaskSchema,
 });
 
 /** Envelope returned by `wizard sessions --json`. */
 export const SessionsEnvelopeSchema = z.object({
-  v: z.literal(1),
+  ...ENVELOPE_BASE_FIELDS,
   type: z.literal('orchestration_sessions'),
-  generatedAt: z.string(),
-  installDir: z.string(),
   sessions: z.array(SessionSchema),
 });
 
 /** Envelope returned by `wizard session <id> --json`. */
 export const SessionEnvelopeSchema = z.object({
-  v: z.literal(1),
+  ...ENVELOPE_BASE_FIELDS,
   type: z.literal('orchestration_session'),
-  generatedAt: z.string(),
-  installDir: z.string(),
   session: SessionSchema,
   tasks: z.array(TaskSchema),
 });
 
 /** Envelope returned by `wizard resume <session-id> --json`. */
 export const ResumeEnvelopeSchema = z.object({
-  v: z.literal(1),
+  ...ENVELOPE_BASE_FIELDS,
   type: z.literal('orchestration_resume'),
-  generatedAt: z.string(),
-  installDir: z.string(),
   sessionId: SessionIdSchema,
   command: z.array(z.string()),
   description: z.string(),
