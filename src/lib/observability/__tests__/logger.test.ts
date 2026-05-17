@@ -1,13 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import {
-  existsSync,
-  mkdtempSync,
-  readFileSync,
-  rmSync,
-  writeFileSync,
-} from 'fs';
+import { existsSync, readFileSync, rmSync, writeFileSync } from 'fs';
 import { join } from 'path';
-import { tmpdir } from 'os';
+import { createTempDir } from '../../../utils/__tests__/helpers/temp-dir.js';
 import {
   createLogger,
   initLogger,
@@ -26,11 +20,12 @@ import {
 
 describe('logger', () => {
   let tempDir: string;
+  let cleanup: () => void;
   let logFile: string;
   let structuredLogFile: string;
 
   beforeEach(() => {
-    tempDir = mkdtempSync(join(tmpdir(), 'wizard-logger-test-'));
+    ({ dir: tempDir, cleanup } = createTempDir('wizard-logger-test-'));
     // `.txt` mirrors the per-project layout introduced by storage-paths.ts
     // (`log.txt` + `log.ndjson`). The structured path is auto-derived by
     // `configureLogFile` when omitted, but we set it explicitly so the
@@ -56,7 +51,7 @@ describe('logger', () => {
   afterEach(() => {
     setTerminalSink(null as never);
     try {
-      rmSync(tempDir, { recursive: true });
+      cleanup();
     } catch {
       // cleanup best-effort
     }
