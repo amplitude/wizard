@@ -8,11 +8,8 @@ export default tseslint.config(
   {
     ignores: [
       'eslint.config.mjs',
-      '.eslintrc.js',
-      'babel.config.js',
       'cucumber.mjs',
       'vitest.config.ts',
-      'experiment.mts',
       'build/**',
       'dist/**',
       'esm/**',
