@@ -10,8 +10,6 @@ import { WizardRouter } from '../../src/ui/tui/router.js';
 import { Flow } from '../../src/ui/tui/flows.js';
 import {
   buildSession,
-  RunPhase,
-  OutroKind,
   type WizardSession,
 } from '../../src/lib/wizard-session.js';
 
@@ -56,6 +54,3 @@ export function newRouterAndSession(
     ),
   };
 }
-
-/** Re-export wizard-session enums so step files don't need their own imports. */
-export { RunPhase, OutroKind };
