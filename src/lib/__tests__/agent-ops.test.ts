@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
 import * as fs from 'node:fs';
-import * as os from 'node:os';
 import * as path from 'node:path';
+import { createTempDir } from '../../utils/__tests__/helpers/temp-dir.js';
 
 // Mock the auth plumbing — agent-ops shouldn't actually hit ~/.ampli.json.
 vi.mock('../../utils/ampli-settings.js', () => ({
@@ -134,15 +134,16 @@ describe('getAuthToken', () => {
 
 describe('runDetect + runStatus', () => {
   let tmpDir: string;
+  let cleanup: () => void;
 
   beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-ops-test-'));
+    ({ dir: tmpDir, cleanup } = createTempDir('agent-ops-test-'));
     mockedGetStoredUser.mockReset();
     mockedGetStoredToken.mockReset();
   });
 
   afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    cleanup();
   });
 
   it('runDetect returns integration:null and confidence:none for an empty dir', async () => {

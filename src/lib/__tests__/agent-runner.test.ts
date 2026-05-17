@@ -12,8 +12,8 @@
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
-import * as os from 'os';
 import * as path from 'path';
+import { createTempDir } from '../../utils/__tests__/helpers/temp-dir.js';
 import { vi } from 'vitest';
 import {
   agentArtifactsLookComplete,
@@ -234,10 +234,11 @@ describe('agentEventsInstrumented', () => {
   // exact shape of the bug Cassie hit.
 
   let tmpDir: string;
+  let cleanup: () => void;
   beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'agent-runner-'));
+    ({ dir: tmpDir, cleanup } = createTempDir('agent-runner-'));
   });
-  afterEach(() => fs.rmSync(tmpDir, { recursive: true, force: true }));
+  afterEach(() => cleanup());
 
   it('returns true when .amplitude-events.json exists with events', () => {
     fs.writeFileSync(
@@ -304,13 +305,14 @@ describe('agentEventsInstrumented', () => {
 
 describe('classifyAgentOutcome', () => {
   let tmpDir: string;
+  let cleanup: () => void;
 
   beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'classify-outcome-'));
+    ({ dir: tmpDir, cleanup } = createTempDir('classify-outcome-'));
   });
 
   afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    cleanup();
   });
 
   it('returns soft when dashboard URL is set', () => {
@@ -610,14 +612,15 @@ describe('agent system prompt no longer references dashboard MCP tools (DEFER_DA
 
 describe('events-only success path (DEFER_DASHBOARD_PLAN PR 4)', () => {
   let tmpDir: string;
+  let cleanup: () => void;
 
   beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'defer-dashboard-pr4-'));
+    ({ dir: tmpDir, cleanup } = createTempDir('defer-dashboard-pr4-'));
     fs.mkdirSync(path.join(tmpDir, '.amplitude'), { recursive: true });
   });
 
   afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    cleanup();
   });
 
   it('agentEventsInstrumented is true once events.json lands — no dashboard URL needed', () => {

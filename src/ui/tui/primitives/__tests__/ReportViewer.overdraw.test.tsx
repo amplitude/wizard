@@ -28,8 +28,8 @@
 import React from 'react';
 import { describe, it, expect } from 'vitest';
 import * as fs from 'fs';
-import * as os from 'os';
 import * as path from 'path';
+import { createTempDir } from '../../../../utils/__tests__/helpers/temp-dir.js';
 import { render } from 'ink-testing-library';
 import { Box } from 'ink';
 import { ReportViewer } from '../ReportViewer.js';
@@ -45,7 +45,7 @@ describe('ReportViewer overdraw', () => {
     // joins consecutive paragraphs onto a single rendered line, so
     // force line breaks with `\n\n` (paragraph) or fenced code (each
     // code line is its own row in marked-terminal).
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wizard-report-'));
+    const { dir } = createTempDir('wizard-report-');
     const reportPath = path.join(dir, 'amplitude-setup-report.md');
     const codeBlock = Array.from({ length: 50 }, (_, i) => `row ${i + 1}`).join(
       '\n',
@@ -81,7 +81,7 @@ describe('ReportViewer overdraw', () => {
   });
 
   it('renders the scroll hint inline (not overflowing the bottom)', () => {
-    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'wizard-report-'));
+    const { dir } = createTempDir('wizard-report-');
     const reportPath = path.join(dir, 'amplitude-setup-report.md');
     const codeBlock = Array.from({ length: 40 }, (_, i) => `row ${i + 1}`).join(
       '\n',

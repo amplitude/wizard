@@ -17,16 +17,14 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import {
   existsSync,
   mkdirSync,
-  mkdtempSync,
   readFileSync,
   readdirSync,
-  rmSync,
   writeFileSync,
 } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 
 import { FileChangeLedger } from '../file-change-ledger';
+import { createTempDir } from '../../utils/__tests__/helpers/temp-dir.js';
 
 interface TreeSnapshot {
   files: Record<string, string>;
@@ -58,13 +56,14 @@ function snapshotTree(root: string): TreeSnapshot {
 
 describe('cancel-rollback integration', () => {
   let installDir: string;
+  let cleanup: () => void;
 
   beforeEach(() => {
-    installDir = mkdtempSync(join(tmpdir(), 'wiz-rollback-int-'));
+    ({ dir: installDir, cleanup } = createTempDir('wiz-rollback-int-'));
   });
 
   afterEach(() => {
-    rmSync(installDir, { recursive: true, force: true });
+    cleanup();
   });
 
   it('restores the working tree after a simulated cancelled run', () => {

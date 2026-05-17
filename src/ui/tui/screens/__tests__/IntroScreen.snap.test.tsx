@@ -19,9 +19,9 @@
 
 import React from 'react';
 import * as fs from 'node:fs';
-import * as os from 'node:os';
 import * as path from 'node:path';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { createTempDir } from '../../../../utils/__tests__/helpers/temp-dir.js';
 import { IntroScreen } from '../IntroScreen.js';
 import {
   makeStoreForSnapshot,
@@ -142,7 +142,7 @@ describe('IntroScreen snapshots', () => {
     // `resolveWorkspacePicks` helper light up. The welcome screen then
     // surfaces these as direct picks instead of forcing the user
     // through "Change directory" → typed PathInput.
-    const installDir = fs.mkdtempSync(path.join(os.tmpdir(), 'intro-monorepo-'));
+    const { dir: installDir, cleanup } = createTempDir('intro-monorepo-');
     try {
       fs.writeFileSync(
         path.join(installDir, 'package.json'),
@@ -179,7 +179,7 @@ describe('IntroScreen snapshots', () => {
       expect(frame).toContain('Use root anyway / type a path');
       expect(frame).not.toContain('[4] Change directory');
     } finally {
-      fs.rmSync(installDir, { recursive: true, force: true });
+      cleanup();
     }
   });
 
@@ -207,14 +207,15 @@ describe('IntroScreen snapshots', () => {
 // gating logic and the three-line content fallbacks.
 describe('IntroScreen — welcome-back panel', () => {
   let installDir: string;
+  let cleanupDir: () => void;
 
   beforeEach(() => {
-    installDir = fs.mkdtempSync(path.join(os.tmpdir(), 'intro-welcome-'));
+    ({ dir: installDir, cleanup: cleanupDir } = createTempDir('intro-welcome-'));
   });
 
   afterEach(() => {
     try {
-      fs.rmSync(installDir, { recursive: true, force: true });
+      cleanupDir();
     } catch {
       // best-effort
     }

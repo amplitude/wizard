@@ -19,9 +19,9 @@
 import React from 'react';
 import * as fs from 'node:fs';
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { createTempDir } from '../../../../utils/__tests__/helpers/temp-dir.js';
 
 // Default to "interactive" so the retry hint renders by default. Tests
 // that exercise the non-interactive path override this mock per case.
@@ -595,14 +595,15 @@ describe('OutroScreen — error variants', () => {
 // "Finishing up…" placeholder forever.
 describe('OutroScreen — full-activation re-runs', () => {
   let installDir: string;
+  let cleanup: () => void;
 
   beforeEach(() => {
-    installDir = mkdtempSync(join(tmpdir(), 'outro-full-test-'));
+    ({ dir: installDir, cleanup } = createTempDir('outro-full-test-'));
   });
 
   afterEach(() => {
     try {
-      rmSync(installDir, { recursive: true, force: true });
+      cleanup();
     } catch {
       // best-effort cleanup
     }
