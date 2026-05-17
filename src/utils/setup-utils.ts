@@ -112,7 +112,7 @@ export function getUncommittedOrUntrackedFiles(): string[] {
   }
 }
 
-export async function isReact19Installed({
+async function isReact19Installed({
   installDir,
 }: Pick<WizardOptions, 'installDir'>): Promise<boolean> {
   try {
@@ -335,7 +335,7 @@ export async function updatePackageDotJson(
  * Falls back to first detected or npm if ambiguous.
  */
 // eslint-disable-next-line @typescript-eslint/require-await
-export async function getPackageManager(
+async function getPackageManager(
   options: Pick<WizardOptions, 'installDir'> & { ci?: boolean },
 ): Promise<PackageManager> {
   const detectedPackageManagers = detectAllPackageManagers({
