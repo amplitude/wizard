@@ -1210,11 +1210,12 @@ export const defaultCommand: CommandModule = {
           // Runs concurrently with auth while AuthScreen shows. Each
           // detector has its own per-framework timeout internally, so
           // no outer timeout is needed. The shared `runFrameworkDetection`
-          // helper handles detect → gatherContext → setFrameworkConfig →
-          // discoverFeatures → autoEnableInlineAddons → setDetectionComplete
-          // in the right order, including the abort-aware short-circuits
-          // that let a directory change mid-detection cancel the
-          // in-flight run cleanly.
+          // helper handles detect → gatherContext → `applyDetectionResult`
+          // (single atomic write for results / integration / config /
+          // label / detectionComplete) → discoverFeatures →
+          // autoEnableInlineAddons, including the abort-aware short-
+          // circuits that let a directory change mid-detection cancel
+          // the in-flight run cleanly.
           const { runFrameworkDetection } = await import(
             '../lib/framework-detection.js'
           );
@@ -1232,7 +1233,7 @@ export const defaultCommand: CommandModule = {
           //    store can reach. If the user picks "Change directory"
           //    while this first run is still scanning, the store cancels
           //    it through this controller so a stale
-          //    `setDetectionComplete()` can't fire after the directory
+          //    `applyDetectionResult()` can't fire after the directory
           //    swap.
           const detectionController = new AbortController();
           tui.store.registerActiveDetection(detectionController);
