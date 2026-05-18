@@ -76,6 +76,83 @@ function restoreEnv(): void {
   else delete process.env.AMPLITUDE_WIZARD_NO_TELEMETRY;
 }
 
+describe('initSentry — registerEsmLoaderHooks (DEP0205 root-cause fix)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  // Regression for the DEP0205 `module.register()` deprecation warning
+  // emitted on Node.js >= 23 by `@sentry/node-core`'s ESM loader hook setup.
+  // We fix it at the root: pass `registerEsmLoaderHooks: false` so Sentry
+  // never calls the deprecated API. The wizard doesn't use ESM-loader-based
+  // auto-instrumentation (HTTP/fetch tracing patch built-in modules
+  // directly; MCP servers are wrapped via `wrapMcpServerWithSentry`).
+  // If a future PR forgets this option, real users on Node 23+ will see
+  // a deprecation warning on every `mcp serve` invocation.
+  it('passes registerEsmLoaderHooks: false to Sentry.init', async () => {
+    enableTelemetry();
+    await initSentry({
+      sessionId: 's',
+      version: '0',
+      mode: 'ci',
+      debug: false,
+    });
+    expect(mockSentry.init).toHaveBeenCalledTimes(1);
+    const initArgs = mockSentry.init.mock.calls[0]?.[0] as {
+      registerEsmLoaderHooks?: boolean;
+    };
+    expect(initArgs.registerEsmLoaderHooks).toBe(false);
+    restoreEnv();
+  });
+
+  // Belt-and-braces: simulate the synthetic DEP0205 warning that would
+  // surface if `registerEsmLoaderHooks: false` were ever removed and the
+  // import-in-the-middle stack triggered. The Node runtime's warning
+  // channel still works normally for any unrelated DEP0205 call site —
+  // we never patch `process.emitWarning`, so non-Sentry deprecations
+  // remain visible to users and CI. We use a unique error subclass per
+  // call to dodge Node's dedupe-by-(code,type) cache that would otherwise
+  // collapse a second DEP0205 emission within the same process to a no-op.
+  it('does not patch process.emitWarning — other DEP0205 warnings still surface', async () => {
+    enableTelemetry();
+    await initSentry({
+      sessionId: 's',
+      version: '0',
+      mode: 'ci',
+      debug: false,
+    });
+
+    const received: Array<{ code?: string; message: string }> = [];
+    const listener = (w: Error & { code?: string }): void => {
+      received.push({ code: w.code, message: w.message });
+    };
+    process.on('warning', listener);
+    try {
+      // Use the Error-object overload with a unique `code` value so Node
+      // delivers it to listeners regardless of any prior DEP0205 emissions
+      // earlier in the process lifetime (Node de-dupes by code+type for
+      // the default stderr printer; with Error objects + unique codes it
+      // still fans out to listeners on every call).
+      const synthetic = new Error(
+        'synthetic-other-source: module.register() is deprecated',
+      ) as Error & { code: string };
+      synthetic.name = 'DeprecationWarning';
+      synthetic.code = `DEP0205-synthetic-${Date.now()}`;
+      process.emitWarning(synthetic);
+      // process.emitWarning is async — Node defers delivery to nextTick.
+      // Yield once so listeners run before we assert.
+      await new Promise<void>((resolve) => setImmediate(resolve));
+    } finally {
+      process.off('warning', listener);
+    }
+
+    expect(received).toHaveLength(1);
+    expect(received[0]?.code).toMatch(/^DEP0205-synthetic-/);
+    expect(received[0]?.message).toContain('synthetic-other-source');
+    restoreEnv();
+  });
+});
+
 describe('wrapMcpServerWithSentry', () => {
   beforeEach(() => {
     vi.clearAllMocks();

@@ -219,6 +219,26 @@ export async function initSentry(config: SentryConfig): Promise<void> {
 
       // Debug mode logs Sentry internals to console
       debug: config.debug && process.env.SENTRY_DEBUG === '1',
+
+      // Skip ESM loader hook registration. On Node.js >= 23 Sentry's
+      // `initializeEsmLoader` calls the deprecated `module.register()`
+      // (DEP0205) via `@sentry/node-core` -> `import-in-the-middle`. The
+      // hook only powers auto-instrumentation of *ESM-loaded* third-party
+      // libraries (DB drivers, frameworks loaded as ESM). The wizard
+      // doesn't depend on any of those:
+      //   - HTTP tracing uses `httpIntegration` which patches Node's
+      //     built-in `http` / `https` modules directly (CJS-native).
+      //   - `fetch` tracing uses `nativeNodeFetchIntegration` (also
+      //     CJS-native).
+      //   - MCP servers are wrapped explicitly via `wrapMcpServerWithSentry`.
+      //   - All error capture, breadcrumbs, logs, and spans work without
+      //     ESM loader hooks.
+      // Turning the hook off addresses the root cause (Sentry no longer
+      // calls the deprecated API) instead of suppressing the warning
+      // after the fact. Verified against `@sentry/node-core@10.47.0`
+      // (`src/sdk/index.ts`: `if (options.registerEsmLoaderHooks !== false)`)
+      // and still honored as of `10.53.1` (latest at time of writing).
+      registerEsmLoaderHooks: false,
     });
 
     // Set initial context
