@@ -18,7 +18,7 @@ export { EventPlanViewer } from './EventPlanViewer.js';
 export { ScreenErrorBoundary } from './ScreenErrorBoundary.js';
 export { TabContainer } from './TabContainer.js';
 export type { TabDefinition } from './TabContainer.js';
-export { SnakeGame } from './SnakeGame.js';
+export { SnakeGame } from '@pavus/snake-game';
 export { DissolveTransition } from './DissolveTransition.js';
 export type { WipeDirection } from './DissolveTransition.js';
 export { SlashCommandInput } from './SlashCommandInput.js';
