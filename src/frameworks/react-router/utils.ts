@@ -1,12 +1,14 @@
-import { major } from 'semver';
+import * as fs from 'node:fs';
+import * as path from 'node:path';
+
 import fg from 'fast-glob';
+import * as semver from 'semver';
+import { major } from 'semver';
+
 import { tryGetPackageJson } from '../../utils/package-json-light';
 import type { WizardOptions } from '../../utils/types';
 import { getPackageVersion } from '../../utils/package-json';
 import { createVersionBucket } from '../../utils/semver';
-import * as fs from 'node:fs';
-import * as path from 'node:path';
-import * as semver from 'semver';
 
 export enum ReactRouterMode {
   V6 = 'v6',

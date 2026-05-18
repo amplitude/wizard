@@ -43,10 +43,18 @@
  * shape changes. If this lands first, theirs rebases on top.
  */
 
-import { existsSync, mkdirSync, readFileSync, rmSync, statSync } from 'node:fs';
+import {
+  existsSync,
+  mkdirSync,
+  readFileSync,
+  renameSync,
+  rmSync,
+  statSync,
+  unlinkSync,
+  writeFileSync,
+} from 'node:fs';
 import { dirname, isAbsolute, relative, resolve, sep } from 'node:path';
 
-import { writeFileSync, renameSync, unlinkSync } from 'node:fs';
 import { logToFile } from '../utils/debug.js';
 
 /**
