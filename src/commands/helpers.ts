@@ -133,7 +133,7 @@ export const buildSessionFromOptions = async (
     executionMode,
   });
   bootstrapInstallDir(session.installDir);
-  await prePopulateDisplayFields(session);
+  await prePopulateDisplayFields(session, executionMode);
   return session;
 };
 
@@ -156,11 +156,13 @@ export const buildSessionFromOptions = async (
  */
 async function prePopulateDisplayFields(
   session: import('../lib/wizard-session').WizardSession,
+  executionMode: import('../lib/mode-config').ExecutionMode,
 ): Promise<void> {
-  // Interactive guard: `session.executionMode` isn't persisted on the
-  // session shape, so the canonical signals are the `ci` / `agent`
-  // booleans set by `buildSession`. Either flag implies non-interactive.
-  if (session.ci || session.agent) return;
+  // Interactive guard. session.agent is set AFTER buildSessionFromOptions
+  // returns (see default.ts), so reading it here would miss agent-mode
+  // invocations. executionMode is the authoritative resolution computed
+  // by resolveMode() above.
+  if (executionMode !== 'interactive') return;
 
   const [{ getStoredUser }, { readAmpliConfig }] = await Promise.all([
     import('../utils/ampli-settings.js'),
