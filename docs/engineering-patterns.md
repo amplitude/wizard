@@ -367,7 +367,7 @@ else { /* fall back to browser OAuth */ }
 When multiple sources specify a region/zone, use a strict priority order to prevent env var pollution:
 
 ```
-CLI flag (--region) > env var (AMPLITUDE_ZONE) > stored config (~/.ampli.json)
+CLI flag (--region) > env var (AMPLITUDE_ZONE) > stored config (~/.amplitude/wizard/oauth-session.json)
 ```
 
 ---

@@ -78,13 +78,18 @@ All three modes share the same persistence infrastructure. State is layered by s
                                       │        In-memory (WizardStore)      │
                                       │   Full session state, per-run only  │
                                       ├─────────────────────────────────────┤
-                                      │     Session checkpoint ($TMPDIR)    │
-                                      │  Crash recovery, 24h TTL, no creds │
+                                      │  Session checkpoint                 │
+                                      │  (~/.amplitude/wizard/runs/<sha>/)  │
+                                      │  Crash recovery, 24h TTL, no creds  │
                                       ├─────────────────────────────────────┤
-                                      │     API key store (~/.ampli.json)   │
+                                      │  API key store                      │
+                                      │  (~/.amplitude/wizard/credentials   │
+                                      │   .json, fallback .env.local)       │
                                       │  Per-project, persistent            │
                                       ├─────────────────────────────────────┤
-                                      │     OAuth tokens (~/.ampli.json)    │
+                                      │  OAuth tokens                       │
+                                      │  (~/.amplitude/wizard/              │
+                                      │   oauth-session.json)               │
                                       │  Per-user, silent refresh           │
                                       └─────────────────────────────────────┘
 ```

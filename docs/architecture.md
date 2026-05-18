@@ -48,7 +48,7 @@ package.json → "bin": { "amplitude-wizard": "dist/bin.js" }
 | Command | What it does |
 |---------|-------------|
 | _(default)_ | Run the wizard (interactive TUI or `--ci` mode) |
-| `login` | OAuth PKCE flow → store token in `~/.ampli.json` |
+| `login` | OAuth PKCE flow → store token in `~/.amplitude/wizard/oauth-session.json` |
 | `logout` | Clear stored credentials |
 | `whoami` | Show current user, org, project, region |
 | `feedback` | Submit product feedback |
@@ -251,7 +251,7 @@ and file system touchpoints, see [`external-services.md`](./external-services.md
 
 | Dependency | Role | How the wizard talks to it |
 |-----------|------|---------------------------|
-| **Amplitude OAuth** (`core.amplitude.com/oauth2`) | User authentication (PKCE flow) | Local HTTP server on port 13222 receives callback; token stored in `~/.ampli.json` |
+| **Amplitude OAuth** (`core.amplitude.com/oauth2`) | User authentication (PKCE flow) | Local HTTP server on port 13222 receives callback; token stored in `~/.amplitude/wizard/oauth-session.json` |
 | **Amplitude LLM Gateway** | Routes Claude API calls so users never need an Anthropic key | `ANTHROPIC_BASE_URL` env var → Claude Agent SDK sends requests here |
 | **Amplitude API** (`core.amplitude.com/api`) | Org/project listing, activation checks, API key validation | REST calls from AuthScreen and DataSetupScreen |
 | **Amplitude MCP Server** (`mcp.amplitude.com/mcp`) | Gives Claude (in the user's editor) access to Amplitude tools | Wizard writes the server URL into editor configs; editors handle OAuth themselves |
@@ -262,7 +262,7 @@ and file system touchpoints, see [`external-services.md`](./external-services.md
 
 | Dependency | Role |
 |-----------|------|
-| **~/.ampli.json** | Shared credential store with the `ampli` CLI |
+| **`~/.amplitude/wizard/oauth-session.json`** | Canonical OAuth session store (legacy `~/.ampli.json` read once for migration). The local callback port (`13222`) is intentionally shared with the `ampli` CLI. |
 
 ---
 
@@ -353,7 +353,7 @@ the TUI or CI runner. Owns the boundary between "CLI tool" and "wizard logic."
 2. Remove legacy shell-completion lines from the user's shell rc
 3. Import and call `startTUI()` — creates store, renders Ink app, swaps in InkUI
 4. Build session from CLI args via `buildSession()`
-5. Pre-populate credentials from `~/.ampli.json` for returning users (skips auth)
+5. Pre-populate credentials from `~/.amplitude/wizard/oauth-session.json` for returning users (skips auth)
 6. Initialize feature flags (non-blocking)
 7. Kick off concurrent: OAuth task + framework detection task
 8. Wait for user to reach RunScreen (`store.onEnterScreen(Screen.Run)`)
@@ -445,8 +445,9 @@ Bundled markdown instructions that the agent follows during runs:
 ### 7. Utilities (`src/utils/`)
 
 ~27 files covering: OAuth flow, analytics tracking, API key persistence
-(`~/.ampli.json` and system keychain), environment handling, package manager
-detection, URL construction, debug logging, shell completions, and more.
+(`~/.amplitude/wizard/credentials.json` with `.env.local` fallback),
+environment handling, package manager detection, URL construction, debug
+logging, shell completions, and more.
 
 ---
 
@@ -693,26 +694,29 @@ The agent sandbox restricts what tools the Claude agent can call:
 The wizard remembers users across runs through four persistence layers, checked
 in order during startup in `bin.ts`:
 
-### 1. OAuth tokens (`~/.ampli.json`)
+### 1. OAuth tokens (`~/.amplitude/wizard/oauth-session.json`)
 
 Stored by `src/utils/ampli-settings.ts`. Contains access token, refresh token,
-ID token, user profile, and zone. On restart the wizard calls `tryRefreshToken()`
-(`src/utils/token-refresh.ts`) to silently exchange an expired access token using
-the refresh token (365-day window) before falling back to browser OAuth.
+ID token, user profile, and zone. Written via `atomicWriteJSON()` at `0o600`.
+Legacy `~/.ampli.json` is still read once for migration when the canonical
+file has no entries; it is no longer written. On restart the wizard calls
+`tryRefreshToken()` (`src/utils/token-refresh.ts`) to silently exchange an
+expired access token using the refresh token before falling back to browser
+OAuth.
 
 ### 2. API key store (`src/utils/api-key-store.ts`)
 
 The project API key is persisted per-project via:
-- **macOS Keychain** — `security` CLI, keyed by SHA-1 hash of the project directory
-- **Linux keyring** — `secret-tool` CLI (gnome-keyring / KWallet)
-- **.env.local fallback** — written to the project directory, auto-added to `.gitignore`
+- **`~/.amplitude/wizard/credentials.json`** (mode `0o600`, keyed by a hash of the install directory) — replaces the previous keychain backend, which triggered an OS unlock prompt on every wizard launch
+- **`.env.local` fallback** — written to the project directory, auto-added to `.gitignore`
 
-### 3. Project config (`.ampli.json` in the project directory)
+### 3. Project config (`<installDir>/.amplitude/project-binding.json`)
 
-Zone, org, project, and environment selections written by the Amplitude CLI
-toolchain. Read by `src/lib/ampli-config.ts`. Stored key is `ProjectId`;
-legacy files with `WorkspaceId` are auto-migrated to `ProjectId` on read, and
-`writeAmpliConfig` only emits the new key.
+Zone, org, project, and environment selections. Written by
+`src/lib/ampli-config.ts`. Legacy `<installDir>/ampli.json` is still read once
+for migration when the canonical file has no entries; it is no longer
+written. Stored key is `ProjectId`; legacy files with `WorkspaceId` are
+auto-migrated on read.
 
 ### 4. Crash-recovery checkpoint (`src/lib/session-checkpoint.ts`)
 
@@ -760,7 +764,8 @@ layout for the current project — useful when filing bug reports.
 ```
 User runs wizard
      │
-     ├─ Check ~/.ampli.json for existing token
+     ├─ Check ~/.amplitude/wizard/oauth-session.json for existing token
+     │   (legacy ~/.ampli.json read once as a migration source)
      │   ├─ Valid token + stored API key → skip OAuth, auto-detect region
      │   ├─ Valid token + single environment → auto-select API key
      │   ├─ Valid token + multiple environments → defer to AuthScreen picker
@@ -773,7 +778,7 @@ OAuth PKCE flow
      ├─ Open browser → core.amplitude.com/oauth2/authorize
      ├─ Local HTTP server on port 13222 receives callback
      ├─ Exchange code for token
-     ├─ Store token + user info in ~/.ampli.json
+     ├─ Store token + user info in ~/.amplitude/wizard/oauth-session.json
      └─ Auto-detect region from token claims
            │
            ▼
@@ -781,8 +786,8 @@ OAuth PKCE flow
 ```
 
 **CI mode auth:** Pass `--api-key <key>` on the command line. The wizard uses this
-directly without OAuth. If no key is provided, it checks `~/.ampli.json` for stored
-credentials.
+directly without OAuth. If no key is provided, it checks
+`~/.amplitude/wizard/oauth-session.json` for stored credentials.
 
 ---
 
@@ -865,12 +870,13 @@ method with its behavior in each mode:
 
 2. Build session from CLI args → store.session = session
 
-3. Pre-populate credentials from ~/.ampli.json
+3. Pre-populate credentials from ~/.amplitude/wizard/oauth-session.json
    ├─ Check stored user + zone
-   ├─ Check stored API key
+   ├─ Check stored API key (~/.amplitude/wizard/credentials.json, then .env.local)
    ├─ If single environment → auto-select
    ├─ If multiple → defer to AuthScreen picker
-   └─ Pre-populate org/project from ampli.json
+   └─ Pre-populate org/project from <installDir>/.amplitude/project-binding.json
+      (legacy <installDir>/ampli.json read once for migration)
 
 4. Initialize feature flags (non-blocking)
 
@@ -1264,8 +1270,8 @@ Default blocking config:
 |------|---------|
 | `oauth.ts` | OAuth PKCE flow: browser redirect, local HTTP server on port 13222, token exchange |
 | `analytics.ts` | Amplitude telemetry: `resolveTelemetryApiKey()`, `sessionProperties()`, `captureWizardError()` |
-| `ampli-settings.ts` | `~/.ampli.json` credential store: `readCredentials()`, `storeToken()`, `clearCredentials()` |
-| `api-key-store.ts` | Per-project API key persistence (keychain / .env.local) |
+| `ampli-settings.ts` | `~/.amplitude/wizard/oauth-session.json` credential store: `readCredentials()`, `storeToken()`, `clearCredentials()` (legacy `~/.ampli.json` is read once for migration) |
+| `api-key-store.ts` | Per-project API key persistence (`~/.amplitude/wizard/credentials.json`, with `.env.local` fallback) |
 | `token-refresh.ts` | Silent OAuth token refresh via refresh token (365-day window) |
 | `atomic-write.ts` | Atomic JSON file writes (temp + rename) for crash safety |
 | `api.ts` | Amplitude REST/GraphQL API calls: `fetchAmplitudeUser()` |
@@ -1352,7 +1358,7 @@ review on workflow/manifest changes.
 | MCP server (US) | `https://mcp.amplitude.com/mcp` | `src/steps/.../defaults.ts` |
 | MCP server (EU) | `https://mcp.eu.amplitude.com/mcp` | `src/steps/.../defaults.ts` |
 | Node.js minimum | `>=20` | `bin.ts` |
-| Credential store | `~/.ampli.json` | `src/utils/ampli-settings.ts` |
+| Credential store | `~/.amplitude/wizard/oauth-session.json` | `src/utils/ampli-settings.ts` |
 | Detection timeout | `10,000ms` | `src/lib/constants.ts` |
 | Stall detection | `60,000ms` cold-start / `120,000ms` mid-run | `src/lib/agent-interface.ts` |
 
@@ -1381,7 +1387,7 @@ amplitude/wizard
 │   │   ├── feature-flags.ts        Amplitude Experiment flags
 │   │   ├── detect-amplitude.ts     Pre-existing SDK detection
 │   │   ├── api.ts                  Amplitude API client
-│   │   ├── ampli-config.ts         .ampli.json project config
+│   │   ├── ampli-config.ts         .amplitude/project-binding.json project config
 │   │   ├── package-manager-detection.ts  Cross-ecosystem PM detection
 │   │   ├── middleware/             Benchmark pipeline (9 trackers)
 │   │   └── health-checks/         Service status monitoring
@@ -1448,8 +1454,8 @@ amplitude/wizard
 │   └── utils/                      ~27 utility modules
 │       ├── oauth.ts                OAuth PKCE flow
 │       ├── analytics.ts            Amplitude telemetry
-│       ├── api-key-store.ts        API key persistence (keychain/.env.local)
-│       ├── ampli-settings.ts       ~/.ampli.json management
+│       ├── api-key-store.ts        API key persistence (~/.amplitude/wizard/credentials.json + .env.local)
+│       ├── ampli-settings.ts       ~/.amplitude/wizard/oauth-session.json management
 │       ├── token-refresh.ts        Silent OAuth token refresh
 │       ├── atomic-write.ts         Crash-safe JSON file writes
 │       ├── urls.ts                 Regional URL construction

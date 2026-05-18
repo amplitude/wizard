@@ -111,9 +111,9 @@ Used to construct: `/chart/new`, `/dashboard/new`, `/settings/profile`, `/produc
 3. User authenticates on `auth.amplitude.com`
 4. Browser redirects back to `http://localhost:13222/callback` with the auth code
 5. Wizard exchanges the code for tokens (ID token + refresh token)
-6. Tokens are persisted to `~/.ampli.json` for session reuse
+6. Tokens are persisted to `~/.amplitude/wizard/oauth-session.json` for session reuse (legacy `~/.ampli.json` is still read for one minor cycle when no canonical file exists, then dropped)
 
-**Token reuse:** On subsequent runs, the wizard reads `~/.ampli.json` and validates the stored ID token against the Data API before showing the auth screen.
+**Token reuse:** On subsequent runs, the wizard reads `~/.amplitude/wizard/oauth-session.json` and validates the stored ID token against the Data API before showing the auth screen.
 
 ---
 
@@ -146,18 +146,20 @@ Amplitude's remote MCP (Model Context Protocol) server provides the agent with A
 
 ### In-Process MCP Server (wizard-tools)
 
-The wizard also runs a local MCP server in-process (`src/lib/wizard-tools.ts`) providing 8 tools to the agent:
+The wizard also runs a local MCP server in-process (`src/lib/wizard-tools.ts`) providing tools to the agent:
 
 | Tool | Purpose |
 |------|---------|
 | `check_env_keys` | Check which env vars are set in the project |
 | `set_env_values` | Write env vars to `.env.local` |
 | `detect_package_manager` | Detect npm/yarn/pnpm/bun/pip/etc. |
-| `load_skill_menu` | Fetch the skill menu for the detected framework |
-| `install_skill` | Download and install a skill from the remote registry |
 | `confirm` | Prompt the user for yes/no confirmation |
 | `choose` | Prompt the user to select from options |
 | `confirm_event_plan` | Present the event tracking plan for user approval before writing `track()` calls |
+| `report_status` | Agent-side status updates surfaced in the TUI |
+| `wizard_feedback` | Submit structured feedback from inside an agent run |
+
+`load_skill_menu` / `install_skill` are defined in source but currently disabled — see the `createWizardToolsServer` comment in `src/lib/wizard-tools.ts`.
 
 ---
 
@@ -238,23 +240,25 @@ Flags are refreshed during the session and all active flag values are attached t
 
 ### API Key Storage
 
-Three-tier strategy, tried in order (`src/utils/api-key-store.ts`):
+Two-tier strategy, tried in order (`src/utils/api-key-store.ts`):
 
-| Tier | Platform | Mechanism | CLI Tool |
-|------|----------|-----------|----------|
-| 1 | macOS | Keychain Services | `security find-generic-password` / `security add-generic-password` |
-| 2 | Linux | GNOME Keyring / KWallet | `secret-tool lookup` / `secret-tool store` |
-| 3 | All | `.env.local` in project dir | File I/O (auto-adds to `.gitignore`) |
+| Tier | Mechanism | Location |
+|------|-----------|----------|
+| 1 | Wizard credential file (mode `0o600`, keyed by hashed install dir) | `~/.amplitude/wizard/credentials.json` |
+| 2 | `.env.local` in project dir (auto-adds to `.gitignore`) | `<project>/.env.local` |
 
-**Scoping:** Keys are scoped by a SHA-1 hash of the install directory (first 12 hex chars), stored under the service name `amplitude-wizard`.
+The previous keychain backend (macOS Keychain, Linux `secret-tool`) was replaced — it triggered an OS unlock prompt on every wizard launch.
+
+**Scoping:** Keys are scoped by a hash of the install directory.
 
 ### OAuth Token Storage
 
 | File | Contents |
 |------|----------|
-| `~/.ampli.json` | OAuth tokens (ID token, refresh token), user info, zone preference |
+| `~/.amplitude/wizard/oauth-session.json` | OAuth tokens (ID token, refresh token), user info, zone preference |
+| `~/.ampli.json` *(legacy)* | Read once for migration when the canonical file has no entries; no longer written. |
 
-This file is shared with the `ampli` CLI — the wizard intentionally uses the same port (`13222`) and storage location for session interoperability.
+Written via `atomicWriteJSON()` at `0o600`. The wizard intentionally reuses the same local callback port (`13222`) as the `ampli` CLI for session interoperability.
 
 ---
 
@@ -264,7 +268,9 @@ This file is shared with the `ampli` CLI — the wizard intentionally uses the s
 
 | Path | Purpose | Source |
 |------|---------|--------|
-| `~/.ampli.json` | Cached OAuth tokens + zone preference | `src/utils/ampli-settings.ts` |
+| `~/.amplitude/wizard/oauth-session.json` | Canonical OAuth token + zone store | `src/utils/ampli-settings.ts` |
+| `~/.ampli.json` *(legacy)* | One-shot migration read when the canonical file has no entries | `src/utils/ampli-settings.ts` |
+| `~/.amplitude/wizard/credentials.json` | Per-project API key store (mode `0o600`) | `src/utils/api-key-store.ts` |
 | `<project>/.env.local` | Fallback API key storage | `src/utils/api-key-store.ts` |
 | `<project>/package.json` | Framework detection, dependency scanning | Multiple detectors |
 | `<project>/pyproject.toml` | Python project detection | Framework detectors |
@@ -276,7 +282,8 @@ This file is shared with the `ampli` CLI — the wizard intentionally uses the s
 
 | Path | Purpose | Source |
 |------|---------|--------|
-| `~/.ampli.json` | Persist OAuth tokens | `src/utils/ampli-settings.ts` |
+| `~/.amplitude/wizard/oauth-session.json` | Persist OAuth tokens (canonical) | `src/utils/ampli-settings.ts` |
+| `~/.amplitude/wizard/credentials.json` | Persist project API keys (mode `0o600`) | `src/utils/api-key-store.ts` |
 | `~/.amplitude/wizard/runs/<sha256(installDir)>/log.txt` | Per-project debug log | `src/lib/observability/logger.ts` |
 | `~/.amplitude/wizard/runs/<sha256(installDir)>/log.ndjson` | Structured log mirror | `src/lib/observability/logger.ts` |
 | `~/.amplitude/wizard/runs/<sha256(installDir)>/benchmark.json` | Per-project benchmark output | `src/lib/middleware/benchmarks/json-writer.ts` |
@@ -307,29 +314,15 @@ The wizard writes MCP server configuration to enable Amplitude tools in AI-power
 
 ## CLI Tools Invoked
 
-The wizard shells out to these external CLI tools at runtime:
+The wizard shells out to these external CLI tools at runtime.
 
-### macOS Keychain (`security`)
-
-```bash
-# Read
-security find-generic-password -a "<hash>" -s "amplitude-wizard" -w
-# Write
-security add-generic-password -U -a "<hash>" -s "amplitude-wizard" -w "<key>"
-# Delete
-security delete-generic-password -a "<hash>" -s "amplitude-wizard"
-```
-
-### Linux Keyring (`secret-tool`)
-
-```bash
-# Read
-secret-tool lookup service "amplitude-wizard" account "<hash>"
-# Write
-printf '%s' "<key>" | secret-tool store --label="Amplitude API Key" service "amplitude-wizard" account "<hash>"
-# Delete
-secret-tool clear service "amplitude-wizard" account "<hash>"
-```
+> **Removed:** The wizard previously shelled out to `security` (macOS Keychain) and
+> `secret-tool` (Linux GNOME Keyring / KWallet) for API key storage. Both have been
+> retired — the keychain backend triggered an OS unlock prompt on every wizard launch.
+> API keys are now stored in `~/.amplitude/wizard/credentials.json` (mode `0o600`),
+> with a `.env.local` fallback. Pre-refactor keychain entries are left in place; users
+> who want to clean them up can do so manually with the same `security` /
+> `secret-tool` invocations the wizard used to run.
 
 ### Claude Code CLI (`claude`)
 
