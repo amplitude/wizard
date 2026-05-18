@@ -42,7 +42,7 @@ const UUID_RE =
 /** ISO 8601 timestamp emitted by `new Date().toISOString()`. */
 const ISO_TIMESTAMP_RE = /\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z/g;
 
-export interface RedactOptions {
+interface RedactOptions {
   /**
    * Absolute path to the test's temp install directory. Any occurrence of
    * this prefix in payloads (file paths, resume commands) gets replaced

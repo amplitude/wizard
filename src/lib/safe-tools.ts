@@ -284,5 +284,3 @@ export const LINTING_TOOLS: string[] = [
   // YAML
   'yamllint',
 ] as const;
-
-export type LintingTool = (typeof LINTING_TOOLS)[number];
