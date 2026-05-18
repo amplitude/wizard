@@ -21,17 +21,13 @@ import React from 'react';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
-import { render } from 'ink-testing-library';
-import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { IntroScreen } from '../IntroScreen.js';
 import {
   makeStoreForSnapshot,
   renderSnapshot,
 } from '../../__tests__/snapshot-utils.js';
-import {
-  DETECTION_STUCK_TIMEOUT_MS,
-  Integration,
-} from '../../../../lib/constants.js';
+import { Integration } from '../../../../lib/constants.js';
 import type { FrameworkConfig } from '../../../../lib/framework-config.js';
 
 /**
@@ -388,85 +384,5 @@ describe('IntroScreen — welcome-back panel', () => {
     expect(frame).toContain("You're signed in as kelson@amplitude.com");
     expect(frame).toContain('Continue — workspace setup');
     expect(frame).not.toContain('Continue — create a new account');
-  });
-
-  // Belt-and-suspenders: if detection never completes for an out-of-band
-  // reason, the screen must force a Generic fallback so the user isn't
-  // stuck on "Detecting…" forever. The per-detector timeout
-  // (DETECTION_TIMEOUT_MS = 10s) bounds normal operation; this guards
-  // against future refactors / hung filesystems / mis-reset state.
-  describe('stuck-detection timeout', () => {
-    beforeEach(() => {
-      vi.useFakeTimers({ shouldAdvanceTime: false });
-    });
-
-    afterEach(() => {
-      vi.useRealTimers();
-    });
-
-    it('forces Generic fallback after DETECTION_STUCK_TIMEOUT_MS', async () => {
-      // Pre-import the registry so the dynamic import() inside the
-      // effect's timer callback resolves synchronously from the module
-      // cache — `vi.advanceTimersByTimeAsync` drains microtasks but
-      // can't fully resolve a fresh on-disk module load while fake
-      // timers are active.
-      await import('../../../../lib/registry.js');
-
-      const store = makeStoreForSnapshot({
-        detectionComplete: false,
-        frameworkConfig: null,
-      });
-      const { unmount } = render(<IntroScreen store={store} />);
-
-      try {
-        expect(store.session.detectionComplete).toBe(false);
-        expect(store.session.frameworkConfig).toBeNull();
-
-        await vi.advanceTimersByTimeAsync(DETECTION_STUCK_TIMEOUT_MS);
-        // One extra microtask flush for the .then() callback chain.
-        await Promise.resolve();
-        await Promise.resolve();
-
-        expect(store.session.detectionComplete).toBe(true);
-        expect(store.session.integration).toBe(Integration.generic);
-        expect(store.session.frameworkConfig?.metadata.integration).toBe(
-          Integration.generic,
-        );
-      } finally {
-        unmount();
-      }
-    });
-
-    it('does not fire when detection completes before the timeout', async () => {
-      const store = makeStoreForSnapshot({
-        detectionComplete: false,
-        frameworkConfig: null,
-      });
-      const { unmount } = render(<IntroScreen store={store} />);
-
-      try {
-        // Detection lands before the deadline — set complete + a real config.
-        store.applyDetectionResult({
-          integration: Integration.nextjs,
-          config: fakeConfig(Integration.nextjs),
-          label: 'Next.js',
-          results: [
-            {
-              integration: Integration.nextjs,
-              detected: true,
-              durationMs: 100,
-              timedOut: false,
-            },
-          ],
-        });
-
-        await vi.advanceTimersByTimeAsync(DETECTION_STUCK_TIMEOUT_MS * 2);
-
-        // Real result preserved — fallback did not clobber it.
-        expect(store.session.integration).toBe(Integration.nextjs);
-      } finally {
-        unmount();
-      }
-    });
   });
 });

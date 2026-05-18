@@ -18,10 +18,7 @@ import type { WizardStore } from '../store.js';
 import { useWizardStore } from '../hooks/useWizardStore.js';
 import { useScreenInput } from '../hooks/useScreenInput.js';
 import { OutroKind } from '../session-constants.js';
-import {
-  DETECTION_STUCK_TIMEOUT_MS,
-  Integration,
-} from '../../../lib/constants.js';
+import { Integration } from '../../../lib/constants.js';
 import { AuthOnboardingPath } from '../../../lib/wizard-session.js';
 import { clearCheckpoint } from '../../../lib/session-checkpoint.js';
 import {
@@ -177,46 +174,6 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
       });
     }
   }, [detectionFoundNothing, session.menu, showResume]);
-
-  // Belt-and-suspenders: if `detecting` is still true after the stuck
-  // timeout, force a Generic fallback so the user can proceed. The
-  // detection runner's per-framework bound (DETECTION_TIMEOUT_MS) caps
-  // wall-clock detection at ~10s in normal operation; this 15s guard
-  // catches the cases where the runner never finishes for an out-of-band
-  // reason — a future refactor that flips detectionComplete=false
-  // without re-running the runner, a checkpoint resume path that
-  // mis-resets state, or a hung network filesystem. `applyDetectionResult`
-  // (not setFrameworkConfig) — we need detectionComplete=true so
-  // downstream gates unblock. If the real detection eventually lands,
-  // its later atomic apply overwrites Generic with the real result.
-  useEffect(() => {
-    if (!detecting || showResume || changingDirectory || session.menu) return;
-    const timer = setTimeout(() => {
-      // Re-read from session at fire time — store may have changed
-      // between mount and timeout (e.g. detection completed on a slow
-      // box just before the timer fired but after the React state
-      // snapshot the effect closure captured).
-      if (store.session.detectionComplete || store.session.frameworkConfig) {
-        return;
-      }
-      void import('../../../lib/registry.js').then(({ FRAMEWORK_REGISTRY }) => {
-        logToFile(
-          `[intro] detection still running after ${DETECTION_STUCK_TIMEOUT_MS}ms — forcing Generic fallback`,
-        );
-        analytics.wizardCapture('framework detection stuck fallback', {
-          'duration ms': DETECTION_STUCK_TIMEOUT_MS,
-          'detection results': store.session.detectionResults?.length ?? 0,
-        });
-        store.applyDetectionResult({
-          integration: Integration.generic,
-          config: FRAMEWORK_REGISTRY[Integration.generic],
-          label: null,
-          results: store.session.detectionResults ?? [],
-        });
-      });
-    }, DETECTION_STUCK_TIMEOUT_MS);
-    return () => clearTimeout(timer);
-  }, [detecting, showResume, changingDirectory, session.menu]);
 
   const showContinue =
     session.frameworkConfig !== null && !detecting && !pickingFramework;

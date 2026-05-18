@@ -276,16 +276,3 @@ export const AMPLITUDE_FLAG_HEADER_PREFIX = 'X-AMPLITUDE-FLAG-';
 
 /** Timeout for framework / project detection probes (ms). */
 export const DETECTION_TIMEOUT_MS = 10_000;
-
-/**
- * Belt-and-suspenders timeout for the IntroScreen "Detecting…" state.
- * Per-detector timeout is DETECTION_TIMEOUT_MS (10s) and detectors run
- * in parallel, so wall-clock detection is bounded at ~10s. This higher
- * threshold guards against the scenario where detection never completes
- * for an out-of-band reason (a future refactor that flips
- * detectionComplete=false without re-running the runner, a checkpoint
- * resume path that mis-resets state, a hung filesystem on a network
- * drive that defeats the per-detector race). When this fires, the
- * screen force-selects Generic so the user can proceed.
- */
-export const DETECTION_STUCK_TIMEOUT_MS = 15_000;
