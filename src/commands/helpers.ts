@@ -143,12 +143,25 @@ export const buildSessionFromOptions = async (
  * resolveCredentials runs. Only display fields — IDs stay null because
  * credential resolution validates them against live pendingOrgs.
  *
+ * Interactive mode only. In `--ci` / `--agent` modes the welcomeBack
+ * panel never renders (no TUI), and writing `session.region` from cache
+ * would silently defeat `gateAgentSignupArguments` / `gateCiSignupAcceptToS`,
+ * both of which use `session.region == null` as the sentinel for "user
+ * didn't pass --region." A cached-zone signup against the wrong region
+ * misroutes the account into the wrong data center because the BE does
+ * not route cross-region.
+ *
  * tryResolveZone (not resolveZone) — falling back to DEFAULT_AMPLITUDE_ZONE
  * would silently skip RegionSelect for users with no stored zone.
  */
 async function prePopulateDisplayFields(
   session: import('../lib/wizard-session').WizardSession,
 ): Promise<void> {
+  // Interactive guard: `session.executionMode` isn't persisted on the
+  // session shape, so the canonical signals are the `ci` / `agent`
+  // booleans set by `buildSession`. Either flag implies non-interactive.
+  if (session.ci || session.agent) return;
+
   const [{ getStoredUser }, { readAmpliConfig }, { tryResolveZone }] =
     await Promise.all([
       import('../utils/ampli-settings.js'),
