@@ -173,11 +173,27 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
   const frameworkLabel =
     session.detectedFrameworkLabel ?? config?.metadata.name;
   const detecting = !session.detectionComplete;
-  // Stricter than `detectionComplete && !frameworkConfig` — requires evidence
-  // (detectionResults populated with no winner) so transient mid-write states
-  // never trigger the auto-fallback effect below.
+  // Auto-fallback trigger. Two conjoined guards:
+  //
+  //   1. Positive evidence that detection ran and found nothing
+  //      (`detectionResults` populated with no winner). Stricter than
+  //      the bare `detectionComplete && !frameworkConfig` predicate
+  //      this used to use — that variant could fire transiently during
+  //      a multi-emit window between `setDetectionComplete` and
+  //      `setFrameworkConfig`. Atomicity is now enforced by
+  //      `applyDetectionResult`, but the stricter guard survives future
+  //      refactors that might split the writes again.
+  //
+  //   2. No `frameworkConfig` is currently set. Without this, a manual
+  //      framework pick made AFTER an autoFallback Generic (the user
+  //      picked "Change framework" from the Generic outcome) would be
+  //      silently clobbered back to Generic on any component remount —
+  //      ScreenErrorBoundary retries do remount the screen, and the
+  //      manual picker reuses the existing `detectionResults` (no
+  //      winner), so condition 1 alone would re-fire indefinitely.
   const detectionFoundNothing =
     session.detectionComplete &&
+    !session.frameworkConfig &&
     (session.detectionResults?.length ?? 0) > 0 &&
     !session.detectionResults?.some((r) => r.detected);
   const needsFrameworkPick =
