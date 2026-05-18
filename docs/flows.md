@@ -105,11 +105,11 @@ flowchart TD
     AGENT_POLL -->|events detected| AGENT_DONE["outro — events_detected NDJSON result"]
     AGENT_POLL -->|timeout| AGENT_TIMEOUT["outro — log warning, continue"]
 
-    LOGIN --> LOGIN_CHECK{~/.ampli.json valid?}
+    LOGIN --> LOGIN_CHECK{~/.amplitude/wizard/oauth-session.json valid?}
     LOGIN_CHECK -->|yes| LOGIN_DONE["Display logged-in user"]
     LOGIN_CHECK -->|no| OAUTH["OAuth flow"] --> STORE["Store token"] --> LOGIN_DONE
 
-    LOGOUT --> CLEAR["Clear ~/.ampli.json"]
+    LOGOUT --> CLEAR["Clear ~/.amplitude/wizard/oauth-session.json"]
 
     WHOAMI --> CHECK_TOKEN{Token exists?}
     CHECK_TOKEN -->|yes| SHOW_USER["Show name, email, zone"]
@@ -273,12 +273,12 @@ flowchart TD
     PROJECT_COUNT -->|1| WRITE_AMPLI
     PROJECT_COUNT -->|many| WS_PICKER["Picker: select project"] --> WRITE_AMPLI
 
-    WRITE_AMPLI["Write ~/.ampli.json<br/>(OrgId, ProjectId, Zone)<br/>(legacy files with WorkspaceId are auto-migrated on read)"]
+    WRITE_AMPLI["Write ~/.amplitude/wizard/oauth-session.json<br/>(OrgId, ProjectId, Zone)<br/>(legacy ~/.ampli.json files with WorkspaceId auto-migrated on read)"]
 
-    WRITE_AMPLI --> KEY_CHECK{Saved API key?<br/>keychain or .env.local}
+    WRITE_AMPLI --> KEY_CHECK{Saved API key?<br/>~/.amplitude/wizard/credentials.json or .env.local}
     KEY_CHECK -->|yes| AUTO_KEY["Auto-advance — no prompt"]
     KEY_CHECK -->|no| KEY_INPUT["Text input: paste Amplitude API key"]
-    KEY_INPUT --> PERSIST["Persist key to system keychain<br/>or .env.local (gitignored)"]
+    KEY_INPUT --> PERSIST["Persist key to ~/.amplitude/wizard/credentials.json<br/>or .env.local (gitignored)"]
 
     AUTO_KEY --> DONE["Credentials set → DataSetup"]
     PERSIST --> DONE

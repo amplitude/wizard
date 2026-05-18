@@ -416,8 +416,8 @@ picks up where you left off.
 
 | What | Where |
 |------|-------|
-| OAuth tokens | `~/.ampli.json` (chmod 0600, owner-only) |
-| API keys | OS keychain (macOS Keychain, Linux `secret-tool`); falls back to `<project>/.env.local` |
+| OAuth tokens | `~/.amplitude/wizard/oauth-session.json` (chmod 0600, owner-only). Legacy `~/.ampli.json` is read once for migration when the canonical file has no entries. |
+| API keys | `~/.amplitude/wizard/credentials.json` (chmod 0600, per-project); falls back to `<project>/.env.local` |
 | Per-project cache (logs, checkpoints, plans, agent state) | `~/.amplitude/wizard/runs/<sha>/...` |
 | Project metadata (event plan, dashboard URL) | `<project>/.amplitude/` (gitignored) |
 | Setup report | `<project>/amplitude-setup-report.md` (the previous run is archived to `amplitude-setup-report.previous.md`) |
