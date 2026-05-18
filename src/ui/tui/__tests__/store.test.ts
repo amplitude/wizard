@@ -441,6 +441,28 @@ describe('WizardStore', () => {
       expect(store.session.detectedFrameworkLabel).toBe('Flask-RESTX');
     });
 
+    it('applyDetectionResult with overwriteLabel:true replaces an existing label', () => {
+      // The manual framework picker uses this — the user explicitly
+      // chose a new framework, so any previously-detected variant label
+      // is now stale and must be replaced.
+      const store = createStore();
+      store.setDetectedFramework('Flask-RESTX');
+
+      const nextConfig = {
+        metadata: { name: 'Next.js' },
+      } as WizardStore['session']['frameworkConfig'];
+
+      store.applyDetectionResult({
+        integration: Integration.nextjs,
+        config: nextConfig,
+        label: 'Next.js',
+        results: [],
+        overwriteLabel: true,
+      });
+
+      expect(store.session.detectedFrameworkLabel).toBe('Next.js');
+    });
+
     it('setLoginUrl sets and clears the login URL', () => {
       const store = createStore();
       store.setLoginUrl('https://example.com/auth');

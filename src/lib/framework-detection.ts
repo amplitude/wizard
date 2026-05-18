@@ -59,6 +59,7 @@ export interface DetectionTargetStore {
     config: FrameworkConfig | null;
     label: string | null;
     results: DetectionResult[];
+    overwriteLabel?: boolean;
   }): void;
   addDiscoveredFeature(feature: DiscoveredFeature): void;
   autoEnableInlineAddons(source: 'auto-tui' | 'auto-ci' | 'auto-agent'): void;

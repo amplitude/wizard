@@ -582,19 +582,29 @@ export class WizardStore {
    * so subscribers never observe `detectionComplete=true && frameworkConfig=null`,
    * which would trigger IntroScreen's autoFallback effect.
    *
-   * `label` is honored only when `detectedFrameworkLabel` isn't already set, so
-   * `gatherContext` calls that pre-set a more specific variant keep precedence.
+   * `label` semantics:
+   *   - Default (`overwriteLabel: false`) — honor `label` only when
+   *     `detectedFrameworkLabel` isn't already set. Used by automated
+   *     detection so `gatherContext` calls that pre-set a more specific
+   *     variant (e.g. "Flask-RESTX" vs "Flask") keep precedence.
+   *   - `overwriteLabel: true` — unconditional set. Used by the manual
+   *     framework picker, where the user explicitly chose this framework
+   *     and any previously-detected variant label is now stale.
    */
   applyDetectionResult(input: {
     integration: WizardSession['integration'];
     config: WizardSession['frameworkConfig'];
     label: string | null;
     results: WizardSession['detectionResults'];
+    overwriteLabel?: boolean;
   }): void {
     this.$session.setKey('detectionResults', input.results);
     this.$session.setKey('integration', input.integration);
     this.$session.setKey('frameworkConfig', input.config);
-    if (input.label && !this.session.detectedFrameworkLabel) {
+    if (
+      input.label &&
+      (input.overwriteLabel || !this.session.detectedFrameworkLabel)
+    ) {
       this.$session.setKey('detectedFrameworkLabel', input.label);
     }
     this.$session.setKey('detectionComplete', true);

@@ -972,8 +972,29 @@ const FrameworkPicker = ({
         void import('../../../lib/registry.js').then(
           ({ FRAMEWORK_REGISTRY }) => {
             const config = FRAMEWORK_REGISTRY[integration];
-            store.setFrameworkConfig(integration, config);
-            store.setDetectedFramework(config.metadata.name);
+            // Single atomic write — same discipline runFrameworkDetection
+            // uses. The screen's autoFallback effect bails on
+            // `detectionFoundNothing`, so two back-to-back setKeys are
+            // harmless today, but matching the atomic-write pattern keeps
+            // the contract uniform and shields future refactors that
+            // tighten the gate from a regression here.
+            //
+            // `overwriteLabel: true` — the user explicitly chose this
+            // framework, so any previously-detected variant label (e.g.
+            // "Flask-RESTX" from a real detection now being overridden
+            // to Next.js) must be replaced. The default precedence is
+            // for auto-detection paths where the variant label should
+            // win.
+            //
+            // Reuse the existing detectionResults so the diagnostics
+            // table doesn't get wiped by a manual pick.
+            store.applyDetectionResult({
+              integration,
+              config,
+              label: config.metadata.name,
+              results: store.session.detectionResults ?? [],
+              overwriteLabel: true,
+            });
             onComplete?.(true);
           },
         );
