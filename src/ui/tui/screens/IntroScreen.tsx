@@ -118,15 +118,35 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
   // returns to the main welcome menu.
   const [wildcardParent, setWildcardParent] = useState<string | null>(null);
 
-  // Resolved zone for display only (welcomeBack panel + Region row).
-  // Reads disk via tryResolveZone so cached signals (stored user zone,
-  // ampli.json Zone) surface in the welcome panel even before
-  // RegionSelect runs. NOT written back to session.region — that field
-  // is reserved for explicit user intent (see wizard-session.ts) and
-  // populating it from cache would silently defeat the
-  // gateAgentSignupArguments / gateCiSignupAcceptToS sentinels. The
-  // useMemo dep set narrows the re-resolve to the cases where Tier 1/2/3
-  // inputs could actually change.
+  // Resolved zone for display only (welcomeBack panel + Region row +
+  // "Change region" menu visibility). Reads disk via tryResolveZone so
+  // cached signals (stored user zone, ampli.json Zone) surface in the
+  // welcome panel even before RegionSelect runs. NOT written back to
+  // session.region — that field is reserved for explicit user intent
+  // (see wizard-session.ts) and populating it from cache would silently
+  // defeat the gateAgentSignupArguments / gateCiSignupAcceptToS
+  // sentinels (see commit fdf56c85 for the misroute scenario).
+  //
+  // KNOWN CONVENTION EXCEPTION: useResolvedZone.ts forbids disk I/O in
+  // render paths and recommends hoisting zone resolution into a parent
+  // (or a derived store atom). IntroScreen renders BEFORE RegionSelect,
+  // so session.region is null and useResolvedZone's `{ readDisk: false }`
+  // mode would yield only DEFAULT_AMPLITUDE_ZONE — wrong for EU users
+  // with cached signals. The proper fix is to hoist into a WizardStore
+  // derived atom, tracked by the project_zone_hoist_followup memory note
+  // (originally filed against PR #165). Until that lands, the useMemo
+  // below pins the read to specific dep changes so the disk reads happen
+  // at most once per (region | installDir | userEmail) change rather
+  // than every render.
+  //
+  // Imperfect dep array: Tier 3 (`getStoredUser().zone`) can in theory
+  // change without `session.userEmail` changing — e.g. a same-email re-
+  // login picking a different zone. Practically inaccessible from this
+  // screen (re-login navigates the user away from Intro before the
+  // stored user mutates), and the failure mode is a stale displayed
+  // zone string until the next dep tick — display-only, no routing
+  // impact. Captured here rather than fixed; the hoist will dissolve
+  // the problem entirely by moving invalidation into the store.
   const displayRegion = useMemo(
     () => tryResolveZone(session) ?? null,
     [session.region, session.installDir, session.userEmail],
