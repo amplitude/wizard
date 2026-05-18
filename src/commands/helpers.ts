@@ -138,21 +138,21 @@ export const buildSessionFromOptions = async (
 };
 
 /**
- * Prefill display-only fields (email / region / project name) from local
- * cache so the TUI's first frame doesn't show the marketing tagline while
+ * Prefill display-only fields (email / project name) from local cache so
+ * the TUI's first frame doesn't show the marketing tagline while
  * resolveCredentials runs. Only display fields — IDs stay null because
  * credential resolution validates them against live pendingOrgs.
  *
- * Interactive mode only. In `--ci` / `--agent` modes the welcomeBack
- * panel never renders (no TUI), and writing `session.region` from cache
- * would silently defeat `gateAgentSignupArguments` / `gateCiSignupAcceptToS`,
- * both of which use `session.region == null` as the sentinel for "user
- * didn't pass --region." A cached-zone signup against the wrong region
- * misroutes the account into the wrong data center because the BE does
- * not route cross-region.
+ * Interactive mode only — the welcomeBack panel doesn't render in
+ * `--ci` / `--agent` modes, so the prefill has no consumer there.
  *
- * tryResolveZone (not resolveZone) — falling back to DEFAULT_AMPLITUDE_ZONE
- * would silently skip RegionSelect for users with no stored zone.
+ * Region is intentionally NOT prefilled. `session.region` is reserved
+ * for explicit user intent (see `wizard-session.ts`); writing it from
+ * cache would silently defeat the `gateAgentSignupArguments` and
+ * `gateCiSignupAcceptToS` sentinels, both of which use
+ * `session.region == null` as the "user didn't pass --region" signal.
+ * IntroScreen reads the displayed region via `tryResolveZone` directly
+ * — disk-tier reads land in the render path, not the session shape.
  */
 async function prePopulateDisplayFields(
   session: import('../lib/wizard-session').WizardSession,
@@ -162,24 +162,15 @@ async function prePopulateDisplayFields(
   // booleans set by `buildSession`. Either flag implies non-interactive.
   if (session.ci || session.agent) return;
 
-  const [{ getStoredUser }, { readAmpliConfig }, { tryResolveZone }] =
-    await Promise.all([
-      import('../utils/ampli-settings.js'),
-      import('../lib/ampli-config.js'),
-      import('../lib/zone-resolution.js'),
-    ]);
+  const [{ getStoredUser }, { readAmpliConfig }] = await Promise.all([
+    import('../utils/ampli-settings.js'),
+    import('../lib/ampli-config.js'),
+  ]);
 
   if (!session.userEmail) {
     const storedUser = getStoredUser();
     if (storedUser?.email && storedUser.id !== 'pending') {
       session.userEmail = storedUser.email;
-    }
-  }
-
-  if (session.region === null) {
-    const resolved = tryResolveZone(session);
-    if (resolved !== null) {
-      session.region = resolved;
     }
   }
 

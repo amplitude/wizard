@@ -28,6 +28,7 @@ import {
   shortenHomePath,
 } from '../../../lib/workspace-analysis.js';
 import { ampliConfigExists } from '../../../lib/ampli-config.js';
+import { tryResolveZone } from '../../../lib/zone-resolution.js';
 import { PickerMenu } from '../primitives/index.js';
 import { PathInput } from '../components/PathInput.js';
 import { Colors, Icons } from '../styles.js';
@@ -116,6 +117,20 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
   // the parent dir flips the screen into a child-list picker; null
   // returns to the main welcome menu.
   const [wildcardParent, setWildcardParent] = useState<string | null>(null);
+
+  // Resolved zone for display only (welcomeBack panel + Region row).
+  // Reads disk via tryResolveZone so cached signals (stored user zone,
+  // ampli.json Zone) surface in the welcome panel even before
+  // RegionSelect runs. NOT written back to session.region — that field
+  // is reserved for explicit user intent (see wizard-session.ts) and
+  // populating it from cache would silently defeat the
+  // gateAgentSignupArguments / gateCiSignupAcceptToS sentinels. The
+  // useMemo dep set narrows the re-resolve to the cases where Tier 1/2/3
+  // inputs could actually change.
+  const displayRegion = useMemo(
+    () => tryResolveZone(session) ?? null,
+    [session.region, session.installDir, session.userEmail],
+  );
 
   // "Welcome back" gate — true when the user is signed in AND this
   // directory has been instrumented before (ampli.json present). First-
@@ -280,7 +295,7 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
           <WelcomeBackPanel
             email={welcomeBack.email}
             projectName={session.selectedProjectName}
-            region={session.region}
+            region={displayRegion}
             eventCount={welcomeBack.eventCount}
             lastRunAt={welcomeBack.lastRunAt}
             compact={compact}
@@ -348,8 +363,8 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
               ? getFrameworkLabelSuffix({ manuallySelected, autoFallback })
               : ''
           }
-          region={session.region}
-          hideRegionRow={Boolean(welcomeBack && !compact && session.region)}
+          region={displayRegion}
+          hideRegionRow={Boolean(welcomeBack && !compact && displayRegion)}
           detecting={detecting}
         />
       )}
@@ -492,7 +507,7 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
                 label: 'Change framework',
                 value: 'framework',
               },
-              ...(session.region
+              ...(displayRegion
                 ? [
                     {
                       label: 'Change region',
