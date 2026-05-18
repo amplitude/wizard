@@ -577,6 +577,33 @@ export class WizardStore {
     this.emitChange();
   }
 
+  /**
+   * Atomic detection-complete write — one `emitChange()` for all four fields
+   * so subscribers never observe `detectionComplete=true && frameworkConfig=null`,
+   * which would trigger IntroScreen's autoFallback effect.
+   *
+   * `label` is honored only when `detectedFrameworkLabel` isn't already set, so
+   * `gatherContext` calls that pre-set a more specific variant keep precedence.
+   */
+  applyDetectionResult(input: {
+    integration: WizardSession['integration'];
+    config: WizardSession['frameworkConfig'];
+    label: string | null;
+    results: WizardSession['detectionResults'];
+  }): void {
+    this.$session.setKey('detectionResults', input.results);
+    this.$session.setKey('integration', input.integration);
+    this.$session.setKey('frameworkConfig', input.config);
+    if (input.label && !this.session.detectedFrameworkLabel) {
+      this.$session.setKey('detectedFrameworkLabel', input.label);
+    }
+    this.$session.setKey('detectionComplete', true);
+    if (input.integration) {
+      analytics.identifyUser({ integration: input.integration });
+    }
+    this.emitChange();
+  }
+
   // ── Inline directory change ─────────────────────────────────────
   //
   // The IntroScreen's "Change directory" flow needs to do three things

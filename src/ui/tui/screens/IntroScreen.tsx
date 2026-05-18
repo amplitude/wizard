@@ -138,6 +138,13 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
   const frameworkLabel =
     session.detectedFrameworkLabel ?? config?.metadata.name;
   const detecting = !session.detectionComplete;
+  // Stricter than `detectionComplete && !frameworkConfig` — requires evidence
+  // (detectionResults populated with no winner) so transient mid-write states
+  // never trigger the auto-fallback effect below.
+  const detectionFoundNothing =
+    session.detectionComplete &&
+    (session.detectionResults?.length ?? 0) > 0 &&
+    !session.detectionResults?.some((r) => r.detected);
   const needsFrameworkPick =
     session.detectionComplete && !session.frameworkConfig;
   // Derive fallback state from session so it survives component remount
@@ -159,14 +166,14 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
   // NOTE: we deliberately do NOT call setDetectedFramework here — Generic is a
   // fallback, not a detection. The render derives its label from the config.
   useEffect(() => {
-    if (needsFrameworkPick && !session.menu && !showResume) {
+    if (detectionFoundNothing && !session.menu && !showResume) {
       void import('../../../lib/registry.js').then(({ FRAMEWORK_REGISTRY }) => {
         const genericConfig = FRAMEWORK_REGISTRY[Integration.generic];
         store.setFrameworkConfig(Integration.generic, genericConfig);
         logToFile('[intro] no framework matched — falling back to Generic');
       });
     }
-  }, [needsFrameworkPick, session.menu, showResume]);
+  }, [detectionFoundNothing, session.menu, showResume]);
 
   const showContinue =
     session.frameworkConfig !== null && !detecting && !pickingFramework;
@@ -345,18 +352,6 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
           hideRegionRow={Boolean(welcomeBack && !compact && session.region)}
           detecting={detecting}
         />
-      )}
-
-      {/* Detection spinner — sits below the target so the user sees
-          which directory we're scanning while it spins. */}
-      {detecting && !changingDirectory && (
-        <Box marginY={1} gap={1}>
-          <BrailleSpinner />
-          <Text color={Colors.secondary}>
-            Scanning {workspace.displayPath}
-            {Icons.ellipsis}
-          </Text>
-        </Box>
       )}
 
       {/* Workspace ambiguity warnings — shown alongside the picker so
@@ -791,21 +786,28 @@ const TargetSummary = ({
         <Text color={Colors.heading}>{displayPath}</Text>
       </Box>
 
-      {/* Framework only renders once detection is done — during the
-          spinner the row would show a stale value or empty slot. */}
-      {!detecting && frameworkLabel && (
-        <Box>
-          <Text color={Colors.muted}>{padLabel('Framework')}</Text>
-          {frameworkGlyph && (
-            <Text color={frameworkGlyphColor}>{frameworkGlyph} </Text>
-          )}
-          <Text color={Colors.body}>
-            {frameworkLabel}
-            {frameworkSuffix}
-          </Text>
-          {frameworkBeta && <Text color={Colors.muted}> · beta</Text>}
-        </Box>
-      )}
+      {/* Always render this row — reserves its vertical slot so the layout
+          doesn't shift when detection settles. */}
+      <Box>
+        <Text color={Colors.muted}>{padLabel('Framework')}</Text>
+        {detecting || !frameworkLabel ? (
+          <Box>
+            <BrailleSpinner />
+            <Text color={Colors.secondary}> Detecting{Icons.ellipsis}</Text>
+          </Box>
+        ) : (
+          <>
+            {frameworkGlyph && (
+              <Text color={frameworkGlyphColor}>{frameworkGlyph} </Text>
+            )}
+            <Text color={Colors.body}>
+              {frameworkLabel}
+              {frameworkSuffix}
+            </Text>
+            {frameworkBeta && <Text color={Colors.muted}> · beta</Text>}
+          </>
+        )}
+      </Box>
 
       {region && !hideRegionRow && (
         <Box>

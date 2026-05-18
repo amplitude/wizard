@@ -133,8 +133,50 @@ export const buildSessionFromOptions = async (
     executionMode,
   });
   bootstrapInstallDir(session.installDir);
+  await prePopulateDisplayFields(session);
   return session;
 };
+
+/**
+ * Prefill display-only fields (email / region / project name) from local
+ * cache so the TUI's first frame doesn't show the marketing tagline while
+ * resolveCredentials runs. Only display fields — IDs stay null because
+ * credential resolution validates them against live pendingOrgs.
+ *
+ * tryResolveZone (not resolveZone) — falling back to DEFAULT_AMPLITUDE_ZONE
+ * would silently skip RegionSelect for users with no stored zone.
+ */
+async function prePopulateDisplayFields(
+  session: import('../lib/wizard-session').WizardSession,
+): Promise<void> {
+  const [{ getStoredUser }, { readAmpliConfig }, { tryResolveZone }] =
+    await Promise.all([
+      import('../utils/ampli-settings.js'),
+      import('../lib/ampli-config.js'),
+      import('../lib/zone-resolution.js'),
+    ]);
+
+  if (!session.userEmail) {
+    const storedUser = getStoredUser();
+    if (storedUser?.email && storedUser.id !== 'pending') {
+      session.userEmail = storedUser.email;
+    }
+  }
+
+  if (session.region === null) {
+    const resolved = tryResolveZone(session);
+    if (resolved !== null) {
+      session.region = resolved;
+    }
+  }
+
+  if (!session.selectedProjectName) {
+    const projectConfig = readAmpliConfig(session.installDir);
+    if (projectConfig.ok && projectConfig.config.ProjectName) {
+      session.selectedProjectName = projectConfig.config.ProjectName;
+    }
+  }
+}
 
 /**
  * Shared credential resolution for non-interactive modes (agent + CI).

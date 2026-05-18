@@ -56,7 +56,7 @@ function fakeConfig(
 }
 
 describe('IntroScreen snapshots', () => {
-  it('renders the detecting state with target line + "Scanning …" spinner', () => {
+  it('renders the detecting state with target line + inline Detecting spinner', () => {
     const store = makeStoreForSnapshot({
       detectionComplete: false,
       frameworkConfig: null,
@@ -70,7 +70,12 @@ describe('IntroScreen snapshots', () => {
     // of moving it above the spinner. If a user pointed the wizard at
     // the wrong directory, they need to spot it here.
     expect(frame).toContain('Target');
-    expect(frame).toContain('Scanning');
+    // The Framework row now reserves its slot from frame 1 with an
+    // inline "Detecting…" placeholder, so the row position doesn't
+    // shift when detection lands. Previously this was a separate
+    // "Scanning <path>…" line below the Target.
+    expect(frame).toContain('Framework');
+    expect(frame).toContain('Detecting');
     expect(frame).toMatchSnapshot();
   });
 
