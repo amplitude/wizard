@@ -119,6 +119,11 @@ import {
   refreshGatewayBearer,
   startGatewayBearerRefreshTimer,
 } from './llm-gateway-bearer-refresh.js';
+import {
+  mergeTrackerHooks,
+  startAiTelemetryAttempt,
+  type AiTelemetryAttempt,
+} from './ai-telemetry.js';
 
 export { selectModel, sdkStandardFallbackModel };
 export { parseEventPlanContent };
@@ -3229,6 +3234,13 @@ export async function runAgent(
       // stdio bridge, surfacing as `Error in hook callback hook_0: Error:
       // Stream closed`. See issue #297.
       let response: AsyncIterable<unknown> | undefined;
+      // Pair every SDK attempt with an @amplitude/ai session so tool
+      // calls and AI messages land in Agent Analytics alongside the
+      // backend-captured LLM telemetry. Null when telemetry is
+      // disabled (env kill switch / feature flag / no API key) — all
+      // downstream uses are null-safe.
+      const aiAttempt: AiTelemetryAttempt | null =
+        await startAiTelemetryAttempt();
       try {
         const sdkResponse = query({
           prompt: createPromptStream(),
@@ -3772,7 +3784,7 @@ export async function runAgent(
                 config?.onPreCompact?.(input);
               };
 
-              return buildHooksConfig({
+              const baseHooks = buildHooksConfig({
                 SessionStart: innerHooks.SessionStart,
                 // PreToolUse fires for every tool regardless of permissionMode,
                 // so it's our authoritative gate for Bash safety. canUseTool
@@ -3791,6 +3803,28 @@ export async function runAgent(
                 PreCompact: createPreCompactHook(preCompactHandler),
                 UserPromptSubmit: createUserPromptSubmitHook(agentState),
               });
+              // Layer @amplitude/ai tool-call telemetry as additional
+              // PreToolUse/PostToolUse observers. The tracker's PreToolUse
+              // only records timestamps and its PostToolUse calls
+              // `session.trackToolCall(...)`; neither alters gating.
+              return aiAttempt
+                ? mergeTrackerHooks(
+                    baseHooks as Record<
+                      string,
+                      Array<{
+                        matcher: string | null;
+                        hooks: Array<
+                          (
+                            inputData: Record<string, unknown>,
+                            toolUseId: string | null,
+                            context: Record<string, unknown>,
+                          ) => Promise<Record<string, unknown>>
+                        >;
+                      }>
+                    >,
+                    aiAttempt.tracker.hooks(aiAttempt.session),
+                  )
+                : baseHooks;
             })(),
             // Allow aborting a stalled query so we can retry cleanly
             abortSignal: controller.signal,
@@ -3803,6 +3837,13 @@ export async function runAgent(
 
         // Process the async generator — validate each message at the boundary
         for await (const rawMessage of sdkResponse) {
+          // Feed the message to the @amplitude/ai tracker so assistant
+          // and user messages emit `[Agent] AI Response` / `[Agent] User
+          // Message`. The tracker swallows its own errors via the SDK's
+          // internal logger so this can't break the message loop.
+          if (aiAttempt) {
+            aiAttempt.tracker.process(aiAttempt.session, rawMessage);
+          }
           // Reset the stale timer on every message EXCEPT the SDK's
           // "I'm about to wait on the API" envelope. The Claude Agent
           // SDK emits `system { subtype: 'status', status: 'requesting' }`
@@ -4187,6 +4228,7 @@ export async function runAgent(
         clearTimeout(staleTimer);
         unsubscribePromptRelease();
         wizardSignal.removeEventListener('abort', onWizardAbort);
+        aiAttempt?.endSession();
         const partialOutput = collectedText.join('\n');
 
         // Vertex / wizard-proxy payload-shape rejection — retrying is
@@ -4294,6 +4336,7 @@ export async function runAgent(
         clearTimeout(staleTimer);
         unsubscribePromptRelease();
         wizardSignal.removeEventListener('abort', onWizardAbort);
+        aiAttempt?.endSession();
         signalDone(); // unblock the prompt stream for this attempt
         // Always drain the prior iterator after an exception, regardless
         // of whether we'll retry. Cheap and defends against the hook

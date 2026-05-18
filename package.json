@@ -46,6 +46,7 @@
   },
   "dependencies": {
     "@ai-sdk/anthropic": "^3.0.75",
+    "@amplitude/ai": "^0.9.0",
     "@amplitude/analytics-browser": "2.36.2",
     "@amplitude/analytics-node": "1.5.51",
     "@amplitude/experiment-node-server": "1.13.4",
