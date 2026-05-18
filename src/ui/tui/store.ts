@@ -543,6 +543,15 @@ export class WizardStore {
     this.emitChange();
   }
 
+  /**
+   * @internal Tests-only.
+   *
+   * Granular setter kept on the store for test fixture setup. Production
+   * code paths (runFrameworkDetection, the IntroScreen autoFallback
+   * effect, and the manual framework picker) all go through
+   * `applyDetectionResult` for the single-emit atomicity guarantee.
+   * Reach for that instead.
+   */
   setFrameworkConfig(
     integration: WizardSession['integration'],
     config: WizardSession['frameworkConfig'],
@@ -555,23 +564,36 @@ export class WizardStore {
     this.emitChange();
   }
 
+  /**
+   * @internal Tests-only. See `setFrameworkConfig` for rationale —
+   * production callers should use `applyDetectionResult`.
+   */
   setDetectionComplete(): void {
     this.$session.setKey('detectionComplete', true);
     this.emitChange();
   }
 
   /**
+   * @internal Tests-only.
+   *
    * Mirror the full per-framework detection table onto the session.
    * Used by `/diagnostics` so users filing bug reports can see exactly
    * which detector returned what — even for frameworks that didn't
-   * win. Set BEFORE `setDetectionComplete` so the screen never sees a
-   * stale `[]` after the spinner flips off.
+   * win. Production callers should use `applyDetectionResult`, which
+   * writes this field as part of its atomic bundle.
    */
   setDetectionResults(results: WizardSession['detectionResults']): void {
     this.$session.setKey('detectionResults', results);
     this.emitChange();
   }
 
+  /**
+   * Set the framework display label (e.g. "Flask-RESTX" vs the bare
+   * "Flask"). Called by UI-delegate paths in variant-detector
+   * `gatherContext` flows (see `src/frameworks/flask/utils.ts`,
+   * `src/frameworks/fastapi/utils.ts`) via the InkUI bridge. NOT a
+   * tests-only setter — keep public.
+   */
   setDetectedFramework(label: string): void {
     this.$session.setKey('detectedFrameworkLabel', label);
     this.emitChange();
