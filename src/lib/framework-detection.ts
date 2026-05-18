@@ -42,15 +42,27 @@ export interface DetectionTargetStore {
   /** Live view of the wizard session state. */
   readonly session: WizardSession;
   setFrameworkContext(key: string, value: unknown): void;
-  setFrameworkConfig(
-    integration: Integration | null,
-    config: FrameworkConfig | null,
-  ): void;
-  setDetectedFramework(label: string): void;
-  setDetectionResults(results: DetectionResult[]): void;
+  /**
+   * Atomic write of every detection-related field under one emitChange,
+   * so subscribers never observe `detectionComplete=true &&
+   * frameworkConfig=null` — see the method doc on WizardStore for the
+   * autoFallback-race rationale. This is the only path `runFrameworkDetection`
+   * uses to finalize a detection run; the granular setters
+   * (setFrameworkConfig / setDetectedFramework / setDetectionResults /
+   * setDetectionComplete) still exist on WizardStore for other call
+   * sites but are intentionally NOT part of this interface — keeping
+   * the contract minimal means a test double only has to implement what
+   * the runner actually calls.
+   */
+  applyDetectionResult(input: {
+    integration: Integration | null;
+    config: FrameworkConfig | null;
+    label: string | null;
+    results: DetectionResult[];
+    overwriteLabel?: boolean;
+  }): void;
   addDiscoveredFeature(feature: DiscoveredFeature): void;
   autoEnableInlineAddons(source: 'auto-tui' | 'auto-ci' | 'auto-agent'): void;
-  setDetectionComplete(): void;
   subscribe(listener: () => void): () => void;
 }
 
@@ -59,7 +71,7 @@ export interface RunFrameworkDetectionOptions {
    * Cancellation signal. When aborted before detection completes, the
    * helper resolves WITHOUT mutating the store — used so a re-run
    * triggered by the user picking a different directory doesn't have
-   * the previous run's `setDetectionComplete()` fire after it.
+   * the previous run's `applyDetectionResult()` fire after it.
    */
   signal?: AbortSignal;
 }
@@ -71,13 +83,11 @@ export interface RunFrameworkDetectionOptions {
  * complete OR when the abort signal fires, whichever comes first.
  *
  * The store mutations performed (in order):
- *   - `session.detectionResults = results`
  *   - `setFrameworkContext(...)` for each gathered context key
- *   - `setFrameworkConfig(integration, config)` if a framework matched
- *   - `setDetectedFramework(label)` for the friendly label
+ *   - `applyDetectionResult({results, integration, config, label})` —
+ *      atomic write of every detection-related field
  *   - `addDiscoveredFeature(...)` for each opt-in addon
  *   - `autoEnableInlineAddons('auto-tui')`
- *   - `setDetectionComplete()` exactly once at the end
  *
  * The returned promise resolves with the raw detection results so
  * callers can log them. On abort, resolves with whatever results were
@@ -111,23 +121,21 @@ export async function runFrameworkDetection(
   const results = await detectAllFrameworks(installDir);
   if (signal?.aborted) return results;
 
-  // Mirror the full detection table onto the session so `/diagnostics`
-  // can show what each detector returned, even when we picked one of
-  // them as the winner.
-  store.setDetectionResults(results);
-
   const detectedIntegration = results.find((r) => r.detected)?.integration;
 
+  let resolvedConfig: FrameworkConfig | null = null;
+  let resolvedLabel: string | null = null;
+
   if (detectedIntegration) {
-    const config: FrameworkConfig = FRAMEWORK_REGISTRY[detectedIntegration];
+    resolvedConfig = FRAMEWORK_REGISTRY[detectedIntegration];
 
     // Run gatherContext for the friendly variant label (e.g. "Next.js
     // (App Router)" vs the bare "Next.js"). Bounded by DETECTION_TIMEOUT_MS
     // so a slow project file scan can't deadlock the intro screen.
-    if (config.metadata.gatherContext) {
+    if (resolvedConfig.metadata.gatherContext) {
       try {
         const context = await Promise.race([
-          config.metadata.gatherContext({
+          resolvedConfig.metadata.gatherContext({
             installDir,
             debug: store.session.debug,
             forceInstall: store.session.forceInstall,
@@ -156,12 +164,15 @@ export async function runFrameworkDetection(
 
     if (signal?.aborted) return results;
 
-    store.setFrameworkConfig(detectedIntegration, config);
-
-    if (!store.session.detectedFrameworkLabel) {
-      store.setDetectedFramework(config.metadata.name);
-    }
+    resolvedLabel = resolvedConfig.metadata.name;
   }
+
+  store.applyDetectionResult({
+    integration: detectedIntegration ?? null,
+    config: resolvedConfig,
+    label: resolvedLabel,
+    results,
+  });
 
   if (signal?.aborted) return results;
 
@@ -230,14 +241,6 @@ export async function runFrameworkDetection(
     });
     hasIntegrationWatcher.add(store);
   }
-
-  if (signal?.aborted) return results;
-
-  // Signal detection is done — IntroScreen now shows the picker or
-  // results table. The order matters: we set frameworkConfig BEFORE
-  // flipping detectionComplete so the "no framework detected" fallback
-  // branch in the screen never sees a stale `null` config.
-  store.setDetectionComplete();
 
   return results;
 }

@@ -133,8 +133,56 @@ export const buildSessionFromOptions = async (
     executionMode,
   });
   bootstrapInstallDir(session.installDir);
+  await prePopulateDisplayFields(session, executionMode);
   return session;
 };
+
+/**
+ * Prefill display-only fields (email / project name) from local cache so
+ * the TUI's first frame doesn't show the marketing tagline while
+ * resolveCredentials runs. Only display fields — IDs stay null because
+ * credential resolution validates them against live pendingOrgs.
+ *
+ * Interactive mode only — the welcomeBack panel doesn't render in
+ * `--ci` / `--agent` modes, so the prefill has no consumer there.
+ *
+ * Region is intentionally NOT prefilled. `session.region` is reserved
+ * for explicit user intent (see `wizard-session.ts`); writing it from
+ * cache would silently defeat the `gateAgentSignupArguments` and
+ * `gateCiSignupAcceptToS` sentinels, both of which use
+ * `session.region == null` as the "user didn't pass --region" signal.
+ * IntroScreen reads the displayed region via `tryResolveZone` directly
+ * — disk-tier reads land in the render path, not the session shape.
+ */
+async function prePopulateDisplayFields(
+  session: import('../lib/wizard-session').WizardSession,
+  executionMode: import('../lib/mode-config').ExecutionMode,
+): Promise<void> {
+  // Interactive guard. session.agent is set AFTER buildSessionFromOptions
+  // returns (see default.ts), so reading it here would miss agent-mode
+  // invocations. executionMode is the authoritative resolution computed
+  // by resolveMode() above.
+  if (executionMode !== 'interactive') return;
+
+  const [{ getStoredUser }, { readAmpliConfig }] = await Promise.all([
+    import('../utils/ampli-settings.js'),
+    import('../lib/ampli-config.js'),
+  ]);
+
+  if (!session.userEmail) {
+    const storedUser = getStoredUser();
+    if (storedUser?.email && storedUser.id !== 'pending') {
+      session.userEmail = storedUser.email;
+    }
+  }
+
+  if (!session.selectedProjectName) {
+    const projectConfig = readAmpliConfig(session.installDir);
+    if (projectConfig.ok && projectConfig.config.ProjectName) {
+      session.selectedProjectName = projectConfig.config.ProjectName;
+    }
+  }
+}
 
 /**
  * Shared credential resolution for non-interactive modes (agent + CI).

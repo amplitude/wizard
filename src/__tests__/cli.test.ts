@@ -32,10 +32,7 @@ const {
     setLoginUrl: vi.fn(),
     setAuthPhase: vi.fn(),
     setOAuthComplete: vi.fn(),
-    setFrameworkConfig: vi.fn(),
-    setDetectedFramework: vi.fn(),
-    setDetectionComplete: vi.fn(),
-    setDetectionResults: vi.fn(),
+    applyDetectionResult: vi.fn(),
     setFrameworkContext: vi.fn(),
     addDiscoveredFeature: vi.fn(),
     autoEnableInlineAddons: vi.fn(),
@@ -811,7 +808,7 @@ describe('Feature discovery', () => {
     writePkgJson({ react: '^18.0.0', lodash: '^4.0.0' });
 
     await runCLI(['--install-dir', tmpDir]);
-    await waitFor(() => mockStore.setDetectionComplete.mock.calls.length > 0);
+    await waitFor(() => mockStore.applyDetectionResult.mock.calls.length > 0);
     // Extra margin: ensure addDiscoveredFeature would have been called synchronously
     await new Promise((r) => setTimeout(r, 50));
 
@@ -821,7 +818,7 @@ describe('Feature discovery', () => {
   test('no crash and no features when package.json is absent', async () => {
     // tmpDir has no package.json
     await runCLI(['--install-dir', tmpDir]);
-    await waitFor(() => mockStore.setDetectionComplete.mock.calls.length > 0);
+    await waitFor(() => mockStore.applyDetectionResult.mock.calls.length > 0);
 
     expect(mockStore.addDiscoveredFeature).not.toHaveBeenCalled();
   });

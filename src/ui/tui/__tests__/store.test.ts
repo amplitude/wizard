@@ -375,6 +375,143 @@ describe('WizardStore', () => {
       expect(store.session.detectedFrameworkLabel).toBe('Django');
     });
 
+    // Regression guard: the whole point of applyDetectionResult is that all
+    // four detection-related fields (detectionResults, integration,
+    // frameworkConfig, detectedFrameworkLabel, detectionComplete) land
+    // under a single emitChange so IntroScreen subscribers never observe
+    // the mid-write state `detectionComplete=true && frameworkConfig=null`
+    // (which fires its autoFallback effect prematurely). End-state
+    // assertions don't pin this — a future refactor splitting the writes
+    // back into separate setKey calls would keep the end state identical.
+    // Subscribe directly and count notifications.
+    it('applyDetectionResult fires exactly one emitChange for the bundled write', () => {
+      const store = createStore();
+      const config = {
+        metadata: { name: 'Next.js' },
+      } as WizardStore['session']['frameworkConfig'];
+
+      let notifications = 0;
+      const unsubscribe = store.subscribe(() => {
+        notifications++;
+      });
+
+      store.applyDetectionResult({
+        integration: Integration.nextjs,
+        config,
+        label: 'Next.js',
+        results: [
+          {
+            integration: Integration.nextjs,
+            detected: true,
+            durationMs: 100,
+            timedOut: false,
+          },
+        ],
+      });
+
+      unsubscribe();
+
+      expect(notifications).toBe(1);
+      // Sanity: all four fields landed.
+      expect(store.session.integration).toBe(Integration.nextjs);
+      expect(store.session.frameworkConfig).toBe(config);
+      expect(store.session.detectedFrameworkLabel).toBe('Next.js');
+      expect(store.session.detectionComplete).toBe(true);
+      expect(store.session.detectionResults).toHaveLength(1);
+    });
+
+    it('applyDetectionResult preserves a pre-set detectedFrameworkLabel', () => {
+      // Mirrors the gatherContext flow where a framework variant detector
+      // (e.g. Flask-RESTX) calls setDetectedFramework with a specific
+      // label BEFORE the atomic apply runs with the bare framework name.
+      const store = createStore();
+      store.setDetectedFramework('Flask-RESTX');
+
+      const config = {
+        metadata: { name: 'Flask' },
+      } as WizardStore['session']['frameworkConfig'];
+
+      store.applyDetectionResult({
+        integration: Integration.flask,
+        config,
+        label: 'Flask',
+        results: [],
+      });
+
+      expect(store.session.detectedFrameworkLabel).toBe('Flask-RESTX');
+    });
+
+    it('applyDetectionResult with overwriteLabel:true replaces an existing label', () => {
+      // The manual framework picker uses this — the user explicitly
+      // chose a new framework, so any previously-detected variant label
+      // is now stale and must be replaced.
+      const store = createStore();
+      store.setDetectedFramework('Flask-RESTX');
+
+      const nextConfig = {
+        metadata: { name: 'Next.js' },
+      } as WizardStore['session']['frameworkConfig'];
+
+      store.applyDetectionResult({
+        integration: Integration.nextjs,
+        config: nextConfig,
+        label: 'Next.js',
+        results: [],
+        overwriteLabel: true,
+      });
+
+      expect(store.session.detectedFrameworkLabel).toBe('Next.js');
+    });
+
+    it('applyDetectionResult with label:null does not clobber an existing label', () => {
+      // The Generic autoFallback path explicitly passes label:null
+      // because Generic is a fallback (no friendly variant). If detection
+      // had previously set a label (defensive — shouldn't happen in
+      // practice since autoFallback only fires when no detector won, but
+      // a future state change could create the case), the null input
+      // must NOT overwrite. Guards the `if (input.label && ...)`
+      // short-circuit against a future refactor that drops the falsy
+      // check.
+      const store = createStore();
+      store.setDetectedFramework('Pre-existing Label');
+
+      const genericConfig = {
+        metadata: { name: 'Generic' },
+      } as WizardStore['session']['frameworkConfig'];
+
+      store.applyDetectionResult({
+        integration: Integration.generic,
+        config: genericConfig,
+        label: null,
+        results: [],
+      });
+
+      expect(store.session.detectedFrameworkLabel).toBe('Pre-existing Label');
+    });
+
+    it('applyDetectionResult with label:null + overwriteLabel:true still does not clobber', () => {
+      // Even with overwriteLabel:true, a null label is a no-op — the
+      // intent of overwriteLabel is "replace with this new value," not
+      // "clear." Pins the AND-shape of the guard: `input.label &&
+      // (overwriteLabel || !existing)`.
+      const store = createStore();
+      store.setDetectedFramework('Pre-existing Label');
+
+      const config = {
+        metadata: { name: 'Generic' },
+      } as WizardStore['session']['frameworkConfig'];
+
+      store.applyDetectionResult({
+        integration: Integration.generic,
+        config,
+        label: null,
+        results: [],
+        overwriteLabel: true,
+      });
+
+      expect(store.session.detectedFrameworkLabel).toBe('Pre-existing Label');
+    });
+
     it('setLoginUrl sets and clears the login URL', () => {
       const store = createStore();
       store.setLoginUrl('https://example.com/auth');

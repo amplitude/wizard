@@ -56,7 +56,7 @@ function fakeConfig(
 }
 
 describe('IntroScreen snapshots', () => {
-  it('renders the detecting state with target line + "Scanning …" spinner', () => {
+  it('renders the detecting state with target line + inline Detecting spinner', () => {
     const store = makeStoreForSnapshot({
       detectionComplete: false,
       frameworkConfig: null,
@@ -70,7 +70,12 @@ describe('IntroScreen snapshots', () => {
     // of moving it above the spinner. If a user pointed the wizard at
     // the wrong directory, they need to spot it here.
     expect(frame).toContain('Target');
-    expect(frame).toContain('Scanning');
+    // The Framework row now reserves its slot from frame 1 with an
+    // inline "Detecting…" placeholder, so the row position doesn't
+    // shift when detection lands. Previously this was a separate
+    // "Scanning <path>…" line below the Target.
+    expect(frame).toContain('Framework');
+    expect(frame).toContain('Detecting');
     expect(frame).toMatchSnapshot();
   });
 
@@ -386,5 +391,58 @@ describe('IntroScreen — welcome-back panel', () => {
     expect(frame).toContain("You're signed in as kelson@amplitude.com");
     expect(frame).toContain('Continue — workspace setup');
     expect(frame).not.toContain('Continue — create a new account');
+  });
+
+  // Regression guard for the auto-fallback overwrite scenario flagged
+  // by Bugbot on PR #857. After the user manually picks a framework
+  // from the Generic-fallback outcome, detectionResults still contains
+  // no winner (manual picks preserve the diagnostics table). If
+  // IntroScreen remounts (ScreenErrorBoundary retry, etc.), the
+  // autoFallback effect must NOT re-fire and clobber the manual pick
+  // back to Generic. The guard is `!session.frameworkConfig` inside
+  // detectionFoundNothing — without it, the effect's condition stays
+  // true forever for this state shape.
+  it('does not overwrite a manually-picked framework when detectionResults still lacks a winner', async () => {
+    // Pre-import the registry so the autoFallback effect's dynamic
+    // import resolves from cache synchronously — without this the test
+    // could pass spuriously when the effect's then-callback hasn't run
+    // yet.
+    await import('../../../../lib/registry.js');
+
+    const store = makeStoreForSnapshot({
+      installDir,
+      detectionComplete: true,
+      // Manual pick happened: a real framework is set.
+      integration: Integration.nextjs,
+      detectedFrameworkLabel: 'Next.js',
+      frameworkConfig: fakeConfig(Integration.nextjs),
+      // BUT detection had originally found nothing — diagnostics table
+      // is non-empty with no winner. Manual picks preserve this.
+      detectionResults: [
+        {
+          integration: Integration.nextjs,
+          detected: false,
+          durationMs: 100,
+          timedOut: false,
+        },
+        {
+          integration: Integration.vue,
+          detected: false,
+          durationMs: 100,
+          timedOut: false,
+        },
+      ],
+    });
+
+    // Render simulates the remount — the effect runs.
+    renderSnapshot(<IntroScreen store={store} />, store);
+    // Let any pending microtasks (registry .then() callback) settle.
+    await Promise.resolve();
+    await Promise.resolve();
+
+    expect(store.session.integration).toBe(Integration.nextjs);
+    expect(store.session.frameworkConfig?.metadata.integration).toBe(
+      Integration.nextjs,
+    );
   });
 });

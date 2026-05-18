@@ -28,6 +28,7 @@ import {
   shortenHomePath,
 } from '../../../lib/workspace-analysis.js';
 import { ampliConfigExists } from '../../../lib/ampli-config.js';
+import { tryResolveZone } from '../../../lib/zone-resolution.js';
 import { PickerMenu } from '../primitives/index.js';
 import { PathInput } from '../components/PathInput.js';
 import { Colors, Icons } from '../styles.js';
@@ -117,6 +118,40 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
   // returns to the main welcome menu.
   const [wildcardParent, setWildcardParent] = useState<string | null>(null);
 
+  // Resolved zone for display only (welcomeBack panel + Region row +
+  // "Change region" menu visibility). Reads disk via tryResolveZone so
+  // cached signals (stored user zone, ampli.json Zone) surface in the
+  // welcome panel even before RegionSelect runs. NOT written back to
+  // session.region — that field is reserved for explicit user intent
+  // (see wizard-session.ts) and populating it from cache would silently
+  // defeat the gateAgentSignupArguments / gateCiSignupAcceptToS
+  // sentinels (see commit fdf56c85 for the misroute scenario).
+  //
+  // KNOWN CONVENTION EXCEPTION: useResolvedZone.ts forbids disk I/O in
+  // render paths and recommends hoisting zone resolution into a parent
+  // (or a derived store atom). IntroScreen renders BEFORE RegionSelect,
+  // so session.region is null and useResolvedZone's `{ readDisk: false }`
+  // mode would yield only DEFAULT_AMPLITUDE_ZONE — wrong for EU users
+  // with cached signals. The proper fix is to hoist into a WizardStore
+  // derived atom, tracked by the project_zone_hoist_followup memory note
+  // (originally filed against PR #165). Until that lands, the useMemo
+  // below pins the read to specific dep changes so the disk reads happen
+  // at most once per (region | installDir | userEmail) change rather
+  // than every render.
+  //
+  // Imperfect dep array: Tier 3 (`getStoredUser().zone`) can in theory
+  // change without `session.userEmail` changing — e.g. a same-email re-
+  // login picking a different zone. Practically inaccessible from this
+  // screen (re-login navigates the user away from Intro before the
+  // stored user mutates), and the failure mode is a stale displayed
+  // zone string until the next dep tick — display-only, no routing
+  // impact. Captured here rather than fixed; the hoist will dissolve
+  // the problem entirely by moving invalidation into the store.
+  const displayRegion = useMemo(
+    () => tryResolveZone(session) ?? null,
+    [session.region, session.installDir, session.userEmail],
+  );
+
   // "Welcome back" gate — true when the user is signed in AND this
   // directory has been instrumented before (ampli.json present). First-
   // time users with no email or no prior project still see the marketing
@@ -138,6 +173,29 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
   const frameworkLabel =
     session.detectedFrameworkLabel ?? config?.metadata.name;
   const detecting = !session.detectionComplete;
+  // Auto-fallback trigger. Two conjoined guards:
+  //
+  //   1. Positive evidence that detection ran and found nothing
+  //      (`detectionResults` populated with no winner). Stricter than
+  //      the bare `detectionComplete && !frameworkConfig` predicate
+  //      this used to use — that variant could fire transiently during
+  //      a multi-emit window between `setDetectionComplete` and
+  //      `setFrameworkConfig`. Atomicity is now enforced by
+  //      `applyDetectionResult`, but the stricter guard survives future
+  //      refactors that might split the writes again.
+  //
+  //   2. No `frameworkConfig` is currently set. Without this, a manual
+  //      framework pick made AFTER an autoFallback Generic (the user
+  //      picked "Change framework" from the Generic outcome) would be
+  //      silently clobbered back to Generic on any component remount —
+  //      ScreenErrorBoundary retries do remount the screen, and the
+  //      manual picker reuses the existing `detectionResults` (no
+  //      winner), so condition 1 alone would re-fire indefinitely.
+  const detectionFoundNothing =
+    session.detectionComplete &&
+    !session.frameworkConfig &&
+    (session.detectionResults?.length ?? 0) > 0 &&
+    !session.detectionResults?.some((r) => r.detected);
   const needsFrameworkPick =
     session.detectionComplete && !session.frameworkConfig;
   // Derive fallback state from session so it survives component remount
@@ -156,17 +214,26 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
 
   // When detection fails and the user hasn't explicitly opened the picker,
   // auto-select the generic integration so the wizard can proceed.
-  // NOTE: we deliberately do NOT call setDetectedFramework here — Generic is a
-  // fallback, not a detection. The render derives its label from the config.
+  // `label: null` — Generic is a fallback, not a detection. The render
+  // derives its display string from the config's metadata.name without
+  // a "(detected)" suffix.
+  // Atomic apply (same discipline as the runner and the manual picker)
+  // keeps every detection-related write going through one path. Reuses
+  // the existing detectionResults so the diagnostics table survives.
   useEffect(() => {
-    if (needsFrameworkPick && !session.menu && !showResume) {
+    if (detectionFoundNothing && !session.menu && !showResume) {
       void import('../../../lib/registry.js').then(({ FRAMEWORK_REGISTRY }) => {
         const genericConfig = FRAMEWORK_REGISTRY[Integration.generic];
-        store.setFrameworkConfig(Integration.generic, genericConfig);
+        store.applyDetectionResult({
+          integration: Integration.generic,
+          config: genericConfig,
+          label: null,
+          results: store.session.detectionResults ?? [],
+        });
         logToFile('[intro] no framework matched — falling back to Generic');
       });
     }
-  }, [needsFrameworkPick, session.menu, showResume]);
+  }, [detectionFoundNothing, session.menu, showResume]);
 
   const showContinue =
     session.frameworkConfig !== null && !detecting && !pickingFramework;
@@ -273,7 +340,7 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
           <WelcomeBackPanel
             email={welcomeBack.email}
             projectName={session.selectedProjectName}
-            region={session.region}
+            region={displayRegion}
             eventCount={welcomeBack.eventCount}
             lastRunAt={welcomeBack.lastRunAt}
             compact={compact}
@@ -341,22 +408,10 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
               ? getFrameworkLabelSuffix({ manuallySelected, autoFallback })
               : ''
           }
-          region={session.region}
-          hideRegionRow={Boolean(welcomeBack && !compact && session.region)}
+          region={displayRegion}
+          hideRegionRow={Boolean(welcomeBack && !compact && displayRegion)}
           detecting={detecting}
         />
-      )}
-
-      {/* Detection spinner — sits below the target so the user sees
-          which directory we're scanning while it spins. */}
-      {detecting && !changingDirectory && (
-        <Box marginY={1} gap={1}>
-          <BrailleSpinner />
-          <Text color={Colors.secondary}>
-            Scanning {workspace.displayPath}
-            {Icons.ellipsis}
-          </Text>
-        </Box>
       )}
 
       {/* Workspace ambiguity warnings — shown alongside the picker so
@@ -478,7 +533,7 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
                 label: 'Change framework',
                 value: 'framework',
               },
-              ...(session.region
+              ...(displayRegion
                 ? [
                     {
                       label: 'Change region',
@@ -770,21 +825,28 @@ const TargetSummary = ({
         <Text color={Colors.heading}>{displayPath}</Text>
       </Box>
 
-      {/* Framework only renders once detection is done — during the
-          spinner the row would show a stale value or empty slot. */}
-      {!detecting && frameworkLabel && (
-        <Box>
-          <Text color={Colors.muted}>{padLabel('Framework')}</Text>
-          {frameworkGlyph && (
-            <Text color={frameworkGlyphColor}>{frameworkGlyph} </Text>
-          )}
-          <Text color={Colors.body}>
-            {frameworkLabel}
-            {frameworkSuffix}
-          </Text>
-          {frameworkBeta && <Text color={Colors.muted}> · beta</Text>}
-        </Box>
-      )}
+      {/* Always render this row — reserves its vertical slot so the layout
+          doesn't shift when detection settles. */}
+      <Box>
+        <Text color={Colors.muted}>{padLabel('Framework')}</Text>
+        {detecting || !frameworkLabel ? (
+          <Box>
+            <BrailleSpinner />
+            <Text color={Colors.secondary}> Detecting{Icons.ellipsis}</Text>
+          </Box>
+        ) : (
+          <>
+            {frameworkGlyph && (
+              <Text color={frameworkGlyphColor}>{frameworkGlyph} </Text>
+            )}
+            <Text color={Colors.body}>
+              {frameworkLabel}
+              {frameworkSuffix}
+            </Text>
+            {frameworkBeta && <Text color={Colors.muted}> · beta</Text>}
+          </>
+        )}
+      </Box>
 
       {region && !hideRegionRow && (
         <Box>
@@ -934,8 +996,29 @@ const FrameworkPicker = ({
         void import('../../../lib/registry.js').then(
           ({ FRAMEWORK_REGISTRY }) => {
             const config = FRAMEWORK_REGISTRY[integration];
-            store.setFrameworkConfig(integration, config);
-            store.setDetectedFramework(config.metadata.name);
+            // Single atomic write — same discipline runFrameworkDetection
+            // uses. The screen's autoFallback effect bails on
+            // `detectionFoundNothing`, so two back-to-back setKeys are
+            // harmless today, but matching the atomic-write pattern keeps
+            // the contract uniform and shields future refactors that
+            // tighten the gate from a regression here.
+            //
+            // `overwriteLabel: true` — the user explicitly chose this
+            // framework, so any previously-detected variant label (e.g.
+            // "Flask-RESTX" from a real detection now being overridden
+            // to Next.js) must be replaced. The default precedence is
+            // for auto-detection paths where the variant label should
+            // win.
+            //
+            // Reuse the existing detectionResults so the diagnostics
+            // table doesn't get wiped by a manual pick.
+            store.applyDetectionResult({
+              integration,
+              config,
+              label: config.metadata.name,
+              results: store.session.detectionResults ?? [],
+              overwriteLabel: true,
+            });
             onComplete?.(true);
           },
         );

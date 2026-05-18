@@ -3,7 +3,7 @@
  *
  * Two contracts to pin:
  *   1. On a normal run, it mirrors detection results into the store
- *      and ends with `setDetectionComplete()`.
+ *      via a single atomic `applyDetectionResult` call.
  *   2. When called with an already-aborted signal (or aborted mid-run),
  *      it bails out WITHOUT mutating the store. This is what makes the
  *      "user changes directory twice in a row" case race-safe — the
@@ -96,9 +96,9 @@ describe('runFrameworkDetection', () => {
     expect(store.session.integration).toBeNull();
   });
 
-  it('does not call setDetectionComplete if aborted mid-run', async () => {
+  it('does not call applyDetectionResult if aborted mid-run', async () => {
     // Resolve detection AFTER we've aborted so the helper sees the abort
-    // signal between `detectAllFrameworks` and `setDetectionComplete`.
+    // signal between `detectAllFrameworks` and the atomic apply.
     let resolveDetection!: (value: unknown[]) => void;
     detectAllFrameworksMock.mockReturnValue(
       new Promise((resolve) => {
@@ -118,10 +118,17 @@ describe('runFrameworkDetection', () => {
     resolveDetection([{ integration: Integration.nextjs, detected: true }]);
     await detectionPromise;
 
+    // The critical invariant: the user never sees a stale
+    // `detectionComplete` after a directory swap. With the atomic
+    // applyDetectionResult, this also means none of the related fields
+    // (integration, frameworkConfig, detectionResults) leaked through.
     expect(store.session.detectionComplete).toBe(false);
-    // detectionResults is set BEFORE the next abort check, so we tolerate
-    // it landing — it's harmless. The critical invariant is that the user
-    // never sees a stale `detectionComplete` after a directory swap.
+    expect(store.session.integration).toBeNull();
+    expect(store.session.frameworkConfig).toBeNull();
+    // Initial value: detectionResults defaults to null (see wizard-session.ts).
+    // After atomic apply, it would be an Array. The aborted run never
+    // reaches applyDetectionResult, so we still see the initial null.
+    expect(store.session.detectionResults).toBeNull();
   });
 
   // ── Regression: stale-closure subscriber bug ────────────────────────
