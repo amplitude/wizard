@@ -463,6 +463,55 @@ describe('WizardStore', () => {
       expect(store.session.detectedFrameworkLabel).toBe('Next.js');
     });
 
+    it('applyDetectionResult with label:null does not clobber an existing label', () => {
+      // The Generic autoFallback path explicitly passes label:null
+      // because Generic is a fallback (no friendly variant). If detection
+      // had previously set a label (defensive — shouldn't happen in
+      // practice since autoFallback only fires when no detector won, but
+      // a future state change could create the case), the null input
+      // must NOT overwrite. Guards the `if (input.label && ...)`
+      // short-circuit against a future refactor that drops the falsy
+      // check.
+      const store = createStore();
+      store.setDetectedFramework('Pre-existing Label');
+
+      const genericConfig = {
+        metadata: { name: 'Generic' },
+      } as WizardStore['session']['frameworkConfig'];
+
+      store.applyDetectionResult({
+        integration: Integration.generic,
+        config: genericConfig,
+        label: null,
+        results: [],
+      });
+
+      expect(store.session.detectedFrameworkLabel).toBe('Pre-existing Label');
+    });
+
+    it('applyDetectionResult with label:null + overwriteLabel:true still does not clobber', () => {
+      // Even with overwriteLabel:true, a null label is a no-op — the
+      // intent of overwriteLabel is "replace with this new value," not
+      // "clear." Pins the AND-shape of the guard: `input.label &&
+      // (overwriteLabel || !existing)`.
+      const store = createStore();
+      store.setDetectedFramework('Pre-existing Label');
+
+      const config = {
+        metadata: { name: 'Generic' },
+      } as WizardStore['session']['frameworkConfig'];
+
+      store.applyDetectionResult({
+        integration: Integration.generic,
+        config,
+        label: null,
+        results: [],
+        overwriteLabel: true,
+      });
+
+      expect(store.session.detectedFrameworkLabel).toBe('Pre-existing Label');
+    });
+
     it('setLoginUrl sets and clears the login URL', () => {
       const store = createStore();
       store.setLoginUrl('https://example.com/auth');
