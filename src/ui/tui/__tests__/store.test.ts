@@ -375,6 +375,72 @@ describe('WizardStore', () => {
       expect(store.session.detectedFrameworkLabel).toBe('Django');
     });
 
+    // Regression guard: the whole point of applyDetectionResult is that all
+    // four detection-related fields (detectionResults, integration,
+    // frameworkConfig, detectedFrameworkLabel, detectionComplete) land
+    // under a single emitChange so IntroScreen subscribers never observe
+    // the mid-write state `detectionComplete=true && frameworkConfig=null`
+    // (which fires its autoFallback effect prematurely). End-state
+    // assertions don't pin this — a future refactor splitting the writes
+    // back into separate setKey calls would keep the end state identical.
+    // Subscribe directly and count notifications.
+    it('applyDetectionResult fires exactly one emitChange for the bundled write', () => {
+      const store = createStore();
+      const config = {
+        metadata: { name: 'Next.js' },
+      } as WizardStore['session']['frameworkConfig'];
+
+      let notifications = 0;
+      const unsubscribe = store.subscribe(() => {
+        notifications++;
+      });
+
+      store.applyDetectionResult({
+        integration: Integration.nextjs,
+        config,
+        label: 'Next.js',
+        results: [
+          {
+            integration: Integration.nextjs,
+            detected: true,
+            durationMs: 100,
+            timedOut: false,
+          },
+        ],
+      });
+
+      unsubscribe();
+
+      expect(notifications).toBe(1);
+      // Sanity: all four fields landed.
+      expect(store.session.integration).toBe(Integration.nextjs);
+      expect(store.session.frameworkConfig).toBe(config);
+      expect(store.session.detectedFrameworkLabel).toBe('Next.js');
+      expect(store.session.detectionComplete).toBe(true);
+      expect(store.session.detectionResults).toHaveLength(1);
+    });
+
+    it('applyDetectionResult preserves a pre-set detectedFrameworkLabel', () => {
+      // Mirrors the gatherContext flow where a framework variant detector
+      // (e.g. Flask-RESTX) calls setDetectedFramework with a specific
+      // label BEFORE the atomic apply runs with the bare framework name.
+      const store = createStore();
+      store.setDetectedFramework('Flask-RESTX');
+
+      const config = {
+        metadata: { name: 'Flask' },
+      } as WizardStore['session']['frameworkConfig'];
+
+      store.applyDetectionResult({
+        integration: Integration.flask,
+        config,
+        label: 'Flask',
+        results: [],
+      });
+
+      expect(store.session.detectedFrameworkLabel).toBe('Flask-RESTX');
+    });
+
     it('setLoginUrl sets and clears the login URL', () => {
       const store = createStore();
       store.setLoginUrl('https://example.com/auth');
