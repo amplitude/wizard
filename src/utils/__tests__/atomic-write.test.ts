@@ -15,23 +15,24 @@
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'node:fs';
-import * as os from 'node:os';
 import * as path from 'node:path';
 import { atomicWriteJSON } from '../atomic-write';
+import { createTempDir } from './helpers/temp-dir.js';
 
 const POSIX = process.platform !== 'win32';
 
 describe.skipIf(!POSIX)('atomicWriteJSON — mode enforcement', () => {
   let tmpDir: string;
+  let cleanup: () => void;
   let target: string;
 
   beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'atomic-write-test-'));
+    ({ dir: tmpDir, cleanup } = createTempDir('atomic-write-test-'));
     target = path.join(tmpDir, 'creds.json');
   });
 
   afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    cleanup();
   });
 
   it('creates a new file at the requested mode', () => {

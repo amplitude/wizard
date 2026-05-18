@@ -7,7 +7,6 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'node:fs';
-import * as os from 'node:os';
 import * as path from 'node:path';
 import {
   acquireApplyLock,
@@ -16,15 +15,22 @@ import {
   type ApplyLockHolder,
 } from '../apply-lock.js';
 import { getApplyLockFile } from '../storage-paths.js';
+import { createTempDir } from './helpers/temp-dir.js';
 
 describe('apply-lock', () => {
   let tmpCache: string;
   let tmpInstall: string;
+  let cleanupCache: () => void;
+  let cleanupInstall: () => void;
   const originalCacheEnv = process.env.AMPLITUDE_WIZARD_CACHE_DIR;
 
   beforeEach(() => {
-    tmpCache = fs.mkdtempSync(path.join(os.tmpdir(), 'amp-applylock-cache-'));
-    tmpInstall = fs.mkdtempSync(path.join(os.tmpdir(), 'amp-applylock-proj-'));
+    ({ dir: tmpCache, cleanup: cleanupCache } = createTempDir(
+      'amp-applylock-cache-',
+    ));
+    ({ dir: tmpInstall, cleanup: cleanupInstall } = createTempDir(
+      'amp-applylock-proj-',
+    ));
     process.env.AMPLITUDE_WIZARD_CACHE_DIR = tmpCache;
   });
 
@@ -34,8 +40,8 @@ describe('apply-lock', () => {
     } else {
       process.env.AMPLITUDE_WIZARD_CACHE_DIR = originalCacheEnv;
     }
-    fs.rmSync(tmpCache, { recursive: true, force: true });
-    fs.rmSync(tmpInstall, { recursive: true, force: true });
+    cleanupCache();
+    cleanupInstall();
   });
 
   it('acquires a fresh lock when no prior lock exists', () => {
