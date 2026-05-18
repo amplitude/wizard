@@ -42,17 +42,17 @@ export interface DetectionTargetStore {
   /** Live view of the wizard session state. */
   readonly session: WizardSession;
   setFrameworkContext(key: string, value: unknown): void;
-  setFrameworkConfig(
-    integration: Integration | null,
-    config: FrameworkConfig | null,
-  ): void;
-  setDetectedFramework(label: string): void;
-  setDetectionResults(results: DetectionResult[]): void;
   /**
-   * Atomic alternative to setDetectionResults + setFrameworkConfig +
-   * setDetectedFramework + setDetectionComplete. Required for IntroScreen
-   * to never observe (detectionComplete=true && frameworkConfig=null) —
-   * see the method doc on WizardStore for the autoFallback-race rationale.
+   * Atomic write of every detection-related field under one emitChange,
+   * so subscribers never observe `detectionComplete=true &&
+   * frameworkConfig=null` — see the method doc on WizardStore for the
+   * autoFallback-race rationale. This is the only path `runFrameworkDetection`
+   * uses to finalize a detection run; the granular setters
+   * (setFrameworkConfig / setDetectedFramework / setDetectionResults /
+   * setDetectionComplete) still exist on WizardStore for other call
+   * sites but are intentionally NOT part of this interface — keeping
+   * the contract minimal means a test double only has to implement what
+   * the runner actually calls.
    */
   applyDetectionResult(input: {
     integration: Integration | null;
@@ -63,7 +63,6 @@ export interface DetectionTargetStore {
   }): void;
   addDiscoveredFeature(feature: DiscoveredFeature): void;
   autoEnableInlineAddons(source: 'auto-tui' | 'auto-ci' | 'auto-agent'): void;
-  setDetectionComplete(): void;
   subscribe(listener: () => void): () => void;
 }
 
@@ -72,7 +71,7 @@ export interface RunFrameworkDetectionOptions {
    * Cancellation signal. When aborted before detection completes, the
    * helper resolves WITHOUT mutating the store — used so a re-run
    * triggered by the user picking a different directory doesn't have
-   * the previous run's `setDetectionComplete()` fire after it.
+   * the previous run's `applyDetectionResult()` fire after it.
    */
   signal?: AbortSignal;
 }
