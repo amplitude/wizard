@@ -198,13 +198,22 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
 
   // When detection fails and the user hasn't explicitly opened the picker,
   // auto-select the generic integration so the wizard can proceed.
-  // NOTE: we deliberately do NOT call setDetectedFramework here — Generic is a
-  // fallback, not a detection. The render derives its label from the config.
+  // `label: null` — Generic is a fallback, not a detection. The render
+  // derives its display string from the config's metadata.name without
+  // a "(detected)" suffix.
+  // Atomic apply (same discipline as the runner and the manual picker)
+  // keeps every detection-related write going through one path. Reuses
+  // the existing detectionResults so the diagnostics table survives.
   useEffect(() => {
     if (detectionFoundNothing && !session.menu && !showResume) {
       void import('../../../lib/registry.js').then(({ FRAMEWORK_REGISTRY }) => {
         const genericConfig = FRAMEWORK_REGISTRY[Integration.generic];
-        store.setFrameworkConfig(Integration.generic, genericConfig);
+        store.applyDetectionResult({
+          integration: Integration.generic,
+          config: genericConfig,
+          label: null,
+          results: store.session.detectionResults ?? [],
+        });
         logToFile('[intro] no framework matched — falling back to Generic');
       });
     }
