@@ -204,8 +204,20 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
   // Atomic apply (same discipline as the runner and the manual picker)
   // keeps every detection-related write going through one path. Reuses
   // the existing detectionResults so the diagnostics table survives.
+  //
+  // The `!session.frameworkConfig` guard is load-bearing: a manual pick
+  // via FrameworkPicker leaves `detectionResults` unchanged (no winner),
+  // so `detectionFoundNothing` stays true after the user chose e.g.
+  // Next.js. Without this gate, a component remount (ScreenErrorBoundary
+  // retry) would re-fire the effect and overwrite the manual selection
+  // with Generic.
   useEffect(() => {
-    if (detectionFoundNothing && !session.menu && !showResume) {
+    if (
+      detectionFoundNothing &&
+      !session.frameworkConfig &&
+      !session.menu &&
+      !showResume
+    ) {
       void import('../../../lib/registry.js').then(({ FRAMEWORK_REGISTRY }) => {
         const genericConfig = FRAMEWORK_REGISTRY[Integration.generic];
         store.applyDetectionResult({
@@ -217,7 +229,12 @@ export const IntroScreen = ({ store }: IntroScreenProps) => {
         logToFile('[intro] no framework matched — falling back to Generic');
       });
     }
-  }, [detectionFoundNothing, session.menu, showResume]);
+  }, [
+    detectionFoundNothing,
+    session.frameworkConfig,
+    session.menu,
+    showResume,
+  ]);
 
   const showContinue =
     session.frameworkConfig !== null && !detecting && !pickingFramework;
