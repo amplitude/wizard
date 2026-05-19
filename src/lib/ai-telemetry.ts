@@ -162,31 +162,36 @@ export async function startAiTelemetryAttempt(): Promise<AiTelemetryAttempt | nu
   const TrackerCtor = await loadTrackerCtor();
   if (!TrackerCtor) return null;
 
-  const userId = analytics.getAnonymousId();
-  const agent = ai.agent(WIZARD_AGENT_ID, {
-    description: 'Amplitude wizard CLI agent runs',
-    userId,
-  });
-  const session = agent.session({
-    sessionId: getRunId(),
-    userId,
-  });
-  const tracker = new TrackerCtor({ defaultProvider: 'anthropic' });
+  try {
+    const userId = analytics.getAnonymousId();
+    const agent = ai.agent(WIZARD_AGENT_ID, {
+      description: 'Amplitude wizard CLI agent runs',
+      userId,
+    });
+    const session = agent.session({
+      sessionId: getRunId(),
+      userId,
+    });
+    const tracker = new TrackerCtor({ defaultProvider: 'anthropic' });
 
-  return {
-    agent,
-    session,
-    tracker,
-    endSession() {
-      if (endedSessions.has(session)) return;
-      endedSessions.add(session);
-      try {
-        agent.trackSessionEnd({ sessionId: session.sessionId });
-      } catch (err) {
-        debug('ai-telemetry: trackSessionEnd failed', err);
-      }
-    },
-  };
+    return {
+      agent,
+      session,
+      tracker,
+      endSession() {
+        if (endedSessions.has(session)) return;
+        endedSessions.add(session);
+        try {
+          agent.trackSessionEnd({ sessionId: session.sessionId });
+        } catch (err) {
+          debug('ai-telemetry: trackSessionEnd failed', err);
+        }
+      },
+    };
+  } catch (err) {
+    debug('ai-telemetry: session/tracker init failed', err);
+    return null;
+  }
 }
 
 /**

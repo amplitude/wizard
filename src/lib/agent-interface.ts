@@ -3839,10 +3839,14 @@ export async function runAgent(
         for await (const rawMessage of sdkResponse) {
           // Feed the message to the @amplitude/ai tracker so assistant
           // and user messages emit `[Agent] AI Response` / `[Agent] User
-          // Message`. The tracker swallows its own errors via the SDK's
-          // internal logger so this can't break the message loop.
+          // Message`. Wrapped in try/catch to ensure telemetry errors never
+          // break the message loop.
           if (aiAttempt) {
-            aiAttempt.tracker.process(aiAttempt.session, rawMessage);
+            try {
+              aiAttempt.tracker.process(aiAttempt.session, rawMessage);
+            } catch {
+              // Telemetry is non-disruptive — swallow tracker errors
+            }
           }
           // Reset the stale timer on every message EXCEPT the SDK's
           // "I'm about to wait on the API" envelope. The Claude Agent
