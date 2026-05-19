@@ -72,6 +72,11 @@ const STRING_PATTERNS: Array<{ pattern: RegExp; replacement: string }> = [
     pattern: /\/(?:Users|home)\/[^\s"':,}\]]+/g,
     replacement: '[~]/...',
   },
+  // Absolute paths (Windows user dirs, e.g. `C:\Users\<name>\...`)
+  {
+    pattern: /[A-Za-z]:\\Users\\[^\s"':,}\]]+/g,
+    replacement: '[~]\\...',
+  },
 ];
 
 // ── Public API ──────────────────────────────────────────────────────

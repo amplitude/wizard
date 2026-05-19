@@ -129,6 +129,68 @@ describe('wrapMcpServerWithSentry', () => {
   });
 });
 
+describe('beforeSend (stack frame scrubbing)', () => {
+  beforeEach(() => {
+    vi.clearAllMocks();
+  });
+
+  it('strips user-identifying prefixes from frame filenames while keeping the wizard-relative path', async () => {
+    enableTelemetry();
+    await initSentry({
+      sessionId: 's',
+      version: '0',
+      mode: 'ci',
+      debug: false,
+    });
+    const beforeSend = mockSentry.init.mock.calls.at(-1)?.[0].beforeSend as (
+      e: unknown,
+    ) => {
+      exception?: {
+        values?: Array<{
+          stacktrace?: {
+            frames?: Array<{ filename?: string; abs_path?: string }>;
+          };
+        }>;
+      };
+    };
+
+    const result = beforeSend({
+      exception: {
+        values: [
+          {
+            type: 'WizardError',
+            value: 'API error',
+            stacktrace: {
+              frames: [
+                {
+                  filename:
+                    'C:\\Users\\testuser\\AppData\\Local\\npm-cache\\_npx\\abc123\\node_modules\\@amplitude\\wizard\\dist\\src\\lib\\agent-runner.js',
+                  abs_path:
+                    'C:\\Users\\testuser\\AppData\\Local\\npm-cache\\_npx\\abc123\\node_modules\\@amplitude\\wizard\\dist\\src\\lib\\agent-runner.js',
+                },
+                {
+                  filename: '/Users/someone/code/foo.ts',
+                  abs_path: '/Users/someone/code/foo.ts',
+                },
+              ],
+            },
+          },
+        ],
+      },
+    });
+
+    const frames = result.exception?.values?.[0]?.stacktrace?.frames ?? [];
+    expect(frames[0]?.filename).toBe(
+      'node_modules\\@amplitude\\wizard\\dist\\src\\lib\\agent-runner.js',
+    );
+    expect(frames[0]?.abs_path).toBe(
+      'node_modules\\@amplitude\\wizard\\dist\\src\\lib\\agent-runner.js',
+    );
+    expect(frames[1]?.filename).toBe('[~]/...');
+    restoreEnv();
+  });
+});
+
 describe('setSpanMeasurement', () => {
   beforeEach(() => {
     vi.clearAllMocks();

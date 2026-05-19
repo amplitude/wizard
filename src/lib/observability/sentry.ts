@@ -108,6 +108,18 @@ function resolveEnvironment(mode: ExecutionMode): string {
 
 // ── beforeSend: redaction + fingerprinting ──────────────────────────
 
+/**
+ * Strip user-identifying prefixes from a stack frame path while preserving
+ * the wizard-relative portion (which is the actually useful debugging info).
+ * Falls back to full redaction when no wizard root is found.
+ */
+function scrubFramePath(p: string | undefined): string | undefined {
+  if (!p) return p;
+  const match = p.match(/node_modules[/\\]@amplitude[/\\]wizard[/\\].*/);
+  if (match) return match[0];
+  return redactString(p);
+}
+
 function beforeSend(event: Sentry.ErrorEvent): Sentry.ErrorEvent | null {
   // Selectively redact user-facing fields only. Do NOT redact the entire event
   // — Sentry's own fields (event_id, trace_id, span_id) are 32+ hex chars
@@ -116,6 +128,16 @@ function beforeSend(event: Sentry.ErrorEvent): Sentry.ErrorEvent | null {
     event.exception.values = event.exception.values.map((v) => ({
       ...v,
       value: v.value ? redactString(v.value) : v.value,
+      stacktrace: v.stacktrace
+        ? {
+            ...v.stacktrace,
+            frames: v.stacktrace.frames?.map((f) => ({
+              ...f,
+              filename: scrubFramePath(f.filename),
+              abs_path: scrubFramePath(f.abs_path),
+            })),
+          }
+        : v.stacktrace,
     }));
   }
   if (event.breadcrumbs) {
