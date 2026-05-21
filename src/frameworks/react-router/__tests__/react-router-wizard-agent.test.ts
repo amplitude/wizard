@@ -40,7 +40,7 @@ describe('react-router version check info', () => {
     mockTryGetPackageJson.mockResolvedValue({ name: 'fixture' });
   });
 
-  it('uses React Router minimum for react-router package', async () => {
+  it('returns version info for react-router package', async () => {
     mockGetPackageVersion.mockImplementation((packageName: string) =>
       packageName === 'react-router' ? '6.30.0' : undefined,
     );
@@ -50,7 +50,6 @@ describe('react-router version check info', () => {
 
     expect(info).toEqual({
       version: '6.30.0',
-      minimumVersion: '6.0.0',
       packageDisplayName: 'React Router',
     });
   });

@@ -22,7 +22,6 @@ type ReactRouterContext = {
   routerMode?: ReactRouterMode;
 };
 
-const REACT_ROUTER_MINIMUM_VERSION = '6.0.0';
 const TANSTACK_MINIMUM_VERSION = '1.0.0';
 
 // Priority matches gatherContext: TanStack Start > TanStack Router > react-router
@@ -59,7 +58,6 @@ function getReactRouterVersionCheckInfo(packageJson: PackageDotJson): {
   if (reactRouterVersion) {
     return {
       version: reactRouterVersion,
-      minimumVersion: REACT_ROUTER_MINIMUM_VERSION,
       packageDisplayName: 'React Router',
     };
   }
@@ -138,7 +136,6 @@ export const REACT_ROUTER_AGENT_CONFIG: FrameworkConfig<ReactRouterContext> = {
       );
     },
     getVersionBucket: getReactRouterVersionBucket,
-    minimumVersion: REACT_ROUTER_MINIMUM_VERSION,
     getInstalledVersion: async (options: WizardOptions) => {
       const packageJson = await tryGetPackageJson(options);
       if (!packageJson) return undefined;

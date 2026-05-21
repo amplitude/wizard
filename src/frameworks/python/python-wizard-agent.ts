@@ -57,7 +57,6 @@ export const PYTHON_AGENT_CONFIG: FrameworkConfig<PythonContext> = {
     usesPackageJson: false,
     getVersion: () => undefined,
     getVersionBucket: getPythonVersionBucket,
-    minimumVersion: '3.8.0',
     getInstalledVersion: (options: WizardOptions) =>
       Promise.resolve(getPythonVersion(options)),
     detect: async (options) => {
