@@ -11,6 +11,9 @@ importers:
       '@ai-sdk/anthropic':
         specifier: ^3.0.75
         version: 3.0.75(zod@4.3.6)
+      '@amplitude/ai':
+        specifier: ^0.9.0
+        version: 0.9.0(@amplitude/analytics-node@1.5.51)(@anthropic-ai/sdk@0.95.1(zod@4.3.6))
       '@amplitude/analytics-browser':
         specifier: 2.36.2
         version: 2.36.2
@@ -256,6 +259,34 @@ packages:
   '@alcalzone/ansi-tokenize@0.2.5':
     resolution: {integrity: sha512-3NX/MpTdroi0aKz134A6RC2Gb2iXVECN4QaAXnvCIxxIm3C3AVB1mkUe8NaaiyvOpDfsrqWhYtj+Q6a62RrTsw==}
     engines: {node: '>=18'}
+
+  '@amplitude/ai@0.9.0':
+    resolution: {integrity: sha512-BTACisxzjIhQdUt8k3pjcG3abny6P42X2vfBS0diTmFUxoSTQf7fjTx28mfABDsEGsjvQDIKtMIneOwpUWkwDg==}
+    hasBin: true
+    peerDependencies:
+      '@amplitude/analytics-node': '>=1.3.0'
+      '@anthropic-ai/sdk': '>=0.29.0 <1.0.0'
+      '@aws-sdk/client-bedrock-runtime': '>=3.0.0 <4.0.0'
+      '@google/generative-ai': '>=0.21.0 <1.0.0'
+      '@mistralai/mistralai': '>=1.3.6 <2.0.0'
+      js-tiktoken: '>=1.0.0'
+      openai: '>=4.0.0 <7.0.0'
+      tiktoken: '>=1.0.0'
+    peerDependenciesMeta:
+      '@anthropic-ai/sdk':
+        optional: true
+      '@aws-sdk/client-bedrock-runtime':
+        optional: true
+      '@google/generative-ai':
+        optional: true
+      '@mistralai/mistralai':
+        optional: true
+      js-tiktoken:
+        optional: true
+      openai:
+        optional: true
+      tiktoken:
+        optional: true
 
   '@amplitude/analytics-browser@2.36.2':
     resolution: {integrity: sha512-5LtZfHlpCfAaioKkZAsrQYM69KnK5XaBk38qZBfIviOYQmwwbXfmfv1YEEoAYaAXaPtugsdjNREv4IxO0Zg6kg==}
@@ -1042,6 +1073,16 @@ packages:
   '@jridgewell/trace-mapping@0.3.9':
     resolution: {integrity: sha512-3Belt6tdc8bPgAtbcmdtNJlirVoTmEb5e2gC94PnkwEW9jI6CAHUeoG85tjWP5WquqfavoMtMwiG4P926ZKKuQ==}
 
+  '@modelcontextprotocol/sdk@1.27.1':
+    resolution: {integrity: sha512-sr6GbP+4edBwFndLbM60gf07z0FQ79gaExpnsjMGePXqFcSSb7t6iscpjk9DhFhwd+mTEQrzNafGP8/iGGFYaA==}
+    engines: {node: '>=18'}
+    peerDependencies:
+      '@cfworker/json-schema': ^4.1.1
+      zod: ^3.25 || ^4.0
+    peerDependenciesMeta:
+      '@cfworker/json-schema':
+        optional: true
+
   '@modelcontextprotocol/sdk@1.29.0':
     resolution: {integrity: sha512-zo37mZA9hJWpULgkRpowewez1y6ML5GsXJPY8FI0tBBCd77HEvza4jDqRKOXgHNn867PVGCyTdzqpz0izu5ZjQ==}
     engines: {node: '>=18'}
@@ -1303,6 +1344,11 @@ packages:
     resolution: {integrity: sha512-ZPW2gRiwpPzEfgeZgaekhqXrbW+Y2RJKHVqUmlhZhKzRNCcvR6DykzylDrynpArKKRQtLxoZy36fK7U0p3pdgQ==}
     peerDependencies:
       '@opentelemetry/api': ^1.8
+
+  '@pydantic/genai-prices@0.0.60':
+    resolution: {integrity: sha512-CYlA5Uw4GaZqMRjcYB+8JXL4n0M/K2o1tpdxCk8E30FmD/2QMpIe7aEqf3RAr+SczeB1hCWLvpdW+cpn2opBWA==}
+    engines: {node: '>=20'}
+    hasBin: true
 
   '@rollup/rollup-android-arm-eabi@4.60.2':
     resolution: {integrity: sha512-dnlp69efPPg6Uaw2dVqzWRfAWRnYVb1XJ8CyyhIbZeaq4CA5/mLeZ1IEt9QqQxmbdvagjLIm2ZL8BxXv5lH4Yw==}
@@ -1715,6 +1761,11 @@ packages:
     resolution: {integrity: sha512-rq9s+JNhf0IChjtDXxllJ7g41oZk5SlXtp0LHwyA5cejwn7vKmKp4pPri6YEePv2PU65sAsegbXtIinmDFDXgQ==}
     peerDependencies:
       acorn: ^6.0.0 || ^7.0.0 || ^8.0.0
+
+  acorn-typescript@1.4.13:
+    resolution: {integrity: sha512-xsc9Xv0xlVfwp2o7sQ+GCQ1PgbkdcpWdTzrwXxO3xDMTAywVS3oXVOcOHuRjAPkS4P9b+yc/qNF15460v+jp4Q==}
+    peerDependencies:
+      acorn: '>=8.9.0'
 
   acorn-walk@8.3.5:
     resolution: {integrity: sha512-HEHNfbars9v4pgpW6SO1KSPkfoS0xVOM/9UzkJltjlsHZmJasxg8aXkuZa7SMf8vKGIBhpUsPluQSqhJFCqebw==}
@@ -3848,6 +3899,9 @@ packages:
     peerDependencies:
       zod: ^3.25 || ^4
 
+  zod@3.25.76:
+    resolution: {integrity: sha512-gzUt/qt81nXsFGKIFcC3YnfEAx5NkunCfnDlvuBSSFS02bcXu4Lmea0AFIUwbLWxWPx3d9p8S5QoaujKcNQxcQ==}
+
   zod@4.3.6:
     resolution: {integrity: sha512-rftlrkhHZOcjDwkGlnUtZZkvaPHCsDATp4pGpuOOMDaTdDDXF91wuVDJoWoPsKX/3YPQ5fHuF3STjcYyKr+Qhg==}
 
@@ -3881,6 +3935,20 @@ snapshots:
     dependencies:
       ansi-styles: 6.2.3
       is-fullwidth-code-point: 5.1.0
+
+  '@amplitude/ai@0.9.0(@amplitude/analytics-node@1.5.51)(@anthropic-ai/sdk@0.95.1(zod@4.3.6))':
+    dependencies:
+      '@amplitude/analytics-node': 1.5.51
+      '@pydantic/genai-prices': 0.0.60
+    optionalDependencies:
+      '@anthropic-ai/sdk': 0.95.1(zod@4.3.6)
+      '@modelcontextprotocol/sdk': 1.27.1(zod@3.25.76)
+      acorn: 8.16.0
+      acorn-typescript: 1.4.13(acorn@8.16.0)
+      zod: 3.25.76
+    transitivePeerDependencies:
+      - '@cfworker/json-schema'
+      - supports-color
 
   '@amplitude/analytics-browser@2.36.2':
     dependencies:
@@ -4563,6 +4631,29 @@ snapshots:
       '@jridgewell/resolve-uri': 3.1.2
       '@jridgewell/sourcemap-codec': 1.5.5
 
+  '@modelcontextprotocol/sdk@1.27.1(zod@3.25.76)':
+    dependencies:
+      '@hono/node-server': 1.19.14(hono@4.12.18)
+      ajv: 8.18.0
+      ajv-formats: 3.0.1(ajv@8.18.0)
+      content-type: 1.0.5
+      cors: 2.8.6
+      cross-spawn: 7.0.6
+      eventsource: 3.0.7
+      eventsource-parser: 3.0.8
+      express: 5.2.1
+      express-rate-limit: 8.5.1(express@5.2.1)
+      hono: 4.12.18
+      jose: 6.2.2
+      json-schema-typed: 8.0.2
+      pkce-challenge: 5.0.1
+      raw-body: 3.0.2
+      zod: 3.25.76
+      zod-to-json-schema: 3.25.1(zod@3.25.76)
+    transitivePeerDependencies:
+      - supports-color
+    optional: true
+
   '@modelcontextprotocol/sdk@1.29.0(zod@4.3.6)':
     dependencies:
       '@hono/node-server': 1.19.14(hono@4.12.18)
@@ -4897,6 +4988,10 @@ snapshots:
       '@opentelemetry/instrumentation': 0.207.0(@opentelemetry/api@1.9.1)
     transitivePeerDependencies:
       - supports-color
+
+  '@pydantic/genai-prices@0.0.60':
+    dependencies:
+      yargs: 17.7.2
 
   '@rollup/rollup-android-arm-eabi@4.60.2':
     optional: true
@@ -5320,6 +5415,11 @@ snapshots:
   acorn-jsx@5.3.2(acorn@8.16.0):
     dependencies:
       acorn: 8.16.0
+
+  acorn-typescript@1.4.13(acorn@8.16.0):
+    dependencies:
+      acorn: 8.16.0
+    optional: true
 
   acorn-walk@8.3.5:
     dependencies:
@@ -7394,8 +7494,16 @@ snapshots:
 
   zen-observable@0.8.15: {}
 
+  zod-to-json-schema@3.25.1(zod@3.25.76):
+    dependencies:
+      zod: 3.25.76
+    optional: true
+
   zod-to-json-schema@3.25.1(zod@4.3.6):
     dependencies:
       zod: 4.3.6
+
+  zod@3.25.76:
+    optional: true
 
   zod@4.3.6: {}

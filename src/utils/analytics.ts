@@ -343,7 +343,18 @@ export class Analytics {
     }
     try {
       await this.initPromise;
-      await this.client.flush().promise;
+      await Promise.all([
+        this.client.flush().promise,
+        // Flush buffered [Agent] * events from the @amplitude/ai client.
+        // Best-effort — runs in parallel with the main analytics flush so
+        // a slow/failed AI telemetry flush doesn't block shutdown.
+        (async () => {
+          const { flushAiTelemetry } = await import('../lib/ai-telemetry.js');
+          await flushAiTelemetry();
+        })().catch((err) => {
+          debug('ai-telemetry flush error during shutdown:', err);
+        }),
+      ]);
     } catch (err) {
       debug('analytics shutdown flush error:', err);
     }
