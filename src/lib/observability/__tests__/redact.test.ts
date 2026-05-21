@@ -29,6 +29,17 @@ describe('redactString', () => {
     );
   });
 
+  it('redacts Windows user paths', () => {
+    expect(
+      redactString(
+        'File "C:\\Users\\testuser\\AppData\\Local\\npm-cache\\_npx\\abc123\\node_modules\\@amplitude\\wizard\\dist\\src\\lib\\agent-runner.js", line 308',
+      ),
+    ).toBe('File "[~]\\...", line 308');
+    expect(redactString('at D:\\Users\\someone\\repo\\index.ts')).toBe(
+      'at [~]\\...',
+    );
+  });
+
   it('preserves non-sensitive strings', () => {
     expect(redactString('Detected Next.js 15.2')).toBe('Detected Next.js 15.2');
     expect(redactString('Framework: react-router')).toBe(
