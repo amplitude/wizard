@@ -48,7 +48,6 @@ export const FLASK_AGENT_CONFIG: FrameworkConfig<FlaskContext> = {
     usesPackageJson: false,
     getVersion: () => undefined,
     getVersionBucket: getFlaskVersionBucket,
-    minimumVersion: '2.0.0',
     getInstalledVersion: (options: WizardOptions) => getFlaskVersion(options),
     detect: async (options) => {
       const { installDir } = options;

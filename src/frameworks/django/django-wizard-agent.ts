@@ -47,7 +47,6 @@ export const DJANGO_AGENT_CONFIG: FrameworkConfig<DjangoContext> = {
     usesPackageJson: false,
     getVersion: () => undefined,
     getVersionBucket: getDjangoVersionBucket,
-    minimumVersion: '3.0.0',
     getInstalledVersion: (options: WizardOptions) => getDjangoVersion(options),
     detect: async (options) => {
       const { installDir } = options;
