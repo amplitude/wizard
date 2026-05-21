@@ -4232,7 +4232,6 @@ export async function runAgent(
         clearTimeout(staleTimer);
         unsubscribePromptRelease();
         wizardSignal.removeEventListener('abort', onWizardAbort);
-        aiAttempt?.endSession();
         const partialOutput = collectedText.join('\n');
 
         // Vertex / wizard-proxy payload-shape rejection — retrying is
@@ -4340,7 +4339,6 @@ export async function runAgent(
         clearTimeout(staleTimer);
         unsubscribePromptRelease();
         wizardSignal.removeEventListener('abort', onWizardAbort);
-        aiAttempt?.endSession();
         signalDone(); // unblock the prompt stream for this attempt
         // Always drain the prior iterator after an exception, regardless
         // of whether we'll retry. Cheap and defends against the hook

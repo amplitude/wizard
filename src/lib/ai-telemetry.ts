@@ -37,7 +37,6 @@ type SessionLike = {
 };
 
 type BoundAgentLike = {
-  trackSessionEnd: (opts: { sessionId: string }) => void;
   session: (opts?: {
     sessionId?: string | null;
     userId?: string | null;
@@ -150,11 +149,7 @@ export interface AiTelemetryAttempt {
   agent: BoundAgentLike;
   session: SessionLike;
   tracker: ClaudeAgentSDKTrackerLike;
-  /** Emit `[Agent] Session End`. Idempotent; safe in finally + catch. */
-  endSession(): void;
 }
-
-const endedSessions = new WeakSet<SessionLike>();
 
 export async function startAiTelemetryAttempt(): Promise<AiTelemetryAttempt | null> {
   const ai = await loadAmplitudeAI();
@@ -174,20 +169,7 @@ export async function startAiTelemetryAttempt(): Promise<AiTelemetryAttempt | nu
     });
     const tracker = new TrackerCtor({ defaultProvider: 'anthropic' });
 
-    return {
-      agent,
-      session,
-      tracker,
-      endSession() {
-        if (endedSessions.has(session)) return;
-        endedSessions.add(session);
-        try {
-          agent.trackSessionEnd({ sessionId: session.sessionId });
-        } catch (err) {
-          debug('ai-telemetry: trackSessionEnd failed', err);
-        }
-      },
-    };
+    return { agent, session, tracker };
   } catch (err) {
     debug('ai-telemetry: session/tracker init failed', err);
     return null;

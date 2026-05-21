@@ -104,18 +104,6 @@ describe('ai-telemetry', () => {
       expect(props['[Agent] Input Tokens']).toBe(12);
       expect(props['[Agent] Output Tokens']).toBe(4);
     });
-
-    it('endSession is idempotent', async () => {
-      const attempt = await startAiTelemetryAttempt();
-      expect(attempt).not.toBeNull();
-      if (!attempt) return;
-
-      attempt.endSession();
-      attempt.endSession();
-
-      const endEvents = mock.getEvents('[Agent] Session End');
-      expect(endEvents).toHaveLength(1);
-    });
   });
 
   describe('mergeTrackerHooks', () => {
