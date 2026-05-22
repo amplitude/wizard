@@ -6,19 +6,6 @@
  */
 export type WizardMode = 'fast' | 'standard' | 'thorough';
 
-export const WIZARD_MODES: readonly WizardMode[] = [
-  'fast',
-  'standard',
-  'thorough',
-] as const;
-
-export type AmplitudeProjectData = Record<string, unknown>;
-
-export type PreselectedProject = {
-  project: AmplitudeProjectData;
-  authToken: string;
-};
-
 export type WizardOptions = {
   /**
    * Whether to enable debug mode.
@@ -92,23 +79,4 @@ export type WizardOptions = {
   mode?: WizardMode;
 };
 
-export interface Feature {
-  id: string;
-  prompt: string;
-  enabledHint?: string;
-  disabledHint?: string;
-}
-
-export type FileChange = {
-  filePath: string;
-  oldContent?: string;
-  newContent: string;
-};
-
 export type CloudRegion = 'us' | 'eu';
-
-export type AIModel =
-  | 'gpt-5-mini'
-  | 'o4-mini'
-  | 'gemini-2.5-flash'
-  | 'gemini-2.5-pro';
