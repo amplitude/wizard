@@ -50,6 +50,38 @@ function appApiUrl(
   return queryName ? `${url}?q=${queryName}` : url;
 }
 
+// ── Shared header builders ────────────────────────────────────────────
+//
+// The Data API and App API GraphQL endpoints take different auth headers
+// but identical Content-Type / User-Agent. Centralising the headers keeps
+// the wire shape consistent across helpers — every Data API caller below
+// would otherwise repeat the same three-line dict.
+
+/**
+ * Headers for the Data API GraphQL endpoint. Auth is the raw OAuth
+ * `id_token` in the `Authorization` header (same convention as the ampli CLI).
+ */
+function dataApiHeaders(idToken: string): Record<string, string> {
+  return {
+    Authorization: idToken,
+    'Content-Type': 'application/json',
+    'User-Agent': WIZARD_USER_AGENT,
+  };
+}
+
+/**
+ * Headers for the App API org-scoped GraphQL endpoint. Auth is the OAuth
+ * access token sent as `Bearer ` in the `x-amp-authorization` header (the
+ * main Amplitude app's convention — distinct from the Data API).
+ */
+function appApiHeaders(accessToken: string): Record<string, string> {
+  return {
+    'x-amp-authorization': `Bearer ${accessToken}`,
+    'Content-Type': 'application/json',
+    'User-Agent': WIZARD_USER_AGENT,
+  };
+}
+
 // ── Amplitude GraphQL types ───────────────────────────────────────────
 
 const AmplitudeUserSchema = z.object({
@@ -193,13 +225,7 @@ export async function fetchAmplitudeUser(
     const response = await apiClient.post(
       dataApiUrl,
       { query: ORGS_QUERY },
-      {
-        headers: {
-          Authorization: idToken,
-          'Content-Type': 'application/json',
-          'User-Agent': WIZARD_USER_AGENT,
-        },
-      },
+      { headers: dataApiHeaders(idToken) },
     );
 
     const parsed = AmplitudeUserSchema.parse(response.data);
@@ -772,13 +798,7 @@ export async function fetchBranches(
     const response = await apiClient.post(
       dataApiUrl,
       { query: BRANCHES_QUERY, variables: { orgId, projectId } },
-      {
-        headers: {
-          Authorization: idToken,
-          'Content-Type': 'application/json',
-          'User-Agent': WIZARD_USER_AGENT,
-        },
-      },
+      { headers: dataApiHeaders(idToken) },
     );
     const parsed = BranchesSchema.parse(response.data);
     return parsed.data.orgs[0]?.workspaces[0]?.branches ?? [];
@@ -857,13 +877,7 @@ export async function fetchProjectEventTypes(
           versionId: defaultBranch.currentVersionId,
         },
       },
-      {
-        headers: {
-          Authorization: idToken,
-          'Content-Type': 'application/json',
-          'User-Agent': WIZARD_USER_AGENT,
-        },
-      },
+      { headers: dataApiHeaders(idToken) },
     );
     const parsed = ProjectEventsSchema.parse(response.data);
     return (
@@ -917,13 +931,7 @@ export async function fetchOwnedDashboards(
     const response = await apiClient.post(
       url,
       { query: OWNED_DASHBOARDS_QUERY },
-      {
-        headers: {
-          'x-amp-authorization': `Bearer ${accessToken}`,
-          'Content-Type': 'application/json',
-          'User-Agent': WIZARD_USER_AGENT,
-        },
-      },
+      { headers: appApiHeaders(accessToken) },
     );
     const parsed = OwnedDashboardsSchema.parse(response.data);
     const dashboards = parsed.data.ownedDashboards;
@@ -1033,13 +1041,7 @@ export async function fetchSources(
         query: SOURCES_QUERY,
         variables: { orgId, projectId, branchId, versionId },
       },
-      {
-        headers: {
-          Authorization: idToken,
-          'Content-Type': 'application/json',
-          'User-Agent': WIZARD_USER_AGENT,
-        },
-      },
+      { headers: dataApiHeaders(idToken) },
     );
     const parsed = SourcesSchema.parse(response.data);
     return (
@@ -1285,13 +1287,7 @@ export async function fetchProjectActivationStatus(opts: {
     const response = await apiClient.post(
       url,
       { query: ACTIVATION_STATUS_QUERY, variables: { appId: String(appId) } },
-      {
-        headers: {
-          'x-amp-authorization': `Bearer ${accessToken}`,
-          'Content-Type': 'application/json',
-          'User-Agent': WIZARD_USER_AGENT,
-        },
-      },
+      { headers: appApiHeaders(accessToken) },
     );
     const parsed = ActivationStatusSchema.parse(response.data);
     const s = parsed.data.hasAnyDefaultEventTrackingSourceAndEvents;
@@ -1345,14 +1341,7 @@ export async function fetchSlackInstallUrl(
         query: SLACK_INSTALL_URL_QUERY,
         variables: { action: 'profile', originalPath },
       },
-      {
-        headers: {
-          'x-amp-authorization': `Bearer ${accessToken}`,
-          'Content-Type': 'application/json',
-          'User-Agent': WIZARD_USER_AGENT,
-        },
-        timeout: 10_000,
-      },
+      { headers: appApiHeaders(accessToken), timeout: 10_000 },
     );
     logToFile(
       `[fetchSlackInstallUrl] response status=${
@@ -1405,14 +1394,7 @@ export async function fetchSlackConnectionStatus(
     const response = await apiClient.post(
       url,
       { query: SLACK_CONNECTION_STATUS_QUERY },
-      {
-        headers: {
-          'x-amp-authorization': `Bearer ${accessToken}`,
-          'Content-Type': 'application/json',
-          'User-Agent': WIZARD_USER_AGENT,
-        },
-        timeout: 10_000,
-      },
+      { headers: appApiHeaders(accessToken), timeout: 10_000 },
     );
     const parsed = SlackConnectionStatusSchema.parse(response.data);
     return parsed.data.slackConnectionStatus.isConnected;
