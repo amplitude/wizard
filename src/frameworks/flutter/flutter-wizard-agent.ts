@@ -3,6 +3,13 @@ import type { FrameworkConfig } from '../../lib/framework-config';
 import { flutterPackageManager } from '../../lib/package-manager-detection';
 import { Integration } from '../../lib/constants';
 import { detectFlutterProject } from './utils';
+import {
+  SUCCESS_MESSAGE_INTEGRATION_COMPLETE,
+  OUTRO_DASHBOARD_LINE,
+  emptyEnv,
+  frameworkDocsIdLine,
+  noVersionFromPackageJson,
+} from '../../lib/framework-shared';
 
 type FlutterContext = Record<string, unknown>;
 
@@ -20,7 +27,7 @@ export const FLUTTER_AGENT_CONFIG: FrameworkConfig<FlutterContext> = {
     packageName: 'amplitude_flutter',
     packageDisplayName: 'Flutter',
     usesPackageJson: false,
-    getVersion: () => undefined,
+    getVersion: noVersionFromPackageJson,
     detect: detectFlutterProject,
     detectPackageManager: flutterPackageManager,
   },
@@ -29,7 +36,7 @@ export const FLUTTER_AGENT_CONFIG: FrameworkConfig<FlutterContext> = {
     // Flutter apps don't use .env files — API keys are passed via --dart-define
     // or stored in a constants file; the agent handles key storage
     uploadToHosting: false,
-    getEnvVars: () => ({}),
+    getEnvVars: emptyEnv,
   },
 
   analytics: {
@@ -42,7 +49,7 @@ export const FLUTTER_AGENT_CONFIG: FrameworkConfig<FlutterContext> = {
     packageInstallation:
       'Use Flutter pub: run `flutter pub add amplitude_flutter` to add the dependency (pubspec.yaml and pubspec.lock are updated automatically).',
     getAdditionalContextLines: () => [
-      'Framework docs ID: flutter (use amplitude://docs/frameworks/flutter for documentation)',
+      frameworkDocsIdLine('flutter'),
       'SDK: amplitude_flutter (pub.dev)',
       'Initialization: final amplitude = Amplitude(Configuration(apiKey: const String.fromEnvironment("AMPLITUDE_API_KEY"))); await amplitude.isBuilt;',
       'Always await amplitude.isBuilt before calling track() or flush()',
@@ -51,7 +58,7 @@ export const FLUTTER_AGENT_CONFIG: FrameworkConfig<FlutterContext> = {
   },
 
   ui: {
-    successMessage: 'Amplitude integration complete',
+    successMessage: SUCCESS_MESSAGE_INTEGRATION_COMPLETE,
     estimatedDurationMinutes: 8,
     getOutroChanges: () => [
       'Analyzed your Flutter project structure',
@@ -60,7 +67,7 @@ export const FLUTTER_AGENT_CONFIG: FrameworkConfig<FlutterContext> = {
     ],
     getOutroNextSteps: () => [
       'Run your app on a device or simulator to verify the integration',
-      'Visit your Amplitude dashboard to see incoming events',
+      OUTRO_DASHBOARD_LINE,
       'Use amplitude.track(BaseEvent("Event Name")) for custom events',
       'Pass the API key at build time: flutter run --dart-define=AMPLITUDE_API_KEY=your_key',
     ],

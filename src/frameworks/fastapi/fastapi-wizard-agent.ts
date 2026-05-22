@@ -14,6 +14,12 @@ import {
   IGNORE_PATTERNS,
 } from './utils';
 import { hasPythonProjectMarkers } from '../python/preflight';
+import {
+  SUCCESS_MESSAGE_INTEGRATION_COMPLETE,
+  OUTRO_DASHBOARD_LINE,
+  apiKeyOnlyEnv,
+  frameworkDocsIdLine,
+} from '../../lib/framework-shared';
 
 interface FastAPIContext extends Record<string, unknown> {
   projectType?: FastAPIProjectType;
@@ -132,9 +138,7 @@ export const FASTAPI_AGENT_CONFIG: FrameworkConfig<FastAPIContext> = {
 
   environment: {
     uploadToHosting: false,
-    getEnvVars: (apiKey: string, _host: string) => ({
-      AMPLITUDE_API_KEY: apiKey,
-    }),
+    getEnvVars: apiKeyOnlyEnv,
   },
 
   analytics: {
@@ -167,7 +171,7 @@ export const FASTAPI_AGENT_CONFIG: FrameworkConfig<FastAPIContext> = {
 
       const lines = [
         `Project type: ${projectTypeName}`,
-        `Framework docs ID: ${frameworkId} (use amplitude://docs/frameworks/${frameworkId} for documentation)`,
+        frameworkDocsIdLine(frameworkId),
       ];
 
       if (context.appFile) {
@@ -179,7 +183,7 @@ export const FASTAPI_AGENT_CONFIG: FrameworkConfig<FastAPIContext> = {
   },
 
   ui: {
-    successMessage: 'Amplitude integration complete',
+    successMessage: SUCCESS_MESSAGE_INTEGRATION_COMPLETE,
     estimatedDurationMinutes: 5,
     getOutroChanges: (context: FastAPIContext) => {
       const projectType = context.projectType;
@@ -195,7 +199,7 @@ export const FASTAPI_AGENT_CONFIG: FrameworkConfig<FastAPIContext> = {
     },
     getOutroNextSteps: () => [
       'Start your FastAPI development server to see Amplitude in action',
-      'Visit your Amplitude dashboard to see incoming events',
+      OUTRO_DASHBOARD_LINE,
       'Use amplitude.identify() to associate events with users',
     ],
   },

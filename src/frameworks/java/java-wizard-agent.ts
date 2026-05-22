@@ -4,6 +4,13 @@ import { detectJavaPackageManagers } from '../../lib/package-manager-detection';
 import { Integration } from '../../lib/constants';
 import { detectJavaProject, detectJavaBuildTool } from './utils';
 import type { JavaBuildTool } from './utils';
+import {
+  SUCCESS_MESSAGE_INTEGRATION_COMPLETE,
+  OUTRO_DASHBOARD_LINE,
+  apiKeyAndServerUrlEnv,
+  frameworkDocsIdLine,
+  noVersionFromPackageJson,
+} from '../../lib/framework-shared';
 
 type JavaContext = {
   buildTool?: JavaBuildTool;
@@ -28,17 +35,14 @@ export const JAVA_AGENT_CONFIG: FrameworkConfig<JavaContext> = {
     packageName: 'com.amplitude:java-sdk',
     packageDisplayName: 'Java',
     usesPackageJson: false,
-    getVersion: () => undefined,
+    getVersion: noVersionFromPackageJson,
     detect: detectJavaProject,
     detectPackageManager: detectJavaPackageManagers,
   },
 
   environment: {
     uploadToHosting: false,
-    getEnvVars: (apiKey, host) => ({
-      AMPLITUDE_API_KEY: apiKey,
-      AMPLITUDE_SERVER_URL: host,
-    }),
+    getEnvVars: apiKeyAndServerUrlEnv,
   },
 
   analytics: {
@@ -58,7 +62,7 @@ export const JAVA_AGENT_CONFIG: FrameworkConfig<JavaContext> = {
           : `implementation 'com.amplitude:java-sdk:1.13.0'`;
       return [
         `Build tool: ${buildTool === 'maven' ? 'Maven' : 'Gradle'}`,
-        `Framework docs ID: java (use amplitude://docs/frameworks/java for documentation)`,
+        frameworkDocsIdLine('java'),
         `SDK: com.amplitude:java-sdk — add to ${
           buildTool === 'maven' ? 'pom.xml' : 'build.gradle'
         }: ${depSnippet}`,
@@ -70,7 +74,7 @@ export const JAVA_AGENT_CONFIG: FrameworkConfig<JavaContext> = {
   },
 
   ui: {
-    successMessage: 'Amplitude integration complete',
+    successMessage: SUCCESS_MESSAGE_INTEGRATION_COMPLETE,
     estimatedDurationMinutes: 5,
     getOutroChanges: (context) => {
       const tool = context.buildTool === 'gradle' ? 'Gradle' : 'Maven';
@@ -82,7 +86,7 @@ export const JAVA_AGENT_CONFIG: FrameworkConfig<JavaContext> = {
     },
     getOutroNextSteps: () => [
       'Build and run your application to verify the integration',
-      'Visit your Amplitude dashboard to see incoming events',
+      OUTRO_DASHBOARD_LINE,
       'Use client.logEvent(new Event("Event Name", userId)) for custom events',
       'Ensure client.shutdown() is called on exit to flush queued events',
     ],

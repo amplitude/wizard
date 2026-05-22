@@ -15,6 +15,13 @@ import { detectNodePackageManagersLight as detectNodePackageManagers } from '../
 import { BROWSER_UNIFIED_SDK_PROMPT_LINE } from '../_shared/browser-sdk-prompt';
 import { javascriptWebBlockedByFrameworkPackage } from '../_shared/javascript-web-blocking-policy';
 import { isVuePoweredDocsSite } from '../_shared/vue-powered-docs-site';
+import {
+  SUCCESS_MESSAGE_INTEGRATION_COMPLETE,
+  OUTRO_DASHBOARD_LINE,
+  JS_TS_PROJECT_TYPE_DETECTION,
+  apiKeyOnlyEnv,
+  noVersionFromPackageJson,
+} from '../../lib/framework-shared';
 
 export const JAVASCRIPT_WEB_AGENT_CONFIG: FrameworkConfig<JavaScriptContext> = {
   metadata: {
@@ -47,7 +54,7 @@ export const JAVASCRIPT_WEB_AGENT_CONFIG: FrameworkConfig<JavaScriptContext> = {
     packageName: '@amplitude/analytics-browser',
     packageDisplayName: 'JavaScript (Web)',
     usesPackageJson: false,
-    getVersion: () => undefined,
+    getVersion: noVersionFromPackageJson,
     detectPackageManager: detectNodePackageManagers,
     detect: async (options) => {
       const packageJson = await tryGetPackageJson(options);
@@ -95,9 +102,7 @@ export const JAVASCRIPT_WEB_AGENT_CONFIG: FrameworkConfig<JavaScriptContext> = {
 
   environment: {
     uploadToHosting: false,
-    getEnvVars: (apiKey: string, _host: string) => ({
-      AMPLITUDE_API_KEY: apiKey,
-    }),
+    getEnvVars: apiKeyOnlyEnv,
   },
 
   analytics: {
@@ -113,8 +118,7 @@ export const JAVASCRIPT_WEB_AGENT_CONFIG: FrameworkConfig<JavaScriptContext> = {
   },
 
   prompts: {
-    projectTypeDetection:
-      'This is a JavaScript/TypeScript project. Look for package.json and lockfiles (package-lock.json, yarn.lock, pnpm-lock.yaml, bun.lockb) to confirm.',
+    projectTypeDetection: JS_TS_PROJECT_TYPE_DETECTION,
     packageInstallation:
       'Look for lockfiles to determine the package manager (npm, yarn, pnpm, bun). Do not manually edit package.json.',
     getAdditionalContextLines: (context) => {
@@ -139,7 +143,7 @@ export const JAVASCRIPT_WEB_AGENT_CONFIG: FrameworkConfig<JavaScriptContext> = {
   },
 
   ui: {
-    successMessage: 'Amplitude integration complete',
+    successMessage: SUCCESS_MESSAGE_INTEGRATION_COMPLETE,
     estimatedDurationMinutes: 5,
     getOutroChanges: (context) => {
       const packageManagerName =
@@ -156,7 +160,7 @@ export const JAVASCRIPT_WEB_AGENT_CONFIG: FrameworkConfig<JavaScriptContext> = {
       'Autocapture tracks clicks, form submissions, and pageviews automatically',
       'Use amplitude.track() for custom events and amplitude.setUserId() for users',
       'NEVER send PII in event properties (no emails, names, or user content)',
-      'Visit your Amplitude dashboard to see incoming events',
+      OUTRO_DASHBOARD_LINE,
     ],
   },
 };

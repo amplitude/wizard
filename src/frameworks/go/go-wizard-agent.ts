@@ -3,6 +3,13 @@ import type { FrameworkConfig } from '../../lib/framework-config';
 import { goPackageManager } from '../../lib/package-manager-detection';
 import { Integration } from '../../lib/constants';
 import { detectGoProject } from './utils';
+import {
+  SUCCESS_MESSAGE_INTEGRATION_COMPLETE,
+  OUTRO_DASHBOARD_LINE,
+  apiKeyAndServerUrlEnv,
+  frameworkDocsIdLine,
+  noVersionFromPackageJson,
+} from '../../lib/framework-shared';
 
 type GoContext = Record<string, unknown>;
 
@@ -21,17 +28,14 @@ export const GO_AGENT_CONFIG: FrameworkConfig<GoContext> = {
     packageName: 'github.com/amplitude/analytics-go',
     packageDisplayName: 'Go',
     usesPackageJson: false,
-    getVersion: () => undefined,
+    getVersion: noVersionFromPackageJson,
     detect: detectGoProject,
     detectPackageManager: goPackageManager,
   },
 
   environment: {
     uploadToHosting: false,
-    getEnvVars: (apiKey, host) => ({
-      AMPLITUDE_API_KEY: apiKey,
-      AMPLITUDE_SERVER_URL: host,
-    }),
+    getEnvVars: apiKeyAndServerUrlEnv,
   },
 
   analytics: {
@@ -44,7 +48,7 @@ export const GO_AGENT_CONFIG: FrameworkConfig<GoContext> = {
     packageInstallation:
       'Use Go modules: run `go get github.com/amplitude/analytics-go` to add the dependency (go.mod and go.sum are updated automatically).',
     getAdditionalContextLines: () => [
-      'Framework docs ID: go (use amplitude://docs/frameworks/go for documentation)',
+      frameworkDocsIdLine('go'),
       'SDK: github.com/amplitude/analytics-go',
       'Initialization: config := amplitude.NewConfig(os.Getenv("AMPLITUDE_API_KEY")); client := amplitude.NewClient(config)',
       'Always call client.Shutdown() on application exit to flush queued events',
@@ -52,7 +56,7 @@ export const GO_AGENT_CONFIG: FrameworkConfig<GoContext> = {
   },
 
   ui: {
-    successMessage: 'Amplitude integration complete',
+    successMessage: SUCCESS_MESSAGE_INTEGRATION_COMPLETE,
     estimatedDurationMinutes: 5,
     getOutroChanges: () => [
       'Analyzed your Go project structure',
@@ -61,7 +65,7 @@ export const GO_AGENT_CONFIG: FrameworkConfig<GoContext> = {
     ],
     getOutroNextSteps: () => [
       'Run your application to verify the integration',
-      'Visit your Amplitude dashboard to see incoming events',
+      OUTRO_DASHBOARD_LINE,
       'Use client.Track(amplitude.Event{...}) for custom events',
       'Ensure client.Shutdown() is called on exit to flush queued events',
     ],

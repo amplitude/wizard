@@ -3,6 +3,13 @@ import type { FrameworkConfig } from '../../lib/framework-config';
 import { gradlePackageManager } from '../../lib/package-manager-detection';
 import { Integration } from '../../lib/constants';
 import { detectAndroidProject, detectAndroidLanguage } from './utils';
+import {
+  SUCCESS_MESSAGE_INTEGRATION_COMPLETE,
+  OUTRO_DASHBOARD_LINE,
+  emptyEnv,
+  frameworkDocsIdLine,
+  noVersionFromPackageJson,
+} from '../../lib/framework-shared';
 
 type AndroidContext = {
   language?: 'kotlin' | 'java';
@@ -30,7 +37,7 @@ export const ANDROID_AGENT_CONFIG: FrameworkConfig<AndroidContext> = {
     packageName: 'com.amplitude:analytics-android',
     packageDisplayName: 'Android',
     usesPackageJson: false,
-    getVersion: () => undefined,
+    getVersion: noVersionFromPackageJson,
     detect: detectAndroidProject,
     detectPackageManager: gradlePackageManager,
   },
@@ -38,7 +45,7 @@ export const ANDROID_AGENT_CONFIG: FrameworkConfig<AndroidContext> = {
   environment: {
     // Android apps don't use .env files — the agent stores the key in gradle.properties or BuildConfig
     uploadToHosting: false,
-    getEnvVars: () => ({}),
+    getEnvVars: emptyEnv,
   },
 
   analytics: {
@@ -59,7 +66,7 @@ export const ANDROID_AGENT_CONFIG: FrameworkConfig<AndroidContext> = {
           : 'Amplitude amplitude = new Amplitude(new Configuration(AMPLITUDE_API_KEY, getApplicationContext()));';
       return [
         `Language: ${lang === 'kotlin' ? 'Kotlin' : 'Java'}`,
-        `Framework docs ID: android (use amplitude://docs/frameworks/android for documentation)`,
+        frameworkDocsIdLine('android'),
         `SDK: com.amplitude:analytics-android — add to app-level build.gradle`,
         `Initialization: ${initExample}`,
         `Never hardcode the API key in source files — store it in gradle.properties or local.properties and read it via BuildConfig`,
@@ -68,7 +75,7 @@ export const ANDROID_AGENT_CONFIG: FrameworkConfig<AndroidContext> = {
   },
 
   ui: {
-    successMessage: 'Amplitude integration complete',
+    successMessage: SUCCESS_MESSAGE_INTEGRATION_COMPLETE,
     estimatedDurationMinutes: 8,
     getOutroChanges: (context) => {
       const lang = context.language === 'java' ? 'Java' : 'Kotlin';
@@ -80,7 +87,7 @@ export const ANDROID_AGENT_CONFIG: FrameworkConfig<AndroidContext> = {
     },
     getOutroNextSteps: () => [
       'Sync your Gradle project and run the app on a device or emulator',
-      'Visit your Amplitude dashboard to see incoming events',
+      OUTRO_DASHBOARD_LINE,
       'Use amplitude.track("Event Name") for custom events',
       'Use amplitude.setUserId("user@example.com") to associate events with users',
     ],

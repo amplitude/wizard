@@ -5,6 +5,13 @@ import { hasPackageInstalled } from '../../utils/package-json';
 import { tryGetPackageJson } from '../../utils/package-json-light';
 import { detectNodePackageManagersLight as detectNodePackageManagers } from '../../lib/package-manager-detection-light';
 import { FRAMEWORK_PACKAGES } from '../javascript-web/utils';
+import {
+  SUCCESS_MESSAGE_INTEGRATION_COMPLETE,
+  OUTRO_DASHBOARD_LINE,
+  apiKeyOnlyEnv,
+  frameworkDocsIdLine,
+  noVersionFromPackageJson,
+} from '../../lib/framework-shared';
 
 type JavaScriptNodeContext = Record<string, unknown>;
 
@@ -25,7 +32,7 @@ export const JAVASCRIPT_NODE_AGENT_CONFIG: FrameworkConfig<JavaScriptNodeContext
       packageName: '@amplitude/analytics-node',
       packageDisplayName: 'Node.js',
       usesPackageJson: false,
-      getVersion: () => undefined,
+      getVersion: noVersionFromPackageJson,
       detectPackageManager: detectNodePackageManagers,
       detect: async (options) => {
         const packageJson = await tryGetPackageJson(options);
@@ -42,9 +49,7 @@ export const JAVASCRIPT_NODE_AGENT_CONFIG: FrameworkConfig<JavaScriptNodeContext
 
     environment: {
       uploadToHosting: false,
-      getEnvVars: (apiKey: string, _host: string) => ({
-        AMPLITUDE_API_KEY: apiKey,
-      }),
+      getEnvVars: apiKeyOnlyEnv,
     },
 
     analytics: {
@@ -56,13 +61,11 @@ export const JAVASCRIPT_NODE_AGENT_CONFIG: FrameworkConfig<JavaScriptNodeContext
         'This is a server-side Node.js project. Look for package.json and lockfiles to confirm.',
       packageInstallation:
         'Use npm, yarn, pnpm, or bun based on the existing lockfile (package-lock.json, yarn.lock, pnpm-lock.yaml, bun.lockb). Install @amplitude/analytics-node as a regular dependency.',
-      getAdditionalContextLines: () => [
-        `Framework docs ID: javascript_node (use amplitude://docs/frameworks/javascript_node for documentation)`,
-      ],
+      getAdditionalContextLines: () => [frameworkDocsIdLine('javascript_node')],
     },
 
     ui: {
-      successMessage: 'Amplitude integration complete',
+      successMessage: SUCCESS_MESSAGE_INTEGRATION_COMPLETE,
       estimatedDurationMinutes: 5,
       getOutroChanges: () => [
         `Analyzed your Node.js project structure`,
@@ -74,7 +77,7 @@ export const JAVASCRIPT_NODE_AGENT_CONFIG: FrameworkConfig<JavaScriptNodeContext
         'Use the Amplitude client instance for all tracking calls',
         'NEVER send PII in event properties (no emails, names, or user content)',
         'Use amplitude.track() for events and amplitude.identify() for users',
-        'Visit your Amplitude dashboard to see incoming events',
+        OUTRO_DASHBOARD_LINE,
       ],
     },
   };

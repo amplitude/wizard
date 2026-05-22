@@ -18,6 +18,13 @@ import {
   IGNORE_PATTERNS,
 } from './utils';
 import { hasPythonProjectMarkers } from '../python/preflight';
+import {
+  SUCCESS_MESSAGE_INTEGRATION_COMPLETE,
+  OUTRO_DASHBOARD_LINE,
+  apiKeyOnlyEnv,
+  frameworkDocsIdLine,
+  noVersionFromPackageJson,
+} from '../../lib/framework-shared';
 
 type FlaskContext = {
   projectType?: FlaskProjectType;
@@ -46,7 +53,7 @@ export const FLASK_AGENT_CONFIG: FrameworkConfig<FlaskContext> = {
     packageName: 'flask',
     packageDisplayName: 'Flask',
     usesPackageJson: false,
-    getVersion: () => undefined,
+    getVersion: noVersionFromPackageJson,
     getVersionBucket: getFlaskVersionBucket,
     getInstalledVersion: (options: WizardOptions) => getFlaskVersion(options),
     detect: async (options) => {
@@ -119,9 +126,7 @@ export const FLASK_AGENT_CONFIG: FrameworkConfig<FlaskContext> = {
 
   environment: {
     uploadToHosting: false,
-    getEnvVars: (apiKey: string, _host: string) => ({
-      AMPLITUDE_API_KEY: apiKey,
-    }),
+    getEnvVars: apiKeyOnlyEnv,
   },
 
   analytics: {
@@ -154,7 +159,7 @@ export const FLASK_AGENT_CONFIG: FrameworkConfig<FlaskContext> = {
 
       const lines = [
         `Project type: ${projectTypeName}`,
-        `Framework docs ID: ${frameworkId} (use amplitude://docs/frameworks/${frameworkId} for documentation)`,
+        frameworkDocsIdLine(frameworkId),
       ];
 
       if (context.appFile) {
@@ -166,7 +171,7 @@ export const FLASK_AGENT_CONFIG: FrameworkConfig<FlaskContext> = {
   },
 
   ui: {
-    successMessage: 'Amplitude integration complete',
+    successMessage: SUCCESS_MESSAGE_INTEGRATION_COMPLETE,
     estimatedDurationMinutes: 5,
     getOutroChanges: (context) => {
       const projectTypeName = context.projectType
@@ -181,7 +186,7 @@ export const FLASK_AGENT_CONFIG: FrameworkConfig<FlaskContext> = {
     },
     getOutroNextSteps: () => [
       'Start your Flask development server to see Amplitude in action',
-      'Visit your Amplitude dashboard to see incoming events',
+      OUTRO_DASHBOARD_LINE,
       'Use amplitude.identify() to associate events with users',
     ],
   },

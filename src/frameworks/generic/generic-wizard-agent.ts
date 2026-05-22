@@ -3,6 +3,11 @@ import type { FrameworkConfig } from '../../lib/framework-config';
 import { Integration } from '../../lib/constants';
 import { detectNodePackageManagersLight as detectNodePackageManagers } from '../../lib/package-manager-detection-light';
 import { BrandColors } from '../../lib/brand-colors';
+import {
+  SUCCESS_MESSAGE_INTEGRATION_COMPLETE,
+  apiKeyAndServerUrlEnv,
+  noVersionFromPackageJson,
+} from '../../lib/framework-shared';
 
 export const GENERIC_AGENT_CONFIG: FrameworkConfig = {
   metadata: {
@@ -17,17 +22,14 @@ export const GENERIC_AGENT_CONFIG: FrameworkConfig = {
     packageName: '',
     packageDisplayName: 'Generic',
     usesPackageJson: false,
-    getVersion: () => undefined,
+    getVersion: noVersionFromPackageJson,
     detectPackageManager: detectNodePackageManagers,
     detect: () => Promise.resolve(false),
   },
 
   environment: {
     uploadToHosting: false,
-    getEnvVars: (apiKey, host) => ({
-      AMPLITUDE_API_KEY: apiKey,
-      AMPLITUDE_SERVER_URL: host,
-    }),
+    getEnvVars: apiKeyAndServerUrlEnv,
   },
 
   analytics: {
@@ -211,7 +213,7 @@ Important: You must read a file immediately before writing it. Always use enviro
   },
 
   ui: {
-    successMessage: 'Amplitude integration complete',
+    successMessage: SUCCESS_MESSAGE_INTEGRATION_COMPLETE,
     estimatedDurationMinutes: 5,
     getOutroChanges: () => ['Amplitude SDK installed and initialized'],
     getOutroNextSteps: () => [
