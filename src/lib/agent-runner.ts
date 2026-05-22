@@ -21,6 +21,7 @@ import type { PackageDotJson } from '../utils/package-json';
 import type { WizardOptions } from '../utils/types';
 import { analytics, captureWizardError } from '../utils/analytics';
 import { getUI } from '../ui';
+import { inferVertical, inferAppType } from './discovered-facts/classifier.js';
 import {
   getAgent,
   AgentErrorType,
@@ -134,6 +135,30 @@ export async function runColdStartParallel<TPm, TAgent>(
     initAgent(),
   ]);
   return { packageManagerInfo, agent };
+}
+
+/**
+ * Run the vertical + app-type classifiers against the user's
+ * package.json and publish a Discovered-fact chip per non-null result.
+ * Extracted from `runAgentWizard` so it's unit-testable in isolation
+ * via a `publish` spy (the runner itself is far too integrated to
+ * exercise end-to-end in tests). Skipping `null` results matches the
+ * "don't publish 'Unknown' chips" rule documented in
+ * `discovered-facts/classifier.ts`.
+ */
+export function publishInferredProjectFacts(
+  packageJson: PackageDotJson | null,
+  installDir: string,
+  publish: (id: string, body: { label: string; value: string }) => void,
+): void {
+  const verticalFact = inferVertical(packageJson, installDir);
+  if (verticalFact) {
+    publish('vertical', { label: 'Vertical', value: verticalFact.value });
+  }
+  const appTypeFact = inferAppType(packageJson, installDir);
+  if (appTypeFact) {
+    publish('app-type', { label: 'App type', value: appTypeFact.value });
+  }
 }
 
 /**
@@ -912,7 +937,7 @@ async function runAgentWizardBody(
 
   // Framework detection and version
   const usesPackageJson = config.detection.usesPackageJson !== false;
-  let packageJson: PackageDotJson | null;
+  let packageJson: PackageDotJson | null = null;
   let frameworkVersion: string | undefined;
 
   if (usesPackageJson) {
@@ -946,6 +971,19 @@ async function runAgentWizardBody(
       value: `${baseLabel} ${frameworkVersion}`,
     });
   }
+
+  // Inferred-signal chips: vertical + app type. These are coarse,
+  // non-PII labels derived from package.json + a lightweight directory
+  // probe — purely cosmetic chips that warm the discovery feed beyond
+  // the literal stack tags. Both classifiers return null when no
+  // bucket fires, in which case we skip the publish entirely so the
+  // feed never shows a noisy "Unknown". See
+  // `discovered-facts/classifier.ts` for the priority order.
+  publishInferredProjectFacts(
+    packageJson,
+    session.installDir,
+    publishDiscoveryFact,
+  );
 
   // Set analytics tags for framework version
   if (frameworkVersion && config.detection.getVersionBucket) {
