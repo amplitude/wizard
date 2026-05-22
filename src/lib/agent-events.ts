@@ -37,6 +37,30 @@
 export const AGENT_EVENT_WIRE_VERSION = 1 as const;
 
 /**
+ * Orchestrator-facing protocol version. Distinct from
+ * `AGENT_EVENT_WIRE_VERSION` (which gates the envelope FRAME shape)
+ * and from `EVENT_DATA_VERSIONS` (which gates per-event `data`
+ * shapes): `WIZARD_PROTOCOL_VERSION` is the SEMVER-flavoured number
+ * an orchestrator branches on to decide "do I speak this wizard's
+ * dialect at all?".
+ *
+ * Bump only on a contract change that breaks orchestrators who were
+ * happy with the previous value — adding a new event-key to the
+ * registry is non-breaking (orchestrators see it absent from their
+ * known set and ignore the envelope), while removing or renaming an
+ * existing event-key, or changing the meaning of `mode`, is.
+ *
+ * Currently `2` because this is the first version that ships the
+ * v2 event family (run_phase, decision_id, retry events,
+ * cold_start_breakdown, tool_call_summary, mcp_status, and the
+ * capability announcement itself). Wizard binaries earlier than this
+ * branch implicitly emit a v1 stream (which would not carry a
+ * `wizard_capabilities` envelope at all — capability absence IS the
+ * v1 signal).
+ */
+export const WIZARD_PROTOCOL_VERSION = 2 as const;
+
+/**
  * Per-event-type data-shape version. The key insight from orchestrator
  * feedback: pinning to envelope `v: 1` doesn't protect orchestrators
  * from breaking changes inside `data`. Adding/renaming a field on
@@ -517,6 +541,66 @@ export const EVENT_DATA_VERSIONS = {
    * blocker.
    */
   mcp_status: 1,
+  /**
+   * `wizard_capabilities` — startup announcement emitted as the FIRST
+   * orchestrator-facing envelope after `run_started`, before any
+   * `run_phase: cold_start`. Lets a parent agent (Claude Code, Codex,
+   * custom orchestrator) detect what protocol the wizard speaks
+   * BEFORE any contract-shaped event lands on the stream.
+   *
+   * Why it exists: without this, orchestrators have to either
+   * hard-code feature detection ("wizard >= 0.40 speaks v2 events")
+   * or parse-and-discover at runtime ("I saw `mcp_status`, so the
+   * wizard must support it"). Both are fragile. A single up-front
+   * capability envelope lets orchestrators:
+   *   - Detect protocol version mismatches early ("wizard speaks v1,
+   *     I expect v2") and either downgrade their parser or refuse to
+   *     proceed before any user-visible state has been mutated.
+   *   - Pre-allocate UI for events they know will fire (vs the
+   *     wait-and-see pattern of allocating on first sighting).
+   *   - Gate optional UX on capability presence — e.g. only render
+   *     the per-phase cold-start sparkline if
+   *     `cold_start_breakdown` is in `supportedEvents`.
+   *
+   * Payload: `protocolVersion` (currently 2 — bump on any
+   * orchestrator-breaking contract change), `eventDataVersions` (the
+   * full `EVENT_DATA_VERSIONS` registry mirrored verbatim so
+   * orchestrators can branch per-event without a wizard upgrade),
+   * `supportedEvents` (sorted list of every event-key for cheap
+   * `has`-style lookups), and `mode` (`'agent' | 'ci' |
+   * 'interactive'` — currently always `'agent'` because only AgentUI
+   * emits NDJSON, but the field is on the contract so future CI /
+   * interactive modes that learn to emit capabilities don't need a
+   * schema bump).
+   */
+  wizard_capabilities: 1,
+  /**
+   * `model_used` — orchestrator-facing observability event announcing
+   * which Claude model the wizard is running for a particular
+   * subsystem (inner agent, classifier, taxonomy). Today parent
+   * agents have NO visibility into the wizard's model selection —
+   * the inner agent might be on Sonnet 4.6, the Haiku one-shot
+   * classifier on Haiku 4.5, and an orchestrator wanting to render
+   * "wizard is using model X" or attribute cost / latency to a tier
+   * has to either parse the wizard binary version or guess.
+   *
+   * Lifecycle: fires when each subsystem starts its first message —
+   * the inner agent's first attempt boundary (after the SDK has
+   * settled on the resolved model alias) and at each classifier
+   * call-site (today the Haiku gateway probe and the slash-console
+   * AI-SDK path). The emitter de-dups on the `(model, context)`
+   * pair so a long run doesn't spam the wire with duplicate
+   * announcements — orchestrators see exactly one envelope per
+   * unique (model, context) combination.
+   *
+   * Distinct from `wizard_capabilities`: capabilities pins what the
+   * wizard CAN emit (protocol contract), while `model_used` pins
+   * what the wizard IS RUNNING (operational state). Parent agents
+   * branch on `data.context` to attribute the model to the right
+   * subsystem and on `data.modelTier` for cost / capability tiering
+   * without parsing the raw `data.model` alias.
+   */
+  model_used: 1,
 } as const;
 
 /** All NDJSON event-level types. */
@@ -1778,7 +1862,9 @@ export type InnerAgentLifecycleData =
   | AttemptStartedData
   | ColdStartBreakdownData
   | ToolCallSummaryData
-  | MCPStatusData;
+  | MCPStatusData
+  | WizardCapabilitiesData
+  | ModelUsedData;
 
 /**
  * Which MCP server a `mcp_status` event refers to. Two distinct
@@ -1876,6 +1962,183 @@ export interface MCPStatusData {
   state: MCPStatusState;
   transition_ts: number;
   detail?: string;
+}
+
+/**
+ * Execution mode discriminator on the `wizard_capabilities`
+ * envelope. Mirrors `ExecutionMode` from `lib/mode-config.ts`,
+ * duplicated here so orchestrators parsing the NDJSON contract
+ * don't need to import wizard internals to type-narrow on it.
+ *
+ * `'agent'`        — NDJSON-only output via `--agent`. The only
+ *                    mode that currently emits this envelope.
+ * `'ci'`           — non-interactive batch mode. Reserved on the
+ *                    contract for a future CI emitter; today CI runs
+ *                    use `LoggingUI` which doesn't emit NDJSON.
+ * `'interactive'`  — TUI mode (`InkUI`). Reserved on the contract
+ *                    for the same reason — InkUI is a no-op for
+ *                    this event today.
+ */
+export type WizardCapabilitiesMode = 'agent' | 'ci' | 'interactive';
+
+/**
+ * Wire shape of the `data` field on a `wizard_capabilities`
+ * envelope. See `EVENT_DATA_VERSIONS.wizard_capabilities` for the
+ * full contract, the lifecycle ordering (after `run_started`, before
+ * `run_phase: cold_start`), and the bump policy.
+ *
+ *   protocolVersion    — orchestrator-facing protocol version
+ *                        (`WIZARD_PROTOCOL_VERSION` at emit time).
+ *                        Orchestrators branch on this first.
+ *   eventDataVersions  — verbatim mirror of `EVENT_DATA_VERSIONS`.
+ *                        Stable insertion order (matches the
+ *                        registry's declaration order). Orchestrators
+ *                        can pre-allocate per-event handlers from
+ *                        this map before the first contract event
+ *                        fires.
+ *   supportedEvents    — `Object.keys(EVENT_DATA_VERSIONS).sort()`.
+ *                        Pre-sorted so orchestrators can use
+ *                        binary-search / `Set`-style membership
+ *                        checks without resorting on their side.
+ *                        Identical semantically to the keys of
+ *                        `eventDataVersions`, but cheaper to
+ *                        consume when the orchestrator only cares
+ *                        about presence ("does this wizard emit
+ *                        `progress_estimate`?").
+ *   mode               — `WizardCapabilitiesMode`. Discriminator
+ *                        for execution context.
+ */
+export interface WizardCapabilitiesData {
+  event: 'wizard_capabilities';
+  protocolVersion: number;
+  eventDataVersions: Readonly<Record<string, number>>;
+  supportedEvents: readonly string[];
+  mode: WizardCapabilitiesMode;
+}
+
+/**
+ * Capability tier the resolved `data.model` belongs to. Substring-based
+ * classification (see {@link classifyModelTier}) maps a raw alias to one
+ * of four buckets so an orchestrator can branch on capability / cost
+ * without parsing the dated alias string itself.
+ *
+ *   haiku  — fastest, cheapest tier. Used for one-shot LLM calls
+ *            (gateway probe, slash-console Q&A, classifier paths)
+ *            where reasoning depth doesn't matter.
+ *   sonnet — balanced tier. The wizard's default inner-agent
+ *            model (`claude-sonnet-4-6`) lives here.
+ *   opus   — most capable tier. Selected via `--mode thorough` for
+ *            complex multi-file instrumentation runs.
+ *   other  — model alias didn't match a known prefix. Future tiers,
+ *            custom aliases, or `WIZARD_CLAUDE_MODEL` overrides that
+ *            point at a non-Claude model land here. Parent agents
+ *            should treat `'other'` as "unknown capability — don't
+ *            assume any particular tier".
+ */
+export type ModelTier = 'haiku' | 'sonnet' | 'opus' | 'other';
+
+/**
+ * Which wizard subsystem is announcing the model it's running. The
+ * wizard fires several distinct LLM workloads in a single run and
+ * orchestrators want to attribute model selection to the right one
+ * (e.g. "the inner agent is on Sonnet but the classifier is on
+ * Haiku" is a meaningful operational state).
+ *
+ *   inner_agent — the main Claude Agent SDK tool loop in
+ *                 `agent-interface.ts`. One announcement per run on
+ *                 the first attempt boundary.
+ *   classifier  — low-stakes one-shot LLM calls (gateway probe,
+ *                 slash-console Q&A, future discovered-facts
+ *                 inference). Today these route through Haiku via
+ *                 `selectModel('oneshot', …)`.
+ *   taxonomy    — taxonomy / instrumentation agent. Reserved on the
+ *                 contract for future taxonomy paths that route to a
+ *                 separately-selected model; today taxonomy work
+ *                 rides on the inner agent.
+ */
+export type ModelContext = 'inner_agent' | 'classifier' | 'taxonomy';
+
+/**
+ * Wire shape of the `data` field on a `model_used` envelope. Emitted
+ * once per unique `(model, context)` pair per run — orchestrators key
+ * off `data.context` to attribute the model to a subsystem and on
+ * `data.modelTier` for capability / cost tiering.
+ *
+ *   model        — resolved Claude model alias the subsystem is
+ *                  running (e.g. `'claude-sonnet-4-6'`, `'anthropic/
+ *                  claude-haiku-4-5-20251001'`). Includes the
+ *                  `anthropic/` gateway prefix when present so a
+ *                  parent agent can branch on the routing path.
+ *   modelDisplay — short human-readable label (`'Sonnet 4.6'`,
+ *                  `'Haiku 4.5'`). Operator-friendly — orchestrators
+ *                  can surface this verbatim instead of un-aliasing
+ *                  the raw model string.
+ *   modelTier    — capability bucket (see {@link ModelTier}).
+ *   context      — wizard subsystem (see {@link ModelContext}).
+ *
+ * Bumping a field here is a `data_version` bump on `model_used`.
+ */
+export interface ModelUsedData {
+  event: 'model_used';
+  model: string;
+  modelDisplay: string;
+  modelTier: ModelTier;
+  context: ModelContext;
+}
+
+/**
+ * Substring-based classifier mapping a Claude model alias to its
+ * capability tier. Defensive: strips any `anthropic/` gateway prefix,
+ * lowercases the input so a stray `Claude-Sonnet` doesn't slip
+ * through, and falls back to `'other'` for anything that doesn't
+ * match a known prefix.
+ *
+ * Match order matters — `'opus'` is checked before `'sonnet'` /
+ * `'haiku'` because a hypothetical `'claude-opus-haiku-blend'` (we
+ * don't ship one, but defensive) would otherwise miscategorize as
+ * Haiku. Pure (no I/O, no env reads) so it's safe to call from any
+ * emit path.
+ *
+ * @param model - Claude model alias (with or without `anthropic/`
+ *                gateway prefix).
+ * @returns The {@link ModelTier} bucket the alias belongs to.
+ */
+export function classifyModelTier(model: string): ModelTier {
+  // Strip the gateway prefix so `anthropic/claude-sonnet-4-6` and
+  // `claude-sonnet-4-6` classify identically. Lowercase so a stray
+  // mixed-case override doesn't fall through to `'other'`.
+  const normalized = model.toLowerCase().replace(/^anthropic\//, '');
+  if (normalized.includes('opus')) return 'opus';
+  if (normalized.includes('sonnet')) return 'sonnet';
+  if (normalized.includes('haiku')) return 'haiku';
+  return 'other';
+}
+
+/**
+ * Best-effort human-readable label for a Claude model alias. Used
+ * by `emitModelUsed` to populate `data.modelDisplay` so orchestrators
+ * can surface a friendly name without un-aliasing the raw string
+ * themselves.
+ *
+ * Heuristic-only: matches the `<family>-<major>-<minor>[-<datestamp>]`
+ * shape the Claude aliases follow and falls back to the original
+ * alias when the shape doesn't match. Pure (no env reads, no I/O).
+ *
+ *   'claude-sonnet-4-6'              → 'Sonnet 4.6'
+ *   'claude-haiku-4-5-20251001'      → 'Haiku 4.5'
+ *   'claude-opus-4-7'                → 'Opus 4.7'
+ *   'anthropic/claude-sonnet-4-6'    → 'Sonnet 4.6'
+ *   'gpt-4o'                         → 'gpt-4o'  (unknown shape)
+ */
+export function formatModelDisplay(model: string): string {
+  const normalized = model.toLowerCase().replace(/^anthropic\//, '');
+  const match = /^claude-(opus|sonnet|haiku)-(\d+)-(\d+)/.exec(normalized);
+  if (!match) return model;
+  const family = match[1];
+  const major = match[2];
+  const minor = match[3];
+  const capitalized = family.charAt(0).toUpperCase() + family.slice(1);
+  return `${capitalized} ${major}.${minor}`;
 }
 
 /**
