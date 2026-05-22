@@ -588,6 +588,62 @@ describe('Setup Report reconciliation commandment', () => {
   });
 });
 
+/**
+ * Scale / safety guardrails added by perf(agent): commandments tightening.
+ *
+ * Three rules motivated by production dashboard signals:
+ *   1. Strategy retry cap (3-approach ceiling) — closes the
+ *      completion→activation gap where agents finish nominally but have
+ *      looped on broken approaches.
+ *   2. Destructive bash pre-emption — Bash Policy denies peaked ~80/day;
+ *      naming the always-blocked commands up front avoids a deny + retry.
+ *   3. Monorepo scope clamp — large repos saw cross-package edits the user
+ *      never asked for; the rule restricts work to the install-dir subtree
+ *      by default and forces a confirmation hop for workspace-root runs.
+ *
+ * These rules are short, load-bearing, and easy to weaken with an
+ * innocent-looking copy edit, so the sentinel phrases are pinned here.
+ */
+describe('scale + safety guardrails commandments', () => {
+  const text = getWizardCommandments();
+
+  it('caps strategy retries at 3 distinct approaches per goal', () => {
+    expect(text).toContain('Strategy retry cap');
+    expect(text).toMatch(/3 different approaches/);
+    expect(text).toMatch(/Known limitations/);
+  });
+
+  it('pre-empts destructive bash commands by name', () => {
+    // The agent should learn about these from the prompt, not by tripping
+    // safety-scanner.ts and burning a retry cycle. Each pattern matches a
+    // rule in `src/lib/safety-scanner.ts`.
+    const blockedShapes = [
+      'rm -rf',
+      'git reset --hard',
+      'git push --force',
+      'curl ... | sh',
+      'install -g',
+      'publish',
+      'sudo',
+    ];
+    for (const shape of blockedShapes) {
+      expect(
+        text,
+        `commandments should pre-empt "${shape}" so the agent never burns a retry discovering it's blocked.`,
+      ).toContain(shape);
+    }
+  });
+
+  it('clamps default scope to the install directory subtree', () => {
+    expect(text).toContain('Monorepo scope');
+    expect(text).toMatch(/install directory/i);
+    // The escalation hop — `wizard_feedback` is how the agent surfaces
+    // ambiguity instead of silently fanning out. Naming the tool by id
+    // keeps the rule actionable.
+    expect(text).toContain('wizard_feedback');
+  });
+});
+
 describe('pre-flight context commandment', () => {
   const text = getWizardCommandments();
 
