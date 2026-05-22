@@ -94,7 +94,7 @@ export const buildSessionFromOptions = async (
   // argv. `--agent` and `--yes` similarly come from argv. `isTTY` reflects
   // the real terminal state — non-TTY auto-routes to ci, TTY + no other
   // flags lands on `interactive`.
-  const { mode } = resolveMode({
+  const { mode: executionMode } = resolveMode({
     ci: overrides?.ci ?? Boolean(options.ci),
     yes: Boolean(options.yes),
     autoApprove: Boolean(options.autoApprove),
@@ -102,7 +102,6 @@ export const buildSessionFromOptions = async (
     agent: Boolean(options.agent),
     isTTY: Boolean(process.stdout.isTTY),
   });
-  const executionMode = mode;
   const session = buildSession({
     debug: options.debug as boolean | undefined,
     verbose: options.verbose as boolean | undefined,
@@ -898,6 +897,46 @@ export const runDirectSignupIfRequested = async (
       assertNever(tokens);
   }
 };
+
+/**
+ * Resolve the project directory for a subcommand. Honors the global
+ * `--install-dir` flag (yargs auto-maps `installDir` from kebab) and falls
+ * back to `process.cwd()`. Centralized here because almost every CLI
+ * subcommand needs the same `argv['install-dir'] ?? process.cwd()` shape
+ * — extracting it removes seven separate copies that drift independently
+ * (some used the camelCase form, some the kebab form, one used both).
+ */
+export function getInstallDirFromArgv(argv: Record<string, unknown>): string {
+  const fromKebab = argv['install-dir'] as string | undefined;
+  const fromCamel = argv.installDir as string | undefined;
+  return fromKebab ?? fromCamel ?? process.cwd();
+}
+
+/**
+ * Compute the `jsonOutput` resolution every read-only subcommand
+ * (`detect`, `status`, `verify`, `whoami`, …) needs. Equivalent to
+ * `resolveMode({ json, human, isTTY }).jsonOutput` but doesn't pay for
+ * the full capability matrix on each call, and inlines the dynamic
+ * `import` other commands were duplicating before they could even
+ * compute the flag.
+ *
+ * `requireExplicitWrites` is forwarded so commands that opt into the
+ * strict-grants mode (e.g. `verify`) keep their existing behavior.
+ */
+export async function resolveJsonOutput(
+  argv: Record<string, unknown>,
+  opts: { requireExplicitWrites?: boolean } = {},
+): Promise<boolean> {
+  const { resolveMode } = await import('../lib/mode-config.js');
+  const { jsonOutput } = resolveMode({
+    json: argv.json as boolean | undefined,
+    human: argv.human as boolean | undefined,
+    agent: argv.agent as boolean | undefined,
+    requireExplicitWrites: opts.requireExplicitWrites,
+    isTTY: Boolean(process.stdout.isTTY),
+  });
+  return jsonOutput;
+}
 
 /**
  * Re-export shared UI bootstrap helpers so command modules don't need to

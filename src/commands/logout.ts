@@ -1,5 +1,5 @@
 import type { CommandModule } from 'yargs';
-import { getUI } from './helpers';
+import { getUI, getInstallDirFromArgv } from './helpers';
 
 export const logoutCommand: CommandModule = {
   command: 'logout',
@@ -15,8 +15,7 @@ export const logoutCommand: CommandModule = {
       const { clearAuthFieldsInAmpliConfig } = await import(
         '../lib/ampli-config.js'
       );
-      const installDir =
-        (argv.installDir as string | undefined) ?? process.cwd();
+      const installDir = getInstallDirFromArgv(argv);
       const user = getStoredUser();
       try {
         clearStoredCredentials();

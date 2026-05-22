@@ -1,6 +1,6 @@
 import type { CommandModule } from 'yargs';
 import chalk from 'chalk';
-import { getUI, ExitCode } from './helpers';
+import { getUI, ExitCode, resolveJsonOutput } from './helpers';
 import { CLI_INVOCATION } from './context';
 
 export const authCommand: CommandModule = {
@@ -15,12 +15,7 @@ export const authCommand: CommandModule = {
         (argv) => {
           void (async () => {
             const { getAuthStatus } = await import('../lib/agent-ops.js');
-            const { resolveMode } = await import('../lib/mode-config.js');
-            const { jsonOutput } = resolveMode({
-              json: argv.json as boolean | undefined,
-              human: argv.human as boolean | undefined,
-              isTTY: Boolean(process.stdout.isTTY),
-            });
+            const jsonOutput = await resolveJsonOutput(argv);
             const result = getAuthStatus();
 
             if (jsonOutput) {
@@ -51,12 +46,7 @@ export const authCommand: CommandModule = {
         (argv) => {
           void (async () => {
             const { getAuthToken } = await import('../lib/agent-ops.js');
-            const { resolveMode } = await import('../lib/mode-config.js');
-            const { jsonOutput } = resolveMode({
-              json: argv.json as boolean | undefined,
-              human: argv.human as boolean | undefined,
-              isTTY: Boolean(process.stdout.isTTY),
-            });
+            const jsonOutput = await resolveJsonOutput(argv);
             const result = getAuthToken();
 
             if (!result.token) {
