@@ -143,12 +143,14 @@ describe('DiffViewer — summary mode', () => {
     expect(out).toContain('-7'); // 2 + 5
   });
 
-  it('hints the user about /diff <path> in summary mode', () => {
+  it('hints the user about the Diff tab in summary mode', () => {
     const { lastFrame } = render(
       <DiffViewer diffs={[buildDiff()]} installDir="/proj" />,
     );
     const out = stripAnsi(lastFrame() ?? '');
-    expect(out).toContain('/diff');
+    expect(out).toContain('Diff');
+    // The deprecated /diff slash command must not be re-introduced here.
+    expect(out).not.toContain('/diff');
   });
 });
 

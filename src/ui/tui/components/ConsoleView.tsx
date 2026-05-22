@@ -35,18 +35,9 @@ import {
   getHelpText,
   getVersionText,
   isKnownCommand,
-  parseDiffSlashInput,
   parseFeedbackSlashInput,
   parseCreateProjectSlashInput,
 } from '../console-commands.js';
-import { getFileChangeLedger } from '../../../lib/file-change-ledger.js';
-import {
-  summarizeLedgerDiffs,
-  summarizeLedgerPath,
-} from '../../../lib/file-change-diff.js';
-import { formatChangeCounts } from './DiffViewer.js';
-import { displayPath } from '../utils/display-path.js';
-import path from 'node:path';
 import { analytics } from '../../../utils/analytics.js';
 import { logToFile } from '../../../utils/debug.js';
 import { trackWizardFeedback } from '../../../utils/track-wizard-feedback.js';
@@ -304,87 +295,6 @@ function executeCommand(raw: string, store: WizardStore): string | void {
           );
         }
       })();
-      break;
-    }
-    case '/diff': {
-      // The slash console is a single-line feedback channel — full
-      // unified-diff rendering belongs in the DiffViewer component the
-      // outro mounts. Here we surface the most actionable information:
-      // a tree of touched files with +N/-M counts (no path arg) or
-      // the additions/deletions for one file (path arg).
-      const arg = parseDiffSlashInput(raw) ?? '';
-      const ledger = getFileChangeLedger();
-      // Detail mode (`/diff <path>`): use the purpose-built single-path
-      // helper so we don't burn `structuredPatch`+`createPatch` on every
-      // unrelated file in the ledger just to discard them. The summary
-      // mode below still needs the full sweep for the +N/-M tree.
-      if (arg) {
-        // Hand the raw arg straight to `summarizeLedgerPath` — it already
-        // normalizes relative paths against the ledger's install dir, so
-        // re-resolving against `store.session.installDir` here would risk
-        // silent divergence (e.g. trailing-slash mismatch) without buying
-        // anything. The fallback below covers the user-friendly suffix
-        // case (`/diff amplitude.ts` matching `<installDir>/src/lib/
-        // amplitude.ts`) by walking entries directly.
-        let found = summarizeLedgerPath(ledger, arg);
-        if (!found) {
-          const entries = ledger?.getEntries() ?? [];
-          const suffix = path.sep + arg;
-          const suffixEntry = entries.find((e) => e.path.endsWith(suffix));
-          if (suffixEntry) {
-            found = summarizeLedgerPath(ledger, suffixEntry.path);
-          }
-        }
-        if (!found) {
-          store.setCommandFeedback(
-            `No diff captured for "${arg}". Try /diff with no argument to see all changed files.`,
-            15_000,
-          );
-          break;
-        }
-        // Surface the patch body in the feedback channel. The slash console
-        // can't easily render syntax-coloured diffs inline, but the unified
-        // patch text is itself readable and copy-pasteable. Relativize the
-        // header path through the same `displayPath` helper the summary
-        // mode + FileWritesPanel + DiffViewer use, so detail mode doesn't
-        // leak the user's absolute home-directory path.
-        const detailRel = displayPath(found.path, store.session.installDir);
-        store.setCommandFeedback(
-          `${found.operation.toUpperCase()} ${detailRel}  ${formatChangeCounts(
-            found.additions,
-            found.deletions,
-          )}\n\n${found.patch}`,
-          60_000,
-        );
-        break;
-      }
-      // Summary mode (no arg): walk the whole ledger. The summary only
-      // renders +/- counts and the operation glyph — no patch text — so
-      // skip the per-entry `createPatch` call (an O(n·m) re-diff that
-      // `summarizeDiff` already did) for the whole ledger.
-      const diffs = summarizeLedgerDiffs(ledger, { includePatch: false });
-      if (diffs.length === 0) {
-        store.setCommandFeedback(
-          'No file changes captured yet — the agent has not written anything in this session.',
-          15_000,
-        );
-        break;
-      }
-      const totalAdd = diffs.reduce((s, d) => s + d.additions, 0);
-      const totalDel = diffs.reduce((s, d) => s + d.deletions, 0);
-      const lines = diffs.map((d) => {
-        // Funnel through the shared `displayPath` helper so the `/diff`
-        // summary, the live FileWritesPanel, and the outro DiffViewer all
-        // agree on the out-of-project fallback (basename, not raw path).
-        const rel = displayPath(d.path, store.session.installDir);
-        return `${d.operation
-          .toUpperCase()
-          .padEnd(6)} ${rel}  ${formatChangeCounts(d.additions, d.deletions)}`;
-      });
-      const summary = `${diffs.length} file${
-        diffs.length === 1 ? '' : 's'
-      } changed (+${totalAdd}/-${totalDel})\n${lines.join('\n')}`;
-      store.setCommandFeedback(summary, 30_000);
       break;
     }
     case '/help': {

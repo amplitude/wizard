@@ -8,10 +8,9 @@
  *
  * Two modes:
  *   - **summary** (no `path` prop): tree of every changed file with
- *     +N/-M counts. Used by `/diff` with no argument and by the outro's
- *     "what changed" section.
+ *     +N/-M counts. Used by the outro's "what changed" section.
  *   - **detail** (`path` prop set): unified diff for that one file with
- *     scrollable hunks. Used by `/diff <path>`.
+ *     scrollable hunks. Used by the RunScreen Diff tab.
  *
  * Color semantics:
  *   - additions  → `Colors.success` (emerald)
@@ -211,8 +210,8 @@ export const DiffViewer = ({
       ))}
       <Box marginTop={1}>
         <Text color={Colors.muted}>
-          Use <Text color={Colors.accent}>/diff &lt;path&gt;</Text> to view a
-          file diff.
+          Open the <Text color={Colors.accent}>Diff</Text> tab to inspect any
+          file.
         </Text>
       </Box>
     </Box>

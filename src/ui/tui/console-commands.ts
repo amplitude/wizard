@@ -64,10 +64,6 @@ export const COMMANDS: CommandDef[] = [
   },
   { cmd: '/clear', desc: 'Clear the Q&A conversation history' },
   {
-    cmd: '/diff',
-    desc: 'Show files changed by the agent (or a single file with /diff <path>)',
-  },
-  {
     cmd: '/help',
     desc: 'List available slash commands',
   },
@@ -264,18 +260,6 @@ export function parseFeedbackSlashInput(raw: string): string | undefined {
   if (!m) return undefined;
   const body = m[1]?.trim();
   return body || undefined;
-}
-
-/**
- * Parse `/diff [path]`. Returns:
- *   - undefined when the line isn't a `/diff` command
- *   - empty string when no path argument was provided (summary mode)
- *   - trimmed path string when a path argument was provided
- */
-export function parseDiffSlashInput(raw: string): string | undefined {
-  const m = /^\s*\/diff(?:\s+(.*))?\s*$/i.exec(raw);
-  if (!m) return undefined;
-  return (m[1] ?? '').trim();
 }
 
 /**
