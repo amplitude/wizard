@@ -365,6 +365,29 @@ export function isSafeSkillId(skillId: string): boolean {
 export const SKILL_REFERENCE_REL_PATH = /^references\/[\w.-]+\.md$/;
 
 /**
+ * Look up an index entry by skill id with the layered safety checks every
+ * public helper needs:
+ *
+ *   1. The caller-provided `skillId` is a strict basename (no traversal).
+ *   2. The skill is present in the in-memory index.
+ *   3. The category recorded in the index is *also* a safe basename —
+ *      defense in depth in case a future caller passes an entry's
+ *      `skillDir` into `path.join`.
+ *
+ * All three checks were duplicated across `bundledSkillExists`,
+ * `readBundledSkillBody`, and `readBundledSkillReference`. Centralising
+ * here keeps the contract uniform so a future invariant added to one
+ * helper can't quietly skip the others.
+ */
+function lookupSafeSkillEntry(skillId: string): SkillIndexEntry | null {
+  if (!isSafeSkillId(skillId)) return null;
+  const entry = getBundledSkillsIndex().skills.get(skillId);
+  if (!entry) return null;
+  if (!isSafeSkillId(entry.category)) return null;
+  return entry;
+}
+
+/**
  * Check whether a bundled skill exists on disk. Used to decide whether to
  * pre-stage a skill before the agent runs vs leave integration entry to
  * the agent prompt's on-disk discovery path (`Glob` under `.claude/skills/`
@@ -377,19 +400,7 @@ export const SKILL_REFERENCE_REL_PATH = /^references\/[\w.-]+\.md$/;
  * category traversal vectors).
  */
 export function bundledSkillExists(skillId: string): boolean {
-  // Reject any skillId that's not a strict basename — defense in depth.
-  // The index is keyed by names that came off disk, so a malformed id
-  // can never produce a hit, but we keep the explicit check so callers
-  // get the same fast-fail semantics as before.
-  if (!isSafeSkillId(skillId)) return false;
-  const index = getBundledSkillsIndex();
-  const entry = index.skills.get(skillId);
-  if (!entry) return false;
-  // Defense in depth: ensure the category recorded in the index is also
-  // a safe basename, matching the original `isSafeSkillId(category)`
-  // gate inside the per-category loop.
-  if (!isSafeSkillId(entry.category)) return false;
-  return true;
+  return lookupSafeSkillEntry(skillId) !== null;
 }
 
 /**
@@ -401,12 +412,7 @@ export function bundledSkillExists(skillId: string): boolean {
  * `load_skill` requests it.
  */
 export function readBundledSkillBody(skillId: string): string | null {
-  if (!isSafeSkillId(skillId)) return null;
-  const index = getBundledSkillsIndex();
-  const entry = index.skills.get(skillId);
-  if (!entry) return null;
-  if (!isSafeSkillId(entry.category)) return null;
-  return entry.body;
+  return lookupSafeSkillEntry(skillId)?.body ?? null;
 }
 
 /**
@@ -422,12 +428,9 @@ export function readBundledSkillReference(
   skillId: string,
   refPath: string,
 ): string | null {
-  if (!isSafeSkillId(skillId)) return null;
   if (!SKILL_REFERENCE_REL_PATH.test(refPath)) return null;
-  const index = getBundledSkillsIndex();
-  const entry = index.skills.get(skillId);
+  const entry = lookupSafeSkillEntry(skillId);
   if (!entry) return null;
-  if (!isSafeSkillId(entry.category)) return null;
   // entry.skillDir is built from validated category + skillId during the
   // index walk. refPath is constrained by SKILL_REFERENCE_REL_PATH above.
   // nosemgrep: javascript.lang.security.audit.path-traversal.path-join-resolve-traversal.path-join-resolve-traversal

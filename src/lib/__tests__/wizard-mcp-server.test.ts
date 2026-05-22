@@ -128,6 +128,46 @@ describe('registerWizardTools', () => {
     }
   });
 
+  // Pin the *.installDir field description verbatim. These strings go into
+  // the agent's prompt; even a one-word edit changes what the agent reads.
+  // The `installDirField` helper assembles each description from a unique
+  // action clause — this test guards against a future refactor that
+  // accidentally drops the period, the "Defaults to ..." tail, or a verb.
+  it('pins the installDir description for every tool that accepts one', () => {
+    const expected: Record<string, string> = {
+      detect_framework:
+        'Absolute path to the project to inspect. Defaults to the current working directory.',
+      get_project_status:
+        'Absolute path to the project to inspect. Defaults to the current working directory.',
+      plan_setup:
+        'Absolute path to the project to plan against. Defaults to the current working directory.',
+      verify_setup:
+        'Absolute path to the project to verify. Defaults to the current working directory.',
+      get_event_plan:
+        'Absolute path to the project. Defaults to the current working directory.',
+      record_dashboard_plan:
+        'Absolute path to the project to write the plan into. Defaults to the current working directory.',
+      get_dashboard_plan:
+        'Absolute path to the project to inspect. Defaults to the current working directory.',
+    };
+    for (const [name, want] of Object.entries(expected)) {
+      const tool = fake.tools.find((t) => t.name === name);
+      expect(tool, `missing tool: ${name}`).toBeDefined();
+      const schema = tool!.config.inputSchema as
+        | Record<string, { description?: string }>
+        | undefined;
+      // The zod field's description lives on `_def.description` after
+      // construction. Read it through the typed accessor when present
+      // and fall back to the raw `_def` for older zod builds.
+      const installDir = schema?.installDir as
+        | { description?: string; _def?: { description?: string } }
+        | undefined;
+      const description =
+        installDir?.description ?? installDir?._def?.description;
+      expect(description).toBe(want);
+    }
+  });
+
   it('get_auth_token description flags that it returns a live token', () => {
     const tool = fake.tools.find((t) => t.name === 'get_auth_token');
     // Don't lock to exact wording; just require a security-flavored hint.

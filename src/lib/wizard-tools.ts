@@ -61,6 +61,15 @@ export {
   PRE_STAGED_CONSTANT_SKILLS,
 } from './wizard-tools/bundled-skills.js';
 
+/**
+ * Return a string from an unknown thrown value. Avoids the repetitive
+ * `err instanceof Error ? err.message : String(err)` ternary that this
+ * file used to spell out at every catch site.
+ */
+function errorMessage(err: unknown): string {
+  return err instanceof Error ? err.message : String(err);
+}
+
 // ---------------------------------------------------------------------------
 // Active user-prompt tracking
 // ---------------------------------------------------------------------------
@@ -235,9 +244,9 @@ async function withActiveUserPrompt<T>(fn: () => Promise<T>): Promise<T> {
           cb();
         } catch (err) {
           logToFile(
-            `withActiveUserPrompt: release listener threw: ${
-              err instanceof Error ? err.message : String(err)
-            }`,
+            `withActiveUserPrompt: release listener threw: ${errorMessage(
+              err,
+            )}`,
           );
         }
       }
@@ -356,9 +365,7 @@ export async function fetchSkillMenu(
     logToFile(
       isAbort
         ? `fetchSkillMenu: timed out after ${SKILL_MENU_FETCH_TIMEOUT_MS}ms`
-        : `fetchSkillMenu: error: ${
-            err instanceof Error ? err.message : String(err)
-          }`,
+        : `fetchSkillMenu: error: ${errorMessage(err)}`,
     );
     return null;
   } finally {
@@ -500,7 +507,7 @@ export function downloadSkill(
     );
     return { success: true };
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
+    const msg = errorMessage(err);
     logToFile(`downloadSkill: error: ${msg}`);
     return { success: false, error: msg };
   } finally {
@@ -643,7 +650,7 @@ export function ensureWizardArtifactsIgnored(installDir: string): void {
       'utf8',
     );
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
+    const msg = errorMessage(err);
     logToFile(`ensureWizardArtifactsIgnored: ${msg}`);
   }
 }
@@ -684,7 +691,7 @@ export function archiveSetupReportFile(installDir: string): void {
     fs.renameSync(target, archivePath);
     logToFile(`archiveSetupReportFile: ${target} → ${archivePath}`);
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
+    const msg = errorMessage(err);
     logToFile(`archiveSetupReportFile: ${msg}`);
   }
 }
@@ -714,7 +721,7 @@ export function restoreSetupReportIfMissing(installDir: string): void {
     fs.renameSync(archivePath, target);
     logToFile(`restoreSetupReportIfMissing: ${archivePath} → ${target}`);
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
+    const msg = errorMessage(err);
     logToFile(`restoreSetupReportIfMissing: ${msg}`);
   }
 }
@@ -786,14 +793,14 @@ export function cleanupIntegrationSkills(installDir: string): void {
         fs.rmSync(target, { recursive: true, force: true });
         logToFile(`cleanupIntegrationSkills: removed ${target}`);
       } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
+        const msg = errorMessage(err);
         logToFile(
           `cleanupIntegrationSkills: failed to remove ${target}: ${msg}`,
         );
       }
     }
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
+    const msg = errorMessage(err);
     logToFile(`cleanupIntegrationSkills: error scanning ${skillsDir}: ${msg}`);
   }
 }
@@ -1116,30 +1123,53 @@ export function normalizeEventName(raw: string): string {
  * Returns true on success, false on any filesystem error (the caller logs
  * but doesn't fail the tool call over persistence issues).
  */
-export function persistEventPlan(
+/**
+ * Shared writer for any `<workingDirectory>/.amplitude/*.json` artifact.
+ *
+ * Performs the three steps every `persistX` helper repeated by hand:
+ *   1. Refuse if `workingDirectory` doesn't exist (so a typo or stale
+ *      installDir can't synthesize parents in unexpected places — see
+ *      the comment originally on `persistEventPlan`).
+ *   2. Ensure the project meta dir exists with mode 0755.
+ *   3. Atomically write the JSON payload (temp-file + rename) so a
+ *      crash mid-write leaves the prior file intact.
+ *
+ * Errors are logged via {@link logToFile} with the caller's `label` as the
+ * prefix and false is returned — matches the prior per-helper behaviour so
+ * callsites that ignore the return value continue to no-op on failure.
+ */
+function persistProjectMetaFile(
   workingDirectory: string,
-  events: Array<{ name: string; description: string }>,
+  label: string,
+  filePath: string,
+  payload: unknown,
 ): boolean {
   try {
-    // Refuse to materialize an event plan in a directory the wizard wasn't
-    // pointed at. Without this guard, `getProjectMetaDir` + recursive mkdir
-    // would happily synthesize the parents — turning a typo or missing
-    // installDir into silent file creation in unexpected places.
     if (!fs.existsSync(workingDirectory)) {
       logToFile(
-        `persistEventPlan: working directory does not exist: ${workingDirectory}`,
+        `${label}: working directory does not exist: ${workingDirectory}`,
       );
       return false;
     }
     ensureDir(getProjectMetaDir(workingDirectory), 0o755);
-    atomicWriteJSON(getEventsFile(workingDirectory), events);
+    atomicWriteJSON(filePath, payload);
     return true;
   } catch (err) {
-    logToFile(
-      `persistEventPlan: ${err instanceof Error ? err.message : String(err)}`,
-    );
+    logToFile(`${label}: ${errorMessage(err)}`);
     return false;
   }
+}
+
+export function persistEventPlan(
+  workingDirectory: string,
+  events: Array<{ name: string; description: string }>,
+): boolean {
+  return persistProjectMetaFile(
+    workingDirectory,
+    'persistEventPlan',
+    getEventsFile(workingDirectory),
+    events,
+  );
 }
 
 /**
@@ -1207,9 +1237,9 @@ export function persistDraftEventPlan(
         // corruption. Better to overwrite with a usable draft than to
         // leave the user stuck.
         logToFile(
-          `persistDraftEventPlan: existing ${eventsFile} unparseable, overwriting (${
-            err instanceof Error ? err.message : String(err)
-          })`,
+          `persistDraftEventPlan: existing ${eventsFile} unparseable, overwriting (${errorMessage(
+            err,
+          )})`,
         );
       }
     }
@@ -1228,11 +1258,7 @@ export function persistDraftEventPlan(
     );
     return true;
   } catch (err) {
-    logToFile(
-      `persistDraftEventPlan: ${
-        err instanceof Error ? err.message : String(err)
-      }`,
-    );
+    logToFile(`persistDraftEventPlan: ${errorMessage(err)}`);
     return false;
   }
 }
@@ -1248,22 +1274,12 @@ export function persistDashboard(
   workingDirectory: string,
   content: Record<string, unknown>,
 ): boolean {
-  try {
-    if (!fs.existsSync(workingDirectory)) {
-      logToFile(
-        `persistDashboard: working directory does not exist: ${workingDirectory}`,
-      );
-      return false;
-    }
-    ensureDir(getProjectMetaDir(workingDirectory), 0o755);
-    atomicWriteJSON(getDashboardFile(workingDirectory), content);
-    return true;
-  } catch (err) {
-    logToFile(
-      `persistDashboard: ${err instanceof Error ? err.message : String(err)}`,
-    );
-    return false;
-  }
+  return persistProjectMetaFile(
+    workingDirectory,
+    'persistDashboard',
+    getDashboardFile(workingDirectory),
+    content,
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -1461,7 +1477,7 @@ export function writeFallbackReportIfMissing(
     );
     return 'fallback-wrote';
   } catch (err) {
-    const msg = err instanceof Error ? err.message : String(err);
+    const msg = errorMessage(err);
     logToFile(`writeFallbackReportIfMissing: ${msg}`);
     return 'failed';
   }
@@ -1536,7 +1552,7 @@ export async function createWizardToolsServer(options: WizardToolsOptions) {
       try {
         resolved = resolveEnvPath(workingDirectory, args.filePath);
       } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
+        const msg = errorMessage(err);
         logToFile(`check_env_keys: path rejected: ${msg}`);
         return toWizardToolErrorContent({
           error: `path rejected: ${msg}`,
@@ -1597,7 +1613,7 @@ export async function createWizardToolsServer(options: WizardToolsOptions) {
       try {
         resolved = resolveEnvPath(workingDirectory, args.filePath);
       } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
+        const msg = errorMessage(err);
         logToFile(`set_env_values: path rejected: ${msg}`);
         return toWizardToolErrorContent({
           error: `path rejected: ${msg}`,
@@ -1634,7 +1650,7 @@ export async function createWizardToolsServer(options: WizardToolsOptions) {
           fs.mkdirSync(dir, { recursive: true });
         }
       } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
+        const msg = errorMessage(err);
         logToFile(`set_env_values: mkdir failed for ${dir}: ${msg}`);
         return toWizardToolErrorContent({
           error: `cannot create parent directory for env file: ${msg}`,
@@ -1648,7 +1664,7 @@ export async function createWizardToolsServer(options: WizardToolsOptions) {
       try {
         fs.writeFileSync(resolved, content, 'utf8');
       } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
+        const msg = errorMessage(err);
         logToFile(`set_env_values: writeFile failed for ${resolved}: ${msg}`);
         return toWizardToolErrorContent({
           error: `cannot write env file: ${msg}`,
@@ -1716,7 +1732,7 @@ export async function createWizardToolsServer(options: WizardToolsOptions) {
       try {
         result = await detectPMCache;
       } catch (err) {
-        const msg = err instanceof Error ? err.message : String(err);
+        const msg = errorMessage(err);
         logToFile(`detect_package_manager: scan failed: ${msg}`);
         return toWizardToolErrorContent({
           error: `package-manager detection failed: ${msg}`,
@@ -2321,9 +2337,7 @@ Returns: "approved", "skipped", or "feedback: <user message>"`,
         getUI().setDashboardUrl(args.dashboardUrl);
       } catch (err) {
         logToFile(
-          `record_dashboard: ui.setDashboardUrl failed: ${
-            err instanceof Error ? err.message : String(err)
-          }`,
+          `record_dashboard: ui.setDashboardUrl failed: ${errorMessage(err)}`,
         );
       }
 
@@ -2526,9 +2540,7 @@ Returns: "ok: <planId>" on successful persistence, an error string otherwise. Id
           });
         } catch (err) {
           logToFile(
-            `wizard_feedback: analytics emit failed: ${
-              err instanceof Error ? err.message : String(err)
-            }`,
+            `wizard_feedback: analytics emit failed: ${errorMessage(err)}`,
           );
         }
       })();

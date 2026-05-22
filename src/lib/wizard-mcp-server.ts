@@ -70,6 +70,35 @@ function jsonContent(value: unknown) {
 }
 
 /**
+ * Build the `installDir` zod field. Centralized so the
+ * `.string().optional().describe(...)` wrapping doesn't drift across the
+ * read-only tools that accept it. The `action` clause is the unique
+ * mid-sentence text (e.g. `"to inspect"`, `"to plan against"`, or `""`
+ * for "project." alone). Each tool keeps its bespoke phrasing — the
+ * agent reads these as part of its prompt, so this field assembles
+ * exactly the byte sequence the prior inline literals produced.
+ */
+function installDirField(action: string) {
+  const subject = action ? `project ${action}.` : 'project.';
+  return z
+    .string()
+    .optional()
+    .describe(
+      `Absolute path to the ${subject} Defaults to the current working directory.`,
+    );
+}
+
+/**
+ * Extract `installDir` from a tool-call args bag and default to `process.cwd()`
+ * when omitted. Every read-only tool here repeats this exact two-step shape
+ * (`(args ?? {}) as { installDir?: string }` followed by `?? process.cwd()`).
+ */
+function resolveInstallDir(args: unknown): string {
+  const { installDir } = (args ?? {}) as { installDir?: string };
+  return installDir ?? process.cwd();
+}
+
+/**
  * Register the wizard's tools onto a newly-constructed MCP server.
  * Exposed for unit tests — production path is {@link startAgentMcpServer}.
  */
@@ -85,17 +114,11 @@ export function registerWizardTools(server: WizardMcpToolRegistrar): void {
         'name, and per-detector signals. If installDir is omitted, the ' +
         'wizard inspects the current working directory.',
       inputSchema: {
-        installDir: z
-          .string()
-          .optional()
-          .describe(
-            'Absolute path to the project to inspect. Defaults to the current working directory.',
-          ),
+        installDir: installDirField('to inspect'),
       },
     },
     async (args: unknown) => {
-      const { installDir } = (args ?? {}) as { installDir?: string };
-      const result: DetectResult = await runDetect(installDir ?? process.cwd());
+      const result: DetectResult = await runDetect(resolveInstallDir(args));
       return jsonContent(result);
     },
   );
@@ -111,17 +134,11 @@ export function registerWizardTools(server: WizardMcpToolRegistrar): void {
         'key is configured, and whether the user is logged in. Safe to call ' +
         'repeatedly — does not write anything.',
       inputSchema: {
-        installDir: z
-          .string()
-          .optional()
-          .describe(
-            'Absolute path to the project to inspect. Defaults to the current working directory.',
-          ),
+        installDir: installDirField('to inspect'),
       },
     },
     async (args: unknown) => {
-      const { installDir } = (args ?? {}) as { installDir?: string };
-      const result: StatusResult = await runStatus(installDir ?? process.cwd());
+      const result: StatusResult = await runStatus(resolveInstallDir(args));
       return jsonContent(result);
     },
   );
@@ -140,17 +157,11 @@ export function registerWizardTools(server: WizardMcpToolRegistrar): void {
         'This tool is read-only and safe to call repeatedly — each call ' +
         'creates a new plan.',
       inputSchema: {
-        installDir: z
-          .string()
-          .optional()
-          .describe(
-            'Absolute path to the project to plan against. Defaults to the current working directory.',
-          ),
+        installDir: installDirField('to plan against'),
       },
     },
     async (args: unknown) => {
-      const { installDir } = (args ?? {}) as { installDir?: string };
-      const result: PlanResult = await runPlan(installDir ?? process.cwd());
+      const result: PlanResult = await runPlan(resolveInstallDir(args));
       return jsonContent(result);
     },
   );
@@ -167,17 +178,11 @@ export function registerWizardTools(server: WizardMcpToolRegistrar): void {
         'structured reasons for any failures. Does NOT poll for ingestion; ' +
         'use the CLI for that.',
       inputSchema: {
-        installDir: z
-          .string()
-          .optional()
-          .describe(
-            'Absolute path to the project to verify. Defaults to the current working directory.',
-          ),
+        installDir: installDirField('to verify'),
       },
     },
     async (args: unknown) => {
-      const { installDir } = (args ?? {}) as { installDir?: string };
-      const result: VerifyResult = await runVerify(installDir ?? process.cwd());
+      const result: VerifyResult = await runVerify(resolveInstallDir(args));
       return jsonContent(result);
     },
   );
@@ -193,18 +198,12 @@ export function registerWizardTools(server: WizardMcpToolRegistrar): void {
         'legacy paths). Returns `{ events: [{ name, description }], count }`. ' +
         'Read-only — does not modify the project.',
       inputSchema: {
-        installDir: z
-          .string()
-          .optional()
-          .describe(
-            'Absolute path to the project. Defaults to the current working directory.',
-          ),
+        installDir: installDirField(''),
       },
     },
     (args: unknown) => {
-      const { installDir } = (args ?? {}) as { installDir?: string };
       const result: EventPlanReadResult = runGetEventPlan(
-        installDir ?? process.cwd(),
+        resolveInstallDir(args),
       );
       return jsonContent(result);
     },
@@ -266,23 +265,15 @@ export function registerWizardTools(server: WizardMcpToolRegistrar): void {
         'ingestion has caught up. `planId` and `createdAt` are stamped by ' +
         'the wizard. Returns the persisted plan on success.',
       inputSchema: {
-        installDir: z
-          .string()
-          .optional()
-          .describe(
-            'Absolute path to the project to write the plan into. Defaults to the current working directory.',
-          ),
+        installDir: installDirField('to write the plan into'),
         plan: DashboardPlanInputSchema.describe(
           'The plan body. Must include orgId, projectId, events, charts, and dashboard. `version`, `planId`, and `createdAt` are stamped by the writer.',
         ),
       },
     },
     (args: unknown) => {
-      const { installDir, plan } = (args ?? {}) as {
-        installDir?: string;
-        plan: DashboardPlanInput;
-      };
-      const persisted = writeDashboardPlan(installDir ?? process.cwd(), plan);
+      const { plan } = (args ?? {}) as { plan: DashboardPlanInput };
+      const persisted = writeDashboardPlan(resolveInstallDir(args), plan);
       if (!persisted) {
         return jsonContent({
           ok: false,
@@ -308,17 +299,11 @@ export function registerWizardTools(server: WizardMcpToolRegistrar): void {
         'missing, unreadable, or fails schema validation. Safe to call ' +
         'repeatedly — does not write anything.',
       inputSchema: {
-        installDir: z
-          .string()
-          .optional()
-          .describe(
-            'Absolute path to the project to inspect. Defaults to the current working directory.',
-          ),
+        installDir: installDirField('to inspect'),
       },
     },
     (args: unknown) => {
-      const { installDir } = (args ?? {}) as { installDir?: string };
-      const plan = readDashboardPlan(installDir ?? process.cwd());
+      const plan = readDashboardPlan(resolveInstallDir(args));
       return jsonContent({ plan });
     },
   );
