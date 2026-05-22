@@ -70,27 +70,25 @@ function formatTimestamp(ms: number | null | undefined): string {
   }
 }
 
+/**
+ * Per-state chalk painter for human-mode task rows. Kept as a typed
+ * `Record<TaskLifecycle, …>` lookup (vs the prior switch) so TypeScript
+ * flags any new lifecycle state that forgets to declare a color, and the
+ * mapping is greppable at a glance.
+ */
+const LIFECYCLE_PAINTERS: Record<TaskLifecycle, (input: string) => string> = {
+  [TaskLifecycle.Completed]: chalk.green,
+  [TaskLifecycle.Failed]: chalk.red,
+  [TaskLifecycle.Cancelled]: chalk.yellow,
+  [TaskLifecycle.Running]: chalk.cyan,
+  [TaskLifecycle.WaitingForUser]: chalk.magenta,
+  [TaskLifecycle.Blocked]: chalk.red,
+  [TaskLifecycle.Superseded]: chalk.dim,
+  [TaskLifecycle.Queued]: chalk.dim,
+};
+
 function lifecycleColor(state: TaskLifecycle): string {
-  switch (state) {
-    case TaskLifecycle.Completed:
-      return chalk.green(state);
-    case TaskLifecycle.Failed:
-      return chalk.red(state);
-    case TaskLifecycle.Cancelled:
-      return chalk.yellow(state);
-    case TaskLifecycle.Running:
-      return chalk.cyan(state);
-    case TaskLifecycle.WaitingForUser:
-      return chalk.magenta(state);
-    case TaskLifecycle.Blocked:
-      return chalk.red(state);
-    case TaskLifecycle.Superseded:
-      return chalk.dim(state);
-    case TaskLifecycle.Queued:
-      return chalk.dim(state);
-    default:
-      return state;
-  }
+  return LIFECYCLE_PAINTERS[state](state);
 }
 
 function emitJson(payload: unknown): void {
@@ -107,13 +105,12 @@ function emitJsonError(message: string): void {
 }
 
 /**
- * Centralized error reporter. Every handler does the same fork:
+ * Centralized error reporter for the catch-block path. Every handler does
+ * the same fork:
  *   if (opts?.jsonOutput) emitJsonError(prefixed); else getUI().log.error(prefixed)
  * The prefix is the operation name in human-readable form ("Tasks listing
  * failed:" vs the JSON-side "tasks listing failed:"). The two prefixes differ
- * only in leading-capital convention, so we accept both up front. An empty
- * `message` (e.g. for plain "<noun> <id> not found" lookups) renders without
- * a trailing space so the emitted text matches the prior inline string.
+ * only in leading-capital convention, so we accept both up front.
  */
 function reportError(
   opts: CommonOpts | undefined,
@@ -121,10 +118,20 @@ function reportError(
   jsonPrefix: string,
   message: string,
 ): void {
-  const joined = (prefix: string): string =>
-    message.length === 0 ? prefix : `${prefix} ${message}`;
-  if (opts?.jsonOutput) emitJsonError(joined(jsonPrefix));
-  else getUI().log.error(joined(humanPrefix));
+  if (opts?.jsonOutput) emitJsonError(`${jsonPrefix} ${message}`);
+  else getUI().log.error(`${humanPrefix} ${message}`);
+}
+
+/**
+ * Variant of `reportError` for cases where the human and JSON text are
+ * identical and there is no separate "operation failed:" prefix — typically
+ * `<Noun> <id> not found` lookups and the `Resume command is empty` guard.
+ * Lets the call site avoid passing the same prefix twice plus an empty
+ * `message` arg.
+ */
+function reportPlainError(opts: CommonOpts | undefined, message: string): void {
+  if (opts?.jsonOutput) emitJsonError(message);
+  else getUI().log.error(message);
 }
 
 /**
@@ -144,9 +151,7 @@ function parseIdOrExit<T>(
   try {
     return parser(raw);
   } catch (err) {
-    const m = err instanceof Error ? err.message : String(err);
-    if (opts?.jsonOutput) emitJsonError(m);
-    else getUI().log.error(m);
+    reportPlainError(opts, err instanceof Error ? err.message : String(err));
     process.exit(ExitCode.INVALID_ARGS);
   }
 }
@@ -196,11 +201,12 @@ export const tasksCommand: CommandModule = {
               stateFilterRaw as TaskLifecycle,
             )
           ) {
-            const message = `Invalid --state value: '${stateFilterRaw}'. Allowed: ${Object.values(
-              TaskLifecycle,
-            ).join(', ')}.`;
-            if (opts.jsonOutput) emitJsonError(message);
-            else getUI().log.error(message);
+            reportPlainError(
+              opts,
+              `Invalid --state value: '${stateFilterRaw}'. Allowed: ${Object.values(
+                TaskLifecycle,
+              ).join(', ')}.`,
+            );
             process.exit(ExitCode.INVALID_ARGS);
           }
           stateFilter = stateFilterRaw as TaskLifecycle;
@@ -290,12 +296,7 @@ export const taskCommand: CommandModule = {
         const store = getOrchestrationStore(opts.installDir);
         const task = store.getTask(id);
         if (!task) {
-          reportError(
-            opts,
-            `Task ${idRaw} not found`,
-            `Task ${idRaw} not found`,
-            '',
-          );
+          reportPlainError(opts, `Task ${idRaw} not found`);
           process.exit(ExitCode.INVALID_ARGS);
         }
         if (opts.jsonOutput) {
@@ -492,12 +493,7 @@ export const sessionCommand: CommandModule = {
         const store = getOrchestrationStore(opts.installDir);
         const session = store.getSession(id);
         if (!session) {
-          reportError(
-            opts,
-            `Session ${idRaw} not found`,
-            `Session ${idRaw} not found`,
-            '',
-          );
+          reportPlainError(opts, `Session ${idRaw} not found`);
           process.exit(ExitCode.INVALID_ARGS);
         }
         const tasks = store.listTasks({
@@ -600,12 +596,7 @@ export const resumeCommand: CommandModule = {
         const store = getOrchestrationStore(opts.installDir);
         const session = store.getSession(sessionId);
         if (!session) {
-          reportError(
-            opts,
-            `Session ${sessionIdRaw} not found`,
-            `Session ${sessionIdRaw} not found`,
-            '',
-          );
+          reportPlainError(opts, `Session ${sessionIdRaw} not found`);
           process.exit(ExitCode.INVALID_ARGS);
         }
         // Scope LSP derivation to the resolved session so the resume command
@@ -652,11 +643,9 @@ export const resumeCommand: CommandModule = {
           const { spawn } = await import('../utils/cross-platform-spawn.js');
           const [cmd, ...rest] = command;
           if (!cmd) {
-            reportError(
+            reportPlainError(
               opts,
               'Resume command is empty — nothing to execute.',
-              'Resume command is empty — nothing to execute.',
-              '',
             );
             process.exit(ExitCode.GENERAL_ERROR);
           }
