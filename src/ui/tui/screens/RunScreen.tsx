@@ -140,6 +140,67 @@ export function resolveRunScreenStatus(store: WizardStore): string | undefined {
   return resolveRunStatusPill(store);
 }
 
+/**
+ * The agent's self-reported task list — populated by the inner agent
+ * via the `set_agent_tasks` / `update_agent_task` wizard-tools MCP
+ * tools. Rendered below the canonical wizard task list so users can
+ * see what the agent itself is planning, not just the 4-step
+ * scaffolding.
+ *
+ * Voice / labeling: the heading is intentionally lowercase
+ * (`the agent's plan:`) — matches the rest of the wizard's voice
+ * conventions, which avoid SHOUTY caps and second-person task-list
+ * labels. The agent's task titles render verbatim; we don't reshape
+ * what the agent wrote.
+ */
+const AgentTaskList = ({ store }: { store: WizardStore }) => {
+  const tasks = store.agentTasks;
+  if (tasks.length === 0) return null;
+
+  // Phrasing flips once the plan has actually been seeded and the agent
+  // has started transitioning rows: before any row is in_progress or
+  // done, we call it "planning to"; once work is underway we call it
+  // "the agent's plan". Cosmetic, but keeps the copy honest about the
+  // current state.
+  const anyStarted = tasks.some(
+    (t) => t.status === 'in_progress' || t.status === 'done',
+  );
+  const heading = anyStarted
+    ? "the agent's plan:"
+    : 'the agent is planning to:';
+
+  return (
+    <Box flexDirection="column" marginTop={1}>
+      <Text color={Colors.muted}>
+        <Text color={Colors.accent}>{Icons.diamond}</Text> {heading}
+      </Text>
+      {tasks.map((t) => {
+        let icon: string;
+        let color: string;
+        if (t.status === 'done') {
+          icon = '✓';
+          color = Colors.success;
+        } else if (t.status === 'in_progress') {
+          icon = '◌';
+          color = Colors.accent;
+        } else {
+          icon = '·';
+          color = Colors.muted;
+        }
+        return (
+          <Box key={t.id} paddingLeft={2}>
+            <Text color={color}>{icon}</Text>
+            <Text> </Text>
+            <Text color={t.status === 'done' ? Colors.muted : Colors.body}>
+              {t.title}
+            </Text>
+          </Box>
+        );
+      })}
+    </Box>
+  );
+};
+
 /** Compact inline display of planned event names. */
 const InlineEventPlan = ({ store }: { store: WizardStore }) => {
   const events = store.eventPlan.filter((e) => e.name);
@@ -473,34 +534,36 @@ const ProgressTab = ({ store }: { store: WizardStore }) => {
             further right than the headers" misalignment users called
             out. */}
         <Box flexDirection="column" flexGrow={1} flexShrink={1}>
-        {/* Header: progress counter + elapsed + retry chip + current file. */}
-        <Box marginBottom={1} flexDirection="column">
-          <Box justifyContent="space-between">
-            <Box gap={1}>
-              <Text color={Colors.body} bold>
-                {total > 0
-                  ? // Avoid "X / Y" — Y can grow as the agent adds new tasks
-                    // mid-run, which makes the progress bar look like it's
-                    // going backwards (6 tasks → 9 tasks). Show absolute
-                    // counts instead so the user sees forward motion.
-                    // `completedDisplay` is a high-water mark, so the "done"
-                    // count never regresses if new tasks appear after the
-                    // user already saw earlier ones finish.
-                    pending + inProgress > 0
-                    ? `${completedDisplay} done · ${inProgress + pending} to go`
-                    : `${completedDisplay} tasks complete`
-                  : 'Agent running'}
-              </Text>
-              <Text color={Colors.muted}>
-                {Icons.dot} {formatElapsed(elapsed)}
-                {showColdStartHint ? ' (cold start: ~30–60s)' : ''}
-              </Text>
-              <RetryStatusChip
-                retryState={store.session.retryState}
-                now={Date.now()}
-              />
-            </Box>
-            {/* Typewriter reveal of the path the agent is currently
+          {/* Header: progress counter + elapsed + retry chip + current file. */}
+          <Box marginBottom={1} flexDirection="column">
+            <Box justifyContent="space-between">
+              <Box gap={1}>
+                <Text color={Colors.body} bold>
+                  {total > 0
+                    ? // Avoid "X / Y" — Y can grow as the agent adds new tasks
+                      // mid-run, which makes the progress bar look like it's
+                      // going backwards (6 tasks → 9 tasks). Show absolute
+                      // counts instead so the user sees forward motion.
+                      // `completedDisplay` is a high-water mark, so the "done"
+                      // count never regresses if new tasks appear after the
+                      // user already saw earlier ones finish.
+                      pending + inProgress > 0
+                      ? `${completedDisplay} done · ${
+                          inProgress + pending
+                        } to go`
+                      : `${completedDisplay} tasks complete`
+                    : 'Agent running'}
+                </Text>
+                <Text color={Colors.muted}>
+                  {Icons.dot} {formatElapsed(elapsed)}
+                  {showColdStartHint ? ' (cold start: ~30–60s)' : ''}
+                </Text>
+                <RetryStatusChip
+                  retryState={store.session.retryState}
+                  now={Date.now()}
+                />
+              </Box>
+              {/* Typewriter reveal of the path the agent is currently
                 writing — fed by the same FileChangeLedger entry as the
                 rest of the screen, so no extra signal source. Adds a
                 little texture to the file-write progression and makes
@@ -508,55 +571,55 @@ const ProgressTab = ({ store }: { store: WizardStore }) => {
                 glance. The TypewriterFilename component itself caps
                 at one filename, restarts on path change, and clears
                 when the path becomes null. */}
-            {currentFile && <TypewriterFilename path={currentFile} />}
+              {currentFile && <TypewriterFilename path={currentFile} />}
+            </Box>
           </Box>
-        </Box>
 
-        {/* Tasks — the hero. The `renderActiveSubsteps` slot injects 2-3
+          {/* Tasks — the hero. The `renderActiveSubsteps` slot injects 2-3
             lines of live tool-call narration ("Reading package.json",
             "Running pnpm add …") under whichever task is currently
             in_progress. Sources: PreToolUse hooks in
             `inner-lifecycle.ts` push verb-formed labels into
             `store.toolActivities` via `recordToolActivity`. Hidden on
             terminals < MIN_WIDTH_FOR_SUBSTEPS cols to save space. */}
-        <ProgressList
-          items={progressItems}
-          title="Tasks"
-          // The "0 done · N to go · 55s" header above the task list
-          // already shows the same X/Y completion + an elapsed timer +
-          // a cold-start hint. The default ProgressList footer
-          // ("spinner Progress: 0/4 completed") was just a duplicate of
-          // that header without the elapsed information — drop it here
-          // so the Progress tab doesn't show the same number twice.
-          showFooter={false}
-          renderActiveSubsteps={() => (
-            <ActiveTaskSubsteps
-              activities={store.toolActivities}
-              width={cols}
-            />
-          )}
-        />
+          <ProgressList
+            items={progressItems}
+            title="Tasks"
+            // The "0 done · N to go · 55s" header above the task list
+            // already shows the same X/Y completion + an elapsed timer +
+            // a cold-start hint. The default ProgressList footer
+            // ("spinner Progress: 0/4 completed") was just a duplicate of
+            // that header without the elapsed information — drop it here
+            // so the Progress tab doesn't show the same number twice.
+            showFooter={false}
+            renderActiveSubsteps={() => (
+              <ActiveTaskSubsteps
+                activities={store.toolActivities}
+                width={cols}
+              />
+            )}
+          />
 
-        {/* Live per-file activity from the inner agent's write hooks.
+          {/* Live per-file activity from the inner agent's write hooks.
             Hidden until the first PreToolUse fires so it doesn't reserve
             blank space during planning. The panel shares the spinner
             frame so its in-progress rows tick in lockstep with the
             header braille spinner. */}
-        <FileWritesPanel
-          entries={store.fileWrites}
-          installDir={store.session.installDir}
-          spinnerFrame={spinnerFrame}
-          // Subtract App.tsx's `Layout.paddingX` (2 each side) so the
-          // path-budget reflects the actual visible width inside the
-          // content area. Previously this was `cols - 2`, which assumed
-          // the now-removed inner paddingX=1 instead of the outer
-          // Layout.paddingX=2 — paths got more head-truncation budget
-          // than they should have, occasionally letting a long path
-          // collide with the trailing detail column on tight terminals.
-          width={cols - 4}
-        />
+          <FileWritesPanel
+            entries={store.fileWrites}
+            installDir={store.session.installDir}
+            spinnerFrame={spinnerFrame}
+            // Subtract App.tsx's `Layout.paddingX` (2 each side) so the
+            // path-budget reflects the actual visible width inside the
+            // content area. Previously this was `cols - 2`, which assumed
+            // the now-removed inner paddingX=1 instead of the outer
+            // Layout.paddingX=2 — paths got more head-truncation budget
+            // than they should have, occasionally letting a long path
+            // collide with the trailing detail column on tight terminals.
+            width={cols - 4}
+          />
 
-        {/* Coaching: surfaces calmly after 90s of no task-count progress.
+          {/* Coaching: surfaces calmly after 90s of no task-count progress.
             The spinner stays — this is a *secondary* line that gives the
             user something to do (open Logs, cancel) instead of staring
             at a frozen indicator. Resets when a new task appears.
@@ -564,31 +627,38 @@ const ProgressTab = ({ store }: { store: WizardStore }) => {
             NB: tabs switch with ← / → (or number keys); the Tab key is
             wired to opening the slash-command input in ConsoleView. The
             old copy said "(Tab)" and led users to the wrong key. */}
-        {coachingTier >= 1 && (
-          <Box>
-            <Text color={Colors.muted}>
-              <Text color={Colors.accent}>{Icons.diamond} tip</Text>
-              {Icons.dash}
-              {coachingTier >= 2
-                ? " This is unusually slow. Press ← / → to switch to the Logs tab and see what's stuck — or Ctrl+C to cancel."
-                : " Still working — press ← / → to switch to the Logs tab and see what's happening, or Ctrl+C to cancel."}
-            </Text>
-          </Box>
-        )}
+          {coachingTier >= 1 && (
+            <Box>
+              <Text color={Colors.muted}>
+                <Text color={Colors.accent}>{Icons.diamond} tip</Text>
+                {Icons.dash}
+                {coachingTier >= 2
+                  ? " This is unusually slow. Press ← / → to switch to the Logs tab and see what's stuck — or Ctrl+C to cancel."
+                  : " Still working — press ← / → to switch to the Logs tab and see what's happening, or Ctrl+C to cancel."}
+              </Text>
+            </Box>
+          )}
 
-        {/* Post-agent steps (commit events, create dashboard, …).
+          {/* Post-agent steps (commit events, create dashboard, …).
             Rendered as its own panel below the agent task list — keeps
             the "main agent work done" milestone intact while still
             surfacing the work happening between agent completion and
             the MCP/Verify screens. Empty until agent-runner seeds the
             queue, so it's a no-op during the agent run itself. */}
-        <FinalizingPanel steps={store.session.postAgentSteps} />
+          <FinalizingPanel steps={store.session.postAgentSteps} />
 
-        {/* Inline event plan */}
-        <InlineEventPlan store={store} />
+          {/* Agent's self-reported task list. Sits below the canonical
+            wizard task list (above) and above the inline event plan +
+            tips. Empty until the inner agent calls `set_agent_tasks` —
+            so it's a no-op during cold start and on legacy skill
+            paths that haven't been updated to seed a plan yet. */}
+          <AgentTaskList store={store} />
 
-        {/* Compact conditional tips */}
-        <ConditionalTips store={store} />
+          {/* Inline event plan */}
+          <InlineEventPlan store={store} />
+
+          {/* Compact conditional tips */}
+          <ConditionalTips store={store} />
         </Box>
 
         {/* Right column: Discovered facts panel (real status), replacing

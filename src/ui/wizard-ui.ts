@@ -317,6 +317,41 @@ export interface WizardUI {
    */
   recordToolActivity?(label: string): void;
 
+  // ── Agent self-reported task list ─────────────────────────────────
+  /**
+   * Replace the agent's self-reported task list wholesale. Called by
+   * the `set_agent_tasks` wizard-tools MCP function — at the start of
+   * every run and again whenever the agent's plan changes mid-run.
+   * Renders in the RunScreen below the wizard's canonical task list
+   * so users see what the agent itself is planning, not just the
+   * wizard's scaffolding.
+   *
+   * - InkUI:     delegates to the store; RunScreen reads it.
+   * - LoggingUI: prints a short summary per status transition.
+   * - AgentUI:   no-op (NDJSON consumers have other signals).
+   */
+  setAgentTasks(
+    tasks: Array<{
+      id: string;
+      title: string;
+      status: 'pending' | 'in_progress' | 'done';
+    }>,
+  ): void;
+
+  /**
+   * Patch a single agent task by id. Returns true if the row was
+   * updated, false if the id was unknown (the agent should call
+   * `setAgentTasks` first). Called by the `update_agent_task`
+   * wizard-tools MCP function.
+   */
+  updateAgentTask(
+    id: string,
+    patch: {
+      status: 'pending' | 'in_progress' | 'done';
+      title?: string;
+    },
+  ): boolean;
+
   // ── Event plan from .amplitude-events.json ────────────────────
   setEventPlan(events: Array<{ name: string; description: string }>): void;
 

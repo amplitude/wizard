@@ -88,6 +88,31 @@ export interface TaskItem {
   done: boolean;
 }
 
+/**
+ * One row of the agent's self-reported task list — surfaced in the
+ * RunScreen below the canonical 4-step wizard task list. Distinct from
+ * `TaskItem` (the wizard-orchestrated skeleton) and `ToolActivity` (raw
+ * tool-call narration): the agent itself declares this list at the
+ * start of a run via the `set_agent_tasks` wizard-tools MCP function
+ * and updates each row via `update_agent_task` as work progresses.
+ *
+ * Each entry should be specific and observable (e.g.
+ * "Add @amplitude/analytics-browser import to src/index.tsx" rather
+ * than "Install SDK"). Status mirrors the canonical wizard task lifecycle:
+ *   - `pending`    — declared, not yet started
+ *   - `in_progress` — agent is actively working on this row
+ *   - `done`        — agent reports the row complete
+ *
+ * `id` is the agent-chosen handle used by `update_agent_task`. The
+ * wizard does not validate ids beyond requiring non-empty strings; the
+ * agent owns the namespace.
+ */
+export interface AgentTask {
+  id: string;
+  title: string;
+  status: 'pending' | 'in_progress' | 'done';
+}
+
 export interface PlannedEvent {
   name: string;
   description: string;
@@ -198,6 +223,16 @@ export class WizardStore {
   private $session = createSessionStore();
   private $statusMessages = atom<string[]>([]);
   private $tasks = atom<TaskItem[]>([]);
+  /**
+   * Agent-declared task list — separate from `$tasks` (the wizard's
+   * canonical 4-step skeleton). The inner agent populates this via the
+   * `set_agent_tasks` wizard-tools MCP function at the start of a run
+   * and updates each row via `update_agent_task` as work progresses.
+   * Rendered in the RunScreen below the wizard task list so users can
+   * see what the agent itself plans to do, not just the wizard's
+   * scaffolding.
+   */
+  private $agentTasks = atom<AgentTask[]>([]);
   private $eventPlan = atom<PlannedEvent[]>([]);
   /**
    * Live list of file writes the inner agent has issued during the run.
@@ -349,6 +384,10 @@ export class WizardStore {
 
   get tasks(): TaskItem[] {
     return this.$tasks.get();
+  }
+
+  get agentTasks(): AgentTask[] {
+    return this.$agentTasks.get();
   }
 
   get eventPlan(): PlannedEvent[] {
@@ -2375,6 +2414,44 @@ export class WizardStore {
   setTasks(tasks: TaskItem[]): void {
     this.$tasks.set(tasks);
     this.emitChange();
+  }
+
+  /**
+   * Replace the agent's self-reported task list wholesale. Called from
+   * the `set_agent_tasks` wizard-tools MCP function — once at the start
+   * of every run after the agent has inspected the codebase, and again
+   * whenever the agent's plan changes mid-run (e.g. it discovers
+   * another file that needs wiring). Distinct from `setTasks`, which
+   * owns the wizard's canonical 4-step skeleton.
+   */
+  setAgentTasks(tasks: AgentTask[]): void {
+    this.$agentTasks.set(tasks);
+    this.emitChange();
+  }
+
+  /**
+   * Patch a single agent-declared task by id. Called from the
+   * `update_agent_task` wizard-tools MCP function as the agent
+   * transitions a row through pending → in_progress → done.
+   * No-op (returns false) if the id isn't in the current list — the
+   * agent is expected to call `set_agent_tasks` first.
+   */
+  updateAgentTask(
+    id: string,
+    patch: { status: AgentTask['status']; title?: string },
+  ): boolean {
+    const current = this.$agentTasks.get();
+    const idx = current.findIndex((t) => t.id === id);
+    if (idx === -1) return false;
+    const updated = [...current];
+    updated[idx] = {
+      ...updated[idx],
+      status: patch.status,
+      ...(patch.title !== undefined ? { title: patch.title } : {}),
+    };
+    this.$agentTasks.set(updated);
+    this.emitChange();
+    return true;
   }
 
   updateTask(index: number, done: boolean): void {
