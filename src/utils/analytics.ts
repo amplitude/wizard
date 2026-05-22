@@ -38,24 +38,6 @@ export function getAmplitudeNodeServerUrl(): string {
 }
 
 /**
- * Extract a standard property bag from the current session.
- * Used by store-level analytics and available for ad-hoc captures.
- */
-export function sessionProperties(
-  session: WizardSession,
-): Record<string, unknown> {
-  return {
-    integration: session.integration,
-    'detected framework': session.detectedFrameworkLabel,
-    typescript: session.typescript,
-    'app id': session.credentials?.appId,
-    'discovered features': session.discoveredFeatures,
-    'additional features': session.additionalFeatureQueue,
-    'run phase': session.runPhase,
-  };
-}
-
-/**
  * Smaller session bag for high-volume wizard events (taxonomy: keep event
  * properties chart-useful and within a small count).
  */

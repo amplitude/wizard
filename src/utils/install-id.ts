@@ -17,8 +17,8 @@ import { z } from 'zod';
 import { atomicWriteJSON } from './atomic-write.js';
 import { debug } from './debug.js';
 
-export const INSTALL_DIR = path.join(os.homedir(), '.amplitude-wizard');
-export const INSTALL_FILE = path.join(INSTALL_DIR, 'install.json');
+const INSTALL_DIR = path.join(os.homedir(), '.amplitude-wizard');
+const INSTALL_FILE = path.join(INSTALL_DIR, 'install.json');
 
 const InstallRecordSchema = z.object({
   installId: z.string().uuid(),
