@@ -20,6 +20,7 @@ import type {
   LastStoppingPoint,
   NextAction,
   Ownership,
+  PendingCheckpoint,
   SessionId,
   Task,
 } from './state';
@@ -250,28 +251,29 @@ export function computeLastStoppingPoint(
     ...recentlyCompletedTasks.flatMap((t) => t.ownership),
   ]);
 
-  // PR 1 stub arrays — populated in PR 2. See module header.
-  const pendingChoices = activeTasks
-    .filter(
-      (t) =>
-        t.state === TaskLifecycle.WaitingForUser && t.waitingFor !== undefined,
-    )
-    .map((t) => t.waitingFor!)
-    .filter((c) => c.kind === 'user_choice' || c.kind === 'event_plan_confirm');
-  const pendingMcpActions = activeTasks
-    .filter(
-      (t) =>
-        t.state === TaskLifecycle.WaitingForUser && t.waitingFor !== undefined,
-    )
-    .map((t) => t.waitingFor!)
-    .filter((c) => c.kind === 'mcp_install' || c.kind === 'mcp_action');
-  const pendingManualVerifications = activeTasks
-    .filter(
-      (t) =>
-        t.state === TaskLifecycle.WaitingForUser && t.waitingFor !== undefined,
-    )
-    .map((t) => t.waitingFor!)
-    .filter((c) => c.kind === 'manual_verification');
+  // PR 1 stub arrays — populated in PR 2. See module header. We do a single
+  // pass over activeTasks and bucket each waiting checkpoint by `kind`; the
+  // three output arrays carry the same partitioning the per-array filter
+  // chains did, just without iterating activeTasks three times.
+  const pendingChoices: PendingCheckpoint[] = [];
+  const pendingMcpActions: PendingCheckpoint[] = [];
+  const pendingManualVerifications: PendingCheckpoint[] = [];
+  for (const t of activeTasks) {
+    if (
+      t.state !== TaskLifecycle.WaitingForUser ||
+      t.waitingFor === undefined
+    ) {
+      continue;
+    }
+    const cp = t.waitingFor;
+    if (cp.kind === 'user_choice' || cp.kind === 'event_plan_confirm') {
+      pendingChoices.push(cp);
+    } else if (cp.kind === 'mcp_install' || cp.kind === 'mcp_action') {
+      pendingMcpActions.push(cp);
+    } else if (cp.kind === 'manual_verification') {
+      pendingManualVerifications.push(cp);
+    }
+  }
 
   const cliInvocation = options?.cliInvocation ?? CLI_INVOCATION.split(/\s+/);
   const nextAction = deriveNextAction({

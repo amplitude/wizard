@@ -16,6 +16,11 @@ import {
   OwnershipSchema,
   TaskResultSchema,
   StatusEnvelopeSchema,
+  TasksEnvelopeSchema,
+  TaskEnvelopeSchema,
+  SessionsEnvelopeSchema,
+  SessionEnvelopeSchema,
+  ResumeEnvelopeSchema,
 } from '../schemas';
 import { ORCHESTRATION_STORE_VERSION } from '../state';
 import { TaskLifecycle } from '../lifecycle';
@@ -200,6 +205,77 @@ describe('OrchestrationStoreFile schema', () => {
         subagents: [],
       }),
     ).toThrow();
+  });
+});
+
+describe('Envelope schemas share the v1 base header fields', () => {
+  // Lock in the shared base-fields contract that every `--json` envelope
+  // surfaces. Outer agents key off these three fields (`v`, `generatedAt`,
+  // `installDir`) before branching on `type`; if a future contributor
+  // accidentally drops or renames one of them in `schemas.ts` this test
+  // surfaces the regression instead of letting CLI consumers break silently.
+  const base = {
+    v: 1 as const,
+    generatedAt: new Date(NOW).toISOString(),
+    installDir: '/tmp/proj',
+  };
+  it('TasksEnvelope accepts the base header + an empty tasks array', () => {
+    expect(() =>
+      TasksEnvelopeSchema.parse({
+        ...base,
+        type: 'orchestration_tasks',
+        tasks: [],
+      }),
+    ).not.toThrow();
+  });
+  it('TaskEnvelope, Sessions, Session, Resume all accept the base header', () => {
+    const sample = SessionSchema.parse({
+      id: 'session_abc',
+      installDir: '/tmp/proj',
+      createdAt: NOW,
+      updatedAt: NOW,
+      status: 'active',
+    });
+    expect(() =>
+      SessionsEnvelopeSchema.parse({
+        ...base,
+        type: 'orchestration_sessions',
+        sessions: [sample],
+      }),
+    ).not.toThrow();
+    expect(() =>
+      SessionEnvelopeSchema.parse({
+        ...base,
+        type: 'orchestration_session',
+        session: sample,
+        tasks: [],
+      }),
+    ).not.toThrow();
+    expect(() =>
+      ResumeEnvelopeSchema.parse({
+        ...base,
+        type: 'orchestration_resume',
+        sessionId: 'session_abc',
+        command: ['amplitude-wizard'],
+        description: 'go',
+        executed: false,
+      }),
+    ).not.toThrow();
+    // TaskEnvelope: build a minimal task that satisfies TaskSchema first.
+    const task = TaskSchema.parse({
+      id: 'task_x',
+      sessionId: 'session_abc',
+      label: 't',
+      state: TaskLifecycle.Queued,
+      ownership: [],
+      subagentKind: null,
+      createdAt: NOW,
+      updatedAt: NOW,
+      startedAt: null,
+    });
+    expect(() =>
+      TaskEnvelopeSchema.parse({ ...base, type: 'orchestration_task', task }),
+    ).not.toThrow();
   });
 });
 
