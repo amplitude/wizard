@@ -10,9 +10,8 @@
  */
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
 import { spawnSync } from 'node:child_process';
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join, resolve } from 'node:path';
+import { resolve } from 'node:path';
+import { createTempDir } from '../../utils/__tests__/helpers/temp-dir.js';
 
 import { OrchestrationStore } from '../../lib/orchestration/store';
 import { TaskLifecycle } from '../../lib/orchestration/lifecycle';
@@ -30,12 +29,15 @@ const BIN = resolve(REPO_ROOT, 'bin.ts');
 
 let cacheRoot: string;
 let installDir: string;
+let cleanupCache: () => void;
+let cleanupInstall: () => void;
 
 // Shared seed for env() — the CLI's bootstrap migrations may touch the
 // cache so we use a fresh dir per process.
 beforeAll(() => {
-  cacheRoot = mkdtempSync(join(tmpdir(), 'orch-cli-'));
-  installDir = mkdtempSync(join(tmpdir(), 'orch-cli-install-'));
+  ({ dir: cacheRoot, cleanup: cleanupCache } = createTempDir('orch-cli-'));
+  ({ dir: installDir, cleanup: cleanupInstall } =
+    createTempDir('orch-cli-install-'));
   process.env.AMPLITUDE_WIZARD_CACHE_DIR = cacheRoot;
   process.env.AMPLITUDE_WIZARD_SKIP_BOOTSTRAP = '1';
 
@@ -61,8 +63,8 @@ beforeAll(() => {
 });
 
 afterAll(() => {
-  rmSync(cacheRoot, { recursive: true, force: true });
-  rmSync(installDir, { recursive: true, force: true });
+  cleanupCache();
+  cleanupInstall();
   delete process.env.AMPLITUDE_WIZARD_CACHE_DIR;
   delete process.env.AMPLITUDE_WIZARD_SKIP_BOOTSTRAP;
   delete process.env.__ORCH_TEST_SESSION_ID;

@@ -5,13 +5,13 @@
  */
 
 import * as fs from 'node:fs';
-import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   parseEventPlanContent,
   readLocalEventPlan,
 } from '../event-plan-parser.js';
+import { createTempDir } from '../../utils/__tests__/helpers/temp-dir.js';
 
 describe('parseEventPlanContent', () => {
   it('returns null for invalid JSON', () => {
@@ -62,13 +62,14 @@ describe('parseEventPlanContent', () => {
 
 describe('readLocalEventPlan', () => {
   let installDir: string;
+  let cleanup: () => void;
 
   beforeEach(() => {
-    installDir = fs.mkdtempSync(path.join(os.tmpdir(), 'event-plan-test-'));
+    ({ dir: installDir, cleanup } = createTempDir('event-plan-test-'));
   });
 
   afterEach(() => {
-    fs.rmSync(installDir, { recursive: true, force: true });
+    cleanup();
   });
 
   it('returns [] when neither canonical nor legacy file exists', () => {

@@ -12,7 +12,6 @@
  */
 
 import * as fs from 'node:fs';
-import * as os from 'node:os';
 import * as path from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -21,10 +20,7 @@ import { Integration } from '../../constants';
 import { buildPreflightContext } from '../preflight-context';
 
 import type { PackageManagerInfo } from '../../package-manager-detection-types';
-
-function makeTmpInstallDir(): string {
-  return fs.mkdtempSync(path.join(os.tmpdir(), 'preflight-ctx-'));
-}
+import { createTempDir } from '../../../utils/__tests__/helpers/temp-dir.js';
 
 const PNPM_INFO: PackageManagerInfo = {
   detected: [
@@ -46,14 +42,15 @@ const PNPM_INFO: PackageManagerInfo = {
 
 describe('buildPreflightContext', () => {
   let installDir: string;
+  let cleanup: () => void;
 
   beforeEach(() => {
-    installDir = makeTmpInstallDir();
+    ({ dir: installDir, cleanup } = createTempDir('preflight-ctx-'));
   });
 
   afterEach(() => {
     try {
-      fs.rmSync(installDir, { recursive: true, force: true });
+      cleanup();
     } catch {
       // ignore
     }
@@ -386,7 +383,7 @@ describe('buildPreflightContext', () => {
       },
     ];
     for (const c of cases) {
-      const dir = makeTmpInstallDir();
+      const { dir, cleanup: cleanupDir } = createTempDir('preflight-ctx-');
       try {
         if (c.hasEnvFiles) {
           fs.writeFileSync(
@@ -421,7 +418,7 @@ describe('buildPreflightContext', () => {
         // No env values ever leak.
         expect(out).not.toContain('stub');
       } finally {
-        fs.rmSync(dir, { recursive: true, force: true });
+        cleanupDir();
       }
     }
   });
@@ -439,14 +436,15 @@ describe('buildPreflightContext', () => {
  */
 describe('buildPreflightContext — JIT gating', () => {
   let installDir: string;
+  let cleanup: () => void;
 
   beforeEach(() => {
-    installDir = fs.mkdtempSync(path.join(os.tmpdir(), 'preflight-gate-'));
+    ({ dir: installDir, cleanup } = createTempDir('preflight-gate-'));
   });
 
   afterEach(() => {
     try {
-      fs.rmSync(installDir, { recursive: true, force: true });
+      cleanup();
     } catch {
       // ignore
     }

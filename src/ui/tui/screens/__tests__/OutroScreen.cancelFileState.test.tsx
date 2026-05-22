@@ -27,9 +27,9 @@
 
 import React from 'react';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { mkdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
+import { createTempDir } from '../../../../utils/__tests__/helpers/temp-dir.js';
 
 import {
   OutroScreen,
@@ -47,16 +47,17 @@ import {
 
 describe('OutroScreen — cancel file-state line', () => {
   let installDir: string;
+  let cleanup: () => void;
 
   beforeEach(() => {
-    installDir = mkdtempSync(join(tmpdir(), 'outro-cancel-fs-'));
+    ({ dir: installDir, cleanup } = createTempDir('outro-cancel-fs-'));
     resetFileChangeLedger();
   });
 
   afterEach(() => {
     resetFileChangeLedger();
     try {
-      rmSync(installDir, { recursive: true, force: true });
+      cleanup();
     } catch {
       /* best-effort */
     }

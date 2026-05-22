@@ -7,8 +7,8 @@
  * to instrument.
  */
 
-import { mkdtempSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir, homedir } from 'node:os';
+import { mkdirSync, writeFileSync } from 'node:fs';
+import { homedir } from 'node:os';
 import { join } from 'node:path';
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
@@ -19,16 +19,18 @@ import {
   resolveWorkspacePicks,
   shortenHomePath,
 } from '../workspace-analysis.js';
+import { createTempDir } from '../../utils/__tests__/helpers/temp-dir.js';
 
 let dir: string;
+let cleanup: () => void;
 
 beforeEach(() => {
-  dir = mkdtempSync(join(tmpdir(), 'wizard-workspace-analysis-'));
+  ({ dir, cleanup } = createTempDir('wizard-workspace-analysis-'));
 });
 
 afterEach(() => {
   try {
-    rmSync(dir, { recursive: true, force: true });
+    cleanup();
   } catch {
     /* best effort */
   }

@@ -6,24 +6,25 @@
  */
 
 import * as fs from 'node:fs';
-import * as os from 'node:os';
 import * as path from 'node:path';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import {
   readPreviousRunSummary,
   humanizeAge,
 } from '../welcome-back-context.js';
+import { createTempDir } from '../../../../utils/__tests__/helpers/temp-dir.js';
 
 describe('readPreviousRunSummary', () => {
   let tmpDir: string;
+  let cleanup: () => void;
 
   beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'welcome-back-test-'));
+    ({ dir: tmpDir, cleanup } = createTempDir('welcome-back-test-'));
   });
 
   afterEach(() => {
     try {
-      fs.rmSync(tmpDir, { recursive: true, force: true });
+      cleanup();
     } catch {
       // Best-effort cleanup
     }

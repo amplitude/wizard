@@ -21,9 +21,8 @@
 
 import React from 'react';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { createTempDir } from '../../../../utils/__tests__/helpers/temp-dir.js';
 
 import { OutroScreen } from '../OutroScreen.js';
 import {
@@ -55,16 +54,17 @@ function seedLedgerWith(
 
 describe('OutroScreen — success event list reflects wired code', () => {
   let installDir: string;
+  let cleanup: () => void;
 
   beforeEach(() => {
-    installDir = mkdtempSync(join(tmpdir(), 'outro-events-'));
+    ({ dir: installDir, cleanup } = createTempDir('outro-events-'));
     resetFileChangeLedger();
   });
 
   afterEach(() => {
     resetFileChangeLedger();
     try {
-      rmSync(installDir, { recursive: true, force: true });
+      cleanup();
     } catch {
       /* best-effort */
     }

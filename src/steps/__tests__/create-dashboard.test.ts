@@ -10,8 +10,8 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import fs from 'fs';
-import os from 'os';
 import path from 'path';
+import { createTempDir } from '../../utils/__tests__/helpers/temp-dir.js';
 import {
   __test__,
   createDashboardStep,
@@ -244,8 +244,9 @@ describe('createDashboardStep — agent already created dashboard', () => {
 
   const ui = (uiModule as any).__ui;
 
+  let cleanup: () => void;
   beforeEach(() => {
-    installDir = fs.mkdtempSync(path.join(os.tmpdir(), 'wizard-dashboard-'));
+    ({ dir: installDir, cleanup } = createTempDir('wizard-dashboard-'));
     fs.writeFileSync(
       path.join(installDir, '.amplitude-events.json'),
       JSON.stringify([{ name: 'Hello API Called' }]),
@@ -254,7 +255,7 @@ describe('createDashboardStep — agent already created dashboard', () => {
   });
 
   afterEach(() => {
-    fs.rmSync(installDir, { recursive: true, force: true });
+    cleanup();
   });
 
   function makeSession(): {

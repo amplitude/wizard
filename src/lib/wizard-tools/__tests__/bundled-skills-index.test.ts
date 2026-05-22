@@ -23,6 +23,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import fs from 'fs';
 import path from 'path';
+import { createTempDir } from '../../../utils/__tests__/helpers/temp-dir.js';
 import {
   bundledSkillExists,
   clearBundledSkillsCache,
@@ -192,14 +193,14 @@ describe('bundled-skills in-memory index', () => {
     loadBundledSkillMenu();
     const baseline = skillTreeReaddirCalls();
 
-    const tmpDest = fs.mkdtempSync(
-      path.join(require('os').tmpdir(), 'wizard-install-skill-test-'),
+    const { dir: tmpDest, cleanup } = createTempDir(
+      'wizard-install-skill-test-',
     );
     try {
       const result = installBundledSkill('wizard-prompt-supplement', tmpDest);
       expect(result.success).toBe(true);
     } finally {
-      fs.rmSync(tmpDest, { recursive: true, force: true });
+      cleanup();
     }
 
     expect(skillTreeReaddirCalls()).toBe(baseline);
