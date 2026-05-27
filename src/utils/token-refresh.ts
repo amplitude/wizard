@@ -244,3 +244,75 @@ async function tryRefreshTokenInner(
     return null;
   }
 }
+
+/**
+ * Read the freshest stored OAuth token, refreshing it from the stored
+ * refresh token when it has expired (or is within {@link EXPIRY_BUFFER_MS}).
+ * Returns the new access token on success, or `fallback` when no stored
+ * token / refresh token / refresh-attempt success is available.
+ *
+ * Used at pre-run / post-run boundaries in `agent-runner.ts` and on every
+ * assistant message via the token-refresh middleware for long runs.
+ */
+export async function refreshTokenIfStale(
+  fallback: string,
+  label: string,
+): Promise<string> {
+  try {
+    const { getStoredToken, getStoredUser, storeToken } = await import(
+      './ampli-settings.js'
+    );
+    const { refreshAccessToken } = await import('./oauth.js');
+    const user = getStoredUser();
+    const stored = getStoredToken(user?.id, user?.zone);
+    if (!stored?.accessToken) return fallback;
+    const needsRefresh =
+      user &&
+      Date.now() + EXPIRY_BUFFER_MS > new Date(stored.expiresAt).getTime();
+    if (!needsRefresh) {
+      if (stored.accessToken !== fallback) {
+        const { invalidateMcpSessionsForToken } = await import(
+          '../lib/mcp-with-fallback.js'
+        );
+        invalidateMcpSessionsForToken(fallback);
+      }
+      return stored.accessToken;
+    }
+    const startedAt = Date.now();
+    try {
+      const { analytics } = await import('./analytics.js');
+      const refreshed = await refreshAccessToken(
+        stored.refreshToken,
+        user.zone,
+      );
+      storeToken(user, {
+        accessToken: refreshed.accessToken,
+        idToken: refreshed.idToken,
+        refreshToken: refreshed.refreshToken,
+        expiresAt: refreshed.expiresAt,
+      });
+      const { invalidateMcpSessionsForToken } = await import(
+        '../lib/mcp-with-fallback.js'
+      );
+      invalidateMcpSessionsForToken(fallback);
+      if (stored.accessToken !== fallback) {
+        invalidateMcpSessionsForToken(stored.accessToken);
+      }
+      analytics.wizardCapture('auth refreshed silently', {
+        label,
+        'duration ms': Date.now() - startedAt,
+      });
+      return refreshed.accessToken;
+    } catch (err) {
+      const { analytics } = await import('./analytics.js');
+      analytics.wizardCapture('auth refresh failed', {
+        label,
+        reason: err instanceof Error ? err.message : 'unknown',
+        'duration ms': Date.now() - startedAt,
+      });
+      return stored.accessToken;
+    }
+  } catch {
+    return fallback;
+  }
+}
