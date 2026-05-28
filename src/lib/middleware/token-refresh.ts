@@ -34,13 +34,15 @@
  * ## Wiring
  *
  * Add to the middleware pipeline in `agent-runner.ts` alongside
- * `createRetryMiddleware`. Pass `onTokenRefreshed` so the runner can
- * mirror the new token back onto `session.credentials.accessToken` and
- * onto the agent's HTTP client before the next gateway request fires.
+ * `createRetryMiddleware`. Pass `mcpServers` and `onTokenRefreshed` so
+ * the rotation atomically updates `process.env`, `CLAUDE_CODE_OAUTH_TOKEN`,
+ * and MCP headers via `refreshGatewayBearer()`. The `onTokenRefreshed`
+ * callback mirrors the new token onto `session.credentials.accessToken`.
  *
  * ```ts
  * const tokenRefreshMiddleware = createTokenRefreshMiddleware({
  *   getToken: () => accessToken,
+ *   mcpServers: agent.mcpServers,
  *   onTokenRefreshed: (fresh) => {
  *     accessToken = fresh;
  *     if (session.credentials) session.credentials.accessToken = fresh;
@@ -56,8 +58,9 @@ import type {
   MiddlewareStore,
 } from './types.js';
 import { logToFile } from '../../utils/debug.js';
-import { analytics } from '../../utils/analytics.js';
+import { refreshGatewayBearer } from '../llm-gateway-bearer-refresh.js';
 import { refreshTokenIfStale } from '../../utils/token-refresh.js';
+import { updateAmplitudeMcpBearer } from '../agent-interface.js';
 
 /**
  * How often to re-read the stored token from disk and compare its
@@ -76,11 +79,17 @@ export interface TokenRefreshMiddlewareOptions {
   getToken: () => string;
 
   /**
+   * MCP server config to re-stamp with the fresh bearer on rotation.
+   * Required so the middleware can atomically update env vars + MCP
+   * headers via `refreshGatewayBearer()`.
+   */
+  mcpServers?: Record<string, unknown>;
+
+  /**
    * Called with the freshly-rotated token immediately after a
    * successful silent refresh. The caller MUST mirror this value back
-   * onto `session.credentials.accessToken` and onto any HTTP client
-   * headers that carry the bearer — the middleware itself has no
-   * reference to those call sites.
+   * onto `session.credentials.accessToken` — `refreshGatewayBearer()`
+   * already updated `process.env` and MCP headers atomically.
    */
   onTokenRefreshed: (newToken: string) => void;
 }
@@ -120,13 +129,26 @@ export function createTokenRefreshMiddleware(
 
     try {
       const currentToken = opts.getToken();
-      const fresh = await refreshTokenIfStale(currentToken, 'mid-run');
-      if (fresh !== currentToken) {
+      // Use refreshGatewayBearer to atomically update process.env vars,
+      // CLAUDE_CODE_OAUTH_TOKEN, and MCP headers — manual rotation via
+      // refreshTokenIfStale alone would skip env vars and cause the
+      // running agent SDK to see a stale bearer on subsequent gateway calls.
+      const rotated = await refreshGatewayBearer({
+        label: 'mid-run',
+        mcpServers: opts.mcpServers,
+        refreshTokenIfStale,
+        updateAmplitudeMcpBearer,
+      });
+      if (rotated) {
         logToFile('[token-refresh-mw] mid-run token rotated');
-        analytics.wizardCapture('auth refreshed silently', {
-          label: 'mid-run',
-        });
+        // Read the fresh token from process.env after refreshGatewayBearer
+        // has applied it — this ensures the callback sees the same value
+        // the SDK will read on the next gateway call.
+        const fresh = process.env.ANTHROPIC_AUTH_TOKEN ?? currentToken;
         opts.onTokenRefreshed(fresh);
+        // Note: analytics event 'auth refreshed silently' is emitted by
+        // refreshTokenIfStale (called inside refreshGatewayBearer), not here,
+        // to avoid double-counting mid-run rotations.
       }
     } catch (err) {
       // Never throw from middleware — a failed refresh attempt is

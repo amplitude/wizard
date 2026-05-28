@@ -969,13 +969,6 @@ async function runAgentWizardBody(
   if (accessToken !== rawAccessToken && session.credentials) {
     session.credentials.accessToken = accessToken;
   }
-  const tokenRefreshMiddleware = createTokenRefreshMiddleware({
-    getToken: () => accessToken,
-    onTokenRefreshed: (fresh) => {
-      accessToken = fresh;
-      if (session.credentials) session.credentials.accessToken = fresh;
-    },
-  });
   // Derive cloudRegion from session via the centralized resolver.
   // readDisk: true — the agent runner may be entered via paths (resumed
   // sessions, TUI fallback) where the RegionSelect invariant isn't guaranteed.
@@ -1347,7 +1340,19 @@ async function runAgentWizardBody(
 
   // Always run observability middleware for structured logging + Sentry breadcrumbs.
   // Retry middleware surfaces transient gateway retries to the UI.
+  // Token-refresh middleware proactively rotates the bearer mid-run to prevent
+  // long-running tasks from hitting token expiry. Must be created after the
+  // agent object is available so we can pass agent.mcpServers to ensure atomic
+  // rotation of env vars + MCP headers.
   // Benchmark middleware (token/cost tracking) is opt-in via --benchmark.
+  const tokenRefreshMiddleware = createTokenRefreshMiddleware({
+    getToken: () => accessToken,
+    mcpServers: agent.mcpServers,
+    onTokenRefreshed: (fresh) => {
+      accessToken = fresh;
+      if (session.credentials) session.credentials.accessToken = fresh;
+    },
+  });
   const retryMiddleware = createRetryMiddleware((state) =>
     getUI().setRetryState(state),
   );
