@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.18.1](https://github.com/amplitude/wizard/compare/wizard-v1.18.0...wizard-v1.18.1) (2026-05-28)
+
+
+### Bug Fixes
+
+* **auth:** refresh oauth token mid-run on long agent sessions ([#862](https://github.com/amplitude/wizard/issues/862)) ([ebc9691](https://github.com/amplitude/wizard/commit/ebc9691546541bd8daad39d0d197f6b731d31341))
+
 ## [1.18.0](https://github.com/amplitude/wizard/compare/wizard-v1.17.0...wizard-v1.18.0) (2026-05-22)
 
 
