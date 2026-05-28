@@ -15,3 +15,8 @@ export type { BenchmarkData, StepUsage } from './benchmark';
 export { createPluginsFromConfig } from './benchmarks';
 
 export { createRetryMiddleware } from './retry';
+export {
+  createTokenRefreshMiddleware,
+  CHECK_INTERVAL_MS,
+} from './token-refresh';
+export type { TokenRefreshMiddlewareOptions } from './token-refresh';

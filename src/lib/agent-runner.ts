@@ -49,6 +49,7 @@ import { createObservabilityMiddleware } from './middleware/observability';
 import { MiddlewarePipeline } from './middleware/pipeline';
 import { createBenchmarkPipeline } from './middleware/benchmark';
 import { createRetryMiddleware } from './middleware/retry';
+import { createTokenRefreshMiddleware } from './middleware/token-refresh.js';
 import {
   wizardAbort,
   WizardError,
@@ -482,106 +483,9 @@ function sessionToOptions(session: WizardSession): WizardOptions {
   };
 }
 
-/**
- * Read the freshest stored OAuth token, refreshing it from the stored
- * refresh token when it has expired (or is within the 5-minute pre-expiry
- * buffer). Returns the new access token on success, or `fallback` when no
- * stored token / refresh token / refresh-attempt success is available.
- *
- * This is the post-run-token-staleness fix:
- *
- * Pre-PR, agent-runner had this logic inline ONCE — at the top of the
- * run, before the agent started. After a 14-minute Excalidraw run the
- * 1-hour OAuth token was already past its `expiresAt` by the time
- * `commitPlannedEventsStep` / `createDashboardStep` / `pollForDataIngestion`
- * fired their MCP / data-API calls, surfacing the same
- * "Authentication failed while trying to fetch Amplitude user data"
- * cascade we already fixed for the in-run path in PR #348.
- *
- * Now extracted so the agent-runner can re-invoke it at the post-run
- * boundary, AND so the freshly-refreshed token gets mirrored back onto
- * `session.credentials.accessToken` — that way late-render screens
- * (SlackScreen, OutroScreen) automatically pick up the new value when
- * they read from session.
- *
- * Failure mode: returns `fallback` and logs an analytics breadcrumb. The
- * downstream API call will then fail loudly — better than swallowing the
- * auth error twice.
- */
-export async function refreshTokenIfStale(
-  fallback: string,
-  label: string,
-): Promise<string> {
-  try {
-    const { getStoredToken, getStoredUser, storeToken } = await import(
-      '../utils/ampli-settings.js'
-    );
-    const { refreshAccessToken } = await import('../utils/oauth.js');
-    const { EXPIRY_BUFFER_MS } = await import('../utils/token-refresh.js');
-    const user = getStoredUser();
-    const stored = getStoredToken(user?.id, user?.zone);
-    if (!stored?.accessToken) return fallback;
-    const needsRefresh =
-      user &&
-      Date.now() + EXPIRY_BUFFER_MS > new Date(stored.expiresAt).getTime();
-    if (!needsRefresh) {
-      // If the on-disk token differs from the caller's in-memory one,
-      // a previous refresh rotated it — drop any MCP sessions bound to
-      // the stale value before handing it back. Cheap & idempotent.
-      if (stored.accessToken !== fallback) {
-        const { invalidateMcpSessionsForToken } = await import(
-          './mcp-with-fallback.js'
-        );
-        invalidateMcpSessionsForToken(fallback);
-      }
-      return stored.accessToken;
-    }
-    const startedAt = Date.now();
-    try {
-      // CRITICAL: pass the user's zone — without it `refreshAccessToken`
-      // defaults to the US OAuth host and EU users' refresh tokens get
-      // rejected. (Same root cause as PR #348's in-run fix.)
-      const refreshed = await refreshAccessToken(
-        stored.refreshToken,
-        user.zone,
-      );
-      storeToken(user, {
-        accessToken: refreshed.accessToken,
-        idToken: refreshed.idToken,
-        refreshToken: refreshed.refreshToken,
-        expiresAt: refreshed.expiresAt,
-      });
-      // Drop cached MCP sessions keyed on the now-stale token so the
-      // next callAmplitudeMcp opens a fresh session with the rotated
-      // bearer instead of 401-ing and falling through to the 12s agent
-      // fallback.
-      const { invalidateMcpSessionsForToken } = await import(
-        './mcp-with-fallback.js'
-      );
-      invalidateMcpSessionsForToken(fallback);
-      if (stored.accessToken !== fallback) {
-        invalidateMcpSessionsForToken(stored.accessToken);
-      }
-      analytics.wizardCapture('auth refreshed silently', {
-        label,
-        'duration ms': Date.now() - startedAt,
-      });
-      return refreshed.accessToken;
-    } catch (err) {
-      analytics.wizardCapture('auth refresh failed', {
-        label,
-        reason: err instanceof Error ? err.message : 'unknown',
-        'duration ms': Date.now() - startedAt,
-      });
-      // Even when refresh fails, return whatever non-refreshed token we
-      // already pulled from disk — it might still be live (we may have
-      // entered the buffer but not yet expired).
-      return stored.accessToken;
-    }
-  } catch {
-    return fallback;
-  }
-}
+import { refreshTokenIfStale } from '../utils/token-refresh.js';
+
+export { refreshTokenIfStale };
 
 /**
  * Universal agent-powered wizard runner.
@@ -1436,16 +1340,29 @@ async function runAgentWizardBody(
 
   // Always run observability middleware for structured logging + Sentry breadcrumbs.
   // Retry middleware surfaces transient gateway retries to the UI.
+  // Token-refresh middleware proactively rotates the bearer mid-run to prevent
+  // long-running tasks from hitting token expiry. Must be created after the
+  // agent object is available so we can pass agent.mcpServers to ensure atomic
+  // rotation of env vars + MCP headers.
   // Benchmark middleware (token/cost tracking) is opt-in via --benchmark.
+  const tokenRefreshMiddleware = createTokenRefreshMiddleware({
+    getToken: () => accessToken,
+    mcpServers: agent.mcpServers,
+    onTokenRefreshed: (fresh) => {
+      accessToken = fresh;
+      if (session.credentials) session.credentials.accessToken = fresh;
+    },
+  });
   const retryMiddleware = createRetryMiddleware((state) =>
     getUI().setRetryState(state),
   );
   const middleware = session.benchmark
     ? createBenchmarkPipeline(spinner, sessionToOptions(session), undefined, {
-        extraMiddlewares: [retryMiddleware],
+        extraMiddlewares: [tokenRefreshMiddleware, retryMiddleware],
       })
     : new MiddlewarePipeline([
         createObservabilityMiddleware(),
+        tokenRefreshMiddleware,
         retryMiddleware,
       ]);
 
