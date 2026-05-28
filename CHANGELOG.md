@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.18.2](https://github.com/amplitude/wizard/compare/wizard-v1.18.1...wizard-v1.18.2) (2026-05-28)
+
+
+### Bug Fixes
+
+* **auth:** force re-login on dead refresh token + enrich Sentry auth telemetry ([#864](https://github.com/amplitude/wizard/issues/864)) ([0585af1](https://github.com/amplitude/wizard/commit/0585af10aa05568ac89e6f91c3aced9314044a61))
+
 ## [1.18.1](https://github.com/amplitude/wizard/compare/wizard-v1.18.0...wizard-v1.18.1) (2026-05-28)
 
 
