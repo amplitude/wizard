@@ -12,7 +12,13 @@
  */
 
 import { describe, it, expect, vi, beforeEach } from 'vitest';
-import { tryRefreshToken } from '../token-refresh.js';
+import {
+  tryRefreshToken,
+  isDeadRefreshToken,
+  isReauthRequired,
+  markReauthRequired,
+  resetReauthRequired,
+} from '../token-refresh.js';
 
 vi.mock('../debug.js', () => ({ logToFile: vi.fn() }));
 vi.mock('../../lib/observability/index.js', () => ({
@@ -144,5 +150,51 @@ describe('tryRefreshToken', () => {
     );
 
     expect(result).toBeNull();
+  });
+});
+
+describe('isDeadRefreshToken', () => {
+  const axiosErr = (status: number, error?: string) => ({
+    response: { status, data: error === undefined ? {} : { error } },
+  });
+
+  it('treats 400 invalid_grant as a dead refresh token', () => {
+    expect(isDeadRefreshToken(axiosErr(400, 'invalid_grant'))).toBe(true);
+  });
+
+  it('treats 401 invalid_token as a dead refresh token', () => {
+    expect(isDeadRefreshToken(axiosErr(401, 'invalid_token'))).toBe(true);
+  });
+
+  it('treats a bare 400 from the token endpoint as dead (grant is all we sent)', () => {
+    expect(isDeadRefreshToken(axiosErr(400))).toBe(true);
+  });
+
+  it('does NOT log the user out on transient 5xx', () => {
+    expect(isDeadRefreshToken(axiosErr(503, 'temporarily_unavailable'))).toBe(
+      false,
+    );
+  });
+
+  it('does NOT log the user out on a network error (no response)', () => {
+    expect(isDeadRefreshToken(new Error('ECONNRESET'))).toBe(false);
+    expect(isDeadRefreshToken(undefined)).toBe(false);
+    expect(isDeadRefreshToken({ code: 'ETIMEDOUT' })).toBe(false);
+  });
+
+  it('does NOT treat an unrelated 400 error code as dead', () => {
+    expect(isDeadRefreshToken(axiosErr(400, 'invalid_request'))).toBe(false);
+  });
+});
+
+describe('reauth-required flag lifecycle', () => {
+  beforeEach(() => resetReauthRequired());
+
+  it('starts clear, sets on mark, clears on reset', () => {
+    expect(isReauthRequired()).toBe(false);
+    markReauthRequired();
+    expect(isReauthRequired()).toBe(true);
+    resetReauthRequired();
+    expect(isReauthRequired()).toBe(false);
   });
 });

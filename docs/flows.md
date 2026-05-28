@@ -2,49 +2,59 @@
 
 ## Back navigation
 
-Pressing **Esc** on a decision-point screen steps the user back to the
-previous decision so they can change their answer. Implemented declaratively
-via `FlowEntry.revert` callbacks in `src/ui/tui/flows.ts` — each entry that
-supports back-nav describes how to un-complete itself, and the router walks
-backwards to find the most recent revertible entry.
+Pressing **Esc** on a decision-point screen steps the user back to the previous
+decision so they can change their answer. Implemented declaratively via
+`FlowEntry.revert` callbacks in `src/ui/tui/flows.ts` — each entry that supports
+back-nav describes how to un-complete itself, and the router walks backwards to
+find the most recent revertible entry.
 
 Entries without a `revert` act as a **back-stop wall**:
 
-- **Run** — the agent has executed; backing past it would re-run instrumentation.
+- **Run** — the agent has executed; backing past it would re-run
+  instrumentation.
 - **Intro** — first screen; nothing to back to.
 
 Entries whose `revert` returns `false` are transparent — the router walks
 through them. Setup uses this to walk past when there are no user-answered
-questions to pop; CreateProject uses this so back-nav from DataSetup lands
-on Auth (not the create-project form).
+questions to pop; CreateProject uses this so back-nav from DataSetup lands on
+Auth (not the create-project form).
 
 Per-screen Esc behavior:
 
-| Screen                | Esc action                                                    |
-| --------------------- | ------------------------------------------------------------- |
-| Auth                  | Back → SignupFullName / ToS / SignupEmail (whichever has the most recent meaningful revert on the create-account path), else RegionSelect |
-| SignupFullName        | Back → SignupEmail (clears email + ceremony state via `setSignupEmail(null)`'s bound reset, so the next pass re-probes from scratch) |
-| ToS                   | Back → SignupEmail (clears email + ceremony state — same reason as SignupFullName) |
-| SigningUp             | Transparent (`revert: () => false`) — back-walk skips this entry; no clean undo for an in-flight network call |
-| SignupEmail           | Back → RegionSelect (clears captured email *and* `signupRequiredFields` / `signupAuth` / `signupAbandoned` via `setSignupEmail(null)`) |
-| DataSetup             | Back → Auth (clears org/project selection)                    |
-| ActivationOptions     | Back → DataSetup (re-runs activation check)                   |
-| Setup                 | Pops one answered question; if none, walks back further       |
-| Slack                 | Back → DataIngestionCheck or Mcp                              |
-| DataIngestionCheck    | Back → Mcp; **Enter** or **q** skip verification (with confirm if no events yet); **x** exits to resume later |
-| CreateProject         | Cancel (existing) — also functions as back to Auth            |
-| FeatureOptIn          | Skip (confirms with no features selected — Esc=skip is the    |
-|                       | one screen that breaks the convention; hint bar makes it      |
-|                       | explicit)                                                     |
-| Intro                 | Cancel wizard (existing)                                      |
-| Outro                 | Close report dialog (existing)                                |
-| RegionSelect / Mcp    | No-op (no revertible step before them)                        |
+| Screen             | Esc action                                                                                                                                |
+| ------------------ | ----------------------------------------------------------------------------------------------------------------------------------------- |
+| Auth               | Back → SignupFullName / ToS / SignupEmail (whichever has the most recent meaningful revert on the create-account path), else RegionSelect |
+| SignupFullName     | Back → SignupEmail (clears email + ceremony state via `setSignupEmail(null)`'s bound reset, so the next pass re-probes from scratch)      |
+| ToS                | Back → SignupEmail (clears email + ceremony state — same reason as SignupFullName)                                                        |
+| SigningUp          | Transparent (`revert: () => false`) — back-walk skips this entry; no clean undo for an in-flight network call                             |
+| SignupEmail        | Back → RegionSelect (clears captured email _and_ `signupRequiredFields` / `signupAuth` / `signupAbandoned` via `setSignupEmail(null)`)    |
+| DataSetup          | Back → Auth (clears org/project selection)                                                                                                |
+| ActivationOptions  | Back → DataSetup (re-runs activation check)                                                                                               |
+| Setup              | Pops one answered question; if none, walks back further                                                                                   |
+| Slack              | Back → DataIngestionCheck or Mcp                                                                                                          |
+| DataIngestionCheck | Back → Mcp; **Enter** or **q** skip verification (with confirm if no events yet); **x** exits to resume later                             |
+| CreateProject      | Cancel (existing) — also functions as back to Auth                                                                                        |
+| FeatureOptIn       | Skip (confirms with no features selected — Esc=skip is the                                                                                |
+|                    | one screen that breaks the convention; hint bar makes it                                                                                  |
+|                    | explicit)                                                                                                                                 |
+| Intro              | Cancel wizard (existing)                                                                                                                  |
+| Outro              | Close report dialog (existing)                                                                                                            |
+| RegionSelect / Mcp | No-op (no revertible step before them)                                                                                                    |
 
 ### Signup ceremony invariants
 
-- `setSignupEmail(null)` clears **all** ceremony state (`signupRequiredFields`, `signupAuth`, `signupAbandoned`) so any back-nav path that rewinds to the email step automatically invalidates the prior probe response. The ceremony is a single conceptual unit keyed to the email being present.
-- `SignupFullName.revert` and `ToS.revert` return `false` when the screen was skipped (server never asked, value never set) so the back-walk continues past them rather than firing a no-op revert that traps the user.
-- `SigningUpScreen` is the only signup screen with network I/O. Its `useAsyncEffect` writes one of `signupAuth` (success) / `signupRequiredFields` (needs more info) / `signupAbandoned` (redirect or error). The auth task in `default.ts` waits on this settle before opening browser OAuth (see `isAuthTaskGateReady` in `src/commands/helpers.ts`).
+- `setSignupEmail(null)` clears **all** ceremony state (`signupRequiredFields`,
+  `signupAuth`, `signupAbandoned`) so any back-nav path that rewinds to the
+  email step automatically invalidates the prior probe response. The ceremony is
+  a single conceptual unit keyed to the email being present.
+- `SignupFullName.revert` and `ToS.revert` return `false` when the screen was
+  skipped (server never asked, value never set) so the back-walk continues past
+  them rather than firing a no-op revert that traps the user.
+- `SigningUpScreen` is the only signup screen with network I/O. Its
+  `useAsyncEffect` writes one of `signupAuth` (success) / `signupRequiredFields`
+  (needs more info) / `signupAbandoned` (redirect or error). The auth task in
+  `default.ts` waits on this settle before opening browser OAuth (see
+  `isAuthTaskGateReady` in `src/commands/helpers.ts`).
 
 The `[Esc] Back` hint appears in `KeyHintBar` only when back is actually
 available, so it never lies about what the keystroke will do.
@@ -57,20 +67,20 @@ The CLI keeps a persistent prompt open at all times (like Claude). Slash
 commands can be run at any point during the wizard to change settings or trigger
 actions.
 
-| Command      | Description                                                       |
-| ------------ | ----------------------------------------------------------------- |
-| `/region`    | Switch the data-center region (US or EU) — re-triggers data setup |
-| `/org`       | Switch the active org                                             |
-| `/project`   | Switch the active project                                         |
-| `/login`     | Re-authenticate                                                   |
-| `/logout`    | Clear stored credentials                                          |
-| `/whoami`    | Show current user, org, and project                               |
-| `/mcp`       | Install or remove the Amplitude MCP server                        |
-| `/slack`     | Set up Amplitude Slack integration                                |
-| `/feedback`  | Send product feedback (optionally with opt-in system diagnostics) |
-| `/test`      | Run a prompt-skill demo (confirm + choose)                        |
-| `/snake`     | Play Snake                                                        |
-| `/exit`      | Exit the wizard                                                   |
+| Command     | Description                                                       |
+| ----------- | ----------------------------------------------------------------- |
+| `/region`   | Switch the data-center region (US or EU) — re-triggers data setup |
+| `/org`      | Switch the active org                                             |
+| `/project`  | Switch the active project                                         |
+| `/login`    | Re-authenticate                                                   |
+| `/logout`   | Clear stored credentials                                          |
+| `/whoami`   | Show current user, org, and project                               |
+| `/mcp`      | Install or remove the Amplitude MCP server                        |
+| `/slack`    | Set up Amplitude Slack integration                                |
+| `/feedback` | Send product feedback (optionally with opt-in system diagnostics) |
+| `/test`     | Run a prompt-skill demo (confirm + choose)                        |
+| `/snake`    | Play Snake                                                        |
+| `/exit`     | Exit the wizard                                                   |
 
 ---
 
@@ -203,10 +213,10 @@ flowchart TD
     SUSI -. overlay .-> OUTAGE["OutageScreen"]
 ```
 
-> The `SettingsOverrideScreen` overlay was removed. The wizard now scopes
-> its gateway env to `.claude/settings.local.json` (machine-local,
-> gitignored) so the user's checked-in `.claude/settings.json` is never
-> touched. See `src/lib/claude-settings-scope.ts`.
+> The `SettingsOverrideScreen` overlay was removed. The wizard now scopes its
+> gateway env to `.claude/settings.local.json` (machine-local, gitignored) so
+> the user's checked-in `.claude/settings.json` is never touched. See
+> `src/lib/claude-settings-scope.ts`.
 
 ---
 
@@ -291,11 +301,10 @@ flowchart TD
 > **Partially implemented.** `DataSetupScreen` sets `activationLevel` (none /
 > partial / full). `DataIngestionCheckScreen` polls for events; the user can
 > skip verification (Enter or q, with a confirm step when nothing has been
-> observed yet) or exit to resume later (x).
-> `ChecklistScreen` offers first chart and first dashboard via browser
-> deep-links. Taxonomy agent and direct GraphQL chart/dashboard creation are
-> planned. See `features/05-data-setup-flow.feature` for the full target
-> behaviour.
+> observed yet) or exit to resume later (x). `ChecklistScreen` offers first
+> chart and first dashboard via browser deep-links. Taxonomy agent and direct
+> GraphQL chart/dashboard creation are planned. See
+> `features/05-data-setup-flow.feature` for the full target behaviour.
 
 ```mermaid
 ---
@@ -362,9 +371,28 @@ title: Outro flow
 flowchart TD
     OUTRO["OutroScreen"] --> OUTCOME{Outcome?}
     OUTCOME -->|success| SUCCESS["Show changes, events, docs/continue URLs"]
-    OUTCOME -->|error| ERR["Show error message"]
+    OUTCOME -->|error| ERR{Auth error?}
     OUTCOME -->|cancel| CANCEL["Show cancel message"]
+    ERR -->|no| ERR_GENERIC["Show error message"]
+    ERR -->|"auth — recoverable<br/>(access token expired mid-run,<br/>refresh token still valid)"| ERR_RERUN["Show 'session expired, re-run to refresh'<br/>promptLogin = false · creds preserved"]
+    ERR -->|"auth — re-login required<br/>(refresh token rejected: invalid_grant,<br/>OR Amplitude OAuth needs-auth)"| ERR_REAUTH["Show 'couldn't refresh your session — log in again'<br/>promptLogin = true · stored session cleared<br/>(next run forces fresh browser OAuth)"]
     SUCCESS --> EXIT["Press key to exit"]
-    ERR --> EXIT
+    ERR_GENERIC --> EXIT
+    ERR_RERUN --> EXIT
+    ERR_REAUTH --> EXIT
     CANCEL --> EXIT
 ```
+
+**Auth-failure recovery routing.** Not all `AUTH_ERROR` outros are equal:
+
+- **Recoverable** — the access token expired mid-run but the stored refresh
+  token is still good. Silent refresh on the next launch fixes it, so we keep
+  credentials and tell the user to simply re-run (`promptLogin = false`).
+- **Re-login required** — the refresh token itself was rejected (`invalid_grant`
+  from the OAuth token endpoint) or Amplitude OAuth reported `needs-auth`.
+  Re-running can only re-refresh the same dead token and loops on the identical
+  failure. The wizard clears the stored OAuth session (`clearStoredCredentials`)
+  so the next launch forces a fresh browser login, sets `promptLogin = true`,
+  and the copy steers the user to log in again (equivalent to `/logout` →
+  `/login`). This breaks the repeat-failure loop observed in Sentry
+  `WIZARD-CLI-F`.
