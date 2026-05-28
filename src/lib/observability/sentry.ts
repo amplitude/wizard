@@ -174,10 +174,18 @@ function beforeSend(event: Sentry.ErrorEvent): Sentry.ErrorEvent | null {
     const category = classified.retryable ? 'transient' : 'permanent';
     const integration = event.tags?.integration as string | undefined;
 
+    // Split auth failures by their surface so a gateway-401 (bearer expired
+    // mid-run) and an Amplitude-MCP `needs-auth` (token rejected at the first
+    // MCP call) become DISTINCT issues — distinct alerts, distinct trends —
+    // instead of collapsing into one undifferentiated group (WIZARD-CLI-F).
+    // Only set on auth aborts (see agent-runner), so it's a no-op elsewhere.
+    const failureSurface = event.tags?.failure_surface as string | undefined;
+
     event.fingerprint = [
       '{{ default }}',
       category,
       ...(integration ? [integration] : []),
+      ...(failureSurface ? [`surface:${failureSurface}`] : []),
     ];
 
     event.contexts = {

@@ -246,6 +246,61 @@ async function tryRefreshTokenInner(
 }
 
 /**
+ * Set when a refresh attempt is rejected because the stored REFRESH token
+ * itself is dead (OAuth `invalid_grant`), not merely because the access token
+ * expired. A dead refresh token cannot be silently recovered — the only fix
+ * is a fresh browser login — so the auth-failure outro reads this to clear the
+ * stored session and steer the user to log in again, instead of telling them
+ * to "just re-run" (which silently re-mints the same rejected token and loops
+ * on the identical failure; see Sentry `WIZARD-CLI-F` and docs/flows.md →
+ * Outro flow). Module-scoped: one wizard process == one auth identity.
+ */
+let reauthRequired = false;
+
+/** True once a refresh attempt has seen a definitively-dead refresh token. */
+export function isReauthRequired(): boolean {
+  return reauthRequired;
+}
+
+/** Flag that the stored refresh token is dead and a fresh login is required. */
+export function markReauthRequired(): void {
+  reauthRequired = true;
+}
+
+/**
+ * Reset the re-auth flag. Called at the start of each agent run so a stale
+ * flag from a prior run in the same process (test harness, additional-feature
+ * re-runs) can't force a needless re-login.
+ */
+export function resetReauthRequired(): void {
+  reauthRequired = false;
+}
+
+/**
+ * Decide whether a failed refresh means the refresh token is dead (→ re-login
+ * required) versus a transient failure (network, timeout, 5xx → keep the token
+ * and let the next attempt retry). Per OAuth2 §5.2 a rejected/expired/revoked
+ * refresh token returns `400 invalid_grant`; we treat a bare 400/401 from the
+ * token endpoint the same way, since the grant is the only thing we sent. We
+ * deliberately do NOT log the user out on network errors or 5xx — those are
+ * transient and a forced re-login would be user-hostile.
+ */
+export function isDeadRefreshToken(err: unknown): boolean {
+  const resp = (
+    err as { response?: { status?: number; data?: unknown } } | undefined
+  )?.response;
+  if (!resp || typeof resp.status !== 'number') return false;
+  if (resp.status !== 400 && resp.status !== 401) return false;
+  const code =
+    resp.data && typeof resp.data === 'object'
+      ? (resp.data as { error?: unknown }).error
+      : undefined;
+  return (
+    code === undefined || code === 'invalid_grant' || code === 'invalid_token'
+  );
+}
+
+/**
  * Read the freshest stored OAuth token, refreshing it from the stored
  * refresh token when it has expired (or is within {@link EXPIRY_BUFFER_MS}).
  * Returns the new access token on success, or `fallback` when no stored
@@ -305,9 +360,14 @@ export async function refreshTokenIfStale(
       return refreshed.accessToken;
     } catch (err) {
       const { analytics } = await import('./analytics.js');
+      // A dead refresh token (invalid_grant) can't self-heal — flag the
+      // outro to force a clean re-login instead of looping on "just re-run".
+      const deadRefreshToken = isDeadRefreshToken(err);
+      if (deadRefreshToken) markReauthRequired();
       analytics.wizardCapture('auth refresh failed', {
         label,
         reason: err instanceof Error ? err.message : 'unknown',
+        'reauth required': deadRefreshToken,
         'duration ms': Date.now() - startedAt,
       });
       return stored.accessToken;

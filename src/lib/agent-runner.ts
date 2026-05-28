@@ -44,7 +44,11 @@ import {
   DATA_INGESTION_POLL_BACKOFF_START_MS,
 } from './data-ingestion-agent-poll.js';
 import { enableDebugLogs, logToFile } from '../utils/debug';
-import { getLogFilePath } from './observability/index.js';
+import {
+  getLogFilePath,
+  setSentryTag,
+  addBreadcrumb,
+} from './observability/index.js';
 import { createObservabilityMiddleware } from './middleware/observability';
 import { MiddlewarePipeline } from './middleware/pipeline';
 import { createBenchmarkPipeline } from './middleware/benchmark';
@@ -483,7 +487,12 @@ function sessionToOptions(session: WizardSession): WizardOptions {
   };
 }
 
-import { refreshTokenIfStale } from '../utils/token-refresh.js';
+import {
+  refreshTokenIfStale,
+  isReauthRequired,
+  resetReauthRequired,
+} from '../utils/token-refresh.js';
+import { clearStoredCredentials } from '../utils/ampli-settings.js';
 
 export { refreshTokenIfStale };
 
@@ -1163,6 +1172,16 @@ async function runAgentWizardBody(
   // returns to its pre-wizard state on every exit path — no separate
   // outro hook needed.
   getUI().startRun();
+  // Wall-clock anchor for the agent run itself (post cold-start). Used to
+  // bucket how far into the run a failure occurred — see `run_elapsed_bucket`
+  // on the AUTH_ERROR path below. Distinguishes start-of-run auth rejections
+  // (bearer bad from the first gateway/MCP call) from genuine long-run token
+  // expiry, which otherwise look identical in Sentry.
+  const agentRunStartedAt = Date.now();
+  // Clear any re-auth flag left over from a prior run in the same process
+  // (test harness / additional-feature re-runs) so a stale flag can't force
+  // a needless re-login this run.
+  resetReauthRequired();
 
   // PR B8: emit the startup capability announcement immediately
   // after `run_started` so an orchestrator sees the protocol /
@@ -1479,17 +1498,68 @@ async function runAgentWizardBody(
     // — actively misleading and the most enraging copy for that specific
     // failure. See AuthErrorSubkind for the source distinction.
     const isLlmGateway = agentResult.authSubkind === 'llm-gateway';
+
+    // A gateway 401 normally self-heals on re-run (silent refresh re-mints the
+    // bearer). But if the stored REFRESH token itself was rejected mid-run
+    // (`isReauthRequired()` — set on `invalid_grant`), re-running just re-mints
+    // the same dead token and loops on the identical failure (the WIZARD-CLI-F
+    // repeat-failure pattern). Amplitude-OAuth `needs-auth` (`!isLlmGateway`)
+    // is likewise unrecoverable without a fresh login. Both route to a clean
+    // re-login. See docs/flows.md → Outro flow.
+    const reauthRequired = !isLlmGateway || isReauthRequired();
+
+    // Enrich the Sentry issue so this auth failure is debuggable and
+    // alertable WITHOUT the fields Sentry's server-side scrubber redacts.
+    // `auth subkind` / `error type` arrive as `[Filtered]` because their
+    // value contains "auth" — so we emit a parallel, scrubber-safe tag whose
+    // values (`mcp` / `gateway`) carry the same discriminator in the clear.
+    // `failure_surface` also feeds the fingerprint (see `beforeSend`) so the
+    // two auth paths split into separate issues / alerts instead of piling
+    // into one undifferentiated group.
+    const failureSurface = isLlmGateway ? 'gateway' : 'mcp';
+    const runElapsedMs = Date.now() - agentRunStartedAt;
+    setSentryTag('failure_surface', failureSurface);
+    // Which recovery the user is steered toward — lets us alert on the
+    // unrecoverable `reauth` cases (the ones that loop) distinctly from the
+    // benign `rerun` ones. Values avoid the 'auth' substring the scrubber trips.
+    setSentryTag('recovery', reauthRequired ? 'reauth' : 'rerun');
+    // Coarse buckets, not raw ms — keeps tag cardinality low and answers the
+    // one question that matters at triage: did the bearer fail at the start
+    // of the run (bad/rejected token) or after a long run (genuine expiry)?
+    setSentryTag(
+      'run_elapsed_bucket',
+      runElapsedMs < 60_000
+        ? 'lt_1m'
+        : runElapsedMs < 5 * 60_000
+        ? '1m_5m'
+        : runElapsedMs < 15 * 60_000
+        ? '5m_15m'
+        : 'gt_15m',
+    );
+    addBreadcrumb(
+      'auth',
+      `Agent run aborted: ${failureSurface} authentication failed`,
+      { 'failure surface': failureSurface, 'run elapsed ms': runElapsedMs },
+    );
+
     const signupUrl = `${OUTBOUND_URLS.overview[cloudRegion]}/signup`;
-    const authMessage = isLlmGateway
+    const authMessage = !isLlmGateway
       ? `Authentication failed\n\n` +
-        `Your wizard session token expired during a long-running task.\n\n` +
-        `Re-run the wizard to refresh and resume — your in-progress files are preserved.`
-      : `Authentication failed\n\n` +
         `We couldn't authenticate your Amplitude session with our service. ` +
         `This can happen if your account was just created and isn't fully provisioned yet.\n\n` +
         `Try one of the following:\n` +
         `  • Re-run the wizard in a minute and log in again\n` +
-        `  • Sign up manually at ${signupUrl}, then re-run the wizard`;
+        `  • Sign up manually at ${signupUrl}, then re-run the wizard`
+      : isReauthRequired()
+      ? // Gateway 401 AND the refresh token is dead — re-running can only
+        // re-mint the same rejected token. Steer to a clean login instead.
+        `Authentication failed\n\n` +
+        `We couldn't refresh your Amplitude session — you'll need to log in again.\n\n` +
+        `Re-run the wizard and log in when prompted — your in-progress files are preserved.`
+      : // Gateway 401, refresh token still good — silent refresh fixes it.
+        `Authentication failed\n\n` +
+        `Your wizard session token expired during a long-running task.\n\n` +
+        `Re-run the wizard to refresh and resume — your in-progress files are preserved.`;
     // Set outroData via the UI so the OutroScreen reliably re-renders before
     // wizardAbort awaits user dismissal. Direct mutation of session.outroData
     // doesn't notify nanostore subscribers and would make the outro miss the
@@ -1498,10 +1568,12 @@ async function runAgentWizardBody(
     getUI().setOutroData({
       kind: OutroKind.Error,
       message: authMessage,
-      // Only steer the user back through the OAuth login wall when the
-      // failure was on the Amplitude side. An LLM-gateway 401 is solved
-      // by simply re-running — forcing /login here would just add friction.
-      promptLogin: !isLlmGateway,
+      // Steer the user back through the OAuth login wall whenever the failure
+      // can't self-heal on re-run: Amplitude-OAuth needs-auth, OR a gateway
+      // 401 whose refresh token is also dead. A gateway 401 with a still-valid
+      // refresh token is solved by simply re-running, so we don't add the
+      // login friction there.
+      promptLogin: reauthRequired,
       canRestart: true,
       // The bearer token expired on the very last gateway call. The
       // event plan was approved, `track()` calls landed, validation
@@ -1514,11 +1586,20 @@ async function runAgentWizardBody(
     // Also push a status so the failure is visibly announced even if the
     // OutroScreen hasn't taken focus yet (e.g. mid-Run-screen render).
     getUI().pushStatus('Authentication failed — see details below.');
-    // Only clear credentials when Amplitude OAuth itself failed. LLM-gateway
-    // expiry doesn't invalidate the user's Amplitude session, so wiping
-    // credentials would force a needless re-login on the next run.
-    if (!isLlmGateway) {
+    // Clear credentials only when a fresh login is actually required —
+    // a recoverable gateway expiry leaves the session intact so the next
+    // run refreshes silently without forcing a needless re-login. For the
+    // unrecoverable cases we also wipe the stored OAuth session on disk so
+    // the next launch can't silently reuse the dead token and loop — this
+    // is the programmatic equivalent of `/logout`, matched by the
+    // `promptLogin` above so the next run starts at a clean login.
+    if (reauthRequired) {
       session.credentials = null;
+      try {
+        clearStoredCredentials();
+      } catch (err) {
+        logToFile('[agent-runner] clearStoredCredentials threw', err);
+      }
     }
 
     // Emit the structured `auth_required` envelope BEFORE wizardAbort so

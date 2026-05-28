@@ -121,6 +121,7 @@ import {
   refreshGatewayBearer,
   startGatewayBearerRefreshTimer,
 } from './llm-gateway-bearer-refresh.js';
+import { addBreadcrumb } from './observability/index.js';
 import {
   mergeTrackerHooks,
   startAiTelemetryAttempt,
@@ -4065,6 +4066,11 @@ export async function runAgent(
             // copy would be misleading. See AuthErrorSubkind.
             recordAuthSubkind('llm-gateway');
             logToFile('Auth error detected in result message');
+            addBreadcrumb(
+              'auth',
+              'LLM gateway returned authentication_error (result message)',
+              { surface: 'gateway', detected_at: 'result' },
+            );
           }
 
           // Capture the SDK-reported `retry_delay_ms` from every `api_retry`
@@ -4191,6 +4197,11 @@ export async function runAgent(
               logToFile(
                 'Auth retries exceeded threshold — aborting agent query',
               );
+              addBreadcrumb(
+                'auth',
+                `LLM gateway 401 retry storm exceeded threshold (${authRetryCount}/${AUTH_RETRY_LIMIT}) — aborting`,
+                { surface: 'gateway', detected_at: 'retry_storm' },
+              );
               analytics.wizardCapture('agent auth retry aborted', {
                 'retry count': authRetryCount,
                 attempt: attempt + 1,
@@ -4239,6 +4250,11 @@ export async function runAgent(
                 recordAuthSubkind('amplitude');
                 logToFile(
                   'Auth error detected: amplitude-wizard MCP needs-auth',
+                );
+                addBreadcrumb(
+                  'auth',
+                  'Amplitude MCP reported needs-auth at init — bearer rejected on first MCP call',
+                  { surface: 'mcp', detected_at: 'mcp_init' },
                 );
               }
             }
