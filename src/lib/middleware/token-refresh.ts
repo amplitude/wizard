@@ -149,6 +149,15 @@ export function createTokenRefreshMiddleware(
         // Note: analytics event 'auth refreshed silently' is emitted by
         // refreshTokenIfStale (called inside refreshGatewayBearer), not here,
         // to avoid double-counting mid-run rotations.
+      } else {
+        // Even when refreshGatewayBearer returns false (no rotation triggered),
+        // the env var may have been updated externally (e.g. by the 5-minute timer).
+        // Sync in-memory state if process.env differs from what getToken() sees.
+        const envToken = process.env.ANTHROPIC_AUTH_TOKEN ?? '';
+        if (envToken && envToken !== currentToken) {
+          logToFile('[token-refresh-mw] syncing externally-rotated token');
+          opts.onTokenRefreshed(envToken);
+        }
       }
     } catch (err) {
       // Never throw from middleware — a failed refresh attempt is
