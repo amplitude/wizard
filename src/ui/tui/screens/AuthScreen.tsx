@@ -532,6 +532,19 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
       const source = persistApiKey(trimmed, session.installDir);
       setSavedKeySource(source);
     });
+    // When the [M] pre-OAuth fallback was used, the API key alone can't
+    // satisfy `Auth.isComplete` — that gate also requires a resolved
+    // org/project tuple, which only comes from browser OAuth (or stored
+    // creds). Without the close-and-re-render below, the manual-fallback
+    // form keeps its "Enter your project API key" headline + empty input
+    // visible after submission, so the user sees absolutely nothing happen
+    // and concludes the wizard is hung (BA-296). Close the form so the
+    // OAuth-waiting view re-renders with the saved-key acknowledgement
+    // surfaced above the URL, giving the user a clear signal that their
+    // key landed and what they still need to do (complete sign-in).
+    if (manualFallbackOpen) {
+      setManualFallbackOpen(false);
+    }
   };
 
   // ─── OAuth wait-state coaching ────────────────────────────────────────
@@ -810,6 +823,23 @@ export const AuthScreen = ({ store }: AuthScreenProps) => {
               {Icons.ellipsis}
             </Text>
           </Box>
+          {/* Acknowledgement of a manual API key that was just submitted via
+              the [M] fallback. We can't advance the flow on the strength of
+              the key alone (Auth.isComplete also requires org/project, which
+              only OAuth can supply) — but the user just typed something and
+              hit Enter, so we owe them a visible "received" signal before the
+              spinner copy resumes. Without this row the user sees an unchanged
+              screen and assumes the wizard is broken (BA-296). */}
+          {savedKeySource && (
+            <Box marginTop={1}>
+              <Text color={Colors.success}>
+                {Icons.checkmark}{' '}
+                {savedKeySource === 'cache'
+                  ? 'API key saved — finish browser sign-in to continue.'
+                  : 'API key saved to .env.local — finish browser sign-in to continue.'}
+              </Text>
+            </Box>
+          )}
           <Box marginTop={1} flexDirection="column">
             {session.loginUrl ? (
               <>
