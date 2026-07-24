@@ -1638,6 +1638,47 @@ async function runAgentWizardBody(
     });
   }
 
+  if (agentResult.error === AgentErrorType.NATIVE_BINARY_MISSING) {
+    // The Claude Agent SDK couldn't resolve its per-platform native binary
+    // (Sentry WIZARD-CLI-19). `agentResult.message` already carries the
+    // actionable remediation built in agent-interface.ts. This is a userland
+    // install-config issue (typically node_modules copied across an OS/libc
+    // boundary), not a transient failure — tag it `fatal` so orchestrators
+    // don't burn retry budget re-running an environment that will fail
+    // identically until dependencies are reinstalled in place.
+    const remediation =
+      agentResult.message ?? 'Claude Code native binary not found.';
+    captureWizardError(
+      'Agent Runtime',
+      'Claude Code native binary not found',
+      'agent-runner',
+      {
+        integration: config.metadata.integration,
+        'error type': agentResult.error,
+      },
+    );
+    try {
+      getUI().emitRunError?.({
+        message: 'Claude Code native binary not found',
+        code: 'NATIVE_BINARY_MISSING',
+        recoverable: 'human_required',
+      });
+    } catch (err) {
+      logToFile(
+        '[agent-runner] emitRunError (NATIVE_BINARY_MISSING) threw',
+        err,
+      );
+    }
+    await wizardAbort({
+      message: `${remediation}\n\nIf this persists after reinstalling, please report it (with the log file at ${getLogFilePath()}) to: ${SUPPORT_EMAIL}`,
+      error: new WizardError('Claude Code native binary not found', {
+        integration: config.metadata.integration,
+        'error type': agentResult.error,
+      }),
+      exitCode: ExitCode.AGENT_FAILED,
+    });
+  }
+
   if (
     agentResult.error === AgentErrorType.MCP_MISSING ||
     agentResult.error === AgentErrorType.RESOURCE_MISSING

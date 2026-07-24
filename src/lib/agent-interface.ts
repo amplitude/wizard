@@ -116,6 +116,10 @@ import {
   maybeRunAiSdkGatewayProbe,
 } from './agent/ai-sdk-gateway-probe.js';
 import { sdkStandardFallbackModel, selectModel } from './agent/model-config.js';
+import {
+  formatNativeBinaryMissingMessage,
+  isNativeBinaryMissingError,
+} from './agent/native-binary-error.js';
 import { buildSkillTierSystemPromptAppend } from './agent/skill-tier-prompt.js';
 import {
   refreshGatewayBearer,
@@ -218,16 +222,6 @@ async function getSDKModule(): Promise<{ query: SDKQueryFn }> {
   return { query: driver as unknown as SDKQueryFn };
 }
 
-/**
- * Get the path to the bundled Claude Code CLI from the SDK package.
- * This ensures we use the SDK's bundled version rather than the user's installed Claude Code.
- */
-function getClaudeCodeExecutablePath(): string {
-  // require.resolve finds the package's main entry, then we get cli.js from same dir
-  const sdkPackagePath = require.resolve('@anthropic-ai/claude-agent-sdk');
-  return path.join(path.dirname(sdkPackagePath), 'cli.js');
-}
-
 type McpServersConfig = Record<string, unknown>;
 
 /**
@@ -311,6 +305,16 @@ export enum AgentErrorType {
    * meantime).
    */
   GATEWAY_INVALID_REQUEST = 'WIZARD_GATEWAY_INVALID_REQUEST',
+  /**
+   * The Claude Agent SDK could not resolve its per-platform native `claude`
+   * binary at `query()` time (Sentry WIZARD-CLI-19). This is a userland
+   * install-config issue — typically `node_modules` installed on one OS/libc
+   * and copied into a different runtime — not a wizard bug. The runner
+   * surfaces an actionable remediation message (reinstall in-place / set
+   * pnpm.supportedArchitectures / pass options.pathToClaudeCodeExecutable)
+   * instead of relaying the raw SDK stack. See `agent/native-binary-error.ts`.
+   */
+  NATIVE_BINARY_MISSING = 'WIZARD_NATIVE_BINARY_MISSING',
 }
 
 /**
@@ -2264,9 +2268,12 @@ export async function runAgent(
 
   const { query } = await getSDKModule();
 
-  const cliPath = getClaudeCodeExecutablePath();
+  // The SDK resolves its per-platform native `claude` binary itself at
+  // `query()` time (via `@anthropic-ai/claude-agent-sdk-<platform>` optional
+  // deps) — we don't pass `pathToClaudeCodeExecutable`. When that resolution
+  // fails the throw is caught in the outer catch and re-messaged via
+  // `isNativeBinaryMissingError`.
   logToFile('Starting agent run');
-  logToFile('Claude Code executable:', cliPath);
   logToFile('Prompt:', prompt);
 
   const startTime = Date.now();
@@ -4752,6 +4759,22 @@ export async function runAgent(
       logToFile('Agent error (caught): API_ERROR');
       spinner.stop('API error occurred');
       return exitWithError(AgentErrorType.API_ERROR, apiErrorMessage);
+    }
+
+    // The Claude Agent SDK couldn't resolve its per-platform native binary
+    // (Sentry WIZARD-CLI-19). Deterministic — no retry helps — and NOT a
+    // wizard bug, so classify it explicitly and hand agent-runner an
+    // actionable remediation message instead of relaying the raw SDK stack.
+    // The original error is preserved in the file log (and Sentry via the
+    // WizardError agent-runner builds) so we don't lose the stack.
+    if (isNativeBinaryMissingError(error)) {
+      const remediation = formatNativeBinaryMissingMessage();
+      logToFile(
+        'Agent error (caught): NATIVE_BINARY_MISSING',
+        (error as Error).message,
+      );
+      spinner.stop('Claude Code native binary not found');
+      return exitWithError(AgentErrorType.NATIVE_BINARY_MISSING, remediation);
     }
 
     // No API error found, re-throw the original exception
