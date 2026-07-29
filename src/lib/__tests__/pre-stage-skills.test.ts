@@ -26,7 +26,6 @@
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import path from 'path';
-import os from 'os';
 import fs from 'fs';
 import {
   preStageSkills,
@@ -36,22 +35,22 @@ import {
   SKILL_MENU_FILENAME,
   PRE_STAGED_CONSTANT_SKILLS,
 } from '../wizard-tools/bundled-skills';
+import { createTempDir } from '../../utils/__tests__/helpers/temp-dir.js';
 
 describe('preStageSkills (eager mode, AMPLITUDE_WIZARD_SKILL_TIERS=0)', () => {
   let installDir: string;
+  let cleanup: () => void;
   const ENV_KEY = 'AMPLITUDE_WIZARD_SKILL_TIERS';
 
   beforeEach(() => {
-    installDir = fs.mkdtempSync(
-      path.join(os.tmpdir(), 'wizard-prestage-test-'),
-    );
+    ({ dir: installDir, cleanup } = createTempDir('wizard-prestage-test-'));
     // Force the legacy eager path. The default is now tiered.
     process.env[ENV_KEY] = '0';
   });
 
   afterEach(() => {
     try {
-      fs.rmSync(installDir, { recursive: true, force: true });
+      cleanup();
     } catch {
       // best-effort cleanup
     }
@@ -129,12 +128,13 @@ describe('preStageSkills (eager mode, AMPLITUDE_WIZARD_SKILL_TIERS=0)', () => {
 
 describe('preStageSkills (tiered mode — default)', () => {
   let installDir: string;
+  let cleanup: () => void;
   const ENV_KEY = 'AMPLITUDE_WIZARD_SKILL_TIERS';
 
   beforeEach(() => {
-    installDir = fs.mkdtempSync(
-      path.join(os.tmpdir(), 'wizard-prestage-tiered-test-'),
-    );
+    ({ dir: installDir, cleanup } = createTempDir(
+      'wizard-prestage-tiered-test-',
+    ));
     // Default-on behaviour: leave the env var unset so isSkillTiersEnabled
     // returns true. (Setting to '1' is also valid; the default-unset path
     // is the more common production case so we test that explicitly.)
@@ -143,7 +143,7 @@ describe('preStageSkills (tiered mode — default)', () => {
 
   afterEach(() => {
     try {
-      fs.rmSync(installDir, { recursive: true, force: true });
+      cleanup();
     } catch {
       // best-effort cleanup
     }

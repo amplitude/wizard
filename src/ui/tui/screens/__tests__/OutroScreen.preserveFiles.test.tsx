@@ -28,13 +28,11 @@ import {
 import {
   existsSync,
   mkdirSync,
-  mkdtempSync,
   readFileSync,
-  rmSync,
   writeFileSync,
 } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { createTempDir } from '../../../../utils/__tests__/helpers/temp-dir.js';
 import { render } from 'ink-testing-library';
 
 vi.mock('../../utils/outro-mode.js', () => ({
@@ -71,15 +69,16 @@ describe('OutroScreen — preserveFiles prompt (AUTH_ERROR carve-out)', () => {
     exitSpy?.mockRestore();
   });
 
+  let cleanupDir: () => void;
   beforeEach(() => {
-    installDir = mkdtempSync(join(tmpdir(), 'outro-preserve-'));
+    ({ dir: installDir, cleanup: cleanupDir } = createTempDir('outro-preserve-'));
     resetFileChangeLedger();
   });
 
   afterEach(() => {
     resetFileChangeLedger();
     try {
-      rmSync(installDir, { recursive: true, force: true });
+      cleanupDir();
     } catch {
       /* best-effort */
     }

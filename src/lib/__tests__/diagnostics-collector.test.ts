@@ -10,6 +10,7 @@ import {
 } from '../diagnostics-collector';
 import type { WizardSession } from '../wizard-session';
 import { RunPhase } from '../wizard-session';
+import { createTempDir } from '../../utils/__tests__/helpers/temp-dir.js';
 
 vi.mock('../../utils/debug');
 vi.mock('../../utils/analytics', () => ({
@@ -19,14 +20,6 @@ vi.mock('../../utils/analytics', () => ({
     wizardCapture: vi.fn(),
   },
 }));
-
-function makeTmpDir(): string {
-  return fs.mkdtempSync(path.join(os.tmpdir(), 'diag-'));
-}
-
-function cleanup(dir: string): void {
-  fs.rmSync(dir, { recursive: true, force: true });
-}
 
 function baseSession(
   installDir: string,
@@ -78,13 +71,14 @@ describe('redactHomePath', () => {
 
 describe('collectDiagnostics', () => {
   let tmpDir: string;
+  let cleanup: () => void;
 
   beforeEach(() => {
-    tmpDir = makeTmpDir();
+    ({ dir: tmpDir, cleanup } = createTempDir('diag-'));
   });
 
   afterEach(() => {
-    cleanup(tmpDir);
+    cleanup();
   });
 
   it('returns a schema-valid payload when the directory is empty', async () => {

@@ -16,7 +16,6 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
-import * as os from 'os';
 import {
   writeDashboardPlan,
   readDashboardPlan,
@@ -25,14 +24,7 @@ import {
   DashboardPlanSchema,
   type DashboardPlanInput,
 } from '../dashboard-plan';
-
-function makeTmpDir(): string {
-  return fs.mkdtempSync(path.join(os.tmpdir(), 'wizard-dashboard-plan-'));
-}
-
-function cleanup(dir: string): void {
-  fs.rmSync(dir, { recursive: true, force: true });
-}
+import { createTempDir } from '../../utils/__tests__/helpers/temp-dir.js';
 
 function validInput(): DashboardPlanInput {
   return {
@@ -170,10 +162,11 @@ describe('DashboardPlanSchema', () => {
 
 describe('writeDashboardPlan', () => {
   let tmpDir: string;
+  let cleanup: () => void;
   beforeEach(() => {
-    tmpDir = makeTmpDir();
+    ({ dir: tmpDir, cleanup } = createTempDir('wizard-dashboard-plan-'));
   });
-  afterEach(() => cleanup(tmpDir));
+  afterEach(() => cleanup());
 
   it('persists to .amplitude/dashboard-plan.json and stamps version/planId/createdAt', () => {
     const persisted = writeDashboardPlan(tmpDir, validInput());
@@ -253,10 +246,11 @@ describe('writeDashboardPlan', () => {
 
 describe('readDashboardPlan', () => {
   let tmpDir: string;
+  let cleanup: () => void;
   beforeEach(() => {
-    tmpDir = makeTmpDir();
+    ({ dir: tmpDir, cleanup } = createTempDir('wizard-dashboard-plan-'));
   });
-  afterEach(() => cleanup(tmpDir));
+  afterEach(() => cleanup());
 
   it('round-trips a written plan exactly', () => {
     const written = writeDashboardPlan(tmpDir, validInput())!;

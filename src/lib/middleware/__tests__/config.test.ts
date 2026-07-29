@@ -1,6 +1,5 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'node:fs';
-import * as os from 'node:os';
 import * as path from 'node:path';
 import { loadBenchmarkConfig, getDefaultConfig } from '../config.js';
 import {
@@ -8,6 +7,7 @@ import {
   getBenchmarkFile,
   getLogFile,
 } from '../../../utils/storage-paths.js';
+import { createTempDir } from '../../../utils/__tests__/helpers/temp-dir.js';
 
 // ── helpers ───────────────────────────────────────────────────────────────────
 
@@ -44,11 +44,16 @@ describe('getDefaultConfig', () => {
 describe('loadBenchmarkConfig', () => {
   let tmpDir: string;
   let cacheRoot: string;
+  let cleanupTmp: () => void;
+  let cleanupCache: () => void;
   let originalCacheOverride: string | undefined;
 
   beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'benchmark-config-test-'));
-    cacheRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'benchmark-cache-'));
+    ({ dir: tmpDir, cleanup: cleanupTmp } = createTempDir(
+      'benchmark-config-test-',
+    ));
+    ({ dir: cacheRoot, cleanup: cleanupCache } =
+      createTempDir('benchmark-cache-'));
     originalCacheOverride = process.env[CACHE_ROOT_OVERRIDE_ENV];
     process.env[CACHE_ROOT_OVERRIDE_ENV] = cacheRoot;
     // Clean env overrides before each test
@@ -58,8 +63,8 @@ describe('loadBenchmarkConfig', () => {
   });
 
   afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
-    fs.rmSync(cacheRoot, { recursive: true, force: true });
+    cleanupTmp();
+    cleanupCache();
     delete process.env.AMPLITUDE_WIZARD_BENCHMARK_CONFIG;
     delete process.env.AMPLITUDE_WIZARD_BENCHMARK_FILE;
     delete process.env.AMPLITUDE_WIZARD_LOG_FILE;

@@ -26,9 +26,9 @@
 
 import React from 'react';
 import * as fs from 'node:fs';
-import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { createTempDir } from '../../../../utils/__tests__/helpers/temp-dir.js';
 import { LogViewer } from '../LogViewer.js';
 import { renderInkFrame } from '../../__tests__/ink-stdin.js';
 
@@ -51,13 +51,14 @@ const sanitize = (frame: string): string =>
 
 describe('LogViewer collapse-to-content', () => {
   let tempDir: string;
+  let cleanup: () => void;
 
   beforeEach(() => {
-    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'wizard-log-collapse-'));
+    ({ dir: tempDir, cleanup } = createTempDir('wizard-log-collapse-'));
   });
 
   afterEach(() => {
-    fs.rmSync(tempDir, { recursive: true, force: true });
+    cleanup();
   });
 
   function writeLogFile(content: string): string {

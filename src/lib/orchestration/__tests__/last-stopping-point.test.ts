@@ -2,28 +2,30 @@
  * `computeLastStoppingPoint` — derivation tests against fixture stores.
  */
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
 
 import { OrchestrationStore, _resetOrchestrationStoreCache } from '../store';
 import { TaskLifecycle } from '../lifecycle';
 import { computeLastStoppingPoint } from '../last-stopping-point';
+import { createTempDir } from '../../../utils/__tests__/helpers/temp-dir.js';
 
 let cacheRoot: string;
 let installDir: string;
+let cleanupCache: () => void;
+let cleanupInstall: () => void;
 const NOW = 1_715_000_000_000;
 
 beforeEach(() => {
-  cacheRoot = mkdtempSync(join(tmpdir(), 'orch-lsp-'));
-  installDir = mkdtempSync(join(tmpdir(), 'orch-installdir-lsp-'));
+  ({ dir: cacheRoot, cleanup: cleanupCache } = createTempDir('orch-lsp-'));
+  ({ dir: installDir, cleanup: cleanupInstall } = createTempDir(
+    'orch-installdir-lsp-',
+  ));
   process.env.AMPLITUDE_WIZARD_CACHE_DIR = cacheRoot;
   _resetOrchestrationStoreCache();
 });
 
 afterEach(() => {
-  rmSync(cacheRoot, { recursive: true, force: true });
-  rmSync(installDir, { recursive: true, force: true });
+  cleanupCache();
+  cleanupInstall();
   delete process.env.AMPLITUDE_WIZARD_CACHE_DIR;
   _resetOrchestrationStoreCache();
 });

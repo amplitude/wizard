@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'node:fs';
-import * as os from 'node:os';
 import * as path from 'node:path';
+import { createTempDir } from '../../../utils/__tests__/helpers/temp-dir.js';
 import {
   getPythonVersionBucket,
   getPackageManagerName,
@@ -73,15 +73,16 @@ describe('getPackageManagerName', () => {
 
 describe('detectPackageManager', () => {
   let tmpDir: string;
+  let cleanup: () => void;
 
   const options = (installDir: string) => ({ installDir } as any);
 
   beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'python-utils-test-'));
+    ({ dir: tmpDir, cleanup } = createTempDir('python-utils-test-'));
   });
 
   afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    cleanup();
   });
 
   it('detects uv via uv.lock', async () => {

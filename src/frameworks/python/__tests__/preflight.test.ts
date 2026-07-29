@@ -14,20 +14,21 @@
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'node:fs';
-import * as os from 'node:os';
 import * as path from 'node:path';
 
 import { hasPythonProjectMarkers, PYTHON_TOPLEVEL_MARKERS } from '../preflight';
+import { createTempDir } from '../../../utils/__tests__/helpers/temp-dir.js';
 
 describe('hasPythonProjectMarkers', () => {
   let tmpDir: string;
+  let cleanup: () => void;
 
   beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'preflight-'));
+    ({ dir: tmpDir, cleanup } = createTempDir('preflight-'));
   });
 
   afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    cleanup();
   });
 
   it('returns false on an empty directory', () => {

@@ -17,7 +17,6 @@
  */
 
 import * as fs from 'node:fs';
-import * as os from 'node:os';
 import * as path from 'node:path';
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
@@ -30,10 +29,7 @@ import {
   resolveThresholds,
   shouldUseJitMode,
 } from '../project-size';
-
-function makeTmpDir(): string {
-  return fs.mkdtempSync(path.join(os.tmpdir(), 'project-size-'));
-}
+import { createTempDir } from '../../../utils/__tests__/helpers/temp-dir.js';
 
 function touch(file: string, content = ''): void {
   fs.mkdirSync(path.dirname(file), { recursive: true });
@@ -42,14 +38,15 @@ function touch(file: string, content = ''): void {
 
 describe('detectProjectSize', () => {
   let dir: string;
+  let cleanup: () => void;
 
   beforeEach(() => {
-    dir = makeTmpDir();
+    ({ dir, cleanup } = createTempDir('project-size-'));
   });
 
   afterEach(() => {
     try {
-      fs.rmSync(dir, { recursive: true, force: true });
+      cleanup();
     } catch {
       // ignore
     }

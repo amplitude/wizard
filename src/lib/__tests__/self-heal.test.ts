@@ -18,6 +18,7 @@ import {
 } from '../../utils/api-key-store.js';
 import { saveCheckpoint } from '../session-checkpoint.js';
 import type { WizardSession } from '../wizard-session.js';
+import { createTempDir } from '../../utils/__tests__/helpers/temp-dir.js';
 
 const STUB_SESSION = (installDir: string): WizardSession =>
   ({
@@ -45,22 +46,26 @@ function writeProjectBinding(installDir: string): void {
 describe('selfHealStaleProjectState', () => {
   let installDir: string;
   let cacheRoot: string;
+  let cleanupInstall: () => void;
+  let cleanupCache: () => void;
 
   beforeEach(() => {
-    installDir = fs.mkdtempSync(path.join(os.tmpdir(), 'wizard-heal-proj-'));
-    cacheRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'wizard-heal-cache-'));
+    ({ dir: installDir, cleanup: cleanupInstall } =
+      createTempDir('wizard-heal-proj-'));
+    ({ dir: cacheRoot, cleanup: cleanupCache } =
+      createTempDir('wizard-heal-cache-'));
     process.env[CACHE_ROOT_OVERRIDE_ENV] = cacheRoot;
   });
 
   afterEach(() => {
     delete process.env[CACHE_ROOT_OVERRIDE_ENV];
     try {
-      fs.rmSync(installDir, { recursive: true, force: true });
+      cleanupInstall();
     } catch {
       /* best-effort */
     }
     try {
-      fs.rmSync(cacheRoot, { recursive: true, force: true });
+      cleanupCache();
     } catch {
       /* best-effort */
     }
@@ -175,9 +180,8 @@ describe('selfHealStaleProjectState', () => {
   });
 
   it('preserves stored API keys for OTHER install directories', () => {
-    const otherInstall = fs.mkdtempSync(
-      path.join(os.tmpdir(), 'wizard-heal-other-'),
-    );
+    const { dir: otherInstall, cleanup: cleanupOther } =
+      createTempDir('wizard-heal-other-');
     try {
       // Other project: has ampli.json, has its own API key.
       writeAmpliConfig(otherInstall, { OrgId: 'o2', ProjectId: 'p2' });
@@ -193,7 +197,7 @@ describe('selfHealStaleProjectState', () => {
       expect(readApiKey(installDir)).toBeNull();
     } finally {
       clearApiKey(otherInstall);
-      fs.rmSync(otherInstall, { recursive: true, force: true });
+      cleanupOther();
     }
   });
 
