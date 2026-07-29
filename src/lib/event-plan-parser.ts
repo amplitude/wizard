@@ -93,25 +93,21 @@ export function parseEventPlanContent(
 }
 
 /**
- * Read the agent-written event plan from a project's install dir.
+ * Locate the freshest existing event-plan file (canonical
+ * `.amplitude/events.json` or legacy `.amplitude-events.json`) and read its
+ * raw contents. Returns null when no candidate exists or read failed; the
+ * `[label]` prefix on log lines distinguishes which caller logged the error.
  *
- * Tries the canonical path first (`<installDir>/.amplitude/events.json`),
- * then the legacy dotfile (`<installDir>/.amplitude-events.json`) that
- * older context-hub integration skills still emit. Returns whichever has
- * the more recent mtime so a stale canonical from a previous run can't
- * shadow a fresh legacy write — mirroring the `pickFreshestExisting`
- * logic in `agent-interface.ts`.
- *
- * Returns `[]` for any non-fatal failure (file missing, malformed JSON,
- * schema mismatch). Empty entries (no name) are dropped. Logs to the
- * debug file so issues are recoverable post-mortem.
- *
- * Used by the Event Verification screen to render the planned tracking
- * list inline so users can see what they need to trigger.
+ * Shared between {@link readLocalEventPlan} and {@link readLocalEventPlanRich}
+ * so the file-discovery + winner-by-mtime logic stays in one place. Mirrors
+ * the `pickFreshestExisting` logic in `agent-interface.ts` — picks whichever
+ * candidate has the more recent mtime so a stale canonical from a previous
+ * run can't shadow a fresh legacy write.
  */
-export function readLocalEventPlan(
+function readFreshestEventPlanFile(
   installDir: string,
-): Array<{ name: string; description: string }> {
+  label: string,
+): { content: string; path: string } | null {
   const candidates = [
     getEventsFile(installDir),
     path.join(installDir, '.amplitude-events.json'),
@@ -130,35 +126,166 @@ export function readLocalEventPlan(
     } catch (e) {
       const err = e as NodeJS.ErrnoException;
       if (err.code !== 'ENOENT') {
-        logToFile(
-          `[readLocalEventPlan] stat ${candidate} failed: ${
-            err.message ?? err
-          }`,
-        );
+        logToFile(`[${label}] stat ${candidate} failed: ${err.message ?? err}`);
       }
     }
   }
 
-  if (!winner) return [];
+  if (!winner) return null;
 
-  let raw: string;
   try {
-    raw = fs.readFileSync(winner, 'utf8');
+    return { content: fs.readFileSync(winner, 'utf8'), path: winner };
   } catch (e) {
     const err = e as NodeJS.ErrnoException;
-    logToFile(
-      `[readLocalEventPlan] read ${winner} failed: ${err.message ?? err}`,
-    );
-    return [];
+    logToFile(`[${label}] read ${winner} failed: ${err.message ?? err}`);
+    return null;
   }
+}
 
-  const parsed = parseEventPlanContent(raw);
+/**
+ * Read the agent-written event plan from a project's install dir.
+ *
+ * Tries the canonical path first (`<installDir>/.amplitude/events.json`),
+ * then the legacy dotfile (`<installDir>/.amplitude-events.json`) that
+ * older context-hub integration skills still emit. Returns whichever has
+ * the more recent mtime so a stale canonical from a previous run can't
+ * shadow a fresh legacy write.
+ *
+ * Returns `[]` for any non-fatal failure (file missing, malformed JSON,
+ * schema mismatch). Empty entries (no name) are dropped. Logs to the
+ * debug file so issues are recoverable post-mortem.
+ *
+ * Used by the Event Verification screen to render the planned tracking
+ * list inline so users can see what they need to trigger.
+ */
+export function readLocalEventPlan(
+  installDir: string,
+): Array<{ name: string; description: string }> {
+  const file = readFreshestEventPlanFile(installDir, 'readLocalEventPlan');
+  if (!file) return [];
+
+  const parsed = parseEventPlanContent(file.content);
   if (parsed === null) {
     logToFile(
-      `[readLocalEventPlan] ${winner} could not be parsed as an event plan`,
+      `[readLocalEventPlan] ${file.path} could not be parsed as an event plan`,
     );
     return [];
   }
 
   return parsed.filter((e) => e.name.trim().length > 0);
+}
+
+/**
+ * Like {@link readLocalEventPlan} but preserves optional `callsites` arrays
+ * written by `persistEventPlan`. Used by the batch-merge path so earlier
+ * batches' callsite annotations survive when subsequent batches are merged in.
+ *
+ * Returns `null` when no event-plan file exists or the JSON couldn't be parsed
+ * — so callers can distinguish "missing / unparseable, don't merge" from
+ * "parsed cleanly but contained zero events" (`[]`). Mirrors the
+ * {@link parseEventPlanContent} contract.
+ *
+ * Defensively coerces every field to a string. A user-edited `events.json`
+ * with a numeric `name` or `null` `description` would otherwise crash inside
+ * `String.prototype.trim` — we treat any non-string field value as an
+ * effectively empty string and drop the entry via the same name-required
+ * filter that `readLocalEventPlan` uses.
+ */
+export function readLocalEventPlanRich(installDir: string): Array<{
+  name: string;
+  description: string;
+  callsites?: Array<{ filePath: string; anchor?: string }>;
+}> | null {
+  const file = readFreshestEventPlanFile(installDir, 'readLocalEventPlanRich');
+  if (!file) return null;
+
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(file.content);
+  } catch {
+    logToFile(
+      `[readLocalEventPlanRich] ${file.path} could not be parsed as JSON`,
+    );
+    return null;
+  }
+
+  if (
+    parsed &&
+    typeof parsed === 'object' &&
+    !Array.isArray(parsed) &&
+    Array.isArray((parsed as { events?: unknown }).events)
+  ) {
+    parsed = (parsed as { events: unknown[] }).events;
+  }
+
+  if (!Array.isArray(parsed)) {
+    logToFile(
+      `[readLocalEventPlanRich] ${file.path} did not contain a JSON array`,
+    );
+    return null;
+  }
+
+  // Coerce every field through `coerceToString` so a user-edited file with
+  // numeric / null / object values can't crash the merge path.
+  return (parsed as Array<unknown>)
+    .filter((e): e is Record<string, unknown> => isPlainObject(e))
+    .map((e) => {
+      const name =
+        coerceToString(e.name) ||
+        coerceToString(e.event) ||
+        coerceToString(e.eventName) ||
+        coerceToString(e.event_name);
+      const description =
+        coerceToString(e.description) ||
+        coerceToString(e.event_description) ||
+        coerceToString(e.eventDescription) ||
+        coerceToString(e.eventDescriptionAndReasoning);
+      const result: {
+        name: string;
+        description: string;
+        callsites?: Array<{ filePath: string; anchor?: string }>;
+      } = {
+        name,
+        description,
+      };
+      if (Array.isArray(e.callsites) && e.callsites.length > 0) {
+        const callsites = (e.callsites as Array<unknown>)
+          .filter((c): c is Record<string, unknown> => isPlainObject(c))
+          .map((c) => {
+            // filePath / anchor are paths and identifiers — keep the strict
+            // string requirement so a stray number doesn't get coerced into
+            // a misleading path like "123".
+            if (typeof c.filePath !== 'string' || c.filePath.length === 0) {
+              return null;
+            }
+            return typeof c.anchor === 'string' && c.anchor.length > 0
+              ? { filePath: c.filePath, anchor: c.anchor }
+              : { filePath: c.filePath };
+          })
+          .filter(
+            (c): c is { filePath: string; anchor?: string } => c !== null,
+          );
+        if (callsites.length > 0) result.callsites = callsites;
+      }
+      return result;
+    })
+    .filter((e) => e.name.trim().length > 0);
+}
+
+/**
+ * Coerce arbitrary JSON values to a safe string. Returns `''` for null,
+ * undefined, objects, arrays, booleans, and NaN — all of which would
+ * otherwise either crash `.trim()` or produce nonsense like `'[object
+ * Object]'` downstream. Numbers and bigints are stringified via `String()`.
+ */
+function coerceToString(value: unknown): string {
+  if (typeof value === 'string') return value;
+  if (typeof value === 'number')
+    return Number.isFinite(value) ? String(value) : '';
+  if (typeof value === 'bigint') return String(value);
+  return '';
+}
+
+function isPlainObject(value: unknown): value is Record<string, unknown> {
+  return typeof value === 'object' && value !== null && !Array.isArray(value);
 }
