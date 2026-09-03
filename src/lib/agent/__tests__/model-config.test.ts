@@ -4,9 +4,30 @@ import {
   FALLBACK_MODEL_GATEWAY,
   HAIKU_MODEL_DIRECT,
   HAIKU_MODEL_GATEWAY,
+  forceSonnetForHaikuRoutes,
   sdkStandardFallbackModel,
   selectModel,
 } from '../model-config.js';
+
+describe('forceSonnetForHaikuRoutes', () => {
+  it('forces Sonnet and restores an existing caller override', () => {
+    const env = { WIZARD_HAIKU_MODEL: 'caller-selected-model' };
+    const restore = forceSonnetForHaikuRoutes(env);
+
+    expect(env.WIZARD_HAIKU_MODEL).toBe('claude-sonnet-4-6');
+    restore();
+    expect(env.WIZARD_HAIKU_MODEL).toBe('caller-selected-model');
+  });
+
+  it('removes the temporary override when no caller value existed', () => {
+    const env: NodeJS.ProcessEnv = {};
+    const restore = forceSonnetForHaikuRoutes(env);
+
+    expect(env.WIZARD_HAIKU_MODEL).toBe('claude-sonnet-4-6');
+    restore();
+    expect(env.WIZARD_HAIKU_MODEL).toBeUndefined();
+  });
+});
 
 /**
  * `selectModel` is the single chokepoint that translates `ModelTier` into
@@ -57,6 +78,12 @@ describe('selectModel', () => {
     vi.stubEnv('WIZARD_HAIKU_MODEL', 'claude-haiku-vnext');
     expect(selectModel('oneshot', true)).toBe('claude-haiku-vnext');
     expect(selectModel('oneshot', false)).toBe('anthropic/claude-haiku-vnext');
+  });
+
+  it('honors WIZARD_HAIKU_MODEL override on the fast tier', () => {
+    vi.stubEnv('WIZARD_HAIKU_MODEL', 'claude-sonnet-4-6');
+    expect(selectModel('fast', true)).toBe('claude-sonnet-4-6');
+    expect(selectModel('fast', false)).toBe('anthropic/claude-sonnet-4-6');
   });
 
   it('ignores empty / whitespace overrides and returns the pinned aliases', () => {

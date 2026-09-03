@@ -104,6 +104,27 @@ describe('runWizard error handling', { timeout: 30_000 }, () => {
     expect(mockAnalytics.shutdown).not.toHaveBeenCalled();
   });
 
+  it('forces Haiku-routed calls to Sonnet for the run and restores the caller environment', async () => {
+    const original = process.env.WIZARD_HAIKU_MODEL;
+    process.env.WIZARD_HAIKU_MODEL = 'caller-selected-model';
+    let modelDuringRun: string | undefined;
+    mockRunAgentWizard.mockImplementation(async () => {
+      modelDuringRun = process.env.WIZARD_HAIKU_MODEL;
+    });
+
+    try {
+      await runWizard({ integration: Integration.nextjs });
+      expect(modelDuringRun).toBe('claude-sonnet-4-6');
+      expect(process.env.WIZARD_HAIKU_MODEL).toBe('caller-selected-model');
+    } finally {
+      if (original === undefined) {
+        delete process.env.WIZARD_HAIKU_MODEL;
+      } else {
+        process.env.WIZARD_HAIKU_MODEL = original;
+      }
+    }
+  });
+
   it('passes account creation flow=true to session started when create-account is selected', async () => {
     mockAnalytics.wizardCapture = vi.fn();
     const testArgs = {

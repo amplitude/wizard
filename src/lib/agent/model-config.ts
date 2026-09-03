@@ -11,6 +11,32 @@ import type { WizardMode } from '../../utils/types.js';
  */
 export type ModelTier = WizardMode | 'oneshot';
 
+export const SONNET_MODEL_DIRECT = 'claude-sonnet-4-6';
+
+/**
+ * Temporarily route every Haiku-selected call through Sonnet for the current
+ * wizard run. The returned cleanup restores the caller's environment exactly,
+ * which matters when the wizard is embedded or exercised repeatedly in one
+ * process.
+ */
+export function forceSonnetForHaikuRoutes(
+  env: NodeJS.ProcessEnv = process.env,
+): () => void {
+  const previous = env.WIZARD_HAIKU_MODEL;
+  env.WIZARD_HAIKU_MODEL = SONNET_MODEL_DIRECT;
+
+  let restored = false;
+  return () => {
+    if (restored) return;
+    restored = true;
+    if (previous === undefined) {
+      delete env.WIZARD_HAIKU_MODEL;
+    } else {
+      env.WIZARD_HAIKU_MODEL = previous;
+    }
+  };
+}
+
 /**
  * Map a {@link ModelTier} to a Claude model alias. Internal — see
  * `docs/internal/agent-mode-flag.md` for the full mapping.
@@ -28,10 +54,10 @@ export function selectModel(mode: ModelTier, useDirectApiKey: boolean): string {
   let alias: string;
   switch (mode) {
     case 'oneshot':
-      alias = haikuAlias();
+      alias = haikuAlias(HAIKU_MODEL_DIRECT);
       break;
     case 'fast':
-      alias = 'claude-haiku-4-5';
+      alias = haikuAlias('claude-haiku-4-5');
       break;
     case 'thorough':
       alias = 'claude-opus-4-7';
@@ -56,10 +82,10 @@ function standardAlias(): string {
     }
     return override;
   }
-  return 'claude-sonnet-4-6';
+  return SONNET_MODEL_DIRECT;
 }
 
-function haikuAlias(): string {
+function haikuAlias(defaultAlias: string): string {
   const override = process.env.WIZARD_HAIKU_MODEL?.trim();
   if (override && override.length > 0) {
     // Mirror the standardAlias() guard: the Agent SDK rejects a fallback
@@ -68,11 +94,11 @@ function haikuAlias(): string {
     // uses for fallback would trip the same invariant — fall through to
     // the default.
     if (override === FALLBACK_MODEL_DIRECT) {
-      return HAIKU_MODEL_DIRECT;
+      return defaultAlias;
     }
     return override;
   }
-  return HAIKU_MODEL_DIRECT;
+  return defaultAlias;
 }
 
 /**

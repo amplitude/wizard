@@ -24,6 +24,7 @@ import { autoEnableOptInFeatures } from './lib/feature-discovery';
 // Orchestration store — durable v2 state. Mirrored alongside the legacy
 // in-memory `WizardSession` for PR 1; PR 2 will widen the wiring.
 import { getOrchestrationStore } from './lib/orchestration/store';
+import { forceSonnetForHaikuRoutes } from './lib/agent/model-config';
 
 EventEmitter.defaultMaxListeners = 50;
 
@@ -47,6 +48,39 @@ type Args = {
 };
 
 export async function runWizard(
+  argv: Args,
+  session?: WizardSession,
+  getAdditionalFeatureQueue?: () => readonly import('./lib/wizard-session').AdditionalFeature[],
+  featureProgress?: {
+    onFeatureStart?: (
+      feature: import('./lib/wizard-session').AdditionalFeature,
+    ) => void;
+    onFeatureComplete?: (
+      feature: import('./lib/wizard-session').AdditionalFeature,
+    ) => void;
+  },
+) {
+  // Production safety override: the Vertex Haiku route currently rejects
+  // wizard requests with HTTP 400. Keep the override process-local and scoped
+  // to the active run; the exit listener also covers wizardAbort/process.exit,
+  // where an async finally block is not guaranteed to complete.
+  const restoreHaikuModel = forceSonnetForHaikuRoutes();
+  process.once('exit', restoreHaikuModel);
+
+  try {
+    return await runWizardBody(
+      argv,
+      session,
+      getAdditionalFeatureQueue,
+      featureProgress,
+    );
+  } finally {
+    process.off('exit', restoreHaikuModel);
+    restoreHaikuModel();
+  }
+}
+
+async function runWizardBody(
   argv: Args,
   session?: WizardSession,
   getAdditionalFeatureQueue?: () => readonly import('./lib/wizard-session').AdditionalFeature[],
