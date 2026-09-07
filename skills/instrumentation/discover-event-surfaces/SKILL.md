@@ -23,7 +23,7 @@ succeeds. Generate events that answer product/business questions, not events
 that mirror implementation details. Aim for **breadth and quality** — a
 downstream skill will narrow the list.
 
-Read the `taxonomy` skill at `../../taxonomy/amplitude-quickstart-taxonomy-agent/SKILL.md` to understand core
+Read the `taxonomy` skill at `../taxonomy/SKILL.md` to understand core
 analytics philosophy and naming standards.
 
 ---
@@ -97,14 +97,17 @@ avoid duplicates and match the naming convention already in use.
 ### Resolve the project
 
 If the change_brief includes an Amplitude `projectId`, use it directly. Otherwise,
-call `get_context` to resolve the project name or ask the user which project to
+call `get_amplitude_context` to resolve the project name or ask the user which project to
 target. You need a `projectId` for the next call.
 
 ### Pull existing events
 
-Call `get_events` with the resolved `projectId` (no cursor needed — just the first
-page is enough for pattern detection). This returns event objects with fields like
-`eventType`, `category`, `description`, etc.
+Inspect the connected catalog and use its current taxonomy event reader with
+the resolved `projectId`. Follow only its advertised schema. When it supports
+caller attribution, identify this skill with the `name` from its YAML
+frontmatter. No cursor is needed—the first page is enough for pattern
+detection. Request the event name, category, and description fields when its
+schema supports field selection, then use the returned field names.
 
 ### Build naming references and an existing event index
 
