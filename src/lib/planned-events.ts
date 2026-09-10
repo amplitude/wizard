@@ -334,15 +334,53 @@ export async function commitPlannedEvents(
     abortSignal,
     agentTimeoutMs: CREATE_EVENTS_TIMEOUT_MS,
     direct: async (callTool) => {
-      const text = await callTool(2, 'update_event', {
+      const parseUpdateResult = (
+        text: string | null,
+        toolName: string,
+      ): { success: boolean } | null => {
+        if (!text) return null;
+        const parsed = UpdateEventResponse.safeParse(JSON.parse(text));
+        if (!parsed.success) {
+          logToFile(
+            `[commitPlannedEvents] ${toolName} response parse failed: ${parsed.error.message}`,
+          );
+          return null;
+        }
+        return { success: parsed.data.success ?? false };
+      };
+
+      const consolidatedText = await callTool(2, 'manage_amp_events', {
+        action: 'update',
+        kind: 'event',
         projectId: appId,
         descriptions,
       });
-      if (!text) return null;
       try {
-        const parsed = UpdateEventResponse.parse(JSON.parse(text));
-        return { success: parsed.success ?? false };
-      } catch {
+        const consolidatedResult = parseUpdateResult(
+          consolidatedText,
+          'manage_amp_events',
+        );
+        if (consolidatedResult !== null) return consolidatedResult;
+      } catch (err) {
+        logToFile(
+          `[commitPlannedEvents] manage_amp_events response parse error: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
+      }
+
+      const legacyText = await callTool(3, 'update_event', {
+        projectId: appId,
+        descriptions,
+      });
+      try {
+        return parseUpdateResult(legacyText, 'update_event');
+      } catch (err) {
+        logToFile(
+          `[commitPlannedEvents] update_event response parse error: ${
+            err instanceof Error ? err.message : String(err)
+          }`,
+        );
         return null;
       }
     },

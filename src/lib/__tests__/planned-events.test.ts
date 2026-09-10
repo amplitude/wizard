@@ -143,7 +143,7 @@ describe('commitPlannedEvents', () => {
     expect(mockFetch).not.toHaveBeenCalled();
   });
 
-  it('follows up with update_event when descriptions are present', async () => {
+  it('uses consolidated manage_amp_events when descriptions are present', async () => {
     mockAxiosPost.mockResolvedValueOnce({
       status: 200,
       data: {
@@ -171,13 +171,65 @@ describe('commitPlannedEvents', () => {
     const updateCall = mockFetch.mock.calls.find(
       ([, init]) =>
         typeof (init as { body?: string })?.body === 'string' &&
-        (init as { body: string }).body.includes('update_event'),
+        (init as { body: string }).body.includes('manage_amp_events'),
     );
     expect(updateCall).toBeTruthy();
     const reqBody = JSON.parse((updateCall![1] as { body: string }).body);
+    expect(reqBody.params.arguments).toMatchObject({
+      action: 'update',
+      kind: 'event',
+      projectId: '12345',
+    });
     expect(reqBody.params.arguments.descriptions).toEqual({
       'Sign Up Completed': 'Fired when signup ends',
     });
+    expect(mockQuery).not.toHaveBeenCalled();
+  });
+
+  it('falls back to legacy update_event when consolidated tools are unavailable', async () => {
+    mockAxiosPost.mockResolvedValueOnce({
+      status: 200,
+      data: {
+        createdCount: 1,
+        eventTypes: ['Sign Up Completed'],
+        appId: '12345',
+      },
+    });
+    primeSession();
+    mockFetch.mockResolvedValueOnce(
+      makeFetchResponse(
+        `data: ${JSON.stringify({
+          jsonrpc: '2.0',
+          id: 2,
+          error: { code: -32601, message: 'Tool not found' },
+        })}\n`,
+      ),
+    );
+    mockFetch.mockResolvedValueOnce(
+      makeFetchResponse(sseResult({ success: true })),
+    );
+
+    const result = await commitPlannedEvents({
+      accessToken: 'tok',
+      appId: '12345',
+      events: [
+        { name: 'Sign Up Completed', description: 'Fired when signup ends' },
+      ],
+      zone: 'us',
+    });
+
+    expect(result).toEqual({ attempted: 1, created: 1, described: 1 });
+
+    const toolCalls = mockFetch.mock.calls
+      .map(([, init]) => (init as { body?: string })?.body)
+      .filter((body): body is string => typeof body === 'string')
+      .map((body) => JSON.parse(body))
+      .filter((body) => body.method === 'tools/call');
+    expect(toolCalls.map((body) => body.params.name)).toEqual([
+      'manage_amp_events',
+      'update_event',
+    ]);
+    expect(mockQuery).not.toHaveBeenCalled();
   });
 
   it('deduplicates events by name and trims whitespace', async () => {
