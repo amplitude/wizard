@@ -470,7 +470,8 @@ export interface WizardUI {
       | 'RATE_LIMIT'
       | 'API_ERROR'
       | 'MCP_MISSING'
-      | 'RESOURCE_MISSING';
+      | 'RESOURCE_MISSING'
+      | 'NATIVE_BINARY_MISSING';
     mcpServer?: 'wizard-tools' | 'amplitude-wizard';
     recoverable?: 'retry' | 'reinvoke_with_flag' | 'human_required' | 'fatal';
     suggestedAction?: { command?: string[]; docsUrl?: string };

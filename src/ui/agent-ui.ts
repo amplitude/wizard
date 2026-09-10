@@ -710,7 +710,8 @@ export class AgentUI implements WizardUI {
       | 'RATE_LIMIT'
       | 'API_ERROR'
       | 'MCP_MISSING'
-      | 'RESOURCE_MISSING';
+      | 'RESOURCE_MISSING'
+      | 'NATIVE_BINARY_MISSING';
     mcpServer?: 'wizard-tools' | 'amplitude-wizard';
     recoverable?: RecoverableHint;
     suggestedAction?: SuggestedAction;

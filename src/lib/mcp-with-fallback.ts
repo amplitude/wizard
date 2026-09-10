@@ -8,7 +8,6 @@
  * MCP API drift without requiring them to write two code paths.
  */
 
-import path from 'path';
 import { logToFile } from '../utils/debug.js';
 import { getWizardAbortSignal } from '../utils/wizard-abort.js';
 import { getMcpUrlFromZone } from '../utils/urls.js';
@@ -43,11 +42,6 @@ async function getSDKModule(): Promise<{ query: SDKQueryFn }> {
     _sdkModule = { query: mod.query as SDKQueryFn };
   }
   return _sdkModule;
-}
-
-function getClaudeCodeExecutablePath(): string {
-  const sdkPackagePath = require.resolve('@anthropic-ai/claude-agent-sdk');
-  return path.join(path.dirname(sdkPackagePath), 'cli.js');
 }
 
 // ── MCP session helpers ───────────────────────────────────────────────────────
@@ -563,7 +557,6 @@ async function runAgentFallbackInner(
   onToolUse?: AgentFallbackToolUseHook,
 ): Promise<string> {
   const { query } = await getSDKModule();
-  const cliPath = getClaudeCodeExecutablePath();
 
   // Combine the timeout with any external abort signal.
   // AbortSignal.any() requires Node 20.3+; we support 18.17+, so we wire it manually.
@@ -585,7 +578,12 @@ async function runAgentFallbackInner(
         // drives Amplitude MCP writes (charts/dashboard); it must stay capable
         // enough for tool JSON — routing `--mode fast` from the main wizard
         // here would regress dashboard fallback quality.
-        claudeCodePath: cliPath,
+        //
+        // We intentionally do NOT pass `pathToClaudeCodeExecutable` — the SDK
+        // resolves its per-platform native binary itself. (An earlier
+        // `claudeCodePath: <sdkDir>/cli.js` override was both a non-existent
+        // SDK option name AND a path the SDK 0.3.x no longer ships, so it was
+        // silently ignored; removing it keeps behavior and drops dead code.)
         permissionMode: 'bypassPermissions',
         allowedTools: [],
         mcpServers: {
