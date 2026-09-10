@@ -1,5 +1,12 @@
 # Changelog
 
+## [1.18.3](https://github.com/amplitude/wizard/compare/wizard-v1.18.2...wizard-v1.18.3) (2026-09-10)
+
+
+### Bug Fixes
+
+* use consolidated event tool for descriptions ([#875](https://github.com/amplitude/wizard/issues/875)) ([c91202a](https://github.com/amplitude/wizard/commit/c91202a8fdc42d745d89072e0855e9f5fc3e601b))
+
 ## [1.18.2](https://github.com/amplitude/wizard/compare/wizard-v1.18.1...wizard-v1.18.2) (2026-05-28)
 
 
