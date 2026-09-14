@@ -44,8 +44,24 @@ export function resolveConsoleCredentials(
     };
   }
 
-  // Session credentials: available after auth screen
-  if (session.credentials?.projectApiKey && session.credentials?.host) {
+  // Session credentials: available after auth screen. The LLM gateway
+  // authenticates via the Amplitude OAuth access token (the bearer that
+  // `initializeAgent` would later put into `ANTHROPIC_AUTH_TOKEN`), so we
+  // require a non-empty `accessToken` here too. Without that guard the
+  // AuthScreen [M]-manual-fallback path — where a user pastes a project
+  // API key BEFORE browser OAuth has resolved — falls through to a
+  // gateway/Agent-SDK call that has no bearer to present. The Claude
+  // Agent SDK then routes through its local-claude CLI fallback (because
+  // `useLocalClaude = !amplitudeBearerToken && !ANTHROPIC_API_KEY`), and
+  // the user sees a misleading "There's an issue with the selected model
+  // (anthropic/claude-sonnet-4-6). It may not exist or you may not have
+  // access to it." instead of the friendly "Claude is not available yet
+  // — complete authentication first." surfaced by `queryConsole` below.
+  if (
+    session.credentials?.projectApiKey &&
+    session.credentials?.host &&
+    session.credentials?.accessToken
+  ) {
     return {
       kind: 'gateway',
       baseUrl: getLlmGatewayUrlFromHost(session.credentials.host),
