@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as fs from 'node:fs';
-import * as os from 'node:os';
 import * as path from 'node:path';
 import { VUE_AGENT_CONFIG } from '../vue-wizard-agent';
+import { createTempDir } from '../../../utils/__tests__/helpers/temp-dir.js';
 
 function makeOptions(installDir: string) {
   return {
@@ -20,13 +20,14 @@ function makeOptions(installDir: string) {
 
 describe('VUE_AGENT_CONFIG.detection.detect', () => {
   let tmpDir: string;
+  let cleanup: () => void;
 
   beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'vue-detect-'));
+    ({ dir: tmpDir, cleanup } = createTempDir('vue-detect-'));
   });
 
   afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    cleanup();
   });
 
   it('detects Vue via package.json when vue is a dependency', async () => {

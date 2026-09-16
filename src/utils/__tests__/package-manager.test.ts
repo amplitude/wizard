@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'node:fs';
-import * as os from 'node:os';
 import * as path from 'node:path';
+import { createTempDir } from './helpers/temp-dir.js';
 
 vi.mock('../../telemetry', () => ({
   traceStep: (_name: string, fn: () => unknown) => fn(),
@@ -36,13 +36,14 @@ import { analytics } from '../analytics.js';
 
 describe('BUN.detect', () => {
   let tmpDir: string;
+  let cleanup: () => void;
 
   beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pm-test-'));
+    ({ dir: tmpDir, cleanup } = createTempDir('pm-test-'));
   });
 
   afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    cleanup();
   });
 
   it('returns true when bun.lockb is present', () => {
@@ -62,13 +63,14 @@ describe('BUN.detect', () => {
 
 describe('YARN_V1.detect', () => {
   let tmpDir: string;
+  let cleanup: () => void;
 
   beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pm-test-'));
+    ({ dir: tmpDir, cleanup } = createTempDir('pm-test-'));
   });
 
   afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    cleanup();
   });
 
   it('returns true when yarn.lock contains "yarn lockfile v1"', () => {
@@ -96,13 +98,14 @@ describe('YARN_V1.detect', () => {
 
 describe('YARN_V2.detect', () => {
   let tmpDir: string;
+  let cleanup: () => void;
 
   beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pm-test-'));
+    ({ dir: tmpDir, cleanup } = createTempDir('pm-test-'));
   });
 
   afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    cleanup();
   });
 
   it('returns true when yarn.lock contains __metadata', () => {
@@ -130,13 +133,14 @@ describe('YARN_V2.detect', () => {
 
 describe('PNPM.detect', () => {
   let tmpDir: string;
+  let cleanup: () => void;
 
   beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pm-test-'));
+    ({ dir: tmpDir, cleanup } = createTempDir('pm-test-'));
   });
 
   afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    cleanup();
   });
 
   it('returns true when pnpm-lock.yaml is present', () => {
@@ -151,13 +155,14 @@ describe('PNPM.detect', () => {
 
 describe('NPM.detect', () => {
   let tmpDir: string;
+  let cleanup: () => void;
 
   beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pm-test-'));
+    ({ dir: tmpDir, cleanup } = createTempDir('pm-test-'));
   });
 
   afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    cleanup();
   });
 
   it('returns true when package-lock.json is present', () => {
@@ -180,13 +185,14 @@ describe('EXPO.detect', () => {
 
 describe('detectAllPackageManagers', () => {
   let tmpDir: string;
+  let cleanup: () => void;
 
   beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pm-test-'));
+    ({ dir: tmpDir, cleanup } = createTempDir('pm-test-'));
   });
 
   afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    cleanup();
   });
 
   it('detects bun when bun.lock is present', () => {

@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { createTempDir } from './helpers/temp-dir.js';
 import {
   CACHE_ROOT_OVERRIDE_ENV,
   ensureDir,
@@ -28,10 +29,13 @@ import {
 
 describe('storage-paths', () => {
   let tmpRoot: string;
+  let cleanupRoot: () => void;
   let originalOverride: string | undefined;
 
   beforeEach(() => {
-    tmpRoot = fs.mkdtempSync(path.join(os.tmpdir(), 'storage-paths-test-'));
+    ({ dir: tmpRoot, cleanup: cleanupRoot } = createTempDir(
+      'storage-paths-test-',
+    ));
     originalOverride = process.env[CACHE_ROOT_OVERRIDE_ENV];
     process.env[CACHE_ROOT_OVERRIDE_ENV] = tmpRoot;
   });
@@ -42,7 +46,7 @@ describe('storage-paths', () => {
     } else {
       process.env[CACHE_ROOT_OVERRIDE_ENV] = originalOverride;
     }
-    fs.rmSync(tmpRoot, { recursive: true, force: true });
+    cleanupRoot();
   });
 
   describe('getCacheRoot', () => {
@@ -92,7 +96,7 @@ describe('storage-paths', () => {
     });
 
     it('resolves symlinks so symlinked variants hash identically', () => {
-      const real = fs.mkdtempSync(path.join(os.tmpdir(), 'ph-real-'));
+      const { dir: real, cleanup } = createTempDir('ph-real-');
       const link = path.join(os.tmpdir(), `ph-link-${Date.now()}`);
       try {
         fs.symlinkSync(real, link);
@@ -103,7 +107,7 @@ describe('storage-paths', () => {
         } catch {
           // ignore
         }
-        fs.rmSync(real, { recursive: true, force: true });
+        cleanup();
       }
     });
   });

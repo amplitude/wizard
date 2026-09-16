@@ -31,9 +31,8 @@
 
 import React from 'react';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { createTempDir } from '../../../../utils/__tests__/helpers/temp-dir.js';
 
 import { render } from 'ink-testing-library';
 import { EventPlanViewer } from '../../primitives/EventPlanViewer.js';
@@ -74,16 +73,17 @@ function renderViewer(
 
 describe('RunScreen Events tab — wired vs pending rendering', () => {
   let installDir: string;
+  let cleanup: () => void;
 
   beforeEach(() => {
-    installDir = mkdtempSync(join(tmpdir(), 'run-events-'));
+    ({ dir: installDir, cleanup } = createTempDir('run-events-'));
     resetFileChangeLedger();
   });
 
   afterEach(() => {
     resetFileChangeLedger();
     try {
-      rmSync(installDir, { recursive: true, force: true });
+      cleanup();
     } catch {
       /* best-effort */
     }

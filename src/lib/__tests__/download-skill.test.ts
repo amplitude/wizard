@@ -16,8 +16,8 @@ import { describe, it, expect } from 'vitest';
 import AdmZip from 'adm-zip';
 import { downloadSkill, isAllowedSkillUrl } from '../wizard-tools';
 import * as fs from 'fs';
-import * as os from 'os';
 import * as path from 'path';
+import { createTempDir } from '../../utils/__tests__/helpers/temp-dir.js';
 
 describe('isAllowedSkillUrl', () => {
   it('accepts github.com over HTTPS', () => {
@@ -62,9 +62,7 @@ describe('isAllowedSkillUrl', () => {
 
 describe('downloadSkill — host allowlist', () => {
   it('refuses an HTTP URL without touching the filesystem', () => {
-    const installDir = fs.mkdtempSync(
-      path.join(os.tmpdir(), 'download-skill-test-'),
-    );
+    const { dir: installDir, cleanup } = createTempDir('download-skill-test-');
     try {
       const result = downloadSkill(
         {
@@ -83,14 +81,12 @@ describe('downloadSkill — host allowlist', () => {
         fs.existsSync(path.join(installDir, '.claude', 'skills', 'malicious')),
       ).toBe(false);
     } finally {
-      fs.rmSync(installDir, { recursive: true, force: true });
+      cleanup();
     }
   });
 
   it('refuses an arbitrary host', () => {
-    const installDir = fs.mkdtempSync(
-      path.join(os.tmpdir(), 'download-skill-test-'),
-    );
+    const { dir: installDir, cleanup } = createTempDir('download-skill-test-');
     try {
       const result = downloadSkill(
         {
@@ -103,7 +99,7 @@ describe('downloadSkill — host allowlist', () => {
       expect(result.success).toBe(false);
       expect(result.error).toMatch(/not from an allowed host/);
     } finally {
-      fs.rmSync(installDir, { recursive: true, force: true });
+      cleanup();
     }
   });
 });
@@ -117,7 +113,7 @@ describe('downloadSkill — host allowlist', () => {
 // not installed by default.
 describe('AdmZip extraction (replaces unzip CLI)', () => {
   it('extracts a flat zip preserving file contents', () => {
-    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'admzip-flat-'));
+    const { dir: tmp, cleanup } = createTempDir('admzip-flat-');
     try {
       const zipPath = path.join(tmp, 'test.zip');
       const zip = new AdmZip();
@@ -137,12 +133,12 @@ describe('AdmZip extraction (replaces unzip CLI)', () => {
         fs.readFileSync(path.join(out, 'references/EXAMPLE.md'), 'utf8'),
       ).toBe('snippet');
     } finally {
-      fs.rmSync(tmp, { recursive: true, force: true });
+      cleanup();
     }
   });
 
   it('overwrite=true matches the previous `unzip -o` semantics', () => {
-    const tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'admzip-overwrite-'));
+    const { dir: tmp, cleanup } = createTempDir('admzip-overwrite-');
     try {
       const out = path.join(tmp, 'out');
       fs.mkdirSync(out, { recursive: true });
@@ -158,7 +154,7 @@ describe('AdmZip extraction (replaces unzip CLI)', () => {
 
       expect(fs.readFileSync(path.join(out, 'SKILL.md'), 'utf8')).toBe('FRESH');
     } finally {
-      fs.rmSync(tmp, { recursive: true, force: true });
+      cleanup();
     }
   });
 });

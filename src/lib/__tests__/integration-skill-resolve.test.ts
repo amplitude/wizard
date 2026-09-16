@@ -1,17 +1,13 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'node:fs';
 import * as path from 'node:path';
-import * as os from 'node:os';
 import { Integration } from '../constants';
 import {
   listIntegrationSkillIdsOnDisk,
   filterIntegrationSkillIdsForIntegration,
   resolveIntegrationSkillId,
 } from '../integration-skill-resolve';
-
-function makeTmpDir(): string {
-  return fs.mkdtempSync(path.join(os.tmpdir(), 'wizard-int-skill-'));
-}
+import { createTempDir } from '../../utils/__tests__/helpers/temp-dir.js';
 
 function touchSkill(installDir: string, skillId: string): void {
   const dir = path.join(installDir, '.claude', 'skills', skillId);
@@ -25,11 +21,12 @@ function touchSkill(installDir: string, skillId: string): void {
 
 describe('listIntegrationSkillIdsOnDisk', () => {
   let dir: string;
+  let cleanup: () => void;
   beforeEach(() => {
-    dir = makeTmpDir();
+    ({ dir, cleanup } = createTempDir('wizard-int-skill-'));
   });
   afterEach(() => {
-    fs.rmSync(dir, { recursive: true, force: true });
+    cleanup();
   });
 
   it('returns empty when .claude/skills is missing', () => {
@@ -84,11 +81,12 @@ describe('filterIntegrationSkillIdsForIntegration', () => {
 
 describe('resolveIntegrationSkillId', () => {
   let dir: string;
+  let cleanup: () => void;
   beforeEach(() => {
-    dir = makeTmpDir();
+    ({ dir, cleanup } = createTempDir('wizard-int-skill-'));
   });
   afterEach(() => {
-    fs.rmSync(dir, { recursive: true, force: true });
+    cleanup();
   });
 
   it('returns null when there are zero candidates', () => {

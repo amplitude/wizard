@@ -20,9 +20,9 @@
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
-import * as os from 'os';
 import path from 'path';
 import { applyScopedSettings } from '../claude-settings-scope.js';
+import { createTempDir } from '../../utils/__tests__/helpers/temp-dir.js';
 
 const SCOPED_KEYS = [
   'ANTHROPIC_BASE_URL',
@@ -48,16 +48,17 @@ function snapshotEnv(): () => void {
 
 describe('applyScopedSettings', () => {
   let workdir: string;
+  let cleanup: () => void;
   let restoreEnv: () => void;
 
   beforeEach(() => {
-    workdir = fs.mkdtempSync(path.join(os.tmpdir(), 'wizard-scope-test-'));
+    ({ dir: workdir, cleanup } = createTempDir('wizard-scope-test-'));
     restoreEnv = snapshotEnv();
   });
 
   afterEach(() => {
     restoreEnv();
-    fs.rmSync(workdir, { recursive: true, force: true });
+    cleanup();
   });
 
   it('returns null when no gateway env is set', () => {

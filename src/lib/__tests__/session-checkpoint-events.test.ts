@@ -15,8 +15,7 @@
 
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import * as fs from 'node:fs';
-import * as os from 'node:os';
-import * as path from 'node:path';
+import { createTempDir } from '../../utils/__tests__/helpers/temp-dir.js';
 import {
   saveCheckpoint,
   loadCheckpoint,
@@ -115,6 +114,8 @@ function makeSession(installDir: string): WizardSession {
 describe('checkpoint NDJSON emissions', () => {
   let cacheDir: string;
   let installDir: string;
+  let cleanupCache: () => void;
+  let cleanupInstall: () => void;
   let prevCacheRoot: string | undefined;
   let savedSpy: ReturnType<typeof vi.fn>;
   let loadedSpy: ReturnType<typeof vi.fn>;
@@ -122,8 +123,9 @@ describe('checkpoint NDJSON emissions', () => {
   let prevUI: ReturnType<typeof getUI>;
 
   beforeEach(() => {
-    cacheDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ckpt-events-'));
-    installDir = fs.mkdtempSync(path.join(os.tmpdir(), 'ckpt-events-pj-'));
+    ({ dir: cacheDir, cleanup: cleanupCache } = createTempDir('ckpt-events-'));
+    ({ dir: installDir, cleanup: cleanupInstall } =
+      createTempDir('ckpt-events-pj-'));
     prevCacheRoot = process.env[CACHE_ROOT_OVERRIDE_ENV];
     process.env[CACHE_ROOT_OVERRIDE_ENV] = cacheDir;
 
@@ -147,8 +149,8 @@ describe('checkpoint NDJSON emissions', () => {
     } else {
       process.env[CACHE_ROOT_OVERRIDE_ENV] = prevCacheRoot;
     }
-    fs.rmSync(cacheDir, { recursive: true, force: true });
-    fs.rmSync(installDir, { recursive: true, force: true });
+    cleanupCache();
+    cleanupInstall();
   });
 
   it('saveCheckpoint emits checkpoint_saved with the supplied phase', () => {

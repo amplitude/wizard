@@ -3,9 +3,7 @@ import { installPackage } from '../setup-utils';
 
 import * as ChildProcess from 'node:child_process';
 import type { PackageManager } from '../package-manager';
-import * as os from 'node:os';
-import * as fs from 'node:fs';
-import * as path from 'node:path';
+import { createTempDir } from './helpers/temp-dir.js';
 
 vi.mock('node:child_process', async () => {
   const actual = await vi.importActual<typeof import('node:child_process')>(
@@ -56,16 +54,17 @@ const npmManager: PackageManager = {
 
 describe('installPackage', () => {
   let tmpDir: string;
+  let cleanup: () => void;
 
   beforeEach(() => {
     // Use an empty tmpdir so isReact19Installed short-circuits (no
     // package.json in the install dir) — keeps tests independent of the
     // wizard repo's own React 19 dev-dep.
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'install-package-test-'));
+    ({ dir: tmpDir, cleanup } = createTempDir('install-package-test-'));
   });
 
   afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    cleanup();
     vi.clearAllMocks();
   });
 

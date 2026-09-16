@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from 'vitest';
 import * as path from 'path';
+import { createTempDir } from './helpers/temp-dir.js';
 
 vi.mock('child_process', () => ({
   exec: vi.fn(),
@@ -105,9 +106,9 @@ describe('isSameOrDescendant', () => {
   });
 
   it('matches through symlinks by canonicalizing both sides', async () => {
-    const { mkdtempSync, mkdirSync, symlinkSync, rmSync } = await import('fs');
+    const { mkdirSync, symlinkSync, rmSync } = await import('fs');
     const os = await import('os');
-    const real = mkdtempSync(path.join(os.tmpdir(), 'port-real-'));
+    const { dir: real, cleanup } = createTempDir('port-real-');
     const sub = path.join(real, 'app');
     mkdirSync(sub);
     const link = path.join(os.tmpdir(), `port-link-${Date.now()}`);
@@ -119,7 +120,7 @@ describe('isSameOrDescendant', () => {
       expect(isSameOrDescendant(path.join(link, 'app'), link)).toBe(true);
     } finally {
       rmSync(link, { force: true });
-      rmSync(real, { recursive: true, force: true });
+      cleanup();
     }
   });
 });

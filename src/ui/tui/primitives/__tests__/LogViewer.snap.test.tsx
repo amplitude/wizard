@@ -1,8 +1,8 @@
 import React from 'react';
 import * as fs from 'node:fs';
-import * as os from 'node:os';
 import * as path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { createTempDir } from '../../../../utils/__tests__/helpers/temp-dir.js';
 import { LogViewer } from '../LogViewer.js';
 import {
   renderInkFrame,
@@ -28,13 +28,14 @@ const sanitize = (frame: string): string =>
 
 describe('LogViewer snapshots', () => {
   let tempDir: string;
+  let cleanup: () => void;
 
   beforeEach(() => {
-    tempDir = fs.mkdtempSync(path.join(os.tmpdir(), 'wizard-log-viewer-'));
+    ({ dir: tempDir, cleanup } = createTempDir('wizard-log-viewer-'));
   });
 
   afterEach(() => {
-    fs.rmSync(tempDir, { recursive: true, force: true });
+    cleanup();
   });
 
   function writeLogFile(content: string): string {

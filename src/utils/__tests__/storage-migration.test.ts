@@ -2,7 +2,6 @@ import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import {
   existsSync,
   mkdirSync,
-  mkdtempSync,
   readFileSync,
   rmSync,
   writeFileSync,
@@ -10,6 +9,7 @@ import {
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { runMigrationShim } from '../storage-migration.js';
+import { createTempDir } from './helpers/temp-dir.js';
 import {
   CACHE_ROOT_OVERRIDE_ENV,
   getBenchmarkFile,
@@ -27,18 +27,23 @@ import {
 describe('runMigrationShim', () => {
   let cacheRoot: string;
   let installDir: string;
+  let cleanupCacheRoot: () => void;
+  let cleanupInstallDir: () => void;
   let originalCacheOverride: string | undefined;
 
   beforeEach(() => {
-    cacheRoot = mkdtempSync(join(tmpdir(), 'wiz-migrate-cache-'));
-    installDir = mkdtempSync(join(tmpdir(), 'wiz-migrate-project-'));
+    ({ dir: cacheRoot, cleanup: cleanupCacheRoot } =
+      createTempDir('wiz-migrate-cache-'));
+    ({ dir: installDir, cleanup: cleanupInstallDir } = createTempDir(
+      'wiz-migrate-project-',
+    ));
     originalCacheOverride = process.env[CACHE_ROOT_OVERRIDE_ENV];
     process.env[CACHE_ROOT_OVERRIDE_ENV] = cacheRoot;
   });
 
   afterEach(() => {
-    rmSync(cacheRoot, { recursive: true, force: true });
-    rmSync(installDir, { recursive: true, force: true });
+    cleanupCacheRoot();
+    cleanupInstallDir();
     if (originalCacheOverride === undefined) {
       delete process.env[CACHE_ROOT_OVERRIDE_ENV];
     } else {

@@ -1,7 +1,7 @@
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
-import * as os from 'os';
+import { createTempDir } from '../../utils/__tests__/helpers/temp-dir.js';
 import {
   resolveEnvPath,
   ensureGitignoreCoverage,
@@ -35,12 +35,24 @@ import {
 import type { WizardToolErrorResponse } from '../wizard-tools';
 import { toWizardDashboardOpenUrl } from '../../utils/dashboard-open-url';
 
+// Track each test's cleanup so the `cleanup(dir)` callsites scattered through
+// this file (it/afterEach blocks) keep working without touching every call.
+const cleanupByDir = new Map<string, () => void>();
+
 function makeTmpDir(): string {
-  return fs.mkdtempSync(path.join(os.tmpdir(), 'wizard-tools-'));
+  const { dir, cleanup: dispose } = createTempDir('wizard-tools-');
+  cleanupByDir.set(dir, dispose);
+  return dir;
 }
 
 function cleanup(dir: string): void {
-  fs.rmSync(dir, { recursive: true, force: true });
+  const dispose = cleanupByDir.get(dir);
+  if (dispose) {
+    cleanupByDir.delete(dir);
+    dispose();
+  } else {
+    fs.rmSync(dir, { recursive: true, force: true });
+  }
 }
 
 // ---------------------------------------------------------------------------

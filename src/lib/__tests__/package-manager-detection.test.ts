@@ -1,7 +1,6 @@
 import { vi, describe, it, expect, beforeEach, afterEach } from 'vitest';
 import * as fs from 'fs';
 import * as path from 'path';
-import * as os from 'os';
 import {
   detectNodePackageManagers,
   detectPythonPackageManagers,
@@ -9,6 +8,7 @@ import {
   swiftPackageManager,
   gradlePackageManager,
 } from '../package-manager-detection';
+import { createTempDir } from '../../utils/__tests__/helpers/temp-dir.js';
 
 vi.mock('../../utils/debug');
 vi.mock('../../telemetry', () => ({
@@ -22,25 +22,18 @@ vi.mock('../../utils/analytics', () => ({
   },
 }));
 
-function makeTmpDir(): string {
-  return fs.mkdtempSync(path.join(os.tmpdir(), 'pm-detect-'));
-}
-
-function cleanup(dir: string): void {
-  fs.rmSync(dir, { recursive: true, force: true });
-}
-
 // ---------------------------------------------------------------------------
 // Node.js detection
 // ---------------------------------------------------------------------------
 
 describe('detectNodePackageManagers', () => {
   let tmpDir: string;
+  let cleanup: () => void;
 
   beforeEach(() => {
-    tmpDir = makeTmpDir();
+    ({ dir: tmpDir, cleanup } = createTempDir('pm-detect-'));
   });
-  afterEach(() => cleanup(tmpDir));
+  afterEach(() => cleanup());
 
   it('returns empty when no lockfile exists', async () => {
     const result = await detectNodePackageManagers(tmpDir);
@@ -114,11 +107,12 @@ describe('detectNodePackageManagers', () => {
 
 describe('detectPythonPackageManagers', () => {
   let tmpDir: string;
+  let cleanup: () => void;
 
   beforeEach(() => {
-    tmpDir = makeTmpDir();
+    ({ dir: tmpDir, cleanup } = createTempDir('pm-detect-'));
   });
-  afterEach(() => cleanup(tmpDir));
+  afterEach(() => cleanup());
 
   it('detects uv via uv.lock', async () => {
     fs.writeFileSync(path.join(tmpDir, 'uv.lock'), '');

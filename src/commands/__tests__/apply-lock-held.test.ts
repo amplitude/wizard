@@ -28,20 +28,19 @@ process.env.AMPLITUDE_WIZARD_SKIP_BOOTSTRAP = '1';
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
 import { ExitCode } from '../../lib/exit-codes';
 import { acquireApplyLock } from '../../utils/apply-lock';
-import { mkdtempSync, rmSync } from 'fs';
-import { tmpdir } from 'os';
-import { join } from 'path';
+import { createTempDir } from '../../utils/__tests__/helpers/temp-dir.js';
 
 describe('apply lock-held wiring', () => {
   let installDir: string;
+  let cleanup: () => void;
 
   beforeEach(() => {
-    installDir = mkdtempSync(join(tmpdir(), 'wizard-apply-lock-test-'));
+    ({ dir: installDir, cleanup } = createTempDir('wizard-apply-lock-test-'));
   });
 
   afterEach(() => {
     try {
-      rmSync(installDir, { recursive: true, force: true });
+      cleanup();
     } catch {
       // best-effort cleanup
     }

@@ -1,18 +1,19 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as fs from 'node:fs';
-import * as os from 'node:os';
 import * as path from 'node:path';
 import { tryGetPackageJson } from '../package-json-light.js';
+import { createTempDir } from './helpers/temp-dir.js';
 
 describe('tryGetPackageJson', () => {
   let tmpDir: string;
+  let cleanup: () => void;
 
   beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pkg-json-light-'));
+    ({ dir: tmpDir, cleanup } = createTempDir('pkg-json-light-'));
   });
 
   afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    cleanup();
   });
 
   it('returns null when package.json is an array (invalid manifest)', async () => {

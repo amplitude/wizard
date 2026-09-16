@@ -10,8 +10,8 @@
  */
 import { describe, it, expect, beforeAll, afterAll } from 'vitest';
 import * as fs from 'node:fs';
-import * as os from 'node:os';
 import * as path from 'node:path';
+import { createTempDir } from '../../../utils/__tests__/helpers/temp-dir.js';
 
 import { DJANGO_AGENT_CONFIG } from '../../django/django-wizard-agent.js';
 import { FLASK_AGENT_CONFIG } from '../../flask/flask-wizard-agent.js';
@@ -31,9 +31,10 @@ const baseOptions = {
 
 describe('python-family detect() ignores node_modules', () => {
   let tmpDir: string;
+  let cleanup: () => void;
 
   beforeAll(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'detect-ignore-'));
+    ({ dir: tmpDir, cleanup } = createTempDir('detect-ignore-'));
 
     // Top-level: a Node project with NO Python signal. package.json only.
     fs.writeFileSync(
@@ -74,7 +75,7 @@ describe('python-family detect() ignores node_modules', () => {
   });
 
   afterAll(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    cleanup();
   });
 
   it('django: no false positive from node_modules', async () => {

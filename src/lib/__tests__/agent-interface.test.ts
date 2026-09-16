@@ -49,8 +49,8 @@ import {
 } from '../wizard-session';
 import { pickFreshestExisting } from '../../utils/storage-paths';
 import * as fs from 'node:fs';
-import * as os from 'node:os';
 import * as path from 'node:path';
+import { createTempDir } from '../../utils/__tests__/helpers/temp-dir.js';
 
 // Mock dependencies
 vi.mock('../../utils/analytics');
@@ -3362,13 +3362,14 @@ describe('buildAgentEnv', () => {
 
 describe('pickFreshestExisting', () => {
   let tmpDir: string;
+  let cleanup: () => void;
 
   beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'pick-freshest-'));
+    ({ dir: tmpDir, cleanup } = createTempDir('pick-freshest-'));
   });
 
   afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    cleanup();
   });
 
   it('returns null when no candidates exist', () => {

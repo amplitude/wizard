@@ -4,19 +4,20 @@
 
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import * as fs from 'node:fs';
-import * as os from 'node:os';
 import * as path from 'node:path';
 import { checkProjectGuard } from '../project-marker.js';
+import { createTempDir } from './helpers/temp-dir.js';
 
 describe('checkProjectGuard', () => {
   let tmp: string;
+  let cleanup: () => void;
 
   beforeEach(() => {
-    tmp = fs.mkdtempSync(path.join(os.tmpdir(), 'amp-project-marker-'));
+    ({ dir: tmp, cleanup } = createTempDir('amp-project-marker-'));
   });
 
   afterEach(() => {
-    fs.rmSync(tmp, { recursive: true, force: true });
+    cleanup();
     vi.restoreAllMocks();
   });
 

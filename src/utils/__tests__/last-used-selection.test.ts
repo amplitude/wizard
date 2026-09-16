@@ -7,24 +7,25 @@
  */
 
 import { describe, it, expect, beforeEach, afterEach } from 'vitest';
-import { mkdtempSync, rmSync, readFileSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
+import { readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import {
   getLastUsedSelection,
   storeLastUsedSelection,
 } from '../ampli-settings.js';
+import { createTempDir } from './helpers/temp-dir.js';
 
 let tmp: string;
+let cleanup: () => void;
 let cfg: string;
 
 beforeEach(() => {
-  tmp = mkdtempSync(join(tmpdir(), 'wizard-last-used-'));
+  ({ dir: tmp, cleanup } = createTempDir('wizard-last-used-'));
   cfg = join(tmp, 'ampli.json');
 });
 
 afterEach(() => {
-  rmSync(tmp, { recursive: true, force: true });
+  cleanup();
 });
 
 describe('getLastUsedSelection', () => {

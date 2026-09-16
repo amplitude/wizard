@@ -1,7 +1,4 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from 'vitest';
-import * as fs from 'node:fs';
-import * as path from 'node:path';
-import * as os from 'node:os';
 import {
   buildRegistryUrl,
   formatNotice,
@@ -9,8 +6,10 @@ import {
   _drainPendingNoticeForTest,
 } from '../update-notifier.js';
 import { CACHE_ROOT_OVERRIDE_ENV } from '../storage-paths.js';
+import { createTempDir } from './helpers/temp-dir.js';
 
 let CACHE_ROOT: string;
+let cleanupCache: () => void;
 let originalCacheOverride: string | undefined;
 
 describe('buildRegistryUrl', () => {
@@ -84,7 +83,8 @@ describe('scheduleUpdateCheck — deferred stderr write', () => {
     _drainPendingNoticeForTest(); // reset module state
     // Redirect the cache root so the disk cache lands somewhere we can clean
     // up — and so we don't depend on `~/.amplitude/wizard/` being writable.
-    CACHE_ROOT = fs.mkdtempSync(path.join(os.tmpdir(), 'wiz-update-cache-'));
+    ({ dir: CACHE_ROOT, cleanup: cleanupCache } =
+      createTempDir('wiz-update-cache-'));
     originalCacheOverride = process.env[CACHE_ROOT_OVERRIDE_ENV];
     process.env[CACHE_ROOT_OVERRIDE_ENV] = CACHE_ROOT;
     process.env.AMPLITUDE_WIZARD_NO_UPDATE_CHECK = ''; // allow the check
@@ -111,7 +111,7 @@ describe('scheduleUpdateCheck — deferred stderr write', () => {
     fetchSpy.mockRestore();
     stderrSpy.mockRestore();
     _drainPendingNoticeForTest();
-    fs.rmSync(CACHE_ROOT, { recursive: true, force: true });
+    cleanupCache();
     if (originalCacheOverride === undefined) {
       delete process.env[CACHE_ROOT_OVERRIDE_ENV];
     } else {

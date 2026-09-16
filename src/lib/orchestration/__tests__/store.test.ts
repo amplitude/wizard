@@ -5,16 +5,7 @@
  * `~/.amplitude/wizard/` directory is never touched.
  */
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
-import {
-  mkdtempSync,
-  mkdirSync,
-  rmSync,
-  readFileSync,
-  readdirSync,
-  writeFileSync,
-} from 'node:fs';
-import { tmpdir } from 'node:os';
-import { join } from 'node:path';
+import { mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 
 import {
   OrchestrationStore,
@@ -26,20 +17,24 @@ import {
 import { TaskLifecycle, IllegalTaskTransitionError } from '../lifecycle';
 import { getOrchestrationStoreFile } from '../storage-paths';
 import { atomicWriteJSON } from '../../../utils/atomic-write';
+import { createTempDir } from '../../../utils/__tests__/helpers/temp-dir.js';
 
 let cacheRoot: string;
 let installDir: string;
+let cleanupCache: () => void;
+let cleanupInstall: () => void;
 
 function setupCacheRoot(): void {
-  cacheRoot = mkdtempSync(join(tmpdir(), 'orch-store-'));
-  installDir = mkdtempSync(join(tmpdir(), 'orch-installdir-'));
+  ({ dir: cacheRoot, cleanup: cleanupCache } = createTempDir('orch-store-'));
+  ({ dir: installDir, cleanup: cleanupInstall } =
+    createTempDir('orch-installdir-'));
   process.env.AMPLITUDE_WIZARD_CACHE_DIR = cacheRoot;
   _resetOrchestrationStoreCache();
 }
 
 function teardownCacheRoot(): void {
-  rmSync(cacheRoot, { recursive: true, force: true });
-  rmSync(installDir, { recursive: true, force: true });
+  cleanupCache();
+  cleanupInstall();
   delete process.env.AMPLITUDE_WIZARD_CACHE_DIR;
   _resetOrchestrationStoreCache();
 }

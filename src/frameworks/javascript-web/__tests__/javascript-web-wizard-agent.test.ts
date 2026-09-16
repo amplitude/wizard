@@ -1,8 +1,8 @@
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
 import * as fs from 'node:fs';
-import * as os from 'node:os';
 import * as path from 'node:path';
 import { JAVASCRIPT_WEB_AGENT_CONFIG } from '../javascript-web-wizard-agent';
+import { createTempDir } from '../../../utils/__tests__/helpers/temp-dir.js';
 
 function makeOptions(installDir: string) {
   return {
@@ -20,13 +20,14 @@ function makeOptions(installDir: string) {
 
 describe('JAVASCRIPT_WEB_AGENT_CONFIG.detection.detect', () => {
   let tmpDir: string;
+  let cleanup: () => void;
 
   beforeEach(() => {
-    tmpDir = fs.mkdtempSync(path.join(os.tmpdir(), 'jsweb-detect-'));
+    ({ dir: tmpDir, cleanup } = createTempDir('jsweb-detect-'));
   });
 
   afterEach(() => {
-    fs.rmSync(tmpDir, { recursive: true, force: true });
+    cleanup();
   });
 
   it('matches VitePress when vue is only there for the docs stack', async () => {
