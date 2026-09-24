@@ -58,7 +58,7 @@
     "@sentry/node": "10.47.0",
     "adm-zip": "~0.5.18",
     "ai": "^6.0.235",
-    "axios": "1.16.0",
+    "axios": "1.18.0",
     "chalk": "2.4.2",
     "cli-highlight": "2.1.11",
     "cross-spawn": "^7.0.6",
