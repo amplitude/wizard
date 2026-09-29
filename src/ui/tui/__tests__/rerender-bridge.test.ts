@@ -1,9 +1,27 @@
-import { afterEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { setRerender, triggerRerender } from '../rerender-bridge.js';
 
 describe('rerender-bridge', () => {
+  beforeEach(() => vi.useFakeTimers());
   afterEach(() => {
     setRerender(null);
+    vi.useRealTimers();
+  });
+
+  it('yields to timers between renders even when every render requests another', async () => {
+    let renders = 0;
+    const timer = vi.fn();
+    setRerender(() => {
+      renders++;
+      if (renders < 100) triggerRerender();
+    });
+    triggerRerender();
+    setTimeout(timer, 20);
+    await vi.advanceTimersByTimeAsync(20);
+    expect(timer).toHaveBeenCalledOnce();
+    expect(renders).toBe(1);
+    await vi.advanceTimersByTimeAsync(12);
+    expect(renders).toBe(2);
   });
 
   it('is a no-op when no rerender is registered', () => {
@@ -11,12 +29,12 @@ describe('rerender-bridge', () => {
     expect(() => triggerRerender()).not.toThrow();
   });
 
-  it('invokes the registered rerender function once per microtask tick', async () => {
+  it('invokes the registered rerender function once per scheduled frame', async () => {
     const fn = vi.fn();
     setRerender(fn);
     triggerRerender();
     expect(fn).not.toHaveBeenCalled(); // deferred
-    await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(16);
     expect(fn).toHaveBeenCalledTimes(1);
   });
 
@@ -27,14 +45,14 @@ describe('rerender-bridge', () => {
     triggerRerender();
     triggerRerender();
     triggerRerender();
-    await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(16);
     expect(fn).toHaveBeenCalledTimes(1);
   });
 
   it('does NOT recurse synchronously when the rerender callback itself calls triggerRerender', async () => {
     // This is the production-breaking scenario: during React's commit
     // phase a store subscriber mutates state → emitChange →
-    // triggerRerender. Without the microtask defer, that would recurse
+    // triggerRerender. Without the deferred frame, that would recurse
     // synchronously into another instance.rerender() call from inside
     // React's commit, which is exactly what trips "Maximum update depth
     // exceeded".
@@ -53,15 +71,15 @@ describe('rerender-bridge', () => {
       totalCalls += 1;
       if (totalCalls < 3) {
         // Simulate subscriber re-triggering. Must NOT cause synchronous
-        // re-entry — the re-entry guard / microtask defer must hold this
+        // re-entry — the re-entry guard / deferred frame must hold this
         // back to a later tick.
         triggerRerender();
       }
       depth -= 1;
     });
     triggerRerender();
-    // Drain a few microtask ticks.
-    for (let i = 0; i < 10; i++) await Promise.resolve();
+    // Advance a few frames.
+    for (let i = 0; i < 10; i++) await vi.advanceTimersByTimeAsync(16);
     expect(maxDepth).toBe(1); // never re-enters synchronously
     // And the chain terminates once the callback stops re-triggering.
     expect(totalCalls).toBe(3);
@@ -74,7 +92,7 @@ describe('rerender-bridge', () => {
     });
     setRerender(fn);
     expect(() => triggerRerender()).not.toThrow();
-    await expect(Promise.resolve()).resolves.toBeUndefined();
+    await vi.advanceTimersByTimeAsync(16);
     expect(fn).toHaveBeenCalled();
   });
 
@@ -83,15 +101,14 @@ describe('rerender-bridge', () => {
     setRerender(fn);
     triggerRerender();
     setRerender(null);
-    await Promise.resolve();
-    // After detach the scheduled callback finds rerender === null and
-    // bails — fn must not have been called.
+    await vi.advanceTimersByTimeAsync(16);
+    // After detach the scheduled callback is cancelled — fn must not have been called.
     expect(fn).not.toHaveBeenCalled();
     // A subsequent re-attach must not be suppressed by stale pending state.
     const fn2 = vi.fn();
     setRerender(fn2);
     triggerRerender();
-    await Promise.resolve();
+    await vi.advanceTimersByTimeAsync(16);
     expect(fn2).toHaveBeenCalledTimes(1);
   });
 });

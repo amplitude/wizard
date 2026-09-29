@@ -1699,6 +1699,10 @@ describe('runAgent', () => {
 
       const observedAuthHeaders: Array<string> = [];
       let queryCallCount = 0;
+      let signalFirstAttemptStarted!: () => void;
+      const firstAttemptStarted = new Promise<void>((resolve) => {
+        signalFirstAttemptStarted = resolve;
+      });
 
       mockQuery.mockImplementation(
         (params: { options: Record<string, unknown> }) => {
@@ -1721,6 +1725,7 @@ describe('runAgent', () => {
                 signal.addEventListener('abort', () =>
                   reject(new Error('Stall aborted')),
                 );
+                signalFirstAttemptStarted();
               });
             })();
           }
@@ -1745,11 +1750,12 @@ describe('runAgent', () => {
         { successMessage: 'Done', errorMessage: 'Failed' },
       );
 
-      // 60s cold-start stall + jittered backoff (2-30s) = up to ~90s.
-      // With the mid-run bearer-refresh fix, the per-attempt refresh
-      // also fires on attempt 0 — that adds an extra microtask cycle
-      // for the dynamic import before the query starts, so we need a
-      // few more advance cycles to drain everything.
+      // Startup awaits dynamic imports that fake timers do not flush.
+      // On Node 22 the entire advance can finish before query() starts,
+      // leaving the subsequently scheduled stall timer frozen forever.
+      // Wait until the first iterator is listening for abort before advancing
+      // the 60s cold-start stall plus retry backoff (up to 30s).
+      await firstAttemptStarted;
       await vi.advanceTimersByTimeAsync(120_000);
 
       const result = await runPromise;

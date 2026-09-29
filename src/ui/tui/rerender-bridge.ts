@@ -20,29 +20,29 @@
  * triggers another store mutation — or any logger.warn → pushStatus path
  * fires during commit — we re-enter `emitChange` → `triggerRerender` →
  * React commit → ... and React aborts with "Maximum update depth
- * exceeded". By scheduling on a microtask we let the current call stack
+ * exceeded". By scheduling on a frame timer we let the current call stack
  * unwind first, and by coalescing pending calls we collapse a burst of
  * mutations into a single rerender. Ink's diff cache still gets
- * invalidated — just one tick later — so the original frame-stuck fix
+ * invalidated — on the next frame — so the original frame-stuck fix
  * (#656) still works.
  */
 
+// Limit forced redraws to one per frame and return to the event loop between
+// frames. A self-scheduling microtask chain starves stdin and elapsed timers.
+const FRAME_DELAY_MS = 16;
 let rerender: (() => void) | null = null;
-let pending = false;
+let pending: ReturnType<typeof setTimeout> | null = null;
 
 export function setRerender(fn: (() => void) | null): void {
+  if (pending !== null) clearTimeout(pending);
+  pending = null;
   rerender = fn;
-  // Reset coalescing state on (re)attach so a stale pending flag from a
-  // prior mount can't suppress the first rerender after re-mount in
-  // tests or hot-reload paths.
-  pending = false;
 }
 
 export function triggerRerender(): void {
-  if (!rerender || pending) return;
-  pending = true;
-  queueMicrotask(() => {
-    pending = false;
+  if (!rerender || pending !== null) return;
+  pending = setTimeout(() => {
+    pending = null;
     const fn = rerender;
     if (!fn) return;
     try {
@@ -50,5 +50,5 @@ export function triggerRerender(): void {
     } catch {
       // Best-effort — never let a render hiccup crash the run.
     }
-  });
+  }, FRAME_DELAY_MS);
 }
