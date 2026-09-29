@@ -1480,6 +1480,22 @@ async function runAgentWizardBody(
     middleware,
   );
 
+  if (agentResult.error === AgentErrorType.TOOL_LOOP) {
+    const message =
+      agentResult.message ?? 'Setup stopped after repeated tool calls.';
+    getUI().setOutroData({
+      kind: OutroKind.Error,
+      message,
+      canRestart: true,
+      preserveFiles: true,
+    });
+    await wizardAbort({
+      message,
+      error: new WizardError(message),
+      exitCode: ExitCode.AGENT_FAILED,
+    });
+  }
+
   // Handle error cases detected in agent output
   if (agentResult.error === AgentErrorType.AUTH_ERROR) {
     captureWizardError(

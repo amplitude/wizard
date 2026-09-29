@@ -12,6 +12,9 @@
  *      events matches what the legacy runner already produces (same
  *      `data.event` discriminator, same shape).
  */
+import { tool } from 'ai';
+import { z } from 'zod';
+
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { simulateReadableStream } from 'ai/test';
 import { MockLanguageModelV3 } from 'ai/test';
@@ -97,6 +100,65 @@ describe('runAiSdkAgent — Phase D-3 foundation', () => {
   afterEach(() => {
     vi.unstubAllEnvs();
     vi.restoreAllMocks();
+  });
+
+  it('warns on unchanged tool results and terminates before another model step', async () => {
+    let calls = 0;
+    const prompts: unknown[] = [];
+    const execute = vi.fn().mockResolvedValue('same contents');
+    const model = new MockLanguageModelV3({
+      doStream: async (options) => {
+        prompts.push(options.prompt);
+        calls++;
+        return {
+          stream: simulateReadableStream({
+            chunks: [
+              { type: 'stream-start', warnings: [] },
+              {
+                type: 'tool-call',
+                toolCallId: `read-${calls}`,
+                toolName: 'read_file',
+                input: JSON.stringify({ file_path: 'app.ts' }),
+              },
+              {
+                type: 'finish',
+                finishReason: { unified: 'tool-calls', raw: 'tool_use' },
+                usage: {
+                  inputTokens: {
+                    total: 10,
+                    noCache: 10,
+                    cacheRead: 0,
+                    cacheWrite: 0,
+                  },
+                  outputTokens: { total: 5, text: 5, reasoning: 0 },
+                },
+              },
+            ],
+            chunkDelayInMs: 0,
+            initialDelayInMs: 0,
+          }),
+        };
+      },
+    });
+    const result = await runAiSdkAgent({
+      workingDirectory: process.cwd(),
+      prompt: 'test',
+      model,
+      wizardOptions: makeWizardOptions(),
+      maxSteps: 8,
+      toolsOverride: {
+        read_file: tool({
+          inputSchema: z.object({ file_path: z.string() }),
+          execute,
+        }),
+      },
+    });
+    expect(result.error).toBe('WIZARD_TOOL_LOOP');
+    expect(calls).toBe(4);
+    expect(execute).toHaveBeenCalledTimes(4);
+    expect(JSON.stringify(prompts[3])).toContain(
+      'Repeated tool calls returned unchanged results',
+    );
   });
 
   it('streams text deltas and resolves with finishReason "stop"', async () => {

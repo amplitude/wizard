@@ -2,6 +2,11 @@
  * Shared agent interface for Amplitude wizards
  * Uses Claude Agent SDK directly with Amplitude LLM gateway
  */
+import {
+  ToolLoopGuard,
+  createToolLoopHooks,
+  TOOL_LOOP_STOP_MESSAGE,
+} from './agent/tool-loop-guard';
 
 import path from 'path';
 import * as fs from 'fs';
@@ -284,6 +289,7 @@ export enum AgentErrorType {
   RATE_LIMIT = 'WIZARD_RATE_LIMIT',
   /** Generic API error */
   API_ERROR = 'WIZARD_API_ERROR',
+  TOOL_LOOP = 'WIZARD_TOOL_LOOP',
   /** Authentication failed — bearer token invalid or expired */
   AUTH_ERROR = 'WIZARD_AUTH_ERROR',
   /**
@@ -2274,6 +2280,8 @@ export async function runAgent(
   const recentStatuses: string[] = []; // rolling last-3 STATUS messages for heartbeat
   // Track if we received a successful result (before any cleanup errors)
   let receivedSuccessResult = false;
+  const toolLoopGuard = new ToolLoopGuard();
+  let toolLoopStopped = false;
   let lastResultMessage: SDKMessage | null = null;
   // Cross-attempt counters used by the post-loop error classifier (and the
   // outer catch). When upstreamGatewayFailures === attemptCount and we
@@ -3569,6 +3577,13 @@ export async function runAgent(
                 onCircuitBreakerTripped: config?.onCircuitBreakerTripped,
               });
               const recordPostToolUse = createPostToolUseHook(agentState);
+              const loopHooks = createToolLoopHooks(toolLoopGuard, () => {
+                toolLoopStopped = true;
+                logToFile(
+                  'Tool-loop guard stopped repeated calls with unchanged results',
+                );
+                controller.abort('tool_loop');
+              });
 
               // Per-step status the journey classifier has emitted so far
               // this run. Passed back into `classifyToolEvent` so triggers
@@ -3698,6 +3713,8 @@ export async function runAgent(
                 toolUseID,
                 hookOpts,
               ) => {
+                if (toolLoopStopped)
+                  return loopHooks.pre(input, toolUseID, hookOpts);
                 advanceJourney('pre', input);
                 onAmplitudeMcpPre(input);
                 const observer = innerHooks
@@ -3741,6 +3758,12 @@ export async function runAgent(
                 toolUseID,
                 hookOpts,
               ) => {
+                const loopResult = await loopHooks.post(
+                  input,
+                  toolUseID,
+                  hookOpts,
+                );
+                if (toolLoopStopped) return loopResult;
                 advanceJourney('post', input);
                 onAmplitudeMcpPost(input);
                 const observer = innerHooks
@@ -3751,7 +3774,22 @@ export async function runAgent(
                 const gate = Promise.resolve(
                   recordPostToolUse(input, toolUseID, hookOpts),
                 );
-                const [, gateResult] = await Promise.all([observer, gate]);
+                const [, recordedResult] = await Promise.all([observer, gate]);
+                const gateResult = loopResult.hookSpecificOutput
+                  ? {
+                      ...recordedResult,
+                      ...loopResult,
+                      hookSpecificOutput: {
+                        ...(recordedResult.hookSpecificOutput as
+                          | Record<string, unknown>
+                          | undefined),
+                        ...(loopResult.hookSpecificOutput as Record<
+                          string,
+                          unknown
+                        >),
+                      },
+                    }
+                  : recordedResult;
 
                 // Truncate the model's view of large Read responses so a
                 // single big file doesn't sit in conversation history at
@@ -3822,6 +3860,7 @@ export async function runAgent(
                 // `tools: { preset: 'claude_code' } + permissionMode: 'acceptEdits'`.
                 PreToolUse: preToolUse,
                 PostToolUse: postToolUse,
+                PostToolUseFailure: loopHooks.failure,
                 Stop: createStopHook(
                   config?.additionalFeatureQueue ?? (() => []),
                   () => authErrorDetected,
@@ -3831,7 +3870,14 @@ export async function runAgent(
                   },
                 ),
                 PreCompact: createPreCompactHook(preCompactHandler),
-                UserPromptSubmit: createUserPromptSubmitHook(agentState),
+                UserPromptSubmit: async (input, id, opts) => {
+                  toolLoopGuard.reset();
+                  return createUserPromptSubmitHook(agentState)(
+                    input,
+                    id,
+                    opts,
+                  );
+                },
               });
               // Layer @amplitude/ai tool-call telemetry as additional
               // PreToolUse/PostToolUse observers. The tracker's PreToolUse
@@ -3867,6 +3913,7 @@ export async function runAgent(
 
         // Process the async generator — validate each message at the boundary
         for await (const rawMessage of sdkResponse) {
+          if (toolLoopStopped) throw new Error(TOOL_LOOP_STOP_MESSAGE);
           // Feed the message to the @amplitude/ai tracker so assistant
           // and user messages emit `[Agent] AI Response` / `[Agent] User
           // Message`. Wrapped in try/catch to ensure telemetry errors never
@@ -4277,6 +4324,10 @@ export async function runAgent(
         clearTimeout(staleTimer);
         unsubscribePromptRelease();
         wizardSignal.removeEventListener('abort', onWizardAbort);
+        if (toolLoopStopped) {
+          signalDone();
+          break;
+        }
         const partialOutput = collectedText.join('\n');
 
         // Vertex / wizard-proxy payload-shape rejection — retrying is
@@ -4390,6 +4441,8 @@ export async function runAgent(
         // bridge race in issue #297.
         await drainPriorResponse(response);
         logSuppressedHookBridgeNoise(hookBridgeRaceSuppressed, attempt);
+
+        if (toolLoopStopped) break;
 
         // Wizard-wide abort (Ctrl+C / SIGINT / graceful-exit) — bail out
         // immediately without retrying. Falling through to the retry branch
@@ -4517,6 +4570,10 @@ export async function runAgent(
       }
     }
 
+    if (toolLoopStopped) {
+      spinner.stop('Stopped repeated tool calls');
+      return exitWithError(AgentErrorType.TOOL_LOOP, TOOL_LOOP_STOP_MESSAGE);
+    }
     const outputText = collectedText.join('\n');
 
     // Auth error takes priority — the agent cannot recover without re-authentication
@@ -4658,6 +4715,11 @@ export async function runAgent(
   } catch (error) {
     // Signal done to unblock the async generator
     signalDone();
+
+    if (toolLoopStopped) {
+      spinner.stop('Stopped repeated tool calls');
+      return exitWithError(AgentErrorType.TOOL_LOOP, TOOL_LOOP_STOP_MESSAGE);
+    }
 
     // Auth-aborted while the SDK was still streaming — the early-detect path
     // fired controller.abort('auth_failed') and the resulting AbortError
