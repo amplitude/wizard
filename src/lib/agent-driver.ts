@@ -25,6 +25,8 @@
  *    test runs don't re-import the SDK every time.
  */
 
+import { withWizardProcessIdentity } from './wizard-agent-process.js';
+
 export type AgentDriverArgs = {
   prompt: string | AsyncIterable<unknown>;
   options?: Record<string, unknown>;
@@ -44,7 +46,7 @@ async function loadDefaultDriver(): Promise<AgentDriver> {
     defaultDriverPromise = (async () => {
       try {
         const mod = await import('@anthropic-ai/claude-agent-sdk');
-        return mod.query as unknown as AgentDriver;
+        return withWizardProcessIdentity(mod.query as unknown as AgentDriver);
       } catch (err) {
         // Clear the cache on rejection so a retry can re-attempt the
         // import. Without this, a transient import failure (broken

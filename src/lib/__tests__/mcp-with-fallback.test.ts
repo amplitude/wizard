@@ -177,6 +177,13 @@ describe('callAmplitudeMcp', () => {
       });
 
       expect(mockQuery).toHaveBeenCalledOnce();
+      expect(mockQuery).toHaveBeenCalledWith(
+        expect.objectContaining({
+          options: expect.objectContaining({
+            spawnClaudeCodeProcess: expect.any(Function),
+          }),
+        }),
+      );
       expect(result).toEqual({ value: 99 });
     });
 
