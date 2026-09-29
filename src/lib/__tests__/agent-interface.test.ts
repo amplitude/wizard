@@ -143,6 +143,41 @@ describe('runAgent', () => {
     Object.values(mockUIInstance.log).forEach((fn) => fn.mockReset());
   });
 
+  it('stops a repeated-tool run without restarting it or accepting a success result', async () => {
+    mockQuery.mockImplementation(({ options }) =>
+      (async function* () {
+        const post = options.hooks.PostToolUse[0].hooks[0];
+        const hookOptions = { signal: new AbortController().signal };
+        for (let i = 0; i < 4; i++) {
+          await post(
+            {
+              tool_name: 'Read',
+              tool_input: { file_path: 'app.ts' },
+              tool_response: 'same contents',
+            },
+            `read-${i}`,
+            hookOptions,
+          );
+        }
+        yield {
+          type: 'result',
+          subtype: 'success',
+          is_error: false,
+          result: 'done',
+        };
+      })(),
+    );
+    const result = await runAgent(
+      defaultAgentConfig,
+      'test prompt',
+      defaultOptions,
+      mockSpinner as unknown as SpinnerHandle,
+    );
+    expect(result.error).toBe(AgentErrorType.TOOL_LOOP);
+    expect(result.message).toContain('Changes already made are preserved');
+    expect(mockQuery).toHaveBeenCalledTimes(1);
+  });
+
   describe('race condition handling', () => {
     it('should return success when agent completes successfully then SDK cleanup fails', async () => {
       // This simulates the race condition:
