@@ -51,6 +51,7 @@ import { pickFreshestExisting } from '../../utils/storage-paths';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { logToFile } from '../../utils/debug';
 
 // Mock dependencies
 vi.mock('../../utils/analytics');
@@ -141,6 +142,69 @@ describe('runAgent', () => {
     mockUIInstance.spinner.mockReturnValue(mockSpinner);
     // Reset log mocks
     Object.values(mockUIInstance.log).forEach((fn) => fn.mockReset());
+  });
+
+  it('omits per-token thinking counters from saved logs while retaining tool results and retries', async () => {
+    mockQuery.mockReturnValue(
+      (function* () {
+        for (let i = 1; i <= 1000; i++) {
+          yield {
+            type: 'system',
+            subtype: 'thinking_tokens',
+            estimated_tokens: i,
+            estimated_tokens_delta: 1,
+          };
+        }
+        yield {
+          type: 'user',
+          message: {
+            content: [
+              {
+                type: 'tool_result',
+                tool_use_id: 'read-1',
+                content: 'Next.js',
+              },
+            ],
+          },
+        };
+        yield {
+          type: 'system',
+          subtype: 'api_retry',
+          attempt: 1,
+          max_retries: 3,
+          retry_delay_ms: 1000,
+          error_status: 503,
+          error: 'overloaded_error',
+        };
+        yield {
+          type: 'result',
+          subtype: 'success',
+          is_error: false,
+          result: 'Setup complete',
+        };
+      })(),
+    );
+
+    const result = await runAgent(
+      defaultAgentConfig,
+      'test prompt',
+      defaultOptions,
+      mockSpinner as unknown as SpinnerHandle,
+    );
+
+    expect(result.error).toBeUndefined();
+    const sdkLogs = vi
+      .mocked(logToFile)
+      .mock.calls.filter(([label]) => String(label).startsWith('SDK Message:'));
+    expect(sdkLogs).toHaveLength(3);
+    expect(JSON.stringify(sdkLogs)).not.toContain('thinking_tokens');
+    expect(sdkLogs).toEqual(
+      expect.arrayContaining([
+        ['SDK Message: user', expect.stringContaining('read-1')],
+        ['SDK Message: system', expect.stringContaining('overloaded_error')],
+        ['SDK Message: result', expect.stringContaining('Setup complete')],
+      ]),
+    );
   });
 
   describe('race condition handling', () => {
