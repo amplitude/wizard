@@ -12,6 +12,25 @@ afterEach(() => {
 });
 
 describe('AgentDriver port', () => {
+  it('uses a wizard-owned subprocess for the production SDK without changing query options', async () => {
+    vi.resetModules();
+    const query = vi.fn().mockReturnValue((async function* () {})());
+    vi.doMock('@anthropic-ai/claude-agent-sdk', () => ({ query }));
+    const { getAgentDriver } = await import('../agent-driver');
+    const driver = await getAgentDriver();
+    const options = {
+      env: { ANTHROPIC_API_KEY: 'test-key' },
+      hooks: { Stop: [] },
+      model: 'test-model',
+    };
+    driver({ prompt: 'hello', options });
+    expect(query).toHaveBeenCalledWith({
+      prompt: 'hello',
+      options: { ...options, spawnClaudeCodeProcess: expect.any(Function) },
+    });
+    expect(options).not.toHaveProperty('spawnClaudeCodeProcess');
+  });
+
   it('returns the global SDK alias when no override is set', async () => {
     // vitest.config.ts aliases @anthropic-ai/claude-agent-sdk to
     // __mocks__/@anthropic-ai/claude-agent-sdk.ts, whose query() yields a

@@ -51,6 +51,7 @@ import { pickFreshestExisting } from '../../utils/storage-paths';
 import * as fs from 'node:fs';
 import * as os from 'node:os';
 import * as path from 'node:path';
+import { logToFile } from '../../utils/debug';
 
 // Mock dependencies
 vi.mock('../../utils/analytics');
@@ -167,15 +168,67 @@ describe('runAgent', () => {
         };
       })(),
     );
+  it('omits per-token thinking counters from saved logs while retaining tool results and retries', async () => {
+    mockQuery.mockReturnValue(
+      (function* () {
+        for (let i = 1; i <= 1000; i++) {
+          yield {
+            type: 'system',
+            subtype: 'thinking_tokens',
+            estimated_tokens: i,
+            estimated_tokens_delta: 1,
+          };
+        }
+        yield {
+          type: 'user',
+          message: {
+            content: [
+              {
+                type: 'tool_result',
+                tool_use_id: 'read-1',
+                content: 'Next.js',
+              },
+            ],
+          },
+        };
+        yield {
+          type: 'system',
+          subtype: 'api_retry',
+          attempt: 1,
+          max_retries: 3,
+          retry_delay_ms: 1000,
+          error_status: 503,
+          error: 'overloaded_error',
+        };
+        yield {
+          type: 'result',
+          subtype: 'success',
+          is_error: false,
+          result: 'Setup complete',
+        };
+      })(),
+    );
+
     const result = await runAgent(
       defaultAgentConfig,
       'test prompt',
       defaultOptions,
       mockSpinner as unknown as SpinnerHandle,
     );
-    expect(result.error).toBe(AgentErrorType.TOOL_LOOP);
-    expect(result.message).toContain('Changes already made are preserved');
-    expect(mockQuery).toHaveBeenCalledTimes(1);
+
+    expect(result.error).toBeUndefined();
+    const sdkLogs = vi
+      .mocked(logToFile)
+      .mock.calls.filter(([label]) => String(label).startsWith('SDK Message:'));
+    expect(sdkLogs).toHaveLength(3);
+    expect(JSON.stringify(sdkLogs)).not.toContain('thinking_tokens');
+    expect(sdkLogs).toEqual(
+      expect.arrayContaining([
+        ['SDK Message: user', expect.stringContaining('read-1')],
+        ['SDK Message: system', expect.stringContaining('overloaded_error')],
+        ['SDK Message: result', expect.stringContaining('Setup complete')],
+      ]),
+    );
   });
 
   describe('race condition handling', () => {
@@ -1734,6 +1787,10 @@ describe('runAgent', () => {
 
       const observedAuthHeaders: Array<string> = [];
       let queryCallCount = 0;
+      let signalFirstAttemptStarted!: () => void;
+      const firstAttemptStarted = new Promise<void>((resolve) => {
+        signalFirstAttemptStarted = resolve;
+      });
 
       mockQuery.mockImplementation(
         (params: { options: Record<string, unknown> }) => {
@@ -1756,6 +1813,7 @@ describe('runAgent', () => {
                 signal.addEventListener('abort', () =>
                   reject(new Error('Stall aborted')),
                 );
+                signalFirstAttemptStarted();
               });
             })();
           }
@@ -1780,11 +1838,12 @@ describe('runAgent', () => {
         { successMessage: 'Done', errorMessage: 'Failed' },
       );
 
-      // 60s cold-start stall + jittered backoff (2-30s) = up to ~90s.
-      // With the mid-run bearer-refresh fix, the per-attempt refresh
-      // also fires on attempt 0 — that adds an extra microtask cycle
-      // for the dynamic import before the query starts, so we need a
-      // few more advance cycles to drain everything.
+      // Startup awaits dynamic imports that fake timers do not flush.
+      // On Node 22 the entire advance can finish before query() starts,
+      // leaving the subsequently scheduled stall timer frozen forever.
+      // Wait until the first iterator is listening for abort before advancing
+      // the 60s cold-start stall plus retry backoff (up to 30s).
+      await firstAttemptStarted;
       await vi.advanceTimersByTimeAsync(120_000);
 
       const result = await runPromise;

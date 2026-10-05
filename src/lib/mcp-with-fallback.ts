@@ -13,6 +13,7 @@ import { logToFile } from '../utils/debug.js';
 import { getWizardAbortSignal } from '../utils/wizard-abort.js';
 import { getMcpUrlFromZone } from '../utils/urls.js';
 import { WIZARD_USER_AGENT } from './constants.js';
+import { withWizardProcessIdentity } from './wizard-agent-process.js';
 import { safeParseSDKMessage } from './middleware/schemas.js';
 import { withWizardSpan, addBreadcrumb } from './observability/index.js';
 
@@ -40,7 +41,7 @@ let _sdkModule: { query: SDKQueryFn } | null = null;
 async function getSDKModule(): Promise<{ query: SDKQueryFn }> {
   if (!_sdkModule) {
     const mod = await import('@anthropic-ai/claude-agent-sdk');
-    _sdkModule = { query: mod.query as SDKQueryFn };
+    _sdkModule = { query: withWizardProcessIdentity(mod.query as SDKQueryFn) };
   }
   return _sdkModule;
 }

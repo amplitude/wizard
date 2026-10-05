@@ -9,6 +9,7 @@ import {
 } from './agent/tool-loop-guard';
 
 import path from 'path';
+import { WIZARD_PROCESS_NAME, wizardAgentEnv } from './wizard-agent-process.js';
 import * as fs from 'fs';
 import { getUI, type SpinnerHandle } from '../ui';
 import { debug, logToFile, initLogFile, getLogFilePath } from '../utils/debug';
@@ -1981,7 +1982,8 @@ export async function runAgentLocally(
   return new Promise((resolve, reject) => {
     const proc = spawn('claude', ['--continue', prompt], {
       cwd: workingDirectory,
-      env: process.env,
+      env: wizardAgentEnv(process.env),
+      argv0: WIZARD_PROCESS_NAME,
       stdio: ['ignore', 'pipe', 'pipe'],
     });
 
@@ -4913,6 +4915,15 @@ function handleSDKMessage(
   receivedSuccessResult = false,
   recentStatuses?: string[],
 ): void {
+  // The SDK emits one thinking_tokens counter per generated reasoning token.
+  // These are transport progress, not actionable log entries: a single turn
+  // can otherwise bury tool results and errors under thousands of JSON dumps.
+  // Leave consumption/progress handling in runAgent unchanged; only omit the
+  // counter from the saved log and optional terminal debug output here.
+  if (message.type === 'system' && message.subtype === 'thinking_tokens') {
+    return;
+  }
+
   logToFile(`SDK Message: ${message.type}`, JSON.stringify(message, null, 2));
 
   if (options.debug) {
