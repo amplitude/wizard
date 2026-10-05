@@ -11,6 +11,7 @@
  */
 
 import { atom, map } from 'nanostores';
+import { createLogger } from '../../lib/observability/logger.js';
 import { TaskStatus, type EventPlanDecision } from '../wizard-ui.js';
 import {
   AuthOnboardingPath,
@@ -217,6 +218,8 @@ function createSessionStore() {
   };
   return m;
 }
+
+const storeLog = createLogger('wizard-store');
 
 export class WizardStore {
   // ── Internal nanostore atoms ─────────────────────────────────────
@@ -1772,6 +1775,8 @@ export class WizardStore {
    * captured by the caller rather than tracked per-kind here.
    */
   setCurrentActivity(activity: WizardActivity | null): void {
+    // Every streamed token clears activity; idle-to-idle is not a UI change.
+    if (this.session.currentActivity === activity) return;
     this.$session.setKey('currentActivity', activity);
     this.emitChange();
   }
@@ -2753,7 +2758,27 @@ export class WizardStore {
   // ── React integration ───────────────────────────────────────────
 
   subscribe(callback: () => void): () => void {
-    return this.$version.listen(() => callback());
+    let reportedFailure = false;
+    return this.$version.listen(() => {
+      try {
+        callback();
+      } catch (error) {
+        // Nanostores' shared queue is not cleared if a listener throws.
+        // One React subscriber failure otherwise stops ALL atom dispatch,
+        // and subsequent updates accumulate in an ever-growing queue.
+        // Keep the listener registered so a transient render can recover.
+        if (!reportedFailure) {
+          reportedFailure = true;
+          try {
+            storeLog.debug('Store subscriber failed', {
+              message: error instanceof Error ? error.message : String(error),
+            });
+          } catch {
+            // A diagnostic sink must not poison the same notification queue.
+          }
+        }
+      }
+    });
   }
 
   getSnapshot(): number {
