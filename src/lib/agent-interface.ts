@@ -4,6 +4,7 @@
  */
 
 import path from 'path';
+import { WIZARD_PROCESS_NAME, wizardAgentEnv } from './wizard-agent-process.js';
 import * as fs from 'fs';
 import { getUI, type SpinnerHandle } from '../ui';
 import { debug, logToFile, initLogFile, getLogFilePath } from '../utils/debug';
@@ -1975,7 +1976,8 @@ export async function runAgentLocally(
   return new Promise((resolve, reject) => {
     const proc = spawn('claude', ['--continue', prompt], {
       cwd: workingDirectory,
-      env: process.env,
+      env: wizardAgentEnv(process.env),
+      argv0: WIZARD_PROCESS_NAME,
       stdio: ['ignore', 'pipe', 'pipe'],
     });
 
