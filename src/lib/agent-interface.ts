@@ -2975,6 +2975,15 @@ export async function runAgent(
         // lastStatus / compactionCount accumulated by a stalled attempt
         // would leak into the next attempt's snapshot. (Bugbot catch.)
         agentState.reset();
+        // Reset the tool-loop guard as well — a fresh SDK conversation
+        // after a stall / transient-API retry legitimately redoes the
+        // same discovery calls with identical results (the underlying
+        // files haven't changed). Leftover fingerprints and the `warned`
+        // flag from the failed attempt would trip WIZARD_TOOL_LOOP on
+        // that normal rediscovery. Terminal trips never get here:
+        // `toolLoopStopped` breaks the retry loop before a new attempt
+        // starts, and `ToolLoopGuard.reset()` is a no-op once stopped.
+        toolLoopGuard.reset();
         // Drop any partial-message text from the stalled attempt so the
         // user doesn't see "...rewriting the package.json" carry over
         // into a fresh retry's pill.

@@ -168,6 +168,17 @@ describe('runAgent', () => {
         };
       })(),
     );
+    const result = await runAgent(
+      defaultAgentConfig,
+      'test prompt',
+      defaultOptions,
+      mockSpinner as unknown as SpinnerHandle,
+    );
+    expect(result.error).toBe(AgentErrorType.TOOL_LOOP);
+    expect(result.message).toContain('Changes already made are preserved');
+    expect(mockQuery).toHaveBeenCalledTimes(1);
+  });
+
   it('omits per-token thinking counters from saved logs while retaining tool results and retries', async () => {
     mockQuery.mockReturnValue(
       (function* () {
@@ -1727,6 +1738,107 @@ describe('runAgent', () => {
         { successMessage: 'Done', errorMessage: 'Failed' },
       );
 
+      await vi.advanceTimersByTimeAsync(10_000);
+
+      const result = await runPromise;
+
+      expect(result).toEqual({ plannedEvents: [] });
+      expect(queryCallCount).toBe(2);
+    });
+
+    // Bugbot thread (PR #877): the tool-loop guard is created once outside
+    // the retry loop. A stall / transient-API retry starts a fresh SDK
+    // conversation that legitimately redoes the same discovery calls with
+    // identical results (the files haven't changed). Leftover fingerprints
+    // and the `warned` flag from the failed attempt would trip
+    // WIZARD_TOOL_LOOP on that normal rediscovery — here, the second read
+    // of attempt 2 would hit `repeats >= 4` against attempt 1's history and
+    // abort a healthy run. The per-attempt reset keeps the guard scoped to
+    // a single conversation.
+    it('resets the tool-loop guard between retry attempts so a fresh conversation can redo discovery', async () => {
+      vi.useFakeTimers();
+
+      // Startup awaits dynamic imports that fake timers do not flush —
+      // on a cold module cache the entire advance can finish before
+      // query() starts, leaving the subsequently scheduled retry backoff
+      // frozen beyond the advanced window (test timeout). Wait until the
+      // first attempt is actually running before advancing the clock.
+      let signalFirstAttemptStarted!: () => void;
+      const firstAttemptStarted = new Promise<void>((resolve) => {
+        signalFirstAttemptStarted = resolve;
+      });
+
+      let queryCallCount = 0;
+      mockQuery.mockImplementation(
+        (params: { options: Record<string, unknown> }) => {
+          queryCallCount++;
+          const post = params.options.hooks.PostToolUse[0].hooks[0] as (
+            input: Record<string, unknown>,
+            id: string,
+            opts: unknown,
+          ) => Promise<unknown>;
+          const hookOptions = { signal: new AbortController().signal };
+          const readTwice = async (prefix: string): Promise<void> => {
+            for (let i = 0; i < 2; i++) {
+              await post(
+                {
+                  tool_name: 'Read',
+                  tool_input: { file_path: 'app.ts' },
+                  tool_response: 'same contents',
+                },
+                `${prefix}-${i}`,
+                hookOptions,
+              );
+            }
+          };
+          if (queryCallCount === 1) {
+            return (async function* () {
+              signalFirstAttemptStarted();
+              // Attempt 1: three identical reads — enough to warn, not to
+              // stop — then the stream dies with a transient API error.
+              for (let i = 0; i < 3; i++) {
+                await post(
+                  {
+                    tool_name: 'Read',
+                    tool_input: { file_path: 'app.ts' },
+                    tool_response: 'same contents',
+                  },
+                  `attempt1-${i}`,
+                  hookOptions,
+                );
+              }
+              yield {
+                type: 'result',
+                subtype: 'success',
+                is_error: true,
+                result: 'API Error: 400 terminated',
+              };
+            })();
+          }
+          return (async function* () {
+            // Attempt 2: fresh conversation redoes the same two discovery
+            // reads (identical inputs, unchanged files). Must NOT inherit
+            // attempt 1's fingerprints or warned state.
+            await readTwice('attempt2');
+            yield {
+              type: 'result',
+              subtype: 'success',
+              is_error: false,
+              result: 'Setup complete',
+            };
+          })();
+        },
+      );
+
+      const runPromise = runAgent(
+        defaultAgentConfig,
+        'test prompt',
+        defaultOptions,
+        mockSpinner as unknown as SpinnerHandle,
+        { successMessage: 'Done', errorMessage: 'Failed' },
+      );
+
+      await firstAttemptStarted;
       await vi.advanceTimersByTimeAsync(10_000);
 
       const result = await runPromise;
