@@ -1,5 +1,20 @@
 # Changelog
 
+## [1.19.0](https://github.com/amplitude/wizard/compare/wizard-v1.18.2...wizard-v1.19.0) (2026-10-06)
+
+
+### Features
+
+* stop repeated tool cycles across wizard engines ([#877](https://github.com/amplitude/wizard/issues/877)) ([769ae8e](https://github.com/amplitude/wizard/commit/769ae8e862ba85be973ab1c9dd1d7f564397bf92))
+
+
+### Bug Fixes
+
+* identify embedded agent processes as amplitude-wizard ([#879](https://github.com/amplitude/wizard/issues/879)) ([dea79ef](https://github.com/amplitude/wizard/commit/dea79ef71e8eda2d819f957e6aee784d22cc7365))
+* keep wizard input responsive during agent streaming ([#880](https://github.com/amplitude/wizard/issues/880)) ([2e08b5b](https://github.com/amplitude/wizard/commit/2e08b5b8ef80a58f444b178ffe1c0bed23bb9917))
+* omit per-token thinking counters from saved logs ([#878](https://github.com/amplitude/wizard/issues/878)) ([ba7a064](https://github.com/amplitude/wizard/commit/ba7a0648a81fe1eec2cf06b799781fa116fc1c22))
+* use consolidated event tool for descriptions ([#875](https://github.com/amplitude/wizard/issues/875)) ([c91202a](https://github.com/amplitude/wizard/commit/c91202a8fdc42d745d89072e0855e9f5fc3e601b))
+
 ## [1.18.2](https://github.com/amplitude/wizard/compare/wizard-v1.18.1...wizard-v1.18.2) (2026-05-28)
 
 
