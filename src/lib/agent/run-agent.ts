@@ -36,6 +36,8 @@
  * `AMPLITUDE_WIZARD_AI_SDK_INNER_LOOP=1` (see `run-agent-feature-flag.ts`).
  * Default off — this PR ships dark.
  */
+import { ToolLoopGuard, TOOL_LOOP_STOP_MESSAGE } from './tool-loop-guard';
+
 import {
   stepCountIs,
   streamText,
@@ -506,6 +508,13 @@ export async function runAiSdkAgent(
   // hook (the closest is `prepareStep`); we approximate by short-
   // circuiting tool execution via a wrapping `execute` middleware
   // when the policy denies.
+  const loopGuard = new ToolLoopGuard();
+  const classifyFailure = (
+    error: unknown,
+  ): ReturnType<typeof classifyRunnerThrow> =>
+    loopGuard.stopped
+      ? { errorType: AgentErrorType.TOOL_LOOP, message: TOOL_LOOP_STOP_MESSAGE }
+      : classifyRunnerThrow(error);
   const wrappedTools = Object.fromEntries(
     Object.entries(tools).map(([toolName, def]) => {
       const original = def as {
@@ -518,7 +527,27 @@ export async function runAiSdkAgent(
       ) => unknown;
       const guarded = {
         ...def,
-        execute: (input: unknown, ctx: unknown) => {
+        execute: async (input: unknown, ctx: unknown) => {
+          if (loopGuard.stopped)
+            return {
+              error: 'wizard_tool_loop',
+              message: TOOL_LOOP_STOP_MESSAGE,
+            };
+          const id =
+            ctx &&
+            typeof ctx === 'object' &&
+            'toolCallId' in ctx &&
+            typeof ctx.toolCallId === 'string'
+              ? ctx.toolCallId
+              : undefined;
+          const record = (result: unknown): void => {
+            loopGuard.observe(
+              normalizeAiSdkToolName(toolName),
+              input,
+              result,
+              id,
+            );
+          };
           const policy = evaluatePreToolPolicy({
             toolName,
             toolInput: input,
@@ -529,12 +558,23 @@ export async function runAiSdkAgent(
             // sees a typed error envelope, not an exception, so the
             // run continues with a recoverable signal rather than
             // collapsing the stream.
-            return {
+            const denied = {
               error: 'wizard_policy_denied',
               message: policy.reason,
             };
+            record(denied);
+            return denied;
           }
-          return innerExecute(input, ctx);
+          try {
+            const result = await innerExecute(input, ctx);
+            record(result);
+            return result;
+          } catch (error) {
+            record({
+              error: error instanceof Error ? error.message : String(error),
+            });
+            throw error;
+          }
         },
       } as typeof def;
       return [toolName, guarded];
@@ -570,7 +610,15 @@ export async function runAiSdkAgent(
         model: args.model,
         system: systemMessageWithCacheControl(systemPrompt),
         tools: wrappedTools,
-        stopWhen: stepCountIs(maxSteps),
+        stopWhen: [stepCountIs(maxSteps), () => loopGuard.stopped],
+        prepareStep: () =>
+          loopGuard.warning
+            ? {
+                system: systemMessageWithCacheControl(
+                  `${systemPrompt}\n\n${loopGuard.warning}`,
+                ),
+              }
+            : {},
         messages: [userMessageWithCacheControl(args.prompt)],
         // Vercel AI SDK retries internally with `maxRetries: 2` by
         // default — but `agent-runner.ts` already retries via the
@@ -610,7 +658,7 @@ export async function runAiSdkAgent(
         },
       });
     } catch (err) {
-      const classified = classifyRunnerThrow(err);
+      const classified = classifyFailure(err);
       logToFile(
         `[ai-sdk-runner] streamText threw: ${classified.errorType} — ${classified.message}`,
       );
@@ -722,7 +770,7 @@ export async function runAiSdkAgent(
         }
       }
     } catch (err) {
-      const classified = classifyRunnerThrow(err);
+      const classified = classifyFailure(err);
       logToFile(
         `[ai-sdk-runner] fullStream threw: ${classified.errorType} — ${classified.message}`,
       );
@@ -746,7 +794,7 @@ export async function runAiSdkAgent(
     }
 
     if (streamError) {
-      const classified = classifyRunnerThrow(streamError);
+      const classified = classifyFailure(streamError);
       return {
         error: classified.errorType,
         message: classified.message,
@@ -775,8 +823,11 @@ export async function runAiSdkAgent(
     );
 
     return {
+      ...(loopGuard.stopped
+        ? { error: AgentErrorType.TOOL_LOOP, message: TOOL_LOOP_STOP_MESSAGE }
+        : {}),
       text: textBuf,
-      finishReason: String(finishReason),
+      finishReason: loopGuard.stopped ? 'tool_loop' : String(finishReason),
       toolCalls,
       usage: {
         inputTokens: totalUsage.inputTokens,

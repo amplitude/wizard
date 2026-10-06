@@ -396,3 +396,15 @@ flowchart TD
   and the copy steers the user to log in again (equivalent to `/logout` →
   `/login`). This breaks the repeat-failure loop observed in Sentry
   `WIZARD-CLI-F`.
+
+## Repeated tool calls
+
+Both agent engines compare the names, semantic arguments, and results of completed
+tool calls. Three repetitions of a one-, two-, or three-call cycle with unchanged
+results inject a recovery warning. A fourth repetition stops setup with the error
+outro and exit code 10; the outer retry loop must not restart the stopped run.
+Changes already made remain on disk, and the message asks the user to review
+unfinished steps before restarting. Successful file writes, explicit user input,
+and task polling clear the comparison window. This supplements the existing
+Bash-denial, skill-loading, and maximum-turn limits; it is a conservative heuristic,
+not a guarantee that every nonproductive workflow is detected.

@@ -5,6 +5,7 @@ import {
 } from './framework-config';
 import {
   type WizardSession,
+  type OutroData,
   OutroKind,
   type AdditionalFeature,
   ADDITIONAL_FEATURE_PROMPTS,
@@ -352,6 +353,29 @@ export function buildDashboardDeferredMessage(args: {
   return args.planPath
     ? `${lead} Run \`npx @amplitude/wizard dashboard\` once your app has sent the new events to Amplitude (usually a few minutes) to build a starter dashboard from the plan saved at ${args.planPath}.`
     : `${lead} Run \`npx @amplitude/wizard dashboard\` once your app has sent the new events to Amplitude (usually a few minutes) to build a starter dashboard.`;
+}
+
+/**
+ * Persist an error-outro payload to the session AND notify the UI.
+ *
+ * `getUI().setOutroData(...)` alone is NOT enough: only the TUI store's
+ * implementation writes `session.outroData` (its patched `setKey`
+ * mutates the shared session object in place). `AgentUI` and `LoggingUI`
+ * merely emit / log the payload, so the ledger-rollback cleanup — which
+ * gates the automatic revert on `session.outroData?.preserveFiles` —
+ * would still revert the very files these outros promise are preserved
+ * when running in `--agent` / CI mode. Assigning the session field
+ * directly is the rollback gate's actual source of truth; in TUI mode
+ * it is an idempotent duplicate (same object the store mutates).
+ *
+ * Exported for unit coverage in `__tests__/agent-runner.test.ts`.
+ */
+export function persistErrorOutro(
+  session: WizardSession,
+  data: OutroData,
+): void {
+  session.outroData = data;
+  getUI().setOutroData(data);
 }
 
 /**
@@ -1480,6 +1504,27 @@ async function runAgentWizardBody(
     middleware,
   );
 
+  if (agentResult.error === AgentErrorType.TOOL_LOOP) {
+    const message =
+      agentResult.message ?? 'Setup stopped after repeated tool calls.';
+    // Route through persistErrorOutro so `session.outroData` carries
+    // `preserveFiles` BEFORE wizardAbort fires the ledger-rollback
+    // cleanup — a bare `getUI().setOutroData` leaves the session field
+    // unset under AgentUI / LoggingUI and the completed edits get
+    // reverted despite the stop message promising they are preserved.
+    persistErrorOutro(session, {
+      kind: OutroKind.Error,
+      message,
+      canRestart: true,
+      preserveFiles: true,
+    });
+    await wizardAbort({
+      message,
+      error: new WizardError(message),
+      exitCode: ExitCode.AGENT_FAILED,
+    });
+  }
+
   // Handle error cases detected in agent output
   if (agentResult.error === AgentErrorType.AUTH_ERROR) {
     captureWizardError(
@@ -1560,12 +1605,17 @@ async function runAgentWizardBody(
         `Authentication failed\n\n` +
         `Your wizard session token expired during a long-running task.\n\n` +
         `Re-run the wizard to refresh and resume — your in-progress files are preserved.`;
-    // Set outroData via the UI so the OutroScreen reliably re-renders before
-    // wizardAbort awaits user dismissal. Direct mutation of session.outroData
-    // doesn't notify nanostore subscribers and would make the outro miss the
-    // updated state — the user would not see the auth-failure confirmation
-    // before being routed back to login on the next run.
-    getUI().setOutroData({
+    // Set outroData via persistErrorOutro so the OutroScreen reliably
+    // re-renders before wizardAbort awaits user dismissal AND so
+    // `session.outroData` carries `preserveFiles` for the ledger-
+    // rollback gate. Direct mutation of session.outroData alone
+    // wouldn't notify nanostore subscribers (the user would not see
+    // the auth-failure confirmation before being routed back to login
+    // on the next run); a bare `getUI().setOutroData` leaves the
+    // session field unset under AgentUI / LoggingUI, so the rollback
+    // cleanup would revert files the message below promises are
+    // preserved.
+    persistErrorOutro(session, {
       kind: OutroKind.Error,
       message: authMessage,
       // Steer the user back through the OAuth login wall whenever the failure

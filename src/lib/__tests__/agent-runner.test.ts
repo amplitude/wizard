@@ -21,13 +21,14 @@ import {
   buildDashboardDeferredMessage,
   classifyAgentOutcome,
   classifyApiErrorSubtype,
+  persistErrorOutro,
   publishInferredProjectFacts,
   refreshTokenIfStale,
   runColdStartParallel,
   POST_AGENT_STEP_COMMIT_EVENTS,
 } from '../agent-runner.js';
 import { AgentErrorType } from '../agent-interface.js';
-import { buildSession } from '../wizard-session.js';
+import { buildSession, OutroKind } from '../wizard-session.js';
 
 // Mock the analytics module up here (shared across describe blocks below)
 // so refreshTokenIfStale's `analytics.wizardCapture` call doesn't try to
@@ -40,6 +41,18 @@ vi.mock('../../utils/analytics', () => ({
     getAllFlagsForWizard: vi.fn().mockResolvedValue({}),
   },
   captureWizardError: vi.fn(),
+}));
+
+// Mock the UI layer so persistErrorOutro's getUI().setOutroData forward can
+// be asserted without console noise from the default LoggingUI. The mock
+// object is hoisted so every getUI() call returns the SAME setOutroData
+// spy — persistErrorOutro constructs its payload once and must hand the
+// identical object to both the session and the UI.
+const { setOutroDataMock } = vi.hoisted(() => ({
+  setOutroDataMock: vi.fn(),
+}));
+vi.mock('../../ui', () => ({
+  getUI: vi.fn(() => ({ setOutroData: setOutroDataMock })),
 }));
 
 vi.mock('../../utils/ampli-settings', () => ({
@@ -197,6 +210,29 @@ describe('classifyApiErrorSubtype', () => {
         }),
       ).toBe('other');
     });
+  });
+});
+
+describe('persistErrorOutro', () => {
+  // PR #877 review (Bugbot + dabito): `getUI().setOutroData` alone does not
+  // persist the payload — only the TUI store writes `session.outroData`.
+  // Under AgentUI (--agent) / LoggingUI (CI) the ledger-rollback cleanup
+  // gates on `session.outroData?.preserveFiles`, so a bare UI call let
+  // wizardAbort's rollback revert the very edits the TOOL_LOOP / AUTH_ERROR
+  // stop messages promise are preserved. Lock the contract: the session
+  // field is assigned BEFORE the UI notification fires.
+  it('writes the error outro to session.outroData and forwards it to the UI', () => {
+    const session = buildSession({ installDir: '/tmp/x' });
+    expect(session.outroData).toBeNull();
+    const data = {
+      kind: OutroKind.Error,
+      message: 'Setup stopped after repeated tool calls.',
+      canRestart: true,
+      preserveFiles: true,
+    };
+    persistErrorOutro(session, data);
+    expect(session.outroData).toEqual(data);
+    expect(setOutroDataMock).toHaveBeenCalledWith(data);
   });
 });
 
