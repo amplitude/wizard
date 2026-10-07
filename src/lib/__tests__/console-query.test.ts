@@ -29,8 +29,14 @@ vi.mock('../agent-interface.js', async () => {
   };
 });
 
-import { queryConsole, type ConsoleCredentials } from '../console-query.js';
+import {
+  queryConsole,
+  resolveConsoleCredentials,
+  type ConsoleCredentials,
+} from '../console-query.js';
 import { getAgent } from '../agent-interface.js';
+import type { WizardSession } from '../wizard-session.js';
+import { toCredentialAppId } from '../wizard-session.js';
 
 const TEST_SESSION_ID = '550e8400-e29b-41d4-a716-446655440000';
 
@@ -219,6 +225,74 @@ describe('queryConsole — Vercel AI SDK path (AMPLITUDE_WIZARD_AI_SDK_CONSOLE)'
       } else {
         process.env.ANTHROPIC_BASE_URL = prior;
       }
+    }
+  });
+
+  // Regression: BA-296 — `resolveConsoleCredentials` used to return a usable
+  // `kind: 'gateway'` envelope as long as the session had a `projectApiKey`
+  // and a `host`. The AuthScreen [M] pre-OAuth manual-fallback path leaves
+  // `credentials.accessToken === ''` (no browser auth yet), so the user could
+  // press Tab to ask a question, the call would route through
+  // `queryConsoleWithClaudeAgentSdk`, `initializeAgent` would fall through to
+  // the local-claude CLI path (`useLocalClaude = !bearerToken && !direct`),
+  // and the Claude Code SDK would surface "There's an issue with the
+  // selected model (anthropic/claude-sonnet-4-6). It may not exist or you
+  // may not have access to it." Guard the gate so the user instead sees the
+  // friendly "Claude is not available yet — complete authentication first."
+  it('returns kind=none when session credentials are present but the OAuth access token is empty (BA-296 manual-fallback path)', () => {
+    const session = {
+      credentials: {
+        accessToken: '',
+        projectApiKey: '15d5e106e8447c5faf2d5b1ff3f66dd9',
+        host: 'https://api2.amplitude.com',
+        appId: toCredentialAppId(null),
+      },
+    } as unknown as WizardSession;
+
+    const prior = {
+      base: process.env.ANTHROPIC_BASE_URL,
+      auth: process.env.ANTHROPIC_AUTH_TOKEN,
+      direct: process.env.ANTHROPIC_API_KEY,
+    };
+    delete process.env.ANTHROPIC_BASE_URL;
+    delete process.env.ANTHROPIC_AUTH_TOKEN;
+    delete process.env.ANTHROPIC_API_KEY;
+
+    try {
+      expect(resolveConsoleCredentials(session)).toEqual({ kind: 'none' });
+    } finally {
+      if (prior.base !== undefined) process.env.ANTHROPIC_BASE_URL = prior.base;
+      if (prior.auth !== undefined)
+        process.env.ANTHROPIC_AUTH_TOKEN = prior.auth;
+      if (prior.direct !== undefined)
+        process.env.ANTHROPIC_API_KEY = prior.direct;
+    }
+  });
+
+  it('returns kind=gateway when session credentials have a non-empty access token', () => {
+    const session = {
+      credentials: {
+        accessToken: 'amplitude-bearer-token',
+        projectApiKey: 'project-key',
+        host: 'https://api2.amplitude.com',
+        appId: toCredentialAppId(null),
+      },
+    } as unknown as WizardSession;
+
+    const prior = {
+      base: process.env.ANTHROPIC_BASE_URL,
+      auth: process.env.ANTHROPIC_AUTH_TOKEN,
+    };
+    delete process.env.ANTHROPIC_BASE_URL;
+    delete process.env.ANTHROPIC_AUTH_TOKEN;
+
+    try {
+      const result = resolveConsoleCredentials(session);
+      expect(result.kind).toBe('gateway');
+    } finally {
+      if (prior.base !== undefined) process.env.ANTHROPIC_BASE_URL = prior.base;
+      if (prior.auth !== undefined)
+        process.env.ANTHROPIC_AUTH_TOKEN = prior.auth;
     }
   });
 
