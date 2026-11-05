@@ -1,7 +1,7 @@
 # Amplitude Wizard
 
-Amplitude Wizard is deprecated. Instead, set up Amplitude with your coding agent
-of choice with the following instructions.
+Amplitude Wizard is deprecated. Instead, set up Amplitude with the following
+instructions.
 
 1. Install the Amplitude Developer CLI:
 
@@ -18,17 +18,18 @@ amp auth login --region <us|eu>
 3. Provide your coding agent of choice the following prompt.
 
 ````text
-Work in the app's repository with its existing toolchain.
+Set up Amplitude in the selected app: one real, app-produced first event. Work in the app's repository with its existing toolchain folliwing these instructions.
 
-1. Check amp cli context.
-Run `amp context` to confirm the user has an authorized amp cli instance. If you receive an error, inform the user they must install the Developer CLI and authenticate with the following commands before continuing.
+1. Check amp CLI context.
+Run `amp context` to confirm the user has an authorized amp CLI instance. If the command does not error, proceed directly from here to Step 2. Otherwise, inform the user they must install the Developer CLI and authenticate with the following commands before continuing.
 
 ```bash
 npm install -g @amplitude/developer-cli
 amp auth login --region <us|eu>
 ```
 
-2. Resolve the region for set up You will need the account region (us or eu) for
+2. Resolve the region for set up
+   You will need the account region (us or eu) for
    set up. Run `amp auth list --json`. The region listed under the profile with
    `is_default` true is the region value for set up. For example, based on the
    following sample output the region would be `us`.
@@ -57,24 +58,26 @@ amp auth login --region <us|eu>
 }
 ```
 
-3. Resolve the Project Id for set up Run `amp projects list`.
+3. Resolve the Project ID for set up
+Run `amp projects list`.
 
-If the user has one project, use that project's id for set up and continue from
+If the user has one project, use that project's ID for set up and continue from
 here directly to Step 3.
 
 If they have more than one project, share the set of projects with the user and
-have them indicate which one they would like to implement. That project's id
-should be used for step 3.
+have them indicate which one they would like to implement. That project's ID
+should be used for Step 3.
 
-4. Retrieve api-key Run `amp projects api-keys get --project-id <project-id>`
-   using the project id from step 3 to retrieve the API key which you will need
-   for implementation.
+4. Retrieve api-key
+   Run `amp projects api-keys get --project-id <project-id>`
+   using the Project ID from Step 3 to retrieve the API key which you will need
+   for implementation. This is critical information you must remember later as part of full completing this work.
 
-5. Fetch the setup skill
+5. Fetch and follow the set up skill
 
-Run `amp skills get integrating-amplitude --region <us|eu>`
+Run `amp skills get integrating-amplitude --region <us|eu>` using the region from earlier.
 
-3. Follow the fetched skill exactly. Do not substitute docs, another SDK, or
+Follow the fetched skill exactly. Do not substitute docs, another SDK, or
    another Amplitude product. Do not assume the app is JavaScript or that the
    event is client-side.
 ````
