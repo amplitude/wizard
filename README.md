@@ -76,17 +76,17 @@ If they have more than one project, share the set of projects with the user and
 have them indicate which one they would like to implement. That project's ID
 should be used for Step 3.
 
-4. Retrieve api-key
+4. Retrieve Project API Key
 
 Run `amp projects api-keys get --project-id <project-id>` using the Project ID
-from Step 3 to retrieve the API key which you will need for implementation. This
-is critical information you must remember later as part of full completing this
-work.
+you resolved in Step 3 to retrieve the API key which you will need for
+implementation. This is critical information you must remember later as part of
+full completing this work.
 
 5. Fetch and follow the set up skill
 
 Run `amp skills get integrating-amplitude --region <us|eu>` using the region
-from earlier.
+value you resolved in Step 2.
 
 Follow the fetched skill exactly. Do not substitute docs, another SDK, or
 another Amplitude product. Do not assume the app is JavaScript or that the event
