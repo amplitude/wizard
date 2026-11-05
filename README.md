@@ -36,10 +36,9 @@ amp auth login --region <us|eu>
 
 2. Resolve the region for set up
 
-You will need the account region (us or eu) for set up. Run
-`amp auth list --json`. The region listed under the profile with `is_default`
-true is the region value for set up. For example, based on the following sample
-output the region would be `us`.
+Run `amp auth list --json`. The region listed under the profile with
+`is_default` true is the region you will use in Step 5. For example, based on
+the following sample output the region would be `us`.
 
 ```json
 {
@@ -69,12 +68,12 @@ output the region would be `us`.
 
 Run `amp projects list`.
 
-If the user has one project, use that project's ID for set up and continue from
-here directly to Step 3.
+If the user has one project, that is the Project ID you will use in Step 5. Now
+continute from here directly to Step 3.
 
 If they have more than one project, share the set of projects with the user and
-have them indicate which one they would like to implement. That project's ID
-should be used for Step 3.
+have them indicate which one they would like to implement. You will use that
+Project ID in Step 5.
 
 4. Retrieve Project API Key
 
@@ -86,7 +85,7 @@ full completing this work.
 5. Fetch and follow the set up skill
 
 Run `amp skills get integrating-amplitude --region <us|eu>` using the region
-value you resolved in Step 2.
+value resolved in Step 2.
 
 Follow the fetched skill exactly. Do not substitute docs, another SDK, or
 another Amplitude product. Do not assume the app is JavaScript or that the event
