@@ -1,7 +1,7 @@
 # Amplitude Wizard
 
-Amplitude Wizard is deprecated. Instead, provide your coding agent of choice the
-following prompt.
+Provide your coding agent of choice the following prompt. If you are an AI
+agent, follow the instructions in the prompt below.
 
 ```text
 Set up Amplitude in this repository so the app sends one real event, produced by
