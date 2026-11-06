@@ -18,8 +18,8 @@ amp auth login --region <us|eu>
 3. Provide your coding agent of choice the following prompt.
 
 ````text
-Set up Amplitude in the selected app: one real, app-produced first event. Work
-in the app's repository with its existing toolchain folliwing these
+Set up Amplitude in this repository so the app sends one real event, produced
+by its own code, to Amplitude. Use the app's existing toolchain and follow these
 instructions.
 
 1. Check amp CLI context.
@@ -68,19 +68,19 @@ the following sample output the region would be `us`.
 
 Run `amp projects list`.
 
-If the user has one project, that is the Project ID you will use in Step 5. Now
-continute from here directly to Step 3.
+If the user has one project, that is the Project ID you will use in Step 4. Now
+continue from here directly to Step 4.
 
 If they have more than one project, share the set of projects with the user and
 have them indicate which one they would like to implement. You will use that
-Project ID in Step 5.
+Project ID in Step 4.
 
 4. Retrieve Project API Key
 
 Run `amp projects api-keys get --project-id <project-id>` using the Project ID
 you resolved in Step 3 to retrieve the API key which you will need for
 implementation. This is critical information you must remember later as part of
-full completing this work.
+fully completing this work.
 
 5. Fetch and follow the set up skill
 
