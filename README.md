@@ -9,8 +9,7 @@ instructions.
 npm install -g @amplitude/developer-cli
 ```
 
-2. Authenticate (or sign up), passing in the region of your account (typically
-`us`).
+2. Authenticate, passing in the region for your account (typically `us`).
 
 ```bash
 amp auth login --region <us|eu>
@@ -48,8 +47,8 @@ If the user has one project, that is the Project ID you will use in Step 4. Now
 continue from here directly to Step 4.
 
 If they have more than one project, share the set of projects with the user and
-wait for them to indicate which one they would like to implement. You will use
-that Project ID in Step 4.
+have them indicate which one they would like to implement. You will use that
+Project ID in Step 4.
 
 4. Retrieve Project API Key
 
