@@ -1,11 +1,9 @@
 # Amplitude Wizard
 
-Amplitude Wizard is deprecated. Instead, set up Amplitude with the following
-instructions.
+Amplitude Wizard is deprecated. Instead, provide your coding agent of choice the
+following prompt.
 
-Provide your coding agent of choice the following prompt.
-
-````text
+```text
 Set up Amplitude in this repository so the app sends one real event, produced by
 its own code, to Amplitude. Use the app's existing toolchain and follow these
 instructions.
@@ -16,7 +14,7 @@ Run `amp context`. If `amp` is not installed, install it with
 `npm install -g @amplitude/developer-cli`. If the user is not logged in, run
 `amp auth login` and follow the instructions it returns. If it requires a
 region, ask the user whether their Amplitude account is in the US or EU; do not
-guess. New users can sign up from the same link.
+guess.
 
 ## Step 2: Resolve the region for setup
 
@@ -48,4 +46,4 @@ Follow the fetched skill exactly. Use the region, project, and API key from
 Steps 2–4 as already confirmed; do not ask the user for them again. Do not
 substitute docs, another SDK, or another Amplitude product. Do not assume the
 app is JavaScript or that the event is client-side.
-````
+```
