@@ -3,36 +3,20 @@
 Amplitude Wizard is deprecated. Instead, set up Amplitude with the following
 instructions.
 
-1. Install the Amplitude Developer CLI.
-
-```bash
-npm install -g @amplitude/developer-cli
-```
-
-2. Authenticate, passing in the region for your account (typically `us`).
-
-```bash
-amp auth login --region <us|eu>
-```
-
-3. Provide your coding agent of choice the following prompt.
+Provide your coding agent of choice the following prompt.
 
 ````text
 Set up Amplitude in this repository so the app sends one real event, produced by
 its own code, to Amplitude. Use the app's existing toolchain and follow these
 instructions.
 
-## Step 1: Check amp CLI context
+## Step 1: Make sure the `amp` CLI is installed and logged in
 
-Run `amp context` to confirm the user is logged in to the `amp` CLI. If the
-command does not error, proceed to Step 2. Otherwise, inform the user they must
-install the Developer CLI and authenticate with the following commands before
-continuing.
-
-```bash
-npm install -g @amplitude/developer-cli
-amp auth login --region <us|eu>
-```
+Run `amp context`. If `amp` is not installed, install it with
+`npm install -g @amplitude/developer-cli`. If the user is not logged in, run
+`amp auth login` and follow the instructions it returns. If it requires a
+region, ask the user whether their Amplitude account is in the US or EU; do not
+guess. New users can sign up from the same link.
 
 ## Step 2: Resolve the region for setup
 
