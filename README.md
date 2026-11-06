@@ -18,8 +18,8 @@ amp auth login --region <us|eu>
 3. Provide your coding agent of choice the following prompt.
 
 ````text
-Set up Amplitude in this repository so the app sends one real event, produced
-by its own code, to Amplitude. Use the app's existing toolchain and follow these
+Set up Amplitude in this repository so the app sends one real event, produced by
+its own code, to Amplitude. Use the app's existing toolchain and follow these
 instructions.
 
 ## Step 1: Check amp CLI context
